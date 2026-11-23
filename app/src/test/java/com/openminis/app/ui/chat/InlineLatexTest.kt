@@ -4,19 +4,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-latex-inline] Regression coverage for GH inline-LaTeX rendering: `$…$`
- * spans must be recognized as math (not leak as literal `$`), including bare
- * short variables (`$x$`), consecutive spans in one paragraph, and spans
- * inside bold / list / conclusion structures. `collectInlineMathLatex` is the
- * pre-scan that registers a KaTeX slot for every span that WILL render as
- * math, so it is the faithful proxy for "did this `$…$` get rendered".
- */
 class InlineLatexTest {
 
     @Test
     fun `bare single-letter inline math is recognized`() {
-        // Previously rejected by the strict looksLikeMath (no math glyph).
         assertEquals(listOf("x"), collectInlineMathLatex("The value \$x\$ is nice."))
         assertEquals(listOf("n"), collectInlineMathLatex("index \$n\$ here"))
     }
@@ -50,7 +41,6 @@ class InlineLatexTest {
             "- item with \$x^2\$ value\n" +
             "**结论**: 因为 \$\\Delta > 0\$ 所以 \$x = 1\$ 且 \$y \\approx 2\$。"
         val found = collectInlineMathLatex(sample)
-        // Every `$…$` in the sample must be collected as a math span.
         assertTrue("approx", found.contains("\\approx"))
         assertTrue("rightarrow", found.contains("\\rightarrow"))
         assertTrue("x^2", found.contains("x^2"))
@@ -61,7 +51,6 @@ class InlineLatexTest {
 
     @Test
     fun `currency is not treated as math`() {
-        // `$5`, `$10.99` must NOT pair into a math span.
         assertEquals(emptyList<String>(), collectInlineMathLatex("Price is \$5 for one."))
         assertEquals(
             listOf("x+y"),
@@ -72,13 +61,11 @@ class InlineLatexTest {
     @Test
     fun `escaped dollar and dollar block are not inline math`() {
         assertEquals(emptyList<String>(), collectInlineMathLatex("literal \\\$5 and \\\$9"))
-        // `$$ … $$` is display math handled at block level, not inline.
         assertEquals(emptyList<String>(), collectInlineMathLatex("\$\$x+y\$\$"))
     }
 
     @Test
     fun `table pipe artifact is not treated as math`() {
-        // `| 月付 | $20|$ **3** |` — the `$20|` must not pair into fake math.
         val found = collectInlineMathLatex("| 月付 | \$20|\$ **3** | ")
         assertTrue("no pipe-artifact span: $found", found.none { it.contains("20|") })
     }

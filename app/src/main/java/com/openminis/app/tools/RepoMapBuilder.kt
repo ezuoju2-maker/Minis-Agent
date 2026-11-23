@@ -2,31 +2,8 @@ package com.openminis.app.tools
 
 import java.io.File
 
-/**
- * [v1.62-repo-map] Token-budgeted repository outline ("repo map").
- *
- * The agent loop pays for every file it reads. On a large project the model
- * either burns its context on whole files or wanders blindly guessing paths.
- * Aider solved this with a graph-ranked skeleton of the repo; this is the same
- * idea implemented without a native parser (the app ships no tree-sitter):
- *
- *   1. Walk the tree once, skipping build output, VCS metadata and vendored
- *      dependencies.
- *   2. Extract *declarations* per file with language-specific regexes
- *      (class / object / interface / fun / def / func / struct / impl …).
- *   3. Rank files by a cheap approximation of the dependency graph: a file
- *      that others import (basename or package tail appears in their import
- *      lines) and that declares many symbols rises; deep paths fall.
- *   4. Render the highest-ranked files first under a hard character budget,
- *      with line numbers, so the model can jump straight to `path:line`.
- *
- * Everything is pure (only reads [root]) and deterministic: same tree in,
- * same map out. It is a *navigation aid*, not a substitute for reading the
- * file the model actually needs — the returned text says so.
- */
 object RepoMapBuilder {
 
-    /** Directories never worth indexing (build output, metadata, vendoring). */
     private val SKIP_DIRS = setOf(
         ".git", ".hg", ".svn", ".idea", ".gradle", ".kotlin", ".cxx", ".venv", "venv",
         "node_modules", "build", "dist", "out", "target", "coverage", "__pycache__",
@@ -34,7 +11,6 @@ object RepoMapBuilder {
         "tmp", "temp", ".mypy_cache", ".pytest_cache",
     )
 
-    /** Extensions the map understands; everything else is ignored. */
     private val LANGUAGE_BY_EXT = mapOf(
         "kt" to "kotlin", "kts" to "kotlin",
         "java" to "java",
@@ -56,13 +32,9 @@ object RepoMapBuilder {
     private const val MAX_FILES_DEFAULT = 1_500
 
     data class Options(
-        /** Hard cap on returned characters. */
         val maxChars: Int = 18_000,
-        /** Hard cap on files inspected. */
         val maxFiles: Int = MAX_FILES_DEFAULT,
-        /** Optional keywords: matching paths/declarations rank first. */
         val focus: List<String> = emptyList(),
-        /** Subdirectory prefixes to ignore (already-resolved, relative). */
         val exclude: List<String> = emptyList(),
     )
 
@@ -77,7 +49,6 @@ object RepoMapBuilder {
         val lineCount: Int,
     )
 
-    /** Build the map for [root]; returns a short honest note when empty. */
     fun build(root: File, options: Options = Options()): String {
         if (!root.exists() || !root.isDirectory) {
             return "repo_map: not a directory: ${root.path}"
@@ -90,7 +61,6 @@ object RepoMapBuilder {
         return render(root, ranked, files.size, options)
     }
 
-    /** Walk [root] and collect declarations. Pure apart from file reads. */
     internal fun scan(root: File, options: Options): List<SourceFile> {
         val out = ArrayList<SourceFile>()
         val excludes = options.exclude.map { it.trim('/') }.filter { it.isNotEmpty() }
@@ -99,7 +69,6 @@ object RepoMapBuilder {
         fun walk(dir: File, depth: Int) {
             if (out.size >= options.maxFiles || depth > 12) return
             val children = dir.listFiles() ?: return
-            // Deterministic order: directories and files sorted by name.
             val sorted = children.sortedBy { it.name }
             for (child in sorted) {
                 if (out.size >= options.maxFiles) return
@@ -148,12 +117,6 @@ object RepoMapBuilder {
 
     private val IMPORT_PATTERN = Regex("""^(import|from|#include|using|require|use)\b""")
 
-    /**
-     * Declarations this map reports. Deliberately only *type and function*
-     * level: fields and local variables would drown the useful signal. The
-     * regexes are anchored at line start (after trim) so commented-out code
-     * indented inside an example is unlikely to match.
-     */
     internal fun declarationOf(line: String, language: String): Symbol? = when (language) {
         "kotlin" -> kotlinDeclaration(line)
         "java", "csharp" -> javaLikeDeclaration(line)
@@ -172,7 +135,6 @@ object RepoMapBuilder {
     private fun clean(name: String): String = name.trim().trimEnd('{', '(', ':', '=', ' ', '\t', '<')
 
     private fun kotlinDeclaration(line: String): Symbol? {
-        // modifiers first (public/internal/data/sealed/suspend/inline/override…)
         val mods = """((?:public|private|protected|internal|open|abstract|final|data|sealed|enum|annotation|value|inline|suspend|operator|infix|tailrec|external|override|const|lateinit|actual|expect)\s+)*"""
         Regex("^$mods(class|interface|object|typealias)\\s+([A-Za-z_][A-Za-z0-9_]*)")
             .find(line)?.let { m ->
@@ -187,7 +149,6 @@ object RepoMapBuilder {
             .find(line)?.let { m ->
                 return Symbol("fun", clean(m.groupValues[3]), 0)
             }
-        // extension function: fun Receiver.name(
         Regex("^$mods(fun)\\s+[A-Za-z0-9_.<>?]+\\.([A-Za-z_][A-Za-z0-9_]*)")
             .find(line)?.let { m ->
                 return Symbol("fun", clean(m.groupValues[3]), 0)
@@ -198,7 +159,6 @@ object RepoMapBuilder {
     private fun javaLikeDeclaration(line: String): Symbol? {
         Regex("""^(?:(?:public|private|protected|abstract|final|static|sealed|non-sealed|strictfp)\s+)*(class|interface|enum|record)\s+([A-Za-z_][A-Za-z0-9_]*)""")
             .find(line)?.let { m -> return Symbol(m.groupValues[1], clean(m.groupValues[2]), 0) }
-        // Java methods: `public static void main(` — take the identifier before `(`.
         Regex("""^(?:(?:public|private|protected|static|final|abstract|synchronized|native|default)\s+)+[\w<>\[\],.?]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(""")
             .find(line)?.let { m -> return Symbol("fun", clean(m.groupValues[1]), 0) }
         return null
@@ -254,7 +214,6 @@ object RepoMapBuilder {
     private fun cDeclaration(line: String): Symbol? {
         Regex("""^(?:typedef\s+)?(?:class|struct|union|enum)\s+([A-Za-z_][A-Za-z0-9_]*)""")
             .find(line)?.let { m -> return Symbol("type", clean(m.groupValues[1]), 0) }
-        // A function definition: return type + name + `(`, line ends with `{` or `)`.
         Regex("""^[A-Za-z_][\w:<>*&\s]*?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*\)\s*\{?\s*$""")
             .find(line)?.let { m ->
                 val name = m.groupValues[1]
@@ -289,21 +248,14 @@ object RepoMapBuilder {
         return null
     }
 
-    // ---- ranking -----------------------------------------------------------
 
     internal fun rank(files: List<SourceFile>, focus: List<String>): List<SourceFile> {
         val focusLower = focus.map { it.lowercase() }.filter { it.isNotBlank() }
-        // A file is "imported" when another file's import line mentions its
-        // basename (without extension) or its dotted path tail.
         val byStem = HashMap<String, MutableList<SourceFile>>()
         for (f in files) {
             byStem.getOrPut(stem(f.relPath)) { ArrayList() }.add(f)
         }
         val inDegree = HashMap<String, Int>()
-        // Inverted index instead of an O(files × imports × files) scan: an
-        // import line is tokenised and each identifier is looked up among
-        // file stems. Bounded by imports × tokens, which is what makes a
-        // 1500-file project map in well under a second on a phone.
         val tokenRe = Regex("[A-Za-z_][A-Za-z0-9_]*")
         for (f in files) {
             for (imp in f.imports) {
@@ -331,7 +283,6 @@ object RepoMapBuilder {
                     focusLower.count { k -> f.symbols.any { it.name.lowercase().contains(k) } }
                 s += 1.2 * hits
             }
-            // Very small files are usually generated stubs or config.
             if (f.lineCount < 8) s -= 0.4
             return s
         }
@@ -343,7 +294,6 @@ object RepoMapBuilder {
         return base.substringBeforeLast('.')
     }
 
-    // ---- rendering ---------------------------------------------------------
 
     internal fun render(root: File, ranked: List<SourceFile>, totalFiles: Int, options: Options): String {
         val sb = StringBuilder()

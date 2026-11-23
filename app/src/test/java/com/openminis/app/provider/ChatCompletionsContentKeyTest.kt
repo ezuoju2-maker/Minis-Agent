@@ -11,12 +11,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [FIX-261024-04] TG Open Minis 95907: replaying tool history over Chat
- * Completions sent an assistant `tool_calls` message with no `content` key,
- * which some OpenAI-compatible servers reject. Every message must carry the
- * key, "" (not null) for a tool-only assistant turn.
- */
 class ChatCompletionsContentKeyTest {
 
     private val model = LLMModel(id = "gpt-4o", displayName = "gpt-4o", provider = "test")
@@ -97,7 +91,6 @@ class ChatCompletionsContentKeyTest {
             assertTrue("message $i has no content key: $m", m.has("content"))
             assertFalse("message $i content is null: $m", m.isNull("content"))
         }
-        // The serialized body a server sees has the key too.
         assertTrue(msgs.getJSONObject(5).toString().contains("\"content\":\"\""))
     }
 }

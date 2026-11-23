@@ -36,11 +36,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * Built-in field registrations. Single place to add or remove a
- * setting from the agent-facing surface. Mirrors iOS
- * `ConfigRegistry+Builtins.swift`.
- */
 internal object ConfigBuiltins {
 
     fun registerInto(
@@ -70,13 +65,7 @@ internal object ConfigBuiltins {
         registerFiles(r, context)
     }
 
-    // -- [T-config-readable] Readable descriptions --
 
-    /**
-     * Points the renderer at the live stores (id → name) and at the in-app
-     * UI language (LocaleWrap), so the text frozen with an audit row is in
-     * the language the user reads the app in.
-     */
     private fun installReadable(context: Context, providerRepo: ProviderRepository) {
         val app = context.applicationContext
         ConfigRefResolver.names = com.openminis.app.config.readable.ProviderRepositoryNames(providerRepo)
@@ -91,13 +80,11 @@ internal object ConfigBuiltins {
         ConfigReadableRenderer.currentLanguage = { ConfigReadableRenderer.currentLocale().toLanguageTag() }
     }
 
-    /** Token → label key; tokens as in [fontScaleField]. */
     private val fontScaleLabels: Map<String, String> = mapOf(
         "xSmall" to "Extra small", "small" to "Small", "default" to "Default",
         "medium" to "Medium", "large" to "Large", "extraLarge" to "Extra large",
     )
 
-    /** BCP-47 code → the language's name in the UI language; "" = system. */
     private fun languagePhrase(v: ConfigValue): ReadableArg {
         val code = (v as? ConfigValue.Str)?.value ?: return ConfigReadableRenderer.genericPhrase(v)
         if (code.isEmpty()) return ReadableArg.Key("System")
@@ -105,33 +92,17 @@ internal object ConfigBuiltins {
         return ReadableArg.Text(name.ifBlank { code })
     }
 
-    // -- Network — the sandbox's DNS (Container Network) --
-    //
-    // [T-container-network-dns] (OpenMinis#396) Same prefs + keys as the
-    // Settings > Rootfs > Container Network section (ContainerDns), so the
-    // agent and the UI read and write one source of truth. Both writers
-    // re-apply the sandbox resolv.conf at once: waiting for the next network
-    // change or reboot would leave a "set but not in effect" gap.
 
     private fun registerNetwork(r: ConfigRegistry, context: Context, envVarRepo: EnvVarRepository) {
         val fields = com.openminis.app.config.fields.ContainerDnsFields.build(ContainerDns.PrefsStore(context)) {
             runCatching { com.openminis.app.sandbox.RootfsManager.getInstance(context).refreshDns() }
         }
         fields.forEach { r.register(it) }
-        // [FEAT-261021-03] Settings > Network: routing, Tailscale and proxies.
         com.openminis.app.config.fields.NetworkConfigFields.build(envVarRepo).forEach { r.register(it) }
         r.register(com.openminis.app.config.collections.ProxiesCollection(envVarRepo))
     }
 
-    // -- [T-minis-config-coverage] Settings added to the app that the
-    // registry did not cover yet. Each one binds to the store its Settings
-    // row writes, so the UI and minis-config read one value. --
 
-    /**
-     * `agentTools.userAsk.*` - the user_ask tool and its timeout /
-     * notification settings (Settings > Agent Tools); same paths, defaults
-     * and range as iOS. Nothing here can answer or approve for the user.
-     */
     private fun registerAgentTools(r: ConfigRegistry, context: Context) {
         val spec = com.openminis.app.agent.userask.UserAskSettingsSpec
         val prefs = context.getSharedPreferences(
@@ -173,13 +144,6 @@ internal object ConfigBuiltins {
         )
     }
 
-    /**
-     * `speech.volume` - the read-aloud volume slider. Written through
-     * VoiceOutputState so a reply being read follows the change at once, as
-     * with the slider. The other iOS `speech.*` keys have no Android
-     * counterpart with the same meaning (speed is a multiplier here, voices
-     * are engine-specific), so they are not registered.
-     */
     private fun registerSpeech(r: ConfigRegistry, context: Context) {
         val state = com.openminis.app.speech.VoiceOutputState
         r.register(
@@ -193,7 +157,6 @@ internal object ConfigBuiltins {
                 readable = ConfigReadable(ConfigValueFormatter.Number()),
                 reader = {
                     state.init(context)
-                    // Two decimals: the stored float reads back as 0.3, not 0.30000001.
                     ConfigValue.Double(Math.round(state.volume.value * 100.0) / 100.0)
                 },
                 writer = { v ->
@@ -209,7 +172,6 @@ internal object ConfigBuiltins {
         )
     }
 
-    /** `scheduled.showHomeBadge` - the switch in the Scheduled Tasks screen's menu. */
     private fun registerScheduled(r: ConfigRegistry, context: Context) {
         val store = com.openminis.app.scheduled.ScheduledTaskStore(context.applicationContext)
         r.register(
@@ -230,13 +192,6 @@ internal object ConfigBuiltins {
         )
     }
 
-    /**
-     * `updates.*` - Settings > About > Check for Updates. Both writes go
-     * through UpdateStateStore, so the cached result of the old channel is
-     * dropped and the badge follows, exactly as with the picker; a channel
-     * change then starts the same check the picker starts. Nothing is
-     * downloaded or installed from here.
-     */
     private fun registerUpdates(r: ConfigRegistry, context: Context) {
         val app = context.applicationContext
         val store = com.openminis.app.data.UpdateStateStore
@@ -247,7 +202,6 @@ internal object ConfigBuiltins {
                 displayName = "Update channel",
                 description = "Which releases the in-app updater offers: stable (tested releases, recommended) or beta (earlier builds with new features; may be less stable). Switching back to stable keeps the installed beta until a newer stable release exists. Changing it only changes what is OFFERED - installing an update is always the user's own tap.",
                 valueSchema = ConfigSchema.StrEnum(channels.map { it.id }),
-                // Sensitive: beta builds are less stable, and Settings asks before switching to them.
                 risk = ConfigRisk.SENSITIVE,
                 revertable = true,
                 readable = ConfigReadable(ConfigValueFormatter.EnumLabels(mapOf("stable" to "Stable", "beta" to "Beta"))),
@@ -281,8 +235,6 @@ internal object ConfigBuiltins {
                 store.setAutoEnabled(app, b)
             },
         )
-        // Settings hides this row on a build without automatic checks, so the
-        // path stays documented there but refuses reads and writes.
         r.register(
             if (com.openminis.app.BuildConfig.AUTO_UPDATE_CHECK) {
                 autoCheck
@@ -292,7 +244,6 @@ internal object ConfigBuiltins {
         )
     }
 
-    /** `files.showHidden` - the file browser's "Show Hidden Files" menu item; same path as iOS. */
     private fun registerFiles(r: ConfigRegistry, context: Context) {
         val vm = com.openminis.app.ui.sandbox.FileBrowserViewModel
         r.register(
@@ -307,7 +258,6 @@ internal object ConfigBuiltins {
         )
     }
 
-    /** `backup.deviceName` - Settings > Backup > Device Name. */
     private fun registerBackup(r: ConfigRegistry, context: Context) {
         val app = context.applicationContext
         val identity = com.openminis.app.data.DeviceIdentity
@@ -329,19 +279,6 @@ internal object ConfigBuiltins {
         )
     }
 
-    // -- Memory — global default toggle for the persistent memory feature --
-    //
-    // [T-android-memory-enabled-minisconfig] `memory.enabled` mirrors the
-    // Settings → Memory switch (MemoryManagementScreen, backed by
-    // MemoryGlobalPrefs: SharedPreferences `minis_memory_prefs`, key
-    // `memory.global.enabled`, default true). It is the global DEFAULT
-    // applied to newly-created sessions: a new chat seeds its per-session
-    // memoryEnabled from this value. It does NOT retroactively flip
-    // already-open sessions — those carry their own per-session toggle,
-    // changed via the SessionMemorySheet / `/memory`. Registering the same
-    // prefs+key as MemoryGlobalPrefs keeps the CLI/agent and the Settings
-    // switch reading/writing one source of truth. Topic auto-surfaces in
-    // list-topics since topics derive from field-path prefixes.
 
     private fun registerMemory(r: ConfigRegistry, context: Context) {
         val prefs = context.getSharedPreferences("minis_memory_prefs", Context.MODE_PRIVATE)
@@ -357,7 +294,6 @@ internal object ConfigBuiltins {
         )
     }
 
-    // -- Master switch surface (read-only via the registry; UI toggles it) --
 
     private fun registerSelfMeta(r: ConfigRegistry) {
         r.register(
@@ -380,12 +316,6 @@ internal object ConfigBuiltins {
         )
     }
 
-    // -- Session (current chat) --
-    //
-    // Mirrors iOS `session.*` keys in ConfigRegistry+Builtins.swift. The
-    // "current session" is whatever ChatScreen is composed with right now,
-    // tracked via `ChatViewModelStore.activeSessionId`. Reads return empty
-    // / writes throw "No active session" when no chat is foregrounded.
 
     private fun registerSession(
         r: ConfigRegistry,
@@ -449,7 +379,6 @@ internal object ConfigBuiltins {
                     val sid = ChatViewModelStore.activeSessionId
                         ?: throw ConfigError.InvalidValue("No active session — open a chat first")
                     if (s.isEmpty()) {
-                        // Clear the binding — fall back to default group/entry on next load.
                         runBlocking { chatRepo.dao.updateSessionBinding(sid, "", "") }
                         return@ClosureField
                     }
@@ -487,22 +416,14 @@ internal object ConfigBuiltins {
                 },
             )
         )
-        // T311: iOS `session.subModel` is not registered on Android — the
-        // platform has no per-session sub/fallback-model concept (no
-        // `subModelSource` field in `model_binding` JSON, no agent-loop
-        // fallback path). Reported up at the spec level rather than
-        // adding a no-op key that silently throws on every write.
     }
 
-    /** iOS uses lowercase tokens (`off`/`low`/…); Android `ThinkingLevel.name`
-     *  is uppercase. Centralised so reader/writer round-trip identical strings. */
     private fun thinkingLevelToToken(level: ThinkingLevel): String = when (level) {
         ThinkingLevel.OFF -> "off"
         ThinkingLevel.LOW -> "low"
         ThinkingLevel.MEDIUM -> "medium"
         ThinkingLevel.HIGH -> "high"
         ThinkingLevel.XHIGH -> "xhigh"
-        // [T-android-thinking-level-arch] GPT-5.6 higher tiers.
         ThinkingLevel.MAX -> "max"
         ThinkingLevel.ULTRA -> "ultra"
     }
@@ -518,10 +439,6 @@ internal object ConfigBuiltins {
         else -> null
     }
 
-    /** Convert the `model_binding` JSON the chat layer writes into the
-     *  `entry:<uuid>` / `group:<id>` form the iOS minis-config surface uses.
-     *  Returns empty string when the session has no explicit binding (the
-     *  default group/entry fallback applies on next load). */
     private fun formatBinding(bindingJson: String?): String {
         if (bindingJson.isNullOrEmpty()) return ""
         return try {
@@ -542,11 +459,8 @@ internal object ConfigBuiltins {
         }
     }
 
-    // -- Appearance & display --
 
     private fun registerAppearance(r: ConfigRegistry, context: Context) {
-        // Source-of-truth lives in `appearance_prefs` (see
-        // ui/settings/AppearanceScreen.kt PREF_APPEARANCE).
         val prefs = context.getSharedPreferences("appearance_prefs", Context.MODE_PRIVATE)
         r.register(
             PrefsIntCodedEnumField(
@@ -560,9 +474,6 @@ internal object ConfigBuiltins {
                 defaultIndex = 0,
             )
         )
-        // T-chat-title-pill: sticky session-title pill on the chat screen.
-        // Default ON; key string deliberately matches iOS so a future
-        // cross-platform settings sync round-trips identically.
         r.register(
             PrefsBoolField(
                 path = "appearance.show_chat_title",
@@ -577,7 +488,6 @@ internal object ConfigBuiltins {
             PrefsStringField(
                 path = "appearance.language",
                 displayName = "App language",
-                // T311: aligned with iOS appearance.language help wording.
                 description = "BCP-47 code (zh-Hans, en, ja, …) or empty for system.",
                 prefs = prefs,
                 key = "app_language",
@@ -586,8 +496,6 @@ internal object ConfigBuiltins {
                 readable = ConfigReadable(ConfigValueFormatter.Custom(::languagePhrase)),
             )
         )
-        // [T-minis-config-coverage] Settings > Appearance > app font size; the
-        // third font axis, same path and tokens as iOS.
         r.register(fontScaleField(
             path = "appearance.appFontSize",
             displayName = "App font size",
@@ -597,15 +505,9 @@ internal object ConfigBuiltins {
         ))
     }
 
-    // -- Chat / input --
 
     private fun registerChat(r: ConfigRegistry, context: Context) {
-        // Default app prefs — Android persists most chat preferences in
-        // the default SharedPreferences for the package.
         val prefs = context.getSharedPreferences("minis_settings", Context.MODE_PRIVATE)
-        // [T-android-config-prefs-mismatch] The chat prefs the SETTINGS UI owns
-        // live here, not in `minis_settings`. Hoisted above the registrations
-        // so every field can bind to the same store the UI reads.
         val appearancePrefs = context.getSharedPreferences(
             com.openminis.app.ui.settings.PREF_APPEARANCE,
             Context.MODE_PRIVATE,
@@ -615,12 +517,6 @@ internal object ConfigBuiltins {
                 path = "chat.returnKey",
                 displayName = "Return key behavior",
                 description = "What the on-screen Return key does in the chat box.",
-                // [T-android-config-prefs-mismatch] Must match
-                // AppearanceScreen.returnKeySendsMessage exactly — both the
-                // store AND the key. This field previously wrote
-                // `minis_settings/return_key_behavior`, which nothing reads,
-                // so `minis-config set chat.returnKey send` reported success
-                // while the chat box kept inserting newlines.
                 prefs = appearancePrefs,
                 key = com.openminis.app.ui.settings.KEY_RETURN_KEY_BEHAVIOR,
                 cases = listOf("newline", "send"),
@@ -633,23 +529,11 @@ internal object ConfigBuiltins {
                 path = "chat.keepScreenAwake",
                 displayName = "Keep screen awake during tasks",
                 description = "Prevents auto-lock while the agent is busy.",
-                // Same mismatch as chat.returnKey above — see that comment.
                 prefs = appearancePrefs,
                 key = com.openminis.app.ui.settings.KEY_KEEP_SCREEN_AWAKE,
                 defaultValue = false,
             )
         )
-        // (No autoFocusAfterReply entry here — it lives in
-        // PREF_APPEARANCE alongside the visible AppearanceScreen toggle.
-        // Registered further down in this method where the
-        // appearance-prefs section starts.)
-        // T311: chat.toolPreview / inputFontSize / messageFontSize live in
-        // `appearance_prefs` — same SharedPreferences AppearanceScreen.kt
-        // reads/writes, so flipping via minis-config flows back into the
-        // settings UI and into ChatScreen's `OnSharedPreferenceChangeListener`
-        // (Compose recomposes immediately, no manual cache invalidation
-        // needed on Android — there is no analogue to iOS
-        // FontSettings.messageBaseScale .Published cache).
         r.register(
             PrefsBoolField(
                 path = "chat.toolPreview",
@@ -660,8 +544,6 @@ internal object ConfigBuiltins {
                 defaultValue = true,
             )
         )
-        // [T-minis-config-coverage] Settings > Appearance > Expand Thinking
-        // While Streaming; also toggled by long-pressing a thinking block.
         r.register(
             PrefsBoolField(
                 path = "chat.autoExpandThinking",
@@ -672,7 +554,6 @@ internal object ConfigBuiltins {
                 defaultValue = true,
             )
         )
-        // [T-minis-config-coverage] Settings > Appearance > Auto-Grouping.
         r.register(
             PrefsBoolField(
                 path = "chat.autoGrouping",
@@ -683,10 +564,6 @@ internal object ConfigBuiltins {
                 defaultValue = true,
             )
         )
-        // [T-minis-config-coverage] The model menu's Speed setting (Standard /
-        // Fast / Ultrafast). Through FastModePrefs, not the raw key: it keeps
-        // the request builders' cache and the legacy fast-mode flag in step.
-        // Tokens as on iOS; Android stores Standard as "off".
         val speedNames = linkedMapOf(
             com.openminis.app.data.SpeedTier.STANDARD to "standard",
             com.openminis.app.data.SpeedTier.FAST to "fast",
@@ -710,10 +587,6 @@ internal object ConfigBuiltins {
                 },
             )
         )
-        // [T-minis-config-coverage] The two optional-tool switches of Settings
-        // > Agent Tools, same paths as iOS. Bound to the store and keys
-        // AgentToolSwitch reads at every request, so a write takes effect on
-        // the next turn. user_ask's switch is agentTools.userAsk.enabled.
         val toolPrefs = context.getSharedPreferences(
             com.openminis.app.tools.AgentToolSwitch.PREFS,
             Context.MODE_PRIVATE,
@@ -738,9 +611,6 @@ internal object ConfigBuiltins {
                 defaultValue = com.openminis.app.tools.AgentToolSwitch.AGENTS.defaultValue,
             )
         )
-        // [T-port-fold-tools] Settings → Appearance → Tool Calls
-        // (`chat.foldTools`, iOS userDefaults chat.foldConsecutiveTools).
-        // [PAR-261022-05] On by default on every platform.
         r.register(
             PrefsBoolField(
                 path = "chat.foldTools",
@@ -751,9 +621,6 @@ internal object ConfigBuiltins {
                 defaultValue = com.openminis.app.ui.settings.FOLD_TOOLS_DEFAULT,
             )
         )
-        // [T-stop-mode-longpress] Settings → Appearance → Confirm Before
-        // Stopping; same store and key the stop button's long-press writes,
-        // same path and default as iOS.
         r.register(
             PrefsBoolField(
                 path = "chat.confirmBeforeStopping",
@@ -764,13 +631,6 @@ internal object ConfigBuiltins {
                 defaultValue = com.openminis.app.ui.chat.StopConfirmPolicy.DEFAULT_ENABLED,
             )
         )
-        // [T-keyboard-auto-pop default flip] On by default — iOS gates
-        // the existing post-stream auto-focus behind this. Android
-        // currently does not auto-focus on stream end (it only
-        // auto-focuses on brand-new sessions starting with "__new__"),
-        // so on this platform the setting is registered for parity.
-        // When a future Android change adds stream-end auto-focus, it
-        // should read this same pref key.
         r.register(
             PrefsBoolField(
                 path = "chat.autoFocusAfterReply",
@@ -797,11 +657,6 @@ internal object ConfigBuiltins {
         ))
     }
 
-    /** Mirrors iOS `fontScaleField` — exposes the integer scale level
-     *  (-2..3 in AppearanceScreen.kt) as a string token (xSmall / small /
-     *  default / medium / large / extraLarge) so reads round-trip the same
-     *  vocabulary as `chat.inputFontSize` / `appearance.appFontSize` on
-     *  iOS. Centralised so both Android axes share one factory. */
     private fun fontScaleField(
         path: String,
         displayName: String,
@@ -848,7 +703,6 @@ internal object ConfigBuiltins {
         )
     }
 
-    // -- Background --
 
     private fun registerBackground(r: ConfigRegistry, context: Context) {
         val prefs = context.getSharedPreferences(BackgroundSettingsRepository.PREFS_NAME, Context.MODE_PRIVATE)
@@ -869,34 +723,10 @@ internal object ConfigBuiltins {
                 displayName = "Background notifications",
                 description = "Post a system notification when long-running tasks complete.",
                 prefs = prefs,
-                // [T-android-config-prefs-mismatch] The key Settings ->
-                // Background's "Task Notifications" switch and the notifier
-                // read. This wrote "background_notifications_enabled", which
-                // nothing reads, so `minis-config set background.notifications`
-                // reported ok and changed nothing (found verifying
-                // FIX-261021-02 on a Pixel 4a).
                 key = BackgroundSettingsRepository.KEY_TASK_NOTIFICATIONS,
                 defaultValue = BackgroundSettingsRepository.DEFAULT_TASK_NOTIFICATIONS,
             )
         )
-        // [T-android-config-feature-unavailable] Live Updates / "dynamic
-        // island". Settings → Background renders this toggle DISABLED with an
-        // "unsupported" footer unless the device is capable, so minis-config
-        // must not be a side door around that gate: on an incapable device the
-        // path stays registered (help/list still describe it) but every read
-        // and write is refused with `feature_unavailable`.
-        //
-        // Capability = Android 16+ AND the per-app Live-Updates grant, probed
-        // via the same DynamicIslandSupport the UI uses. The grant can be
-        // revoked at runtime, so the probe runs at REGISTRATION time here and
-        // the registry is rebuilt on the paths that re-register — matching how
-        // the UI re-probes on resume. Mirrors iOS gating background.liveActivity
-        // on isLiveActivitySupported (dba46d42).
-        //
-        // Writes go through the same SharedPreferences file+key the repository
-        // reads (background_settings / dynamicIslandEnabled), so a change made
-        // here is picked up by AgentForegroundService's overlay/promoted
-        // mutual-exclusion logic exactly like a UI toggle.
         val dynamicIslandField = PrefsBoolField(
             path = "background.dynamicIsland",
             displayName = "Live Updates (dynamic island)",
@@ -916,10 +746,6 @@ internal object ConfigBuiltins {
                 )
             }
         )
-        // [FIX-261025-03] Settings > Background > Scheduled Task Countdown:
-        // how long before a waiting scheduled task's next run its chat shows the
-        // countdown and keeps the service. Same prefs file + key the repository
-        // reads; its listener picks a write up at once.
         r.register(
             PrefsIntCodedEnumField(
                 path = "background.scheduledCountdown",
@@ -937,15 +763,8 @@ internal object ConfigBuiltins {
         )
     }
 
-    // -- Logs --
 
     private fun registerLogs(r: ConfigRegistry, context: Context) {
-        // T311: route through AppLogger so a write actually starts/stops the
-        // capture pipeline. The previous PrefsBoolField wrote a sibling
-        // `logging`/`logging_enabled` key that AppLogger never reads
-        // (AppLogger uses `logging_prefs`/`logging_enabled`), so toggling via
-        // minis-config did nothing. Default mirrors AppLogger's own default
-        // (false — opt-in), aligning with iOS.
         r.register(
             ClosureField(
                 path = "logs.enabled",
@@ -967,7 +786,6 @@ internal object ConfigBuiltins {
         )
     }
 
-    // -- Provider / Models / Groups / EnvVars collections + aggregates --
 
     private fun registerProviderCollections(
         r: ConfigRegistry,
@@ -976,26 +794,18 @@ internal object ConfigBuiltins {
         envVarRepo: EnvVarRepository,
     ) {
         r.register(ProvidersCollection(providerRepo, envVarRepo, context.applicationContext))
-        // [T-minis-config-coverage] Sub agents are global, so the collection
-        // keys its children by id and needs one flat `order` field. The
-        // summary is what `get subagents` returns. Same surface as iOS.
         r.register(com.openminis.app.config.collections.SubAgentsCollection(providerRepo))
         r.register(com.openminis.app.config.collections.SubAgentsCollection.orderField(providerRepo))
         r.register(com.openminis.app.config.collections.SubAgentsCollection.summaryField(providerRepo))
         r.register(ModelsCollection(providerRepo))
         r.register(GroupsCollection(providerRepo))
         r.register(EnvVarsCollection(envVarRepo))
-        // [T-android-thinking-rules-phase2] Custom thinking rules under
-        // thinkingrules.<instanceId>:<ruleId>.<field>.
         r.register(com.openminis.app.config.collections.ThinkingRulesCollection(providerRepo))
 
         val isoFormatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }
 
-        // Aggregate read-only summary so `minis-config get providers`
-        // returns a useful list of configured instances. Credentials
-        // (apiKey / oauthToken) are deliberately omitted.
         r.register(
             ReadOnlyField(
                 path = "providers",
@@ -1025,8 +835,6 @@ internal object ConfigBuiltins {
             )
         )
 
-        // Aggregate read-only summary so `minis-config get models`
-        // returns every model entry along with its provider context.
         r.register(
             ReadOnlyField(
                 path = "models",
@@ -1058,8 +866,6 @@ internal object ConfigBuiltins {
             )
         )
 
-        // Aggregate read-only summary so `minis-config get envvars`
-        // returns every env var key with its non-secret metadata.
         r.register(
             ReadOnlyField(
                 path = "envvars",
@@ -1083,13 +889,6 @@ internal object ConfigBuiltins {
             )
         )
 
-        // Privacy Mode toggle. Read/write so the user can ask the
-        // agent to flip it without diving into Settings ("turn off
-        // privacy mode for the next command"). Routed through
-        // EnvVarPrivacyStore.setEnabled so the StateFlow fires and
-        // the Compose Switch stays in sync. Default ON; risk
-        // SENSITIVE because turning it OFF means the next shell
-        // execute can leak unmasked secrets to the model.
         r.register(
             ClosureField(
                 path = "envvars.privacyMode",
@@ -1108,8 +907,6 @@ internal object ConfigBuiltins {
             )
         )
 
-        // Aggregate read-only summary so `minis-config get groups`
-        // returns every model group with its expanded entries.
         r.register(
             ReadOnlyField(
                 path = "groups",
@@ -1164,7 +961,6 @@ internal object ConfigBuiltins {
         )
     }
 
-    // -- Defaults — agent loop entries / groups, default primary/sub group --
 
     private fun registerDefaults(r: ConfigRegistry, repo: ProviderRepository) {
         r.register(
@@ -1223,10 +1019,6 @@ internal object ConfigBuiltins {
                 revertable = true,
                 readable = ConfigReadable(ConfigValueFormatter.RefList(ConfigRefKind.ModelEntry, ordered = false)),
                 reader = {
-                    // [T-android-agentloop-dirty-data-skip] Filter out ids that no
-                    // longer match a real model entry (legacy bare-UUID / deleted
-                    // rows). Surfacing them confuses minis-model-use and the
-                    // round-trip set/append flow; skip silently.
                     val valid = repo.config.value.modelEntries.map { it.id }.toSet()
                     ConfigValue.Arr(
                         repo.config.value.agentLoopModelEntryIds
@@ -1238,13 +1030,6 @@ internal object ConfigBuiltins {
                     val arr = (v as? ConfigValue.Arr)?.value ?: throw ConfigError.TypeMismatch("array")
                     val ids = arr.mapNotNull { (it as? ConfigValue.Str)?.value }
                     val valid = repo.config.value.modelEntries.map { it.id }.toSet()
-                    // [T-android-agentloop-dirty-data-skip] Silent-skip unknown ids
-                    // instead of hard-failing the whole write. `.append` reads the
-                    // existing array (which may carry legacy bare-UUID dirt) and
-                    // re-writes the full list; a hard fail rejected the valid new
-                    // entry along with the historical dirt. Filtering cleans the
-                    // dirt and lets the valid entries through; one diagnostic line
-                    // per skipped id leaves a trace without blocking the op.
                     val cleanIds = ids.filter { it in valid }
                     ids.filterNot { it in valid }.forEach { bad ->
                         com.openminis.app.logging.AppLogger.warning(
@@ -1265,8 +1050,6 @@ internal object ConfigBuiltins {
                 revertable = true,
                 readable = ConfigReadable(ConfigValueFormatter.RefList(ConfigRefKind.Group, ordered = false)),
                 reader = {
-                    // [T-android-agentloop-dirty-data-skip] Skip ids that no
-                    // longer match a real group (deleted / legacy bare UUID).
                     val valid = repo.config.value.modelGroups.map { it.id }.toSet()
                     ConfigValue.Arr(
                         repo.config.value.agentLoopGroupIds
@@ -1278,8 +1061,6 @@ internal object ConfigBuiltins {
                     val arr = (v as? ConfigValue.Arr)?.value ?: throw ConfigError.TypeMismatch("array")
                     val ids = arr.mapNotNull { (it as? ConfigValue.Str)?.value }
                     val valid = repo.config.value.modelGroups.map { it.id }.toSet()
-                    // [T-android-agentloop-dirty-data-skip] Silent-skip unknown
-                    // group ids (same rationale as agentLoopEntries above).
                     val cleanIds = ids.filter { it in valid }
                     ids.filterNot { it in valid }.forEach { bad ->
                         com.openminis.app.logging.AppLogger.warning(
@@ -1292,27 +1073,7 @@ internal object ConfigBuiltins {
         )
     }
 
-    // -- Soul (SOUL.md personality) --
-    //
-    // [T-soul-md-minisconfig] Exposes the editable subset of SOUL.md
-    // (name / style / lang / body) as `soul.*` config paths. The on-disk
-    // YAML emoji field is intentionally NOT registered — matches the
-    // iOS rollback where ✨ is locked as the identity icon.
-    //
-    // Writes go through the standard PendingConfigChange / user-confirm
-    // gate (registered with [ConfigRisk.SENSITIVE]); only the *approved*
-    // writer touches disk. Each writer reads the current SOUL.md so
-    // unrelated fields (incl. the on-disk `emoji` value that survives
-    // for round-trip) are preserved when one field changes.
 
-    /**
-     * [T-android-soul-icon-config-images] Resolve a config-supplied image
-     * source to the stored inline data URI.
-     *
-     * Throws [ConfigError.InvalidValue] with actionable text on every failure
-     * path — this runs on behalf of a model, and "invalid value" with no
-     * detail just produces another wrong guess.
-     */
     private fun resolveSoulIconImage(context: Context, raw: String): String {
         val icon = com.openminis.app.agent.SoulIcon
         val bytes: ByteArray = when (val src = icon.classifySource(raw)) {
@@ -1327,12 +1088,6 @@ internal object ConfigBuiltins {
                 } ?: throw ConfigError.InvalidValue(
                     "path must be inside one of ${icon.ALLOWED_LINUX_ROOTS.joinToString(", ")}",
                 )
-                // resolveSessionHostPath, NOT resolveHostPath: the global
-                // bindMounts map is only populated once a shell has booted
-                // this session (and is last-writer-wins across sessions), so
-                // resolving through it fails outright when the user hasn't
-                // run a command yet — which is exactly the state a config
-                // write from the UI arrives in.
                 val sid = ChatViewModelStore.activeSessionId
                     ?: throw ConfigError.InvalidValue(
                         "no active session — open a chat first, or pass the image inline as a data URI",
@@ -1342,9 +1097,6 @@ internal object ConfigBuiltins {
                     ?: throw ConfigError.InvalidValue("could not resolve $root on this device")
                 val hostFile = kernel.resolveSessionHostPath(sid, src.path, context)
                     ?: throw ConfigError.InvalidValue("could not resolve ${src.path}")
-                // Canonicalise BOTH sides before comparing, so a symlink
-                // inside an allowed directory cannot point out of it and a
-                // `..` segment cannot walk out of the sandbox.
                 if (!icon.isContained(hostFile, hostRoot)) {
                     throw ConfigError.InvalidValue("${src.path} resolves outside $root")
                 }
@@ -1363,8 +1115,6 @@ internal object ConfigBuiltins {
             "that data isn't a decodable image (png / jpeg / webp / gif are supported; svg is not)",
         )
 
-        // Same encoder the Settings picker uses, so crop / downscale / size
-        // rules are shared by construction rather than by copy.
         return when (val r = icon.encode(bitmap)) {
             is com.openminis.app.agent.SoulIcon.EncodeResult.Success -> r.dataUri
             is com.openminis.app.agent.SoulIcon.EncodeResult.Failure -> when (r.reason) {
@@ -1377,16 +1127,7 @@ internal object ConfigBuiltins {
     }
 
     private fun registerSoul(r: ConfigRegistry, context: Context) {
-        // Length cap is language-aware now (Chinese ≤ 800 chars OR
-        // English ≤ 500 words); see [com.openminis.app.agent.SoulStore.isOverLimit].
-        // No schema-level maxLength — a fixed char count would be wrong
-        // for either language. The writer below rejects over-limit with a
-        // precise [ConfigError.InvalidValue].
 
-        // Re-read SOUL.md every call so concurrent writes from Settings
-        // UI don't race with minis-config writes. Parse falls back to
-        // the canonical default content if the file was somehow deleted
-        // between launches — same behavior as the Settings page.
         fun loadCurrent(): com.openminis.app.agent.SoulFile =
             com.openminis.app.agent.SoulStore.load(context)
                 ?: com.openminis.app.agent.SoulMDParser.parse(
@@ -1422,30 +1163,10 @@ internal object ConfigBuiltins {
             )
         )
 
-        // [T-android-soul-custom-icon][T-android-soul-icon-config-images]
-        //
-        // Accepts an emoji OR an image, matching iOS `fe2f3ae8b`. An address
-        // (minis:// or a /var/minis path) is only an import source: it is
-        // resolved, re-encoded through the SAME SoulIcon.encode the Settings
-        // picker uses, and only the RESULT is stored inline — so the source
-        // file can be deleted afterwards and the icon survives attachment
-        // cleanup and syncing to another device.
-        //
-        // Reading is summarized, never dumped: a stored image reports as
-        // "<image>" so `minis-config get` cannot flood the context with
-        // base64. For the same reason the field is NOT revertable — the audit
-        // log holds "<image>" rather than the bytes, so there is nothing to
-        // restore from and offering a revert button would be a lie.
         r.register(
             ClosureField(
                 path = "soul.icon",
                 displayName = "Soul icon",
-                // The description IS the API doc — `minis-config topic-help
-                // soul` prints it verbatim. It leads with every word a user
-                // might use for this (icon / avatar / persona image /
-                // 角色形象 / 头像) because they are all this ONE field, and a
-                // model that doesn't match the wording will otherwise report
-                // the capability as missing.
                 description = "The Soul's identity icon — also called its avatar, its persona image, or its " +
                     "character image (中文：角色形象 / 图标 / 头像). All of those refer to THIS one setting; " +
                     "there is no separate avatar field. Shown beside the assistant name in the chat header " +
@@ -1476,9 +1197,6 @@ internal object ConfigBuiltins {
                     "  minis-config set soul.icon '\"⚡\"'\n" +
                     "  minis-config set soul.icon '\"minis://attachments/icon.png\"'\n" +
                     "  minis-config set soul.icon '\"\"'   # back to the default sparkle",
-                // No maxLength: an inline data URI is far longer than any cap
-                // that would make sense stated in characters. The real bound
-                // is SoulIcon.MAX_DATA_URI_CHARS, enforced by the encoder.
                 valueSchema = ConfigSchema.Str(),
                 risk = ConfigRisk.SENSITIVE,
                 revertable = false,
@@ -1495,10 +1213,8 @@ internal object ConfigBuiltins {
                     val trimmed = raw.trim()
                     val cur = loadCurrent()
                     val next = when {
-                        // Empty clears back to the default sparkle.
                         trimmed.isEmpty() -> ""
 
-                        // A single emoji stays verbatim.
                         com.openminis.app.agent.SoulIcon.graphemeClusters(trimmed).size == 1 &&
                             com.openminis.app.agent.SoulIcon.isEmojiGlyph(trimmed) -> trimmed
 
@@ -1540,16 +1256,12 @@ internal object ConfigBuiltins {
                 valueSchema = ConfigSchema.StrEnum(listOf("auto", "zh", "en")),
                 risk = ConfigRisk.SENSITIVE,
                 revertable = true,
-                // Label = the iOS key for the same field, so both read alike.
                 readable = ConfigReadable(
                     ConfigValueFormatter.EnumLabels(mapOf("auto" to "Automatic", "zh" to "Chinese", "en" to "English")),
                     label = "Soul language preference",
                 ),
                 reader = {
                     val cur = loadCurrent()
-                    // Older files may be missing the lang frontmatter
-                    // key — parser already substitutes DEFAULT.lang in
-                    // that case, so we just round-trip it.
                     ConfigValue.Str(cur.metadata.lang.ifBlank {
                         com.openminis.app.agent.SoulMetadata.DEFAULT.lang
                     })
@@ -1569,9 +1281,6 @@ internal object ConfigBuiltins {
                 path = "soul.body",
                 displayName = "Soul personality prompt",
                 description = "Personality / voice instructions injected as a block in the system prompt. Length cap is language-aware: Chinese ≤ ${com.openminis.app.agent.SoulStore.CHINESE_CHAR_LIMIT} chars OR English ≤ ${com.openminis.app.agent.SoulStore.ENGLISH_WORD_LIMIT} words (rule picked by the majority language). The writer also rejects prompt-injection patterns (\"ignore previous instructions\" etc.) — keep this to genuine character / tone guidance.",
-                // No schema maxLength because either character or word
-                // count is wrong for the *other* language. Both checks
-                // (length + injection) run in the writer below.
                 valueSchema = ConfigSchema.Str(),
                 risk = ConfigRisk.SENSITIVE,
                 revertable = true,

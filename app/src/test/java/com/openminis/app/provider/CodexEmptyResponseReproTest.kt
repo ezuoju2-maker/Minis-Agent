@@ -17,24 +17,6 @@ import org.json.JSONObject
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
-/**
- * LIVE bisection harness for the "Model returned an empty response" retry on
- * session e01a065e (Pixel 6, GPT-5.6 Terra via Codex OAuth).
- *
- * Not a regression test — it talks to the real chatgpt.com Codex endpoint,
- * spends real quota, and is skipped unless MINIS_LIVE_REPRO=1. It replays the
- * exact history retryLast() re-sends (DB rows 0..21, Case B: tail is a user
- * row so nothing is popped), through the app's OWN OAuth provider and
- * Responses serializer, so the bytes on the wire are what the phone sends.
- * It then removes suspects one at a time and reports, per scenario, what the
- * model produced (text / tool call / nothing).
- *
- * Fixtures (pulled from the device via debug RPC, not hand-written):
- *   app/history.json      DB rows with full tool payloads
- *   app/instructions.txt  the 41.5KB system prompt as sent
- *   app/tools.json        the 8 tool schemas recovered from the capture
- *   app/auth_header.txt   the live OAuth bearer
- */
 class CodexEmptyResponseReproTest {
 
     private fun fixture(name: String) = File(name).also { require(it.exists()) { "missing fixture $name" } }
@@ -147,7 +129,6 @@ class CodexEmptyResponseReproTest {
             repeat(N) { k -> if (run("$label #${k + 1}", hist, sys, tools).isEmpty) empty++ }
             println(">>> $label : EMPTY $empty/$N"); return empty
         }
-        // Apply the production recovery nudge to a user-text tail, exactly as the loop would.
         fun nudge(hist: List<LLMMessage>): List<LLMMessage> {
             val h = hist.toMutableList()
             val tail = h.last(); val parts = tail.contentParts.toMutableList()

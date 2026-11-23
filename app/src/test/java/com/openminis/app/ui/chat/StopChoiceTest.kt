@@ -16,14 +16,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * [T-stop-choice] Stop asks "Stop Current Tool Only / Stop All" when the chat
- * has sub agents or scheduled tasks; the tool-only path ends the foreground
- * work and leaves the background alone.
- */
 class StopChoiceTest {
 
-    // ── decisions ─────────────────────────────────────────────────────
 
     @Test fun `only background work makes Stop ask`() {
         assertFalse("a bare turn stops as before", StopSummary(runningTools = listOf("shell_execute")).hasBackground)
@@ -53,7 +47,6 @@ class StopChoiceTest {
         assertTrue(note.contains("will not fire again"))
     }
 
-    // ── ForegroundToolInterrupts ──────────────────────────────────────
 
     @Test fun `a call that finishes on its own is not marked`() = runBlocking {
         val tools = ForegroundToolInterrupts()
@@ -80,7 +73,6 @@ class StopChoiceTest {
     }
 
     @Test fun `a non-cancellable call keeps running and comes back marked`() = runBlocking {
-        // The shell: its process group is killed, it returns by itself.
         val tools = ForegroundToolInterrupts()
         val release = CompletableDeferred<Unit>()
         val call = async {
@@ -122,8 +114,8 @@ class StopChoiceTest {
             }
         }
         started.await()
-        tools.interrupt() // tool-only stop first ...
-        turn.cancel() // ... and then the turn itself
+        tools.interrupt()
+        turn.cancel()
         try {
             turn.await()
             fail("the turn's cancellation must propagate")
@@ -139,7 +131,6 @@ class StopChoiceTest {
         assertTrue(noted.contains("wait for the user's next message"))
     }
 
-    // ── wiring ────────────────────────────────────────────────────────
 
     private val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
     private val screen = ProductionSources.read("ui/chat/ChatScreen.kt")
@@ -156,7 +147,6 @@ class StopChoiceTest {
         }
         assertTrue(toolOnly.contains("ToolOnlyStop.INTERRUPT_TOOLS -> interruptForegroundTools(ids = null)"))
         assertTrue(toolOnly.contains("ToolOnlyStop.END_TURN -> cancelStream(keepBackground = true)"))
-        // The commands die before the calls are cancelled (a cancelled call drops its shell callback).
         assertTrue(interrupt.indexOf("ExecutionCoordinator.interruptForegroundCommands(activeSessionId)") in 0 until interrupt.indexOf("foregroundTools.interrupt(ids)"))
         assertTrue("a waiting delegation moves to the background", interrupt.contains("delegateDetach.value = delegateDetach.value + 1"))
     }

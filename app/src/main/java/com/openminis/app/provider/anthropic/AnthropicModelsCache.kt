@@ -9,12 +9,6 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.security.MessageDigest
 
-/**
- * On-disk cache for `/v1/models` results, keyed by a SHA-256 hash of the
- * credential so the raw API key / OAuth token never lands in the cache file
- * name. Mirrors iOS `ModelsCache` (AnthropicModelsAPI.swift): 7-day TTL,
- * `context.cacheDir/models-cache/<hash>.json`.
- */
 internal object AnthropicModelsCache {
     private const val TTL_MS = 7L * 24 * 3600 * 1000
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -32,7 +26,6 @@ internal object AnthropicModelsCache {
         return File(cacheDir(context), "$hex.json")
     }
 
-    /** Load cached models if the entry is fresh (<7d). Returns null otherwise. */
     fun load(context: Context, credential: String): List<LLMModel>? {
         val file = keyFile(context, credential)
         if (!file.isFile) return null
@@ -42,7 +35,6 @@ internal object AnthropicModelsCache {
         return entry.models
     }
 
-    /** Persist models for next lookup. Silently drops write errors — cache is advisory. */
     fun save(context: Context, credential: String, models: List<LLMModel>) {
         val file = keyFile(context, credential)
         runCatching {
@@ -50,7 +42,6 @@ internal object AnthropicModelsCache {
         }
     }
 
-    /** Drop the cache file for [credential]. Used on auth failure to avoid stale data. */
     fun invalidate(context: Context, credential: String) {
         runCatching { keyFile(context, credential).delete() }
     }

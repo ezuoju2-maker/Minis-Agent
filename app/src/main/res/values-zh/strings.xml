@@ -1,4 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Minis</string>
     <string name="new_chat">新对话</string>
@@ -934,7 +933,6 @@
     <string name="storage_clear_partial_failure">有 %1$d 个文件无法删除，例如 %2$s。它们可能是只读的，请参考沙盒清理步骤。</string>
     <string name="storage_clear_confirm_text">这将删除 %1$s 的文件。此操作无法撤销。</string>
     <string name="storage_clear_confirm_button">清除 %1$s</string>
-    <!-- [T-android-storage-usage-cache] Storage multi-select batch actions -->
     <string name="storage_batch_clear_button">清除文件</string>
     <plurals name="storage_batch_clear_title">
         <item quantity="other">清除 %d 个会话的文件？</item>
@@ -1290,7 +1288,6 @@
     <string name="chat_stop_confirm_message">当前回复和正在运行的工具都会被停止。</string>
     <string name="chat_stop_confirm_stop">停止</string>
     <string name="chat_stop_confirm_keep_running">继续运行</string>
-    <!-- [T-stop-choice] Stop: current tool only, or everything -->
     <string name="chat_stop_choice_title">要停止什么？</string>
     <string name="chat_stop_choice_current_tools">正在运行：%1$s</string>
     <string name="chat_stop_choice_current_reply">正在运行：当前回复</string>
@@ -1348,7 +1345,6 @@
     <plurals name="chat_delete_from_here_dialog_body">
         <item quantity="other">将删除本条消息及其之后的全部内容，共 %d 条消息。此操作无法撤销。</item>
     </plurals>
-    <!-- [T-android-compact-above] -->
     <string name="chat_longpress_compact_above">从此处压缩</string>
     <string name="chat_compact_above_dialog_body">此消息之前的内容将被压缩为摘要。之后可通过分割线上的信息图标撤销。</string>
     <string name="chat_compact_above_confirm">压缩</string>
@@ -1547,7 +1543,6 @@
     <string name="backup_dest_none">还没有目的地。</string>
     <string name="backup_dest_add_server">添加服务器…</string>
     <string name="backup_dest_remove">移除 %1$s</string>
-    <!-- [T-android-backup-local-folder] -->
     <string name="backup_dest_add_local_folder">添加本地文件夹…</string>
     <string name="backup_dest_kind_local_folder">本地文件夹</string>
     <string name="backup_dest_local_folder_no_permission">无法保持对该文件夹的访问权限。请重新选择，或换一个文件夹。</string>
@@ -1906,7 +1901,6 @@
     <string name="scheduled_task_field_thinking">思考强度</string>
     <string name="scheduled_task_model_default">应用默认</string>
     <string name="scheduled_task_field_active_window">活动时段（可选）</string>
-    <!-- [T-android-scheduled-triggers] -->
     <string name="scheduled_task_field_trigger">触发方式</string>
     <string name="scheduled_task_trigger_readonly_note">由助手通过 minis-scheduled 设置，此处不能修改时间。可以让助手修改，或删除后重新创建。</string>
     <string name="scheduled_task_field_start_date">开始</string>
@@ -1962,7 +1956,6 @@
     <string name="voice_correction_button_a11y">用 AI 修正转录文本</string>
     <string name="voice_correction_none_needed">无需修正</string>
     <string name="voice_correction_failed">纠错失败，已保留原文</string>
-    <!-- [T-voice-asr-failure-retry-prompt] / [T-voice-send-waits-for-asr] -->
     <string name="voice_asr_failed_title">识别失败</string>
     <string name="voice_asr_failed_message">%1$d 秒的语音未能转写（%2$s）。要重试吗？</string>
     <string name="voice_asr_switch_model">切换模型</string>
@@ -2012,7 +2005,6 @@
     <string name="chat_context_usage_hint">上下文已用 %1$s · %2$s</string>
     <string name="compact_progress">正在压缩… 已进行 %1$d 秒</string>
     <string name="compact_progress_split">正在压缩… %1$d 秒 · 分段摘要中（%2$d/%3$d）</string>
-    <!-- [T-p1-delegate-task] helper capsule / sheet -->
     <string name="helper_label">代理任务</string>
     <string name="helper_stop">停止代理任务</string>
     <string name="helper_close">关闭</string>
@@ -2057,7 +2049,6 @@
     <string name="agent_error_timed_out">已超时</string>
     <string name="agent_error_auth_failed">鉴权失败</string>
     <string name="agent_error_network">网络错误</string>
-    <!-- [T-android-tls-trust-error] Shown when a model endpoint's certificate is rejected. -->
     <string name="error_tls_untrusted">无法验证 %1$s 的安全证书（找不到受信任的根证书）。常见原因：开启了代理、VPN 或抓包工具，它们重新签发了 HTTPS 证书（官方模型服务只信任系统证书）；自建或中转接口使用了自签名证书，或没有配置中间证书；所在网络拦截了 HTTPS。请关闭抓包工具或代理后重试，或检查该接口的证书配置。</string>
     <string name="error_tls_expired_or_clock">%1$s 的证书已过期或尚未生效。请先检查手机的日期和时间是否正确（开启自动设置时间）；如果时间正确，说明该服务的证书已过期。</string>
     <string name="error_tls_hostname_mismatch">%1$s 返回的证书与域名不符，连接可能被拦截（公共 Wi-Fi 登录页、运营商或代理）。请切换网络或关闭代理后重试。</string>
@@ -2126,7 +2117,6 @@
     <string name="agent_detail_interaction_progress">进度汇报</string>
     <string name="agent_detail_interaction_final">最终结果</string>
     <string name="agent_detail_job">任务</string>
-    <!-- [T-subagent-detail-rich] sub agent detail card: chips, task, timeline, actions -->
     <string name="subagent_detail_succeeded">%1$d 次成功</string>
     <string name="subagent_detail_failed">%1$d 个失败</string>
     <string name="subagent_detail_tokens">Token：输入 %1$s，输出 %2$s</string>
@@ -2171,7 +2161,6 @@
     <string name="sub_agent_reasoning_footer_on">该子代理的每次运行都使用此强度，覆盖模型分组的默认值。达不到该强度的模型会被限制在自身上限。</string>
     <string name="helper_start">开始</string>
     <string name="helper_start_failed">无法启动——正在运行的子代理过多</string>
-    <!-- [T-android-subagent-card-resume] Resume button on an interrupted sub agent card -->
     <string name="helper_resume">继续子代理</string>
     <string name="helper_resume_queued">子代理都在忙，空出位置后会自动继续</string>
     <string name="helper_resume_failed">无法继续这个子代理</string>
@@ -2192,11 +2181,9 @@
     <string name="thinking_rules_error_path_reserved">「%1$s」是请求保留字段，不能写入。</string>
     <string name="thinking_rules_error_value_required">必须填写取值。</string>
     <string name="thinking_rules_error_off_value_required">开启「发送关闭值」时必须填写关闭值。</string>
-    <!-- [T-send-longpress-return-mode] Send-button long-press chooser -->
     <string name="send_return_mode_sends">回车发送</string>
     <string name="send_return_mode_newline">回车换行</string>
     <string name="send_return_mode_a11y_action">回车键选项</string>
-    <!-- [T-scheduled-task-detail] Scheduled task detail page -->
     <string name="scheduled_detail_title">定时任务</string>
     <string name="scheduled_detail_close">关闭</string>
     <string name="scheduled_status_running">执行中</string>
@@ -2242,7 +2229,6 @@
     <string name="scheduled_trigger_from">%1$s 起</string>
     <string name="scheduled_trigger_until">至 %1$s</string>
     <string name="scheduled_trigger_window">%1$s – %2$s</string>
-    <!-- [T-android-scheduled-triggers] -->
     <string name="scheduled_trigger_interval">每 %1$s</string>
     <string name="scheduled_trigger_interval_count">每 %1$s · 共 %2$d 次</string>
     <string name="scheduled_trigger_on_completion">「%1$s」完成后</string>
@@ -2254,7 +2240,6 @@
     <string name="scheduled_detail_history_empty">暂无执行记录</string>
     <string name="scheduled_detail_current">当前</string>
     <string name="scheduled_detail_open_chat">打开对话</string>
-    <!-- [T-container-network-dns] Rootfs > Container Network -->
     <string name="rootfs_network_section">容器网络</string>
     <string name="rootfs_dns_mode">DNS 模式</string>
     <string name="rootfs_dns_auto">自动</string>
@@ -2391,7 +2376,6 @@
     <string name="chat_share_n_selected">已选择 %1$d 项</string>
     <string name="chat_share_select_all">全选</string>
     <string name="chat_share_deselect_all">取消全选</string>
-    <!-- [T-port-user-ask] user_ask card and settings; text from the iOS string catalog. -->
     <string name="user_ask_needs_answer">需要你回答</string>
     <string name="user_ask_needs_approval">需要你授权</string>
     <string name="user_ask_high_risk">高风险操作</string>
@@ -2434,19 +2418,16 @@
     <string name="user_ask_setting_indefinitely">一直等</string>
     <string name="user_ask_setting_minutes">%1$d 分钟</string>
     <string name="user_ask_setting_footer">允许助手在对话中用卡片请你在几个方案中选择，或在执行有风险的操作前请你确认。只在你参与的对话中使用，子代理、快捷指令和定时任务不会用到。关闭后，助手会自行决定，且在你明确同意前不会执行有风险的操作。</string>
-    <!-- [T-android-user-ask-notify] user_ask background notification. -->
     <string name="user_ask_setting_notify">在后台时发通知</string>
     <string name="user_ask_notif_high_risk">需要你授权 · 高风险</string>
     <string name="user_ask_notif_open_app">打开 App</string>
     <string name="user_ask_notif_hidden_body">有一个问题等你回答</string>
     <string name="user_ask_notif_channel_name">向你提问</string>
     <string name="user_ask_notif_channel_description">Minis 在后台时助手向你提出的问题，可直接在通知里回答</string>
-    <!-- [ISS-036, T-provider-live-check] A running task checks its provider before every request -->
     <string name="provider_live_check_removed">服务商已被删除</string>
     <string name="provider_live_check_disabled">服务商已禁用</string>
     <string name="provider_live_check_removed_message">服务商 %1$s 已被删除，无法继续使用 %2$s。请选择其他模型后继续。</string>
     <string name="provider_live_check_disabled_message">服务商 %1$s 已被禁用，无法使用 %2$s。请在设置中启用它，或选择其他模型后继续。</string>
-    <!-- [T-sse-idle-timeout] Provider detail: response idle timeout -->
     <string name="provider_detail_response_idle_timeout">响应空闲超时</string>
     <string name="provider_detail_response_idle_timeout_footer">等待首次响应、以及两段响应之间的最长等待时间，超过后视为连接卡住并重试。这不是总生成时长的限制：只要回复持续到达就不会超时。本地模型处理很长的上下文需要几分钟时，可以调大。调大后，连接真的断开时也要等这么久才会发现。仅保存在本机。</string>
     <string name="response_idle_timeout_2min_default">2 分钟（默认）</string>
@@ -2457,9 +2438,7 @@
     <string name="response_idle_timeout_custom">自定义…</string>
     <string name="response_idle_timeout_seconds">%1$d 秒</string>
     <string name="response_idle_timeout_seconds_field">秒数（30–3600）</string>
-    <!-- [ISS-038] Suffix word of a duplicated session's title: "Foo (Copy)", "Foo (Copy 2)". The word only. -->
     <string name="session_duplicate_suffix">副本</string>
-    <!-- [T-storage-orphan-cleanup] Settings > Storage: orphaned session files -->
     <string name="storage_overview_orphaned">孤立会话文件</string>
     <string name="storage_orphan_clean_button">清理孤立会话文件</string>
     <string name="storage_orphan_confirm_title">清理孤立会话文件？</string>
@@ -2472,15 +2451,12 @@
     <string name="storage_orphan_result_kept">另有 %1$s 在最近一小时内有改动，已暂时保留，以防它属于正在创建的会话。请稍后再试。</string>
     <string name="storage_orphan_result_none">没有找到孤立会话文件。</string>
     <string name="storage_orphan_footer">孤立会话文件是已不存在的会话留下的残留，例如被旧版本应用删除的会话。它们不会出现在下方列表中。清理它们不会影响你的对话、技能、记忆或共享文件。</string>
-    <!-- [T-tool-preview-longpress-close] Long-press the tool status bar preview -->
     <string name="tool_preview_close_menu">关闭预览小窗</string>
     <string name="tool_preview_closed_toast">已关闭预览小窗，可在 设置 &gt; 外观 中重新开启。</string>
-    <!-- [T-restore-progress-localized] Restore progress lines -->
     <string name="restore_progress_verifying">正在校验完整性…</string>
     <string name="restore_progress_decrypting">正在解密…</string>
     <string name="restore_progress_reading">正在读取备份…</string>
     <string name="restore_progress_listing">正在列出…</string>
-    <!-- [T-mcp-oauth-signin-android] MCP browser sign-in (iOS #432) -->
     <string name="mcp_form_auth_mode">授权</string>
     <string name="mcp_form_auth_none">无</string>
     <string name="mcp_form_auth_browser">浏览器登录</string>
@@ -2520,7 +2496,6 @@
     <string name="mcp_dcr_registration_unreadable">无法读取注册响应。</string>
     <string name="mcp_dcr_http_status">%1$s 返回了 HTTP %2$d。</string>
     <string name="mcp_dcr_unreadable">%1$s 返回的数据无法读取。</string>
-    <!-- Placeholder entries: Built-in Models & Plugin Market -->
     <string name="settings_section_discover">发现</string>
     <string name="settings_builtin_models">内置模型</string>
     <string name="settings_builtin_models_subtitle">内置模型，账号登录即可使用，无需配置</string>

@@ -6,26 +6,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * The "did my destination actually save?" state machine.
- *
- * `RcloneDestinationsScreen` renders one of three things from two pieces of
- * state — `browse != null` (folder browser), `adding` (add form), otherwise
- * the saved list. A successful save used to leave both flags untouched, so
- * the user stayed on the form and a save that worked looked exactly like one
- * that silently failed; the reported behaviour was re-saving the same
- * destination repeatedly.
- *
- * The Compose screen itself needs an instrumented run, but the transition
- * rule is plain logic and is what regressed, so it is pinned here. This
- * mirrors `RcloneDestinationsViewModel.savePending`, which invokes its
- * `onDone` callback ONLY after `store.add` returns — its catch sets `_error`
- * instead — which is why leaving the form on the callback cannot strand a
- * failed save.
- */
 class BackupDestinationSaveStateTest {
 
-    /** The screen's visible surface, decided exactly as the composable does. */
     private enum class Screen { BROWSER, ADD_FORM, LIST }
 
     private class DestinationsUiState {
@@ -49,17 +31,13 @@ class BackupDestinationSaveStateTest {
             browsing = true
         }
 
-        /** The `onSaved` path: viewmodel cleared `browse`, screen leaves the form. */
         fun saveSucceeded(name: String) {
             browsing = false
             adding = false
             justSaved = name
         }
 
-        /** The catch path: viewmodel sets an error and leaves browse in place. */
         fun saveFailed() {
-            // browsing/adding deliberately untouched — the user must stay on
-            // the form to retry or correct the destination.
         }
 
         fun cancel() {
@@ -81,24 +59,18 @@ class BackupDestinationSaveStateTest {
         assertEquals("nas-webdav", s.justSaved)
     }
 
-    /**
-     * The regression itself: before the fix, saving cleared only `browse`, so
-     * `adding` kept the form on screen and the list was never reached.
-     */
     @Test
     fun `save must clear adding too, not just the browser`() {
         val s = DestinationsUiState()
         s.beginAdd()
         s.connected()
 
-        // Old behaviour: only the browser closed.
         s.browsing = false
         assertEquals(
             "clearing browse alone leaves the user on the add form",
             Screen.ADD_FORM, s.screen,
         )
 
-        // Fixed behaviour.
         s.saveSucceeded("nas-webdav")
         assertEquals(Screen.LIST, s.screen)
     }
@@ -127,7 +99,6 @@ class BackupDestinationSaveStateTest {
         assertNull(s.justSaved)
     }
 
-    /** Starting a second add clears the previous confirmation. */
     @Test
     fun `beginning another add drops the stale confirmation`() {
         val s = DestinationsUiState()

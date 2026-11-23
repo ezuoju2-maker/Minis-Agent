@@ -11,16 +11,8 @@ import java.io.File
 import java.net.ServerSocket
 import java.net.Socket
 
-/**
- * [T-oauth-wait-fgs] While an OAuth sign-in waits for its localhost redirect,
- * a dataSync foreground service keeps Minis out of the cached-apps freezer
- * (field log: the redirect hung 39 s, served the millisecond the process
- * thawed). Bookkeeping, the callback-server wiring, and source guards for the
- * compatibility rules the service must follow.
- */
 class OAuthWaitKeepAliveTest {
 
-    // ── Flow bookkeeping ────────────────────────────────────────────────────
 
     @Test
     fun `flows are counted by id, and ending one never ends another`() {
@@ -68,7 +60,6 @@ class OAuthWaitKeepAliveTest {
         assertEquals(base, OAuthWaitKeepAlive.active.value)
     }
 
-    // ── Callback server wiring ──────────────────────────────────────────────
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 
@@ -164,7 +155,6 @@ class OAuthWaitKeepAliveTest {
         assertEquals(base, OAuthWaitKeepAlive.active.value)
     }
 
-    // ── Compatibility guards ────────────────────────────────────────────────
 
     private val svc = ProductionSources.read("service/OAuthWaitService.kt")
 

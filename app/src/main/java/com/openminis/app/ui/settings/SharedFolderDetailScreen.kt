@@ -40,14 +40,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.openminis.app.R
 
-/**
- * Detail screen for a single shared folder. Mirrors the iOS Folder Details
- * screen — header card (icon + name + linux path + R/W badge) and a single
- * "Browse Files" action that routes to the in-app file browser rooted at
- * the corresponding host path. The iOS-only "Show in Files app" toggle is
- * intentionally not ported (Android has no equivalent DocumentsProvider
- * mechanism wired up in this version).
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SharedFolderDetailScreen(
@@ -57,7 +49,6 @@ fun SharedFolderDetailScreen(
 ) {
     val folder = SharedFolderRegistry.find(folderId)
     if (folder == null) {
-        // Unknown id — pop out so we never render an empty/broken detail.
         LaunchedEffect(Unit) { onBack() }
         return
     }

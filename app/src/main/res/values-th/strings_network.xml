@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Settings > Network. Translations shared with iOS come from its Localizable.xcstrings; locales without one fall back to English. -->
 <resources>
     <string name="network_title">เครือข่าย</string>
     <string name="network_status">สถานะ</string>

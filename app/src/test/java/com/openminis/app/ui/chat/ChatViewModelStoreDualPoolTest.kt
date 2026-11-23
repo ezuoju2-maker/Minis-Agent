@@ -6,20 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-android-vm-store-dual-pool] Sub agent sessions and the user's own chats
- * shared one LRU, so they evicted each other. Measured on a Pixel 4a with
- * the sub agent cap (then a global 3) saturated: three children allocated inside
- * 55ms and the third evicted the FIRST — a child 55 milliseconds old — while
- * also pushing two of the user's own sessions out of the cache.
- *
- * ChatViewModelStore is an Android-runtime object this JVM test cannot
- * instantiate, so the store's own invariants are pinned as source facts (the
- * approach [ChatViewModelStoreEvictionTest] established). The eviction
- * ARITHMETIC — the part that actually decides who gets thrown out — is
- * reimplemented here against the same rules and exercised directly, so the
- * isolation claim is tested rather than asserted.
- */
 class ChatViewModelStoreDualPoolTest {
 
     private val src: String by lazy {
@@ -28,7 +14,6 @@ class ChatViewModelStoreDualPoolTest {
         f.readText()
     }
 
-    // ---- source invariants -------------------------------------------------
 
     @Test
     fun `the store declares two pools with separate caps`() {
@@ -57,11 +42,6 @@ class ChatViewModelStoreDualPoolTest {
 
     @Test
     fun `pool membership is cleaned up everywhere a store is dropped`() {
-        // [T-android-vm-store-child-tag-survives-evict] release forgets the tag
-        // for good; eviction (LRU + memory pressure) goes through one helper
-        // that keeps a CHILD tag, so re-opening an evicted sub agent with the
-        // NORMAL default cannot land it in the user's pool (Review0923
-        // ViewModelStoreRealTest drives this on the real store).
         assertTrue(
             "eviction keeps CHILD tags and drops only non-CHILD ones",
             src.contains("if (poolKinds[key] != PoolKind.CHILD) poolKinds.remove(key)"),
@@ -81,13 +61,6 @@ class ChatViewModelStoreDualPoolTest {
         )
     }
 
-    /**
-     * HeadlessChatRunner is NOT child-only — `prompt()` drives ordinary
-     * sessions for the debug RPCs and ScheduledAgentRunner acquires a PARENT
-     * session through it. Hardcoding CHILD inside it was measured to
-     * misclassify all 14 plain sessions of the multi_session baseline scenario,
-     * so the tag belongs at the sites that actually CREATE a sub agent.
-     */
     @Test
     fun `the shared headless entry point defaults to NORMAL`() {
         val runner = File("src/main/java/com/openminis/app/debug/HeadlessChatRunner.kt").readText()
@@ -111,7 +84,6 @@ class ChatViewModelStoreDualPoolTest {
             2, Regex(Regex.escape(tag)).findAll(vm).count(),
         )
         assertTrue("the scheduled child must tag CHILD", sched.contains(tag))
-        // The parent session acquired right above it must NOT be tagged.
         assertTrue(
             "ScheduledAgentRunner's parent VM stays NORMAL",
             sched.contains("viewModelFor(app, parentSid)"),
@@ -126,11 +98,9 @@ class ChatViewModelStoreDualPoolTest {
         )
     }
 
-    // ---- eviction arithmetic ----------------------------------------------
 
     private enum class Kind { NORMAL, CHILD }
 
-    /** Mirrors ChatViewModelStore: per-pool LRU with the two carve-outs. */
     private class Pools(val normalCap: Int = 4, val childCap: Int = 6) {
         val stores = LinkedHashMap<String, Kind>()
         val kinds = mutableMapOf<String, Kind>()
@@ -160,15 +130,9 @@ class ChatViewModelStoreDualPoolTest {
         fun kindsOfEvicted() = evicted.map { it.substringBefore('-') }
     }
 
-    /**
-     * THE BUG, as measured: three concurrent children plus the user's own
-     * chats, in one pool of 4. Reproduced against the OLD single-pool rule to
-     * show the arithmetic really does produce cross-kind eviction.
-     */
     @Test
     fun `single pool lets children evict normals and each other`() {
         val single = Pools(normalCap = 4, childCap = 4)
-        // One shared pool ⇒ model every session as the same kind.
         listOf("normal-1", "normal-2", "normal-3", "normal-4")
             .forEach { single.open(it, Kind.NORMAL) }
         listOf("child-1", "child-2", "child-3")
@@ -180,7 +144,6 @@ class ChatViewModelStoreDualPoolTest {
         )
     }
 
-    /** The fix: children and normals no longer interfere in either direction. */
     @Test
     fun `dual pool keeps three concurrent children and four normals alive together`() {
         val p = Pools()
@@ -198,7 +161,6 @@ class ChatViewModelStoreDualPoolTest {
         val p = Pools()
         listOf("normal-1", "normal-2", "normal-3", "normal-4")
             .forEach { p.open(it, Kind.NORMAL) }
-        // Two full generations of concurrent children, past the child cap.
         (1..9).forEach { p.open("child-$it", Kind.CHILD) }
 
         assertTrue(
@@ -228,8 +190,6 @@ class ChatViewModelStoreDualPoolTest {
     fun `viewing a child transcript does not move it into the normal pool`() {
         val p = Pools()
         p.open("child-1", Kind.CHILD)
-        // AgentTranscriptScreen re-acquires the same VM; even if a caller asked
-        // for NORMAL, stickiness must win.
         p.open("child-1", Kind.NORMAL)
         assertEquals(Kind.CHILD, p.kinds["child-1"])
     }
@@ -246,20 +206,14 @@ class ChatViewModelStoreDualPoolTest {
     fun `both carve-outs still apply inside a pool`() {
         val p = Pools()
         (1..4).forEach { p.open("normal-$it", Kind.NORMAL) }
-        p.busy = setOf("normal-1")     // agent loop running
-        p.onScreen = "normal-2"        // being rendered
+        p.busy = setOf("normal-1")
+        p.onScreen = "normal-2"
         (5..7).forEach { p.open("normal-$it", Kind.NORMAL) }
 
         assertTrue("a running session is never evicted", "normal-1" in p.stores)
         assertTrue("the on-screen session is never evicted", "normal-2" in p.stores)
     }
 
-    /**
-     * The cap is SOFT: when every member of an over-capacity pool is exempt,
-     * the pool runs over rather than breaking a live run. Set the exemptions
-     * BEFORE the opens that push the pool past its cap, so there is genuinely
-     * nothing eligible at trim time.
-     */
     @Test
     fun `a pool of entirely busy sessions runs over rather than killing a run`() {
         val p = Pools()

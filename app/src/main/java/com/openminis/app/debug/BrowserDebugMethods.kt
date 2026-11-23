@@ -10,18 +10,6 @@ import com.openminis.app.browser.SiteCookieCleaner
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Browser-debug RPC handlers (`debug.browser.*`).
- *
- * Mirrors the iOS `debug.browser.*` surface in `docs/debug-server-api.md`. All
- * methods operate on the application-scoped [MinisApp.sharedBrowserTabPool]
- * (the same pool the in-shell `minis-browser-use` agent drives) so external
- * automation sees the tabs the user has actually opened.
- *
- * Tab-id conventions mirror iOS: each method accepts an optional `tabId`. When
- * omitted the currently selected tab is used; an unknown id raises `-32602`
- * with `Tab not found: N`.
- */
 internal object BrowserDebugMethods {
 
     private fun pool(context: Context): BrowserTabPool {
@@ -35,7 +23,6 @@ internal object BrowserDebugMethods {
         if (tabs.isEmpty()) throw RPCException(-32000, "No tabs open")
 
         if (!params.has("tabId") || params.isNull("tabId")) {
-            // Match iOS behavior — fall back to selectedTabId, then first tab.
             val sel = pool.selectedTabId.value
             return tabs.firstOrNull { it.id == sel } ?: tabs.first()
         }
@@ -65,8 +52,6 @@ internal object BrowserDebugMethods {
         val tab = resolveTab(pool, params)
         val mgr = tab.manager
         val res = mgr.execute(BrowserActionInput(action = BrowserAction.GET_PAGE_INFO))
-        // GET_PAGE_INFO returns metadata text; we surface the raw fields directly
-        // for callers that want structured data without parsing the text blob.
         val viewport = readViewport(mgr)
         return JSONObject().apply {
             put("tabId", tab.id)
@@ -76,16 +61,11 @@ internal object BrowserDebugMethods {
             put("canGoBack", mgr.canGoBack.value)
             put("canGoForward", mgr.canGoForward.value)
             put("viewport", viewport)
-            // Include the raw GET_PAGE_INFO text (newline-separated lines that
-            // include scroll position + viewport) for clients that want the
-            // same string the agent loop sees.
             put("text", res.text)
         }
     }
 
     private suspend fun readViewport(mgr: BrowserUseManager): JSONObject {
-        // Mirror navigationMetadata's probe — same shape iOS exposes under
-        // `debug.browser.pageInfo.viewport`.
         val js = "JSON.stringify({" +
             "sx:window.scrollX||0,sy:window.scrollY||0," +
             "pw:document.documentElement.scrollWidth||0," +
@@ -103,8 +83,6 @@ internal object BrowserDebugMethods {
             put("viewportHeight", 0)
             put("readyState", "")
         }
-        // The result text holds the JSON literal for EXECUTE_JS — strip wrapping
-        // quotes if any and parse.
         val raw = res.text.trim().trim('"').replace("\\\"", "\"")
         try {
             val parsed = JSONObject(raw)
@@ -116,7 +94,6 @@ internal object BrowserDebugMethods {
             out.put("viewportHeight", parsed.optInt("vh"))
             out.put("readyState", parsed.optString("rs"))
         } catch (_: Exception) {
-            // Fall through with zeros — the page may be at about:blank.
         }
         return out
     }
@@ -137,8 +114,6 @@ internal object BrowserDebugMethods {
         val tab = resolveTab(pool, params)
         val res = tab.manager.execute(BrowserActionInput(action = BrowserAction.GET_READABLE))
         if (!res.success) throw RPCException(-32000, res.text)
-        // BrowserUseManager.getReadable returns formatted text; preserve the
-        // same envelope iOS exposes (text + length + tabId).
         return JSONObject().apply {
             put("tabId", tab.id)
             put("text", res.text)
@@ -166,7 +141,6 @@ internal object BrowserDebugMethods {
         if (!res.success) throw RPCException(-32000, res.text)
         val b64 = res.base64Image
             ?: throw RPCException(-32000, "Screenshot returned no image data")
-        // Decode size for parity with iOS (which reports `size` in bytes).
         val size = try {
             android.util.Base64.decode(b64, android.util.Base64.NO_WRAP).size
         } catch (_: Exception) { 0 }
@@ -178,14 +152,6 @@ internal object BrowserDebugMethods {
         }
     }
 
-    /**
-     * [ISS-040] DEV_TOOLS-only access to the WebView cookie store, to verify on
-     * a device that the settings sheet's per-site delete really removes
-     * cookies. Reports cookie NAMES only, never values.
-     *  - `get`   {domain}: names the root of the site sends (SiteCookieCleaner).
-     *  - `set`   {url, cookie}: one raw Set-Cookie value, e.g. to seed a test.
-     *  - `clear` {domain}: the exact call the delete icon makes.
-     */
     suspend fun cookies(params: JSONObject): JSONObject {
         if (!com.openminis.app.BuildConfig.DEV_TOOLS) throw RPCException(-32601, "cookie debug exists only in debug builds")
         val cm = android.webkit.CookieManager.getInstance()
@@ -198,8 +164,6 @@ internal object BrowserDebugMethods {
                         .put("hasCookies", cm.hasCookies())
                 }
                 "set" -> {
-                    // `url` is passed through as given, even a bare host and an empty
-                    // cookie: that is how the old delete icon's no-op call is replayed.
                     if (!params.has("url") || !params.has("cookie")) throw RPCException(-32602, "url and cookie required")
                     val url = params.optString("url")
                     val cookie = params.optString("cookie")

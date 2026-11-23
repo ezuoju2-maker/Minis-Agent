@@ -5,10 +5,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [v1.62-apply-patch] The pure patch engine: parsing, matching layers, and
- * the all-or-nothing contract before any IO happens.
- */
 class ApplyPatchTest {
 
     private fun apply(patch: String, files: Map<String, String?>): List<ApplyPatch.FileChange> {
@@ -106,7 +102,6 @@ class ApplyPatchTest {
 
     @Test
     fun `ambiguous fuzzy match is refused, not guessed`() {
-        // Two identical bodies; the patch has no unique context.
         val patch = """
             *** Begin Patch
             *** Update File: a.txt
@@ -120,8 +115,6 @@ class ApplyPatchTest {
         val err = runCatching {
             ApplyPatch.apply(parsed.ops, mapOf("a.txt" to "same\nsame\n"))
         }.exceptionOrNull()
-        // Exact matching finds the first line, so this is deterministic; the
-        // case we care about is a *fuzzy-only* match. Covered below.
         assertTrue(err == null || err is ApplyPatch.ApplyError)
     }
 
@@ -162,8 +155,6 @@ class ApplyPatchTest {
             """.trimIndent(),
         )
         assertNull(parsed.error)
-        // Resolution/safety of paths is the tool wrapper's job; the engine
-        // keeps the path verbatim so the wrapper can reject it.
         assertEquals("../escape.txt", parsed.ops[0].path)
     }
 

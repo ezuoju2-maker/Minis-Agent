@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- [T-port-fold-tools] Fold consecutive tool calls. Translations copied from iOS Localizable.xcstrings. -->
 <resources>
     <string name="tool_fold_setting_title">Agrupar llamadas a herramientas consecutivas</string>
     <string name="tool_fold_section">Llamadas a herramientas</string>

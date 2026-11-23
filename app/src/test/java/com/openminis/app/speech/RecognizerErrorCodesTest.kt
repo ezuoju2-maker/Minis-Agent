@@ -8,13 +8,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Locale
 
-/**
- * [T-431-error-codes] GH #431 side finding: the chat voice input labelled the
- * API 31/33 error literals one slot off (11 as LANGUAGE_NOT_SUPPORTED, 12 as
- * LANGUAGE_UNAVAILABLE), so 13 fell through to UNKNOWN and a dropped service
- * (11) read as a language problem. Values are from the SDK's
- * android/speech/SpeechRecognizer.java (android-34).
- */
 class RecognizerErrorCodesTest {
 
     @Test
@@ -63,7 +56,6 @@ class RecognizerErrorCodesTest {
         val src = ProductionSources.read("speech/SystemSpeechRecognitionEngine.kt")
         assertTrue(src.contains("RecognizerErrorCodes.classify(code)"))
         assertTrue(src.contains("RecognizerErrorCodes.describe(code)"))
-        // The one-slot-off literals are gone.
         assertFalse(src.contains("11 /* ERROR_LANGUAGE_NOT_SUPPORTED */"))
         assertFalse(src.contains("12 /* ERROR_LANGUAGE_UNAVAILABLE"))
     }

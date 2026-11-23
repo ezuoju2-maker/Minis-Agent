@@ -10,14 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.UUID
 
-/**
- * [T-new-limits] The view model cache next to 6 session slots and up to
- * 6 × 3 = 18 sub agents, driven through the REAL ChatViewModelStore (see
- * Review0923ViewModelStoreRealTest for why that works on the JVM).
- *
- * A running session is marked busy the way production does it, through
- * SessionActivityTracker; no ChatViewModel is ever built.
- */
 class NewLimitsVmCacheTest {
 
     private val created = mutableListOf<String>()
@@ -108,7 +100,7 @@ class NewLimitsVmCacheTest {
         assertTrue("on-screen child transcript kept", live(viewed, viewedStore))
 
         release()
-        release()  // idempotent: a double dispose must not underflow another viewer
+        release()
         repeat(ChatViewModelStore.MAX_CACHED_CHILD + 1) { open(id("c"), ChatViewModelStore.PoolKind.CHILD) }
         assertFalse("once closed it is an ordinary finished child again", live(viewed, viewedStore))
     }

@@ -7,34 +7,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-shell-timeout-pgid] Issue #358 — one command outrunning its
- * timeout wedged its whole session.
- *
- * Reported on a vivo V2301A (Android 16, PRoot Alpine): a long curl loop hit
- * the 180s timeout, and from then on every `shell_execute` in that session
- * timed out too — `echo alive` included — while other sessions and the
- * interactive Terminal kept working.
- *
- * The timeout path did nothing to the runaway:
- *
- *     // Timeout — cancel pending, but don't kill the shell
- *     pendingCallback = null
- *
- * so it kept running inside the session's long-lived, REUSED shell. `/bin/sh`
- * reads stdin serially, so later commands merely queued behind it and could
- * not start — hence even a no-op command burned its full timeout.
- *
- * The fix runs each foreground command under `setsid`, giving it its own
- * process group, and kills that group on timeout. These tests pin the
- * decisions; the wrapper's runtime behaviour was verified on device (see the
- * measurements quoted in ForegroundCommandGroup's KDoc).
- */
 class ForegroundCommandGroupTest {
 
     private val marker = "abc12345"
 
-    // ── The wrapper ────────────────────────────────────────────────────────
 
     @Test
     fun `the command runs in its own session via setsid`() {
@@ -46,17 +22,12 @@ class ForegroundCommandGroupTest {
 
     @Test
     fun `the pgid is read from procfs, not from ps`() {
-        // busybox `ps` has no `-o pgid=`, so field 5 of /proc/self/stat is the
-        // only portable source inside this rootfs.
         val w = ForegroundCommandGroup.wrap("echo hi", marker)
         assertTrue(w.contains("/proc/self/stat"))
     }
 
     @Test
     fun `command text is passed through untouched, never parsed`() {
-        // The whole reason for using a process group: these all contain `&`
-        // and none of them is a background job. A string matcher would have to
-        // parse shell grammar to tell them apart; the kernel already knows.
         val tricky = listOf(
             """curl 'https://x.test/a?u=1&v=2'""",
             """grep 'a & b' file.txt""",

@@ -1,30 +1,5 @@
 package com.openminis.app.tools
 
-/**
- * [v1.62-command-guard] Shell command risk policy.
- *
- * The shell is the agent's most powerful tool and the one place a bad guess is
- * irreversible. Best-in-class agents (Claude Code's permission modes, Cursor's
- * command approvals, Cline's terminal confirmation) put a deterministic
- * classifier in front of execution rather than relying on the model's judgment.
- * This app had no such layer: the prompt asked the model to be careful, which
- * is not a control.
- *
- * Scope is deliberately narrow, because a guard that cries wolf gets worked
- * around:
- *   - BLOCK only commands that destroy the sandbox rootfs or the user's data
- *     wholesale (`rm -rf /`, `rm -rf /var/minis`, `mkfs`, `dd` onto a device,
- *     fork bombs, `find / -delete`). Those cannot be justified by a legitimate
- *     agent task, and inside PRoot they brick the environment.
- *   - WARN for commands that are legitimate but data-destructive or execute
- *     remote code (`git reset --hard`, `git clean -fdx`, `curl | sh`,
- *     `chmod -R 777`, broad `pkill -9`). They still run; the result carries a
- *     notice so the transcript shows why it was dangerous.
- *   - SAFE otherwise. Normal `rm -rf build/` and `rm -rf node_modules` stay
- *     silent — that is everyday agent work.
- *
- * Pure: no IO, no Android. Deterministic for tests.
- */
 object CommandRiskPolicy {
 
     enum class Level { SAFE, WARN, BLOCK }
@@ -32,13 +7,11 @@ object CommandRiskPolicy {
     data class Assessment(
         val level: Level,
         val reasons: List<String>,
-        /** Model-facing explanation of what to do instead. */
         val guidance: String? = null,
     ) {
         val blocked: Boolean get() = level == Level.BLOCK
     }
 
-    /** Paths whose recursive removal destroys the environment, not a build artifact. */
     private val PROTECTED_ROOTS = setOf(
         "/", "/*", "~", "~/", "/*/", "/var", "/var/minis", "/var/minis/",
         "/var/minis/workspace", "/var/minis/workspace/", "/var/minis/shared",
@@ -63,7 +36,6 @@ object CommandRiskPolicy {
         val compact = raw.trim()
         if (compact.isEmpty()) return Assessment(Level.SAFE, emptyList())
 
-        // 1. Absolute hard blocks.
         if (compact.replace(" ", "").contains(FORK_BOMB.replace(" ", ""))) {
             return Assessment(
                 Level.BLOCK,
@@ -97,7 +69,6 @@ object CommandRiskPolicy {
             )
         }
 
-        // 2. rm with recursive+force against a protected root.
         val rmHit = rmAgainstProtectedRoot(compact)
         if (rmHit != null) {
             return Assessment(
@@ -109,7 +80,6 @@ object CommandRiskPolicy {
             )
         }
 
-        // 3. Warnings — legitimate but destructive or remote-code execution.
         val warnings = ArrayList<String>()
         if (CHAIN_TO_SHELL.containsMatchIn(compact)) {
             warnings.add("pipes a downloaded script straight into a shell")
@@ -128,19 +98,10 @@ object CommandRiskPolicy {
         )
     }
 
-    /**
-     * Returns the protected target when the command is a recursive+force `rm`
-     * against it, else null. Handles flags before/after the target, `--`,
-     * quoted targets, trailing slashes and `$HOME`.
-     */
     internal fun rmAgainstProtectedRoot(command: String): String? {
-        // Only inspect simple rm invocations; anything more exotic still
-        // contains the same tokens, so we split on shell separators too.
         var rootCwd = false
         for (segment in command.split(Regex("[;&|\\n]+"))) {
             val tokens = tokenize(segment)
-            // "cd / && rm -rf etc" resolves a relative target against the
-            // filesystem root, so it must be judged as "/etc".
             val cdIdx = tokens.indexOfFirst { it == "cd" }
             if (cdIdx >= 0) {
                 val dest = tokens.getOrNull(cdIdx + 1)?.trim('\'', '"')
@@ -180,7 +141,6 @@ object CommandRiskPolicy {
         return s
     }
 
-    /** Split a shell segment into words, keeping quoted strings together. */
     internal fun tokenize(segment: String): List<String> {
         val out = ArrayList<String>()
         val cur = StringBuilder()

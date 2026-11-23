@@ -5,23 +5,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-largecontent-guard-position] Proves where the 32K large-content
- * guard actually applies.
- *
- * `shouldCollapse` compares ONE string against LARGE_MESSAGE_THRESHOLD_CHARS
- * (32_000). The render path calls it per FlatChatItem, and for an assistant
- * text block that item is a *fragment* produced by
- * `splitMarkdownIntoBlockTexts` + `coalesceMarkdownFragments` — the latter
- * budgeted at 2000 chars. So for ordinary prose the guard can never fire no
- * matter how large the message is, because nothing that reaches it is ever
- * big enough. These tests pin that behaviour down rather than assuming it.
- */
 class LargeContentGuardThresholdTest {
 
-    /** Paragraph-shaped body: many blank-line-separated paragraphs. */
     private fun prose(totalChars: Int): String {
-        val para = "word ".repeat(40).trim()          // ~199 chars, no blank line
+        val para = "word ".repeat(40).trim()
         val sb = StringBuilder()
         while (sb.length < totalChars) sb.append(para).append("\n\n")
         return sb.toString()
@@ -40,12 +27,6 @@ class LargeContentGuardThresholdTest {
         )
     }
 
-    /**
-     * THE BUG: after the flatten split, every fragment the guard actually sees
-     * is <= 2000 chars, so `shouldCollapse` is false for all of them. A 200KB
-     * message renders in full through the markdown parser with the 32K
-     * protection never engaging.
-     */
     @Test
     fun `no post-split fragment can ever trigger the guard`() {
         val body = prose(200_000)
@@ -67,15 +48,9 @@ class LargeContentGuardThresholdTest {
         )
     }
 
-    /**
-     * The one shape that DOES still reach the guard: a single paragraph with no
-     * blank line, which `coalesceMarkdownFragments` deliberately keeps whole
-     * rather than dropping. So the guard is not 100% dead code — it is dead for
-     * ordinary prose, which is the common case.
-     */
     @Test
     fun `a single unsplittable oversized paragraph still reaches the guard`() {
-        val oneParagraph = "x".repeat(50_000)          // no blank lines at all
+        val oneParagraph = "x".repeat(50_000)
         val fragments = coalesceMarkdownFragments(splitMarkdownIntoBlockTexts(oneParagraph))
 
         assertEquals("stays as one fragment", 1, fragments.size)
@@ -85,7 +60,6 @@ class LargeContentGuardThresholdTest {
         )
     }
 
-    // ---- after [T-android-largecontent-guard-position] ----
 
     private fun assistantWithText(content: String, streaming: Boolean) = ChatMessage(
         id = "m1",
@@ -95,11 +69,6 @@ class LargeContentGuardThresholdTest {
         toolBlocks = listOf(AssistantBlock(id = "b1", kind = "text", content = content)),
     )
 
-    /**
-     * THE FIX: an oversized FROZEN block is emitted as a single un-split item,
-     * so the item the guard sees carries the real size and the collapse path
-     * engages.
-     */
     @Test
     fun `oversized frozen block is emitted un-split so the guard can fire`() {
         val body = prose(200_000)
@@ -114,7 +83,6 @@ class LargeContentGuardThresholdTest {
         )
     }
 
-    /** A normal-sized message must still be split into fragments as before. */
     @Test
     fun `a small frozen message is still split normally`() {
         val body = prose(10_000)
@@ -128,11 +96,6 @@ class LargeContentGuardThresholdTest {
         )
     }
 
-    /**
-     * Streaming must NOT take the un-split path: collapsing mid-stream would
-     * flicker, and the fine-grained tail fragments are what keep per-token
-     * re-parse cheap.
-     */
     @Test
     fun `an oversized streaming block keeps its fragmented rows`() {
         val body = prose(200_000)

@@ -4,19 +4,6 @@ import java.io.File
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-freeze-edge-carryover] A table still flashed to raw pipes after
- * the cache-deposit fix, on a real model but not on the timed mock. The VM
- * flushes on newline, so a model lands the table's last row and the blank
- * line after it in ONE publish: the fragment goes "4 rows, live" straight to
- * "5 rows, frozen". Its final text is never composed live, so the deposit —
- * keyed to the 4-row text — cannot satisfy the frozen lookup, and the miss
- * paints the plain-text preview for the length of the off-main parse.
- *
- * The fix keeps the live branch's last parse above the live/frozen switch
- * and renders it during that window. Composition needs a device; the wiring
- * is pinned here.
- */
 class FreezeEdgeCarryoverTest {
     private val md by lazy {
         File("src/main/java/com/openminis/app/ui/chat/StreamingMarkdownText.kt").readText()
@@ -35,8 +22,6 @@ class FreezeEdgeCarryoverTest {
 
     @Test
     fun `the frozen branch falls back to an exact-match carry before parsing`() {
-        // Anchor by index rather than slicing at the first "}" — the takeIf
-        // lambda's own brace would truncate the very string under test.
         val start = body.indexOf("val cached = remember(rawText) {")
         val hit = body.indexOf("MarkdownParseCaches.cachedBlocks(rawText)", start)
         val carry = body.indexOf("?: liveCarry[0]?.takeIf { it.first == rawText }?.second", start)

@@ -5,12 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-fold-row-chevron-align] The folded row's chevron starts on the same left
- * edge as the reply text and the tool pills: no start inset on the row, and a
- * chevron drawn edge to edge instead of Material's padded KeyboardArrowRight.
- * The tap target keeps its width and the chevron turns about its own centre.
- */
 class ToolGroupRowAlignTest {
 
     private val src = ProductionSources.read("ui/chat/ToolGroupRow.kt")
@@ -19,9 +13,6 @@ class ToolGroupRowAlignTest {
     fun `no start inset, the same total width moved to the end`() {
         assertFalse(src.contains(".padding(horizontal = 4.dp)"))
         assertTrue(src.contains(".padding(start = 0.dp, end = 8.dp)"))
-        // The tap target is the padded row itself, as before.
-        // [ISS-017] Now the no-ripple variant; a missing call must fail, not
-        // compare -1 below the padding.
         val tap = src.indexOf(".expandToggleClickable(onClick = onToggle)")
         assertTrue(tap >= 0 && tap < src.indexOf(".padding(start = 0.dp, end = 8.dp)"))
     }

@@ -5,13 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-log-hotpath] Diagnostics that fire per streamed event / chunk
- * must cost nothing when nobody can read them (release build at the default
- * Info level), and AppLogger must not format timestamps for a line it does
- * not write. Source guards: unit tests run the debug variant, where
- * BuildConfig.DEBUG keeps the trace gate open.
- */
 class LogHotPathTest {
 
     private val logger by lazy { ProductionSources.read("logging/AppLogger.kt") }

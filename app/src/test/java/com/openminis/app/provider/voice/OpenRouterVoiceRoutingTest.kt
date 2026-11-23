@@ -17,16 +17,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * [T-android-openrouter-voice] Branch selection for OpenRouter voice
- * (parity with iOS 1946b0b2 / 1f23fd02).
- *
- * OpenRouter serves transcription from TWO endpoints with DISJOINT model sets,
- * and each endpoint REJECTS the other's models. Picking the wrong branch is
- * therefore always an HTTP 400, never a degraded-but-working request — which is
- * exactly the bug being fixed. These tests pin the routing predicate itself,
- * since it is the whole of the fix that can be checked without a live key.
- */
 class OpenRouterVoiceRoutingTest {
 
     private fun provider() =
@@ -34,12 +24,6 @@ class OpenRouterVoiceRoutingTest {
 
     private fun model(id: String) = LLMModel(id = id, displayName = id, provider = "OpenRouter")
 
-    // -- [T-openrouter-voice-catalog] OpenMinis#280 fixtures -------------------
-    //
-    // Captured from the live API on 2026-09-23: GET /api/v1/models
-    // ?output_modalities=speech (18) and ?output_modalities=transcription (22).
-    // Neither list shares an id with the default /models list (454 chat
-    // models). Kept byte-identical to iOS OpenRouterVoiceCatalogTests.swift.
 
     private val speechIds = listOf(
         "deepgram/flux-tts:free", "fish-audio/s1", "fish-audio/s2-pro",
@@ -63,7 +47,6 @@ class OpenRouterVoiceRoutingTest {
         "openai/whisper-large-v3-turbo", "openai/whisper-1", "openai/gpt-4o-transcribe",
     )
 
-    /** Default-catalog entries exactly as parsed (modalities as declared). */
     private fun chat(id: String, ins: List<String>, outs: List<String>) = LLMModel(
         id = id, displayName = id, provider = "OpenRouter",
         inputModalities = ins, outputModalities = outs,
@@ -75,7 +58,6 @@ class OpenRouterVoiceRoutingTest {
     private val gptAudioMini = chat("openai/gpt-audio-mini", listOf("text", "audio"), listOf("text", "audio"))
     private val gemini = chat("google/gemini-3.6-flash", listOf("text", "image", "video", "file", "audio"), listOf("text"))
 
-    /** The catalog as fetchModels assembles it. */
     private val catalog: List<LLMModel> by lazy {
         OpenRouterModelsApi.mergeVoiceCatalogs(
             listOf(museSpark, lyria, gptAudio, gptAudioMini, gemini),
@@ -86,7 +68,6 @@ class OpenRouterVoiceRoutingTest {
 
     private fun tagged(id: String) = catalog.first { it.id == id }
 
-    // -- A: every model tagged by the list it came from ------------------------
 
     @Test
     fun `the merged catalog tags each model by its source list`() {
@@ -105,7 +86,6 @@ class OpenRouterVoiceRoutingTest {
         }
         for (m in listOf(museSpark, lyria, gptAudio, gptAudioMini, gemini)) {
             assertEquals(m.id, VoiceRole.NONE, tagged(m.id).voiceRole)
-            // Chat models keep their declared modalities.
             assertEquals(m.id, m.inputModalities, tagged(m.id).inputModalities)
         }
     }
@@ -121,7 +101,6 @@ class OpenRouterVoiceRoutingTest {
         assertEquals(VoiceRole.TTS, merged.single().voiceRole)
     }
 
-    // -- B: voice candidates ---------------------------------------------------
 
     @Test
     fun `speech models are TTS candidates and only that`() {
@@ -141,8 +120,6 @@ class OpenRouterVoiceRoutingTest {
 
     @Test
     fun `Muse Spark and Lyria are no longer voice candidates`() {
-        // The false positives from the report: a chat model that hears audio
-        // listed as STT, a music generator listed as TTS.
         assertFalse(tagged(museSpark.id).isVoiceInputCandidate)
         assertFalse(tagged(museSpark.id).isVoiceOutputCandidate)
         assertFalse(tagged(lyria.id).isVoiceOutputCandidate)
@@ -152,7 +129,6 @@ class OpenRouterVoiceRoutingTest {
 
     @Test
     fun `the global audio flags are untouched`() {
-        // They still describe multimodal chat capability.
         assertTrue(tagged(museSpark.id).hasAudioInput)
         assertTrue(tagged(lyria.id).hasAudioOutput)
     }
@@ -167,7 +143,6 @@ class OpenRouterVoiceRoutingTest {
 
     @Test
     fun `an untagged custom entry keeps the modality rule`() {
-        // The manual-entry escape hatch: a user-typed id with audio out.
         val custom = chat("fish-audio/s9-custom", listOf("text"), listOf("audio"))
         assertNull(custom.voiceRole)
         assertTrue(custom.isVoiceOutputCandidate)
@@ -175,7 +150,6 @@ class OpenRouterVoiceRoutingTest {
             OpenRouterVoiceProvider.ttsRoute(custom.id, custom))
     }
 
-    // -- C: routing --------------------------------------------------------------
 
     @Test
     fun `speech models route to the speech endpoint`() {
@@ -194,13 +168,11 @@ class OpenRouterVoiceRoutingTest {
 
     @Test
     fun `10 of them carry no name hint, so only the tag routes them`() {
-        // qwen3-asr, voxtral, parakeet, chirp-3, … — without the tag these
-        // fell to chat/completions and failed.
         val nameless = transcriptionIds.filterNot { OpenRouterVoiceProvider.isDedicatedTranscriptionModel(it) }
         assertEquals(10, nameless.size)
         for (id in nameless) {
-            assertTrue(id, provider().usesChatBasedASR(model(id)))      // untagged: old, wrong
-            assertFalse(id, provider().usesChatBasedASR(tagged(id)))    // tagged: fixed
+            assertTrue(id, provider().usesChatBasedASR(model(id)))
+            assertFalse(id, provider().usesChatBasedASR(tagged(id)))
         }
     }
 
@@ -244,16 +216,13 @@ class OpenRouterVoiceRoutingTest {
             req.body!!.writeTo(buf)
             return JSONObject(buf.readUtf8())
         }
-        // A vendor voice id is not an OpenAI voice — forwarded as-is.
         assertEquals("fish-voice-7f3a", body("fish-voice-7f3a").getString("voice"))
-        // Empty, or the model id (the entry-id-as-voice convention): omitted.
         assertFalse(body(null).has("voice"))
         assertFalse(body("").has("voice"))
         assertFalse(body("fish-audio/s1").has("voice"))
         assertEquals("fish-audio/s1", body(null).getString("model"))
     }
 
-    // -- D: 401 is only an auth error when the body says so ---------------------
 
     @Test
     fun `401 with a credential message is an auth error`() {
@@ -273,17 +242,12 @@ class OpenRouterVoiceRoutingTest {
         assertTrue(
             VoiceProviderException.Http(401, body).message!!.contains("is not a transcription model"),
         )
-        // The base class is unchanged: every 401/403 is auth.
         assertTrue(VoiceProvider("i", "https://x", null).isAuthFailure(401, body))
     }
 
-    // -- ASR: dedicated transcription models stay on /v1/audio/transcriptions --
 
     @Test
     fun `whisper stays on the REST transcriptions endpoint`() {
-        // The regression control from the iOS fix: whisper works TODAY on REST
-        // and is explicitly rejected by chat.completions ("is a transcription
-        // model and cannot be used with the chat/completions endpoint").
         assertFalse(provider().usesChatBasedASR(model("openai/whisper-1")))
     }
 
@@ -295,39 +259,27 @@ class OpenRouterVoiceRoutingTest {
 
     @Test
     fun `deepgram is matched vendor-qualified, so amazon nova is NOT misrouted`() {
-        // A bare "nova-2"/"nova-3" pattern would also match amazon/nova-2-lite-v1,
-        // a CHAT model in the catalogue — sending it to /audio/transcriptions
-        // returns the very 400 this fix removes.
         assertFalse(provider().usesChatBasedASR(model("deepgram/nova-3")))
         assertTrue(provider().usesChatBasedASR(model("amazon/nova-2-lite-v1")))
     }
 
-    // -- ASR: everything else is treated as a chat model ----------------------
 
     @Test
     fun `audio-capable chat models route to chat completions`() {
-        // These are the ids from the user report that used to 400 on REST.
         assertTrue(provider().usesChatBasedASR(model("google/gemini-3.6-flash")))
         assertTrue(provider().usesChatBasedASR(model("openai/gpt-audio-mini")))
     }
 
     @Test
     fun `the rule is inverted versus the base class, covering future audio chat models`() {
-        // The base class allowlists chat-audio stems; here the DEFAULT is chat,
-        // so a new audio chat model needs no code change. Contrast with the base,
-        // which would send this to the REST endpoint that only takes ASR models.
         val future = model("somevendor/brand-new-speech-chat")
         assertTrue(provider().usesChatBasedASR(future))
         assertFalse(VoiceProvider("i", "https://x", null).usesChatBasedASR(future))
     }
 
-    // -- The WAV wrapper the TTS half depends on ------------------------------
 
     @Test
     fun `PCM16 is wrapped in a RIFF WAV header with the declared sample rate`() {
-        // synthesize() must return something a media player can open; headerless
-        // PCM is not that. 24 kHz is asserted because a wrong rate is not an
-        // error, just wrong pitch — silent unless pinned.
         val pcm = ByteArray(480) { 0 }
         val wav = VoiceProvider.wrapPcm16InWav(pcm, 24000)
 
@@ -340,8 +292,8 @@ class OpenRouterVoiceRoutingTest {
             ((wav[at + 2].toInt() and 0xFF) shl 16) or
             ((wav[at + 3].toInt() and 0xFF) shl 24)
 
-        assertEquals(24000, le32(24))          // sample rate
-        assertEquals(24000 * 2, le32(28))      // byte rate = rate * 1ch * 16bit/8
-        assertEquals(pcm.size, le32(40))       // data chunk size
+        assertEquals(24000, le32(24))
+        assertEquals(24000 * 2, le32(28))
+        assertEquals(pcm.size, le32(40))
     }
 }

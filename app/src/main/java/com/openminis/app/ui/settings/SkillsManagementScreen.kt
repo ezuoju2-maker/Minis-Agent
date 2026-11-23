@@ -100,12 +100,6 @@ import java.util.Date
 import java.util.Locale
 import com.openminis.app.i18n.uppercaseForDisplay
 
-/**
- * Inline state for the three update actions on [SkillDetailScreen]
- * (T154). Drives the status row right under the buttons so the user
- * sees a spinner / stringResource(R.string.skill_detail_updated) / failure reason without leaving the
- * detail screen.
- */
 private sealed class UpdateStatus {
     data object Idle : UpdateStatus()
     data class InProgress(val label: String) : UpdateStatus()
@@ -128,8 +122,6 @@ fun SkillsManagementScreen(
     var searchQuery by remember { mutableStateOf("") }
     val context = LocalContext.current
 
-    // Sort preference — persisted like the file browser's (SharedPreferences,
-    // default name ascending). Mirrors iOS skillsList.sortKey/sortAscending.
     val sortPrefs = remember {
         context.getSharedPreferences("skills_prefs", android.content.Context.MODE_PRIVATE)
     }
@@ -149,10 +141,6 @@ fun SkillsManagementScreen(
         }
     }
 
-    // T-skillscan: rescan on screen entry so a skill that was installed in
-    // the active chat (e.g. via shell `git clone` into skillsDir, which
-    // bypasses the SKILL.md file_write hook) is picked up the moment the
-    // user opens this list, instead of requiring a process restart.
     LaunchedEffect(Unit) {
         skillRepository.reloadFromDisk()
     }
@@ -160,11 +148,7 @@ fun SkillsManagementScreen(
     SettingsScaffold(
         title = stringResource(R.string.skill_title),
         onBack = onBack,
-        // T75-part1 already moved Add off the FAB onto the top-bar action
-        // slot; kept here for visual continuity with the rest of Settings.
         actions = {
-            // Sort menu — same structure as the file browser's MoreMenu
-            // (sort-key items with check marks, divider, direction toggle).
             Box {
                 var sortMenuExpanded by remember { mutableStateOf(false) }
                 IconButton(onClick = { sortMenuExpanded = true }) {
@@ -228,8 +212,6 @@ fun SkillsManagementScreen(
             }
         },
     ) {
-        // Search bar — filters by skill name + description. Sits above the
-        // section so it's discoverable without scrolling on a long list.
         if (skills.isNotEmpty()) {
             DialogTextField(
                 value = searchQuery,
@@ -248,8 +230,6 @@ fun SkillsManagementScreen(
             footer = stringResource(R.string.skill_section_footer),
         ) {
             if (skills.isEmpty()) {
-                // Centred empty-state inside the section card so the empty
-                // state is visually owned by the card.
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -286,9 +266,6 @@ fun SkillsManagementScreen(
             } else {
                 filteredSkills.forEachIndexed { index, skill ->
                     val (badgeIcon, badgeColor) = sourceIconAndColor(skill.importSource)
-                    // [T-android-skill-copy-source-url] Long-press offers "Copy
-                    // Source URL" for a skill installed from one; the others
-                    // keep a plain tappable row.
                     val sourceUrl = SkillSourceUrl.copyable(skill)
                     var menuExpanded by remember(skill.id) { mutableStateOf(false) }
                     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
@@ -306,8 +283,6 @@ fun SkillsManagementScreen(
                             }
                         },
                         trailing = {
-                            // Source badge + Switch. Wrapping in a Row keeps
-                            // them visually grouped before the row's chevron.
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
                                     badgeIcon,
@@ -410,7 +385,6 @@ fun SkillsManagementScreen(
     }
 }
 
-// ─── Import Sheet (3 modes: URL / Paste / File) ─────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -427,31 +401,16 @@ private fun SkillImportSheet(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    // File picker
     val fileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         try {
-            // [T-android-skill-import-zip] Read raw bytes so we can branch on
-            // file magic. The previous code piped the InputStream straight
-            // through `bufferedReader().readText()`, which corrupted any
-            // .zip / .skill bundle into garbage UTF-8 and surfaced as
-            // "Invalid SKILL.md content". Skills shared as bundles
-            // (scripts/, references/, assets/) are the common case on iOS;
-            // matching here aligns Android with iOS
-            // `SkillsManagementView.documentPicker` + `SkillStore.importFromArchive`.
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
             if (bytes == null) {
                 errorText = "Failed to read file"
                 return@rememberLauncherForActivityResult
             }
-            // PK\x03\x04 = standard ZIP local file header; PK\x05\x06 is the
-            // empty-archive EOCD; PK\x07\x08 is a spanned/split archive. Accept
-            // all three so split exports from less-common zip tools don't fall
-            // into the text path. URI may not preserve the filename extension
-            // (some DocumentsProviders / share targets strip it), so magic-byte
-            // sniffing is more reliable than `.zip` / `.skill` checks.
             val isZip = bytes.size >= 4 &&
                 bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte() &&
                 (bytes[2] == 0x03.toByte() || bytes[2] == 0x05.toByte() || bytes[2] == 0x07.toByte())
@@ -554,12 +513,6 @@ private fun SkillImportSheet(
                                     isLoading = true
                                     scope.launch {
                                         try {
-                                            // importFromGitHub fetches SKILL.md AND recurses through
-                                            // the GitHub Contents API so bundled scripts/references
-                                            // land on disk. The old downloadSkillFromUrl +
-                                            // importFromContent path only grabbed SKILL.md, leaving
-                                            // skills like douyin-downloader non-runnable because the
-                                            // sibling python scripts never made it to local storage.
                                             val result = skillRepository.importFromGitHub(urlText.trim())
                                             if (result != null) onDismiss() else errorText = context.getString(R.string.skill_import_error_invalid)
                                         } catch (e: Exception) { errorText = "Error: ${e.message}" }
@@ -589,15 +542,12 @@ private fun downloadSkillFromUrl(url: String): String? {
         withFile.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/").replace("/tree/", "/")
     } else url
 
-    // [FEAT-261021-16] Follows the default route in Settings > Network.
     return com.openminis.app.network.NetworkUrlRequest.open(
         com.openminis.app.network.NetworkHttp.DEFAULT_TAG, rawUrl, connectTimeoutMs = 15_000, readTimeoutMs = 15_000,
     ).use { r -> if (r.code == 200) r.text() else null }
 }
 
-// ─── Skill Detail Sheet ─────────────────────────────────────────────────────
 
-// ─── Skill Detail Screen (full page, matching iOS) ──────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -612,23 +562,13 @@ fun SkillDetailScreen(
     var deleted by remember { mutableStateOf(false) }
 
     if (skill == null && !deleted) { onBack(); return }
-    if (skill == null) return // Already deleted, just stop rendering
+    if (skill == null) return
 
     var showDeleteDialog by remember { mutableStateOf(false) }
-    // T155: name editing now happens in a modal dialog instead of an inline
-    // text field — matches the rest of the app's "edit a single string"
-    // affordances and avoids the layout jiggle the inline OutlinedTextField
-    // caused on a row that's otherwise quiet.
     var showEditNameDialog by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(skill.name) }
 
-    // T154: replace stub state. Each update action drives `updateStatus` which
-    // surfaces inline feedback ("Updating…" / stringResource(R.string.skill_detail_updated) / "Failed: …") next to
-    // the button row, clearing itself ~3 s after a terminal result so a slow
-    // user can still read it without leaving a permanent banner.
     var updateStatus by remember { mutableStateOf<UpdateStatus>(UpdateStatus.Idle) }
-    // [T-android-skill-export] Guards the share button while the zip is being
-    // built off the main thread, so a double-tap can't spawn two exports.
     var isExporting by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -649,9 +589,6 @@ fun SkillDetailScreen(
             if (content.isNullOrBlank()) {
                 updateStatus = UpdateStatus.Failed(context.getString(R.string.skill_detail_error_empty))
             } else {
-                // Re-parse the supplied SKILL.md so we can push name +
-                // description + body into the existing skill record without
-                // creating a new entry.
                 val parsed = skillRepository.parseSkillMdPublic(content)
                 if (parsed == null) {
                     updateStatus = UpdateStatus.Failed(context.getString(R.string.skill_detail_error_invalid))
@@ -687,10 +624,6 @@ fun SkillDetailScreen(
                     }
                 },
                 actions = {
-                    // [T-android-skill-export] Export the skill as a .zip and
-                    // hand it to the system share sheet — the round-trip
-                    // partner of the existing zip import, and the Android
-                    // equivalent of iOS's top-bar share button.
                     IconButton(
                         enabled = !isExporting,
                         onClick = {
@@ -727,9 +660,7 @@ fun SkillDetailScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState()),
         ) {
-            // ── Meta Section ──
             DetailSection {
-                // Name (tap pencil → edit dialog, T155)
                 DetailRow {
                     Text(stringResource(R.string.skill_detail_label_name), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(120.dp))
                     Spacer(Modifier.weight(1f))
@@ -746,7 +677,6 @@ fun SkillDetailScreen(
                 }
                 DetailDivider()
 
-                // Version
                 DetailRow {
                     Text(stringResource(R.string.skill_detail_label_version), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(120.dp))
                     Spacer(Modifier.weight(1f))
@@ -754,7 +684,6 @@ fun SkillDetailScreen(
                 }
                 DetailDivider()
 
-                // Last Modified
                 DetailRow {
                     Text(stringResource(R.string.skill_detail_label_modified), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(120.dp))
                     Spacer(Modifier.weight(1f))
@@ -762,8 +691,6 @@ fun SkillDetailScreen(
                 }
                 DetailDivider()
 
-                // Source. [T-android-skill-copy-source-url] Long-press copies
-                // the URL the skill was installed from, when it has one.
                 val sourceUrl = SkillSourceUrl.copyable(skill)
                 val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
                 DetailRow(
@@ -780,10 +707,6 @@ fun SkillDetailScreen(
                 }
             }
 
-            // ── Update Actions Section ──
-            // T154: every row now drives `updateStatus`. The repository APIs
-            // already exist (updateFromURL / update / rescanFromDisk); the
-            // previous TODOs and the "always show Done" flag were stubs.
             val isBusy = updateStatus is UpdateStatus.InProgress
             DetailSection {
                 if (skill.importSource == SkillRepository.ImportSource.URL) {
@@ -793,10 +716,6 @@ fun SkillDetailScreen(
                         scope.launch {
                             updateStatus = when (val r = skillRepository.updateFromURL(skill.id)) {
                                 is SkillRepository.UpdateResult.Success -> UpdateStatus.Done
-                                // T152: SKILL.md updated but sibling-file recursion
-                                // failed (e.g. GitHub API 403 rate limit). Surface
-                                // the actual cause so the user knows scripts/ may
-                                // be incomplete instead of a silent green check.
                                 is SkillRepository.UpdateResult.PartialSuccess -> UpdateStatus.Failed("Updated, but: ${r.reason}")
                                 is SkillRepository.UpdateResult.Failure -> UpdateStatus.Failed(r.reason)
                             }
@@ -832,9 +751,6 @@ fun SkillDetailScreen(
                     Text(stringResource(R.string.skill_detail_rescan), color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                 }
 
-                // Inline status row — only rendered while there's something to
-                // say. Holds for ~3 s on Done/Failed before LaunchedEffect
-                // clears it back to Idle.
                 when (val s = updateStatus) {
                     is UpdateStatus.InProgress -> {
                         DetailDivider()
@@ -864,7 +780,6 @@ fun SkillDetailScreen(
                 }
             }
 
-            // ── Description Section ──
             val previewLines = skill.body.lineSequence().filter { it.isNotBlank() }.take(5).toList()
             val hasMore = skill.body.lines().count { it.isNotBlank() } > 5
             val preview = previewLines.joinToString("\n") + if (hasMore) "\n…" else ""
@@ -881,10 +796,6 @@ fun SkillDetailScreen(
                 }
             }
 
-            // ── Files Section ──
-            // Re-list whenever the skill record changes (rescan/update bumps
-            // updatedAt, so newly-extracted scripts appear without leaving the
-            // screen).
             val skillFiles = remember(skill.id, skill.updatedAt) {
                 skillRepository.listSkillFiles(skill.id)
                     .ifEmpty { listOf("SKILL.md") }
@@ -910,7 +821,6 @@ fun SkillDetailScreen(
                 }
             }
 
-            // ── Delete ──
             Spacer(Modifier.height(16.dp))
             MinisButton(
                 onClick = { showDeleteDialog = true },
@@ -947,9 +857,6 @@ fun SkillDetailScreen(
         )
     }
 
-    // T155: rename-skill dialog. Save is disabled while the user has cleared
-    // the name or hasn't actually changed it — both would no-op the
-    // repository call, so removing the affordance keeps the UX honest.
     if (showEditNameDialog) {
         AlertDialog(
             onDismissRequest = { showEditNameDialog = false },
@@ -980,7 +887,6 @@ fun SkillDetailScreen(
     }
 }
 
-/** A grouped card section matching iOS List section style. */
 @Composable
 private fun DetailSection(
     header: String? = null,
@@ -1024,7 +930,6 @@ private fun DetailRow(
             .fillMaxWidth()
             .then(
                 when {
-                    // Usually a long-press-only row: a tap then does nothing.
                     onLongClick != null -> Modifier.combinedClickable(
                         enabled = true,
                         onClick = { if (clickable) onClick() },
@@ -1052,17 +957,6 @@ private fun DetailDivider() {
     )
 }
 
-/**
- * [T-android-skill-export] Hand an exported skill zip to the system share
- * sheet. The file already lives under `cacheDir/share/` — a root declared in
- * `file_provider_paths.xml`, which FileProvider requires; a file outside a
- * declared root makes getUriForFile throw and the user only sees a failure.
- *
- * The zip is deliberately NOT deleted here. Consumers (Save to Files, Drive, a
- * chat app) read the URI asynchronously after the chooser closes, so deleting
- * on dismissal races them — the same trap iOS documented. SkillRepository
- * sweeps exports older than 24h before each new export instead.
- */
 private fun shareSkillZip(context: android.content.Context, zip: java.io.File) {
     val uri = try {
         androidx.core.content.FileProvider.getUriForFile(
@@ -1087,26 +981,9 @@ private fun shareSkillZip(context: android.content.Context, zip: java.io.File) {
     }
 }
 
-/** [T-android-skill-icon-circular] The same iOS-system-palette values the main
- *  Settings rows use (SettingsScreen): blue for navigational/remote actions,
- *  green for local filesystem operations. */
 private val SettingsIconBlue = Color(0xFF007AFF)
 private val SettingsIconGreen = Color(0xFF34C759)
 
-/**
- * [T-android-skill-icon-circular] A colored circular badge with a white glyph
- * centered inside, for the skill detail ACTION rows (Update from URL / Update
- * from file / Rescan).
- *
- * Spec is copied VERBATIM from the main Settings page rows
- * (SettingsScreen's row icon: a 30dp circle filled with `iconColor`, holding a
- * 16dp white glyph, followed by a 14dp gap) — keep the two surfaces identical;
- * don't retune one without the other. Mirrors iOS `SettingsActionIcon`
- * (d431cfc7), which copied its own Settings spec the same way.
- *
- * Before this, the action rows used a bare 18dp tinted glyph with no container,
- * so they read as a different visual language from every other settings surface.
- */
 @Composable
 private fun SettingsActionIcon(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -1127,31 +1004,22 @@ private fun SettingsActionIcon(
     }
 }
 
-/**
- * Strip Markdown syntax for display in compact UI surfaces (subtitle rows
- * etc.) where a single-line plain-text preview is wanted. Handles fenced
- * code blocks, inline code, links, headings, blockquotes, bold, italic,
- * and collapses any remaining whitespace/newlines into single spaces.
- * Output is trimmed and capped at 120 characters.
- */
 private fun stripMarkdown(text: String): String {
-    // [T-md-inline-html] <br> → space, whitelisted style tags out (code untouched).
     return com.openminis.app.ui.markdown.InlineHtmlTags.stripForPreview(text)
-        .replace(Regex("```[\\s\\S]*?```"), "")           // fenced code blocks
-        .replace(Regex("`([^`]+)`"), "$1")                  // inline code
-        .replace(Regex("!?\\[([^\\]]+)\\]\\([^)]+\\)"), "$1") // [text](url) → text
-        .replace(Regex("^#+ ", RegexOption.MULTILINE), "") // headings
-        .replace(Regex("^> ", RegexOption.MULTILINE), "")  // blockquote markers
-        .replace(Regex("\\*\\*([^*]+)\\*\\*"), "$1")       // **bold**
-        .replace(Regex("__([^_]+)__"), "$1")                // __bold__
-        .replace(Regex("\\*([^*]+)\\*"), "$1")             // *italic*
-        .replace(Regex("_([^_]+)_"), "$1")                  // _italic_
-        .replace(Regex("\\s+"), " ")                       // collapse whitespace + newlines
+        .replace(Regex("```[\\s\\S]*?```"), "")
+        .replace(Regex("`([^`]+)`"), "$1")
+        .replace(Regex("!?\\[([^\\]]+)\\]\\([^)]+\\)"), "$1")
+        .replace(Regex("^#+ ", RegexOption.MULTILINE), "")
+        .replace(Regex("^> ", RegexOption.MULTILINE), "")
+        .replace(Regex("\\*\\*([^*]+)\\*\\*"), "$1")
+        .replace(Regex("__([^_]+)__"), "$1")
+        .replace(Regex("\\*([^*]+)\\*"), "$1")
+        .replace(Regex("_([^_]+)_"), "$1")
+        .replace(Regex("\\s+"), " ")
         .trim()
         .take(120)
 }
 
-/** Format millis as relative time string (matching iOS). */
 private fun relativeTime(millis: Long): String {
     val now = System.currentTimeMillis()
     val diff = now - millis
@@ -1167,7 +1035,6 @@ private fun relativeTime(millis: Long): String {
     }
 }
 
-// ─── Skill File Viewer Screen (full page, matching iOS) ─────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1184,9 +1051,6 @@ fun SkillFileViewerScreen(
     val isSkillMd = relativePath.equals("SKILL.md", ignoreCase = true)
     val fileName = relativePath.substringAfterLast('/')
 
-    // For SKILL.md, reconstruct from the in-memory record (so frontmatter
-    // edits stay in sync with DB metadata). For sibling files, read straight
-    // from disk.
     val initialContent = remember(skillId, relativePath, skill.updatedAt) {
         if (isSkillMd) {
             buildString {
@@ -1221,8 +1085,6 @@ fun SkillFileViewerScreen(
                     if (isEditing) {
                         MinisTextButton(onClick = {
                             if (isSkillMd) {
-                                // SKILL.md edits go through importFromContent so
-                                // YAML frontmatter changes flow back into DB metadata.
                                 skillRepository.importFromContent(editContent, skill.importSource)
                             } else {
                                 skillRepository.writeSkillFile(skillId, relativePath, editContent)
@@ -1241,8 +1103,6 @@ fun SkillFileViewerScreen(
         },
     ) { padding ->
         if (isEditing) {
-            // [T-android-editor-keyboard-overlap] The caret stays above the
-            // keyboard; see DocumentEditorField.
             com.openminis.app.ui.components.DocumentEditorField(
                 value = editContent,
                 onValueChange = { editContent = it },

@@ -7,21 +7,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.TimeUnit
 
-/**
- * [T-android-parity-fixes] Shell-tool fixes from the iOS/Android parity review
- * of the scheduled prefilled-command work: the exit status is reported once,
- * the timeout ceiling is stated rather than silent, and a command reading
- * stdin gets EOF instead of hanging until the timeout.
- */
 class ShellParityFixesTest {
 
     private val vm by lazy { ProductionSources.read("ui/chat/ChatViewModel.kt") }
 
-    // ── exit code: once, in one format ──────────────────────────────────────
 
     @Test
     fun `the exit status is appended once, as (exit code N)`() {
-        // Coordinator layer, then chat layer — the path every failure takes.
         val fromCoordinator = ShellExitCode.ensureSuffix("boom", 1)
         assertEquals("boom\n(exit code: 1)", fromCoordinator)
         val seenByModel = ShellExitCode.ensureSuffix(fromCoordinator, 1)
@@ -50,7 +42,6 @@ class ShellParityFixesTest {
         assertFalse(coord.contains("\\n(exit code: \$exitCode)"))
     }
 
-    // ── timeout ceiling ─────────────────────────────────────────────────────
 
     @Test
     fun `the timeout ceiling is one hour and the schema says so`() {
@@ -58,11 +49,9 @@ class ShellParityFixesTest {
         assertTrue(vm.contains("const val SHELL_TIMEOUT_MAX_SEC = 3600"))
         assertFalse("no silent 900 s cap left", vm.contains("coerceIn(1, 900)"))
         val tools = ProductionSources.read("tools/AgentTools.kt")
-        // 文案已改为"按命令类型自动选默认值 + 显式上限 3600"；语义不变：schema 明确声明 1 小时上限。
         assertTrue(tools.contains("If you set it explicitly, 1–3600 (larger values are capped)."))
     }
 
-    // ── stdin reads /dev/null ───────────────────────────────────────────────
 
     private fun run(vararg cmd: String): Pair<String, Int> {
         val pb = FreshProcessShell.configureStdin(ProcessBuilder(*cmd)).redirectErrorStream(true)
@@ -77,8 +66,6 @@ class ShellParityFixesTest {
 
     @Test
     fun `a command that reads stdin gets EOF at once instead of hanging`() {
-        // With ProcessBuilder's default stdin (an open pipe nobody writes to)
-        // each of these blocks until the tool's timeout.
         assertEquals("" to 0, run("cat"))
         val (out, _) = run("/bin/sh", "-c", "read x; echo \"got:[\$x]\"")
         assertEquals("got:[]\n", out)

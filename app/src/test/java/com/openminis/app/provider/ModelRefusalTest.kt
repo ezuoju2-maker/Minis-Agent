@@ -18,16 +18,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-android-model-refusal] A model DECLINING a request (Anthropic
- * stop_reason=refusal, OpenAI content_filter) is surfaced on the reply instead
- * of ending the run silently. Port of iOS 54c8ea2a4.
- *
- * Field report: an agent task on claude-sonnet-5-5 "stopped streaming silently
- * and could not recover" — every request was HTTP 200 in ~3 s with
- * stop_reason="refusal" and empty content; the loop logged "empty turn
- * detected … finishReason=refusal" and showed nothing.
- */
 class ModelRefusalTest {
 
     private lateinit var server: MockWebServer
@@ -38,7 +28,6 @@ class ModelRefusalTest {
     private fun anthropic(model: LLMModel = LLMModel.claudeSonnet55) =
         AnthropicProvider(apiKey = "k", model = model, basePath = server.url("/").toString().trimEnd('/'))
 
-    // ---- provider: the refusal arrives as a distinct stop reason ------------
 
     @Test
     fun `the reported stream - refusal with empty content - finishes as refusal, not a dropped stream`() = runBlocking {
@@ -57,20 +46,16 @@ class ModelRefusalTest {
 
     @Test
     fun `a refusal is not a silently truncated stream - no transient retry`() = runBlocking {
-        // failOnSilentEmptyCompletion throws TransientError (auto-retry) only when
-        // NO finish reason arrived. A refusal carries one, so it must pass through:
-        // retrying the identical request is just declined again.
         val out = flowOf<LLMStreamChunk>(LLMStreamChunk.Finished("refusal"))
             .failOnSilentEmptyCompletion("test").toList()
         assertEquals(1, out.size)
     }
 
-    // ---- the mapping --------------------------------------------------------
 
     @Test
     fun `refusal spellings`() {
-        assertTrue(StopReasons.isRefusal("refusal"))        // Anthropic
-        assertTrue(StopReasons.isRefusal("content_filter")) // OpenAI chat + Responses incomplete
+        assertTrue(StopReasons.isRefusal("refusal"))
+        assertTrue(StopReasons.isRefusal("content_filter"))
         for (r in listOf(null, "", "stop", "end_turn", "length", "max_tokens", "tool_use", "tool_calls", "SAFETY")) {
             assertFalse("$r is not a refusal", StopReasons.isRefusal(r))
         }
@@ -83,7 +68,6 @@ class ModelRefusalTest {
         }
     }
 
-    // ---- the loop-end branch --------------------------------------------------
 
     @Test
     fun `the loop surfaces the refusal on the reply without resume, before any empty-turn handling`() {
@@ -91,9 +75,6 @@ class ModelRefusalTest {
         val branch = vm.substringAfter("if (com.openminis.app.provider.StopReasons.isRefusal(turnFinishReason)) {")
             .substringBefore("\n                }\n")
         assertTrue("logged", branch.contains("model declined the request"))
-        // [FIX-261018-12] The text names the provider's category when there is
-        // one (falling back to the generic message), and there is no Resume:
-        // resuming re-sends the same context and is declined again.
         assertTrue("shown on the reply", branch.contains("setInlineError(refusalText)")
             && branch.contains("R.string.chat_error_model_refused_category")
             && branch.contains("genericMessage = context.getString(R.string.chat_error_model_refused)"))

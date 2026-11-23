@@ -6,12 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-java-prompt] The system prompt says how to install a JDK, right
- * after the Python packages note (iOS a0207db08). Android sets no
- * JAVA_TOOL_OPTIONS (measured: C1-only made a 40-file javac ~25% slower on
- * native arm64), so the iOS sentences about that variable are left out.
- */
 class SystemPromptJavaLineTest {
     private val vm by lazy { ProductionSources.read("ui/chat/ChatViewModel.kt") }
 

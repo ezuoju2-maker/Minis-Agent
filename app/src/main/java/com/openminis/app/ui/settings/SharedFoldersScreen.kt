@@ -39,14 +39,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.openminis.app.R
 
-/**
- * Settings → Shared Folders. Mirrors iOS SharedFoldersView.
- *
- * Three fixed entries — Shared (R/W), Skills (read-only), Memory (read-only) —
- * exposing the first-class /var/minis/{shared,skills,memory} dirs to a native
- * browse UI. Skills and Memory are agent-tool-maintained and intentionally
- * read-only here so the user doesn't desync them by hand.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SharedFoldersScreen(

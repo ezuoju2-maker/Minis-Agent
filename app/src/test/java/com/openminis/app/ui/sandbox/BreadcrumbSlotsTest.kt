@@ -5,10 +5,6 @@ import com.openminis.app.ui.sandbox.BreadcrumbSlot.Component
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * [path-ellipsis] Deep paths fold their middle into one `···` capsule: root,
- * the folded folders (in order), the parent, the current folder.
- */
 class BreadcrumbSlotsTest {
 
     @Test
@@ -30,7 +26,6 @@ class BreadcrumbSlotsTest {
     fun `a deep path keeps root, parent and current, and folds every folder between in order`() {
         val slots = breadcrumbSlots(9)
         assertEquals(listOf(Component(0), Collapsed(1..6), Component(7), Component(8)), slots)
-        // Every component is reachable exactly once: shown, or in the menu.
         val reachable = slots.flatMap {
             when (it) {
                 is Component -> listOf(it.index)

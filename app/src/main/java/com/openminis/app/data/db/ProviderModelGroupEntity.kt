@@ -4,13 +4,6 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-/**
- * Per-row model group. memberEntryIds is stored as a serialized JSON
- * array string to preserve order (which is load-bearing for fallback
- * routing). After the legacy JSON→DB migration, every id in
- * member_entry_ids_json is the composite "{instanceId}/{modelId}"
- * shape — never the legacy random UUID.
- */
 @Entity(tableName = "provider_model_groups")
 data class ProviderModelGroupEntity(
     @PrimaryKey val id: String,

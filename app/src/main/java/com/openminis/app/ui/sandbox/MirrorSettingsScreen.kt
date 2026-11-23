@@ -77,7 +77,6 @@ import java.io.File
 import java.net.URI
 import java.util.concurrent.TimeUnit
 
-// ─── Data Model ──────────────────────────────────────────────────────────────
 
 enum class MirrorCategory(
     val key: String,
@@ -115,13 +114,12 @@ data class MirrorEntry(
 
 data class MirrorTestResult(
     val mirror: MirrorEntry,
-    val latencyMs: Int?,   // null = failed/timeout
+    val latencyMs: Int?,
     val error: String? = null,
 ) {
     val isSuccess: Boolean get() = latencyMs != null
 }
 
-// ─── Mirror Definitions ──────────────────────────────────────────────────────
 
 object MirrorCatalog {
     private const val UBUNTU_PROBE = "dists/noble/Release"
@@ -178,7 +176,6 @@ object MirrorCatalog {
         MirrorCategory.entries.firstOrNull { it.key == key }
 }
 
-// ─── ViewModel (singleton) ───────────────────────────────────────────────────
 
 object MirrorSpeedTestViewModel {
     private const val TAG = "MirrorSpeedTest"
@@ -193,7 +190,6 @@ object MirrorSpeedTestViewModel {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var currentJob: Job? = null
 
-    // Observable state — Compose observes these Snapshot-backed maps.
     val results: SnapshotStateMap<MirrorCategory, List<MirrorTestResult>> = mutableStateMapOf()
     val selectedMirrorId: SnapshotStateMap<MirrorCategory, String> = mutableStateMapOf()
     val useCustomMirror: SnapshotStateMap<MirrorCategory, Boolean> = mutableStateMapOf()
@@ -237,7 +233,6 @@ object MirrorSpeedTestViewModel {
         editor.apply()
     }
 
-    // -- Speed Test --
 
     fun runAllTests(context: Context) {
         currentJob?.cancel()
@@ -269,7 +264,6 @@ object MirrorSpeedTestViewModel {
                 results.clear()
                 results.putAll(sorted)
 
-                // Auto-select fastest for categories without prior selection
                 for (cat in MirrorCategory.entries) {
                     if (selectedMirrorId[cat] == null) {
                         val fastest = sorted[cat]?.firstOrNull { it.isSuccess }
@@ -344,7 +338,6 @@ object MirrorSpeedTestViewModel {
         }
     }
 
-    // -- Selection & Apply --
 
     fun selectMirror(context: Context, mirror: MirrorEntry) {
         selectedMirrorId[mirror.category] = mirror.id
@@ -364,12 +357,6 @@ object MirrorSpeedTestViewModel {
         }
     }
 
-    /**
-     * Re-apply the user's selected mirror for every category that has
-     * stringResource(R.string.mirror_use_mirror_toggle) enabled. Call this after the default_mount overlay runs on
-     * boot — the overlay ships stock config files that would otherwise wipe
-     * user-chosen mirrors.
-     */
     fun applyAllActiveMirrors(context: Context) {
         ensureLoaded(context)
         for (category in MirrorCategory.entries) {
@@ -379,11 +366,6 @@ object MirrorSpeedTestViewModel {
         }
     }
 
-    /**
-     * On the first boot after a fresh rootfs install, auto-detect the fastest
-     * mirror for each category and apply it. The `rootfs.freshInstall` flag is
-     * set by RootfsManager.installIfNeeded() and cleared here.
-     */
     fun autoDetectOnceIfNeeded(context: Context) {
         ensureLoaded(context)
         val p = prefs(context)
@@ -392,7 +374,6 @@ object MirrorSpeedTestViewModel {
         Log.i(TAG, "Fresh rootfs detected — running auto mirror detection")
 
         scope.launch {
-            // Reuse the normal test flow, then await its completion via currentJob.
             runAllTests(context)
             currentJob?.join()
             withContext(Dispatchers.Main) {
@@ -494,14 +475,7 @@ object MirrorSpeedTestViewModel {
     }
 }
 
-// ─── Views ───────────────────────────────────────────────────────────────────
 
-/**
- * Body-only rows (no section header) for embedding inside an outer
- * `SettingsSection(stringResource(R.string.mirror_mirrors_section)) { ... }` in RootfsManagementScreen.
- * T168 moved the stringResource(R.string.mirror_mirrors_section) title up to the SettingsSection wrapper so
- * the iOS-style inset-grouped card frames *just* the rows.
- */
 @Composable
 fun MirrorsSectionView(onNavigate: (MirrorCategory) -> Unit) {
     val context = LocalContext.current
@@ -647,7 +621,6 @@ fun MirrorCategoryDetailScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState()),
         ) {
-            // --- Current section ---
             Text(
                 text = stringResource(R.string.mirror_current_section),
                 style = MaterialTheme.typography.titleSmall,
@@ -698,7 +671,6 @@ fun MirrorCategoryDetailScreen(
                 )
             }
 
-            // --- Mirrors / Results section ---
             HorizontalDivider()
             Text(
                 text = if (sortedResults.isEmpty()) stringResource(R.string.mirror_mirrors_section) else stringResource(R.string.mirror_speed_test_results_section),
@@ -735,7 +707,6 @@ fun MirrorCategoryDetailScreen(
                 }
             }
 
-            // --- Test button ---
             HorizontalDivider()
             ListItem(
                 headlineContent = { Text(if (vm.isTesting) stringResource(R.string.mirror_test_speed_testing) else stringResource(R.string.mirror_test_speed_label)) },
@@ -829,4 +800,3 @@ private fun MirrorRow(
         }
     }
 }
-

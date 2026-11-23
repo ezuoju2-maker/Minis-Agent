@@ -9,10 +9,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-p2-agent-series] The parser every agent surface reads (inline block,
- * thumbnail, detail) and the transcript's callback handling.
- */
 class AgentBlockRenderingTest {
     private fun block(content: String, status: ToolBlockStatus?) = AssistantBlock(
         id = "tu1", kind = "tool_use", content = content, toolStatus = status, toolName = HelperRunner.TOOL_NAME, toolTitle = "Survey",
@@ -32,7 +28,6 @@ class AgentBlockRenderingTest {
         val info = parseHelperBlock(block(start, ToolBlockStatus.SUCCESS))
         assertEquals("interrupted", (info.phase as HelperPhase.Finished).status)
         assertFalse(info.isRunning)
-        // …and the same payload with a live RUNNING block is still running.
         assertTrue(parseHelperBlock(block(start, ToolBlockStatus.RUNNING)).isRunning)
     }
 
@@ -47,13 +42,6 @@ class AgentBlockRenderingTest {
         assertEquals("tools browser_use×2 · turns 4 · tokens in 12.0k / out 2.0k", info.runSummary)
         assertEquals("# Report\nbody", info.result)
         assertEquals("Interrupted".lowercase(), "interrupted")
-        // [T-android-showstop-subagent] The helperStatusColor assertion that
-        // used to sit here was dropped: 98861c381 made that function
-        // @Composable (its neutral branch reads a theme colour), so calling it
-        // from a plain unit test stopped compiling and took the whole
-        // testDebugUnitTest source set down with it. The status-to-colour
-        // mapping is covered where it can be — this test is about payload
-        // parsing, not colours.
     }
 
     @Test
@@ -70,13 +58,8 @@ class AgentBlockRenderingTest {
 
     @Test
     fun `callback renders as a card whether or not the transcript holds the delegate block, and never restarts the header`() {
-        // [T-android-subagent-callback-visible] Mirrors iOS 7985d161e: the
-        // final report is NOT deduped against the delegate block any more —
-        // the block changing state is not a record of the hand-off.
         val finalJson = HelperRunner.resultJson("completed", "r", "m", HelperModelTier.PRIMARY, "primary", 1, 1000, "C", "J")
         val cbText = AgentCallback(AgentCallback.Kind.FINISHED, "J", "C", "t", "done", body = "r").xml
-        // With the block: callback card KEPT (this was the reported gap); it is
-        // still not a user bubble, and the reply after it has NO header.
         val withBlock = buildFlatChatItems(listOf(
             user("u1", "do it"),
             assistant("a1", block(finalJson, ToolBlockStatus.SUCCESS)),
@@ -87,8 +70,6 @@ class AgentBlockRenderingTest {
         assertEquals("C", cardWithBlock.callback.childSessionId)
         assertNull(withBlock.firstOrNull { it is FlatChatItem.UserBubble && (it as FlatChatItem.UserBubble).message.id == "u2" })
         assertEquals(listOf("a1"), withBlock.filterIsInstance<FlatChatItem.AssistantHeader>().map { it.messageId })
-        // A progress report with the block present renders too — it never was
-        // duplicated by the block, which only ever shows the final state.
         val progressText = AgentCallback(AgentCallback.Kind.PROGRESS, "J", "C", "t", "running", body = "working").xml
         val withProgress = buildFlatChatItems(listOf(
             user("u1", "do it"),
@@ -100,7 +81,6 @@ class AgentBlockRenderingTest {
             listOf(AgentCallback.Kind.PROGRESS, AgentCallback.Kind.FINISHED),
             withProgress.filterIsInstance<FlatChatItem.AgentCallbackCard>().map { it.callback.kind },
         )
-        // Without a block (scheduled child-of-current): callback card kept, still no second header.
         val withoutBlock = buildFlatChatItems(listOf(
             user("u1", "do it"),
             assistant("a1", AssistantBlock(id = "t1", kind = "text", content = "ok")),
@@ -110,7 +90,6 @@ class AgentBlockRenderingTest {
         val card = withoutBlock.filterIsInstance<FlatChatItem.AgentCallbackCard>().single()
         assertEquals("t", card.callback.title)
         assertEquals(listOf("a1"), withoutBlock.filterIsInstance<FlatChatItem.AssistantHeader>().map { it.messageId })
-        // A human turn still restarts the sequence.
         val human = buildFlatChatItems(listOf(user("u1", "hi"), assistant("a1", AssistantBlock(id = "t1", kind = "text", content = "x")), user("u3", "again"), assistant("a3", AssistantBlock(id = "t3", kind = "text", content = "y"))))
         assertEquals(listOf("a1", "a3"), human.filterIsInstance<FlatChatItem.AssistantHeader>().map { it.messageId })
     }

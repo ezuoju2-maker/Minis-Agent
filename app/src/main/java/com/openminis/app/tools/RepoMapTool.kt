@@ -7,13 +7,6 @@ import com.openminis.app.sandbox.PRootKernel
 import org.json.JSONObject
 import java.io.File
 
-/**
- * [v1.62-repo-map] `repo_map` tool — cheap first look at an unfamiliar project.
- *
- * Deliberately READ-ONLY and offline: it walks the session's Linux paths through
- * the same resolver file_read uses, so it sees exactly the tree the agent can
- * read, and never leaves the sandbox.
- */
 object RepoMapTool {
     const val NAME = "repo_map"
 
@@ -75,9 +68,6 @@ object RepoMapTool {
     }
 
     private fun resolveDirectory(path: String, sessionId: String, context: Context): File? {
-        // resolveSessionHostPath returns the host File for a sandbox path; for
-        // a plain absolute host path (rare) it may return null, in which case
-        // fall back to the literal path only when it is an existing directory.
         PRootKernel.resolveSessionHostPath(sessionId, path, context)?.let { resolved ->
             if (resolved.isDirectory) return resolved
         }

@@ -4,21 +4,8 @@ import com.openminis.app.data.db.ProviderThinkingRuleEntity
 import com.openminis.app.data.model.ThinkingLevel
 import org.json.JSONObject
 
-/**
- * [T-android-thinking-rules-phase2 / parity with iOS ThinkingRuleCoding.swift]
- * (De)serialize a user-authored [ThinkingRule] to/from its Room row.
- *
- * Only CUSTOM rules round-trip through here. The [ThinkingWireFormat] sealed hierarchy is
- * encoded as a small tagged JSON object (`{"type":"reasoning_effort","offValue":"low"}`),
- * chosen over typed columns so adding a new wire format needs no schema migration.
- *
- * Kept deliberately total and defensive: a row that fails to decode (corrupt blob, a
- * format written by a newer build) yields a rule with a null wireFormat — "no opinion" —
- * which the resolver safely falls through, rather than throwing mid-request.
- */
 object ThinkingRuleCoding {
 
-    // ---- Wire format <-> JSON ----
 
     fun encodeWireFormat(fmt: ThinkingWireFormat?): String? {
         if (fmt == null) return null
@@ -110,7 +97,6 @@ object ThinkingRuleCoding {
         }
     }
 
-    // ---- ReasoningEchoPolicy <-> JSON ----
 
     fun encodeEcho(echo: ReasoningEchoPolicy?): String? {
         if (echo == null) return null
@@ -134,7 +120,6 @@ object ThinkingRuleCoding {
         }
     }
 
-    // ---- Rule <-> Entity ----
 
     fun toEntity(rule: ThinkingRule, id: String, instanceId: String, sortOrder: Int): ProviderThinkingRuleEntity {
         val (kind, pattern) = when (val s = rule.scope) {

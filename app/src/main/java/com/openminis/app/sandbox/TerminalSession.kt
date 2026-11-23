@@ -18,46 +18,20 @@ import java.io.File
 import java.lang.ref.WeakReference
 import java.util.concurrent.CopyOnWriteArrayList
 
-/**
- * Interactive PTY shell session — mirrors iOS ISHKernel + TerminalSession.
- *
- * Uses [PtyBridge.forkExec] to spawn `proot /bin/sh -l -i` attached to a real
- * PTY (via bionic forkpty). The shell sees `isatty(0)==true`, emits its PS1
- * prompt, honours termios echo/canonical/ISIG modes, and responds to signals,
- * arrow keys, Tab completion, and interactive programs (vi, top, gh auth login)
- * identically to iSH on iOS.
- *
- * Output is delivered as raw bytes through [outputBytes]; a TerminalEmulator
- * should consume these and parse ANSI sequences.
- */
 class TerminalSession(private val context: Context) {
 
     companion object {
-        /**
-         * [T-envvar-disable] A terminal's environment: the kernel's own
-         * variables, then the user's ENABLED variables ([user] comes from
-         * EnvVarRepository.allAsDict()). Pure, and it never writes back into
-         * [system], so turning every variable off leaves a new terminal with
-         * none of them.
-         */
         internal fun terminalEnvironment(system: Map<String, String>, user: Map<String, String>): Map<String, String> =
             LinkedHashMap(system).apply { putAll(user) }
 
         private const val TAG = "TerminalSession"
         private const val READ_BUFFER_SIZE = 8192
-        /** Max bytes per PTY write; larger pastes are chunked so nothing is dropped. */
         private const val CHUNK_SIZE = 2048
         const val DEFAULT_COLS = 80
         const val DEFAULT_ROWS = 24
 
-        /**
-         * Weak-reference registry of live sessions so the Application can push
-         * environment updates (e.g. ACTION_TIMEZONE_CHANGED) into already-running
-         * interactive shells. Stale weak refs are cleaned on each iteration.
-         */
         private val liveSessions = CopyOnWriteArrayList<WeakReference<TerminalSession>>()
 
-        /** Broadcast `export TZ=<value>` to every live interactive shell. */
         fun broadcastTimezone(tz: String) {
             val dead = mutableListOf<WeakReference<TerminalSession>>()
             for (ref in liveSessions) {
@@ -68,11 +42,6 @@ class TerminalSession(private val context: Context) {
             liveSessions.removeAll(dead)
         }
 
-        /**
-         * Broadcast the HTTP-proxy env block to every live interactive shell.
-         * Sends `export KEY=value` for each pair — empty values clear a
-         * previously-set proxy in one round trip.
-         */
         fun broadcastProxy(env: Map<String, String>) {
             val dead = mutableListOf<WeakReference<TerminalSession>>()
             for (ref in liveSessions) {
@@ -89,14 +58,12 @@ class TerminalSession(private val context: Context) {
     private val _state = MutableStateFlow(State.IDLE)
     val state: StateFlow<State> = _state.asStateFlow()
 
-    /** Raw PTY output bytes (not sanitized — feed directly into TerminalEmulator). */
     private val _outputBytes = MutableSharedFlow<ByteArray>(
         extraBufferCapacity = 64,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
     val outputBytes: SharedFlow<ByteArray> = _outputBytes.asSharedFlow()
 
-    /** Counter bumped on every reset() / clearOutput() — lets UI wipe emulator state. */
     private val _clearVersion = MutableStateFlow(0)
     val clearVersion: StateFlow<Int> = _clearVersion.asStateFlow()
 
@@ -104,19 +71,9 @@ class TerminalSession(private val context: Context) {
     private var childPid: Int = 0
     private var readerJob: Job? = null
 
-    /**
-     * [T-android-seccomp-selfheal / GH#186] Set once the interactive shell has
-     * been restarted with PROOT_NO_SECCOMP=1; also the one-shot guard that
-     * stops a crash-restart loop if the retry dies the same way.
-     */
     @Volatile
     private var useNoSeccomp = false
 
-    /**
-     * Whether this PTY ever emitted output. A terminal that printed something
-     * has begun a real session, so a later crash is the guest program's, not
-     * the loader's — and restarting would wipe visible scrollback.
-     */
     @Volatile
     private var sawOutput = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -126,36 +83,22 @@ class TerminalSession(private val context: Context) {
 
     val isRunning: Boolean get() = _state.value == State.RUNNING
 
-    /**
-     * Start the PTY-backed shell. Call [setWindowSize] first if you know the
-     * target geometry — otherwise boots at 80×24 and expects a resize callback.
-     */
     fun start(sessionId: String? = null, initialCols: Int = DEFAULT_COLS, initialRows: Int = DEFAULT_ROWS) {
         if (_state.value == State.RUNNING) return
         _state.value = State.BOOTING
         cols = initialCols
         rows = initialRows
-        // Fresh per PTY incarnation, so a retry is judged on its own output
-        // rather than inheriting the dead attempt's.
         sawOutput = false
 
         scope.launch {
             try {
                 PRootKernel.boot(context)
 
-                // [T-envvar-disable] The user's variables used to be putAll()-ed
-                // into the process-wide PRootKernel.customEnvironment here. That
-                // map is never cleared, and every shell copies it (FreshProcessShell,
-                // PersistentShell, ShellExecutor), so once a terminal had been
-                // opened a deleted - or disabled - variable kept reaching every
-                // later command until the app restarted. They now go only into
-                // this terminal's own environment, below.
 
                 val cmdList = buildInteractiveCommand(sessionId)
                 val cmd = cmdList.first()
                 val argv = cmdList.toTypedArray()
 
-                // Environment in KEY=VALUE form
                 val envMap = LinkedHashMap<String, String>()
                 envMap["PROOT_TMP_DIR"] = PRootKernel.getProotTmpDir(context).absolutePath
                 if (PRootKernel.nativeLibDir.isNotEmpty())
@@ -167,12 +110,7 @@ class TerminalSession(private val context: Context) {
                 envMap["TERM"] = "xterm-256color"
                 envMap["LANG"] = "C.UTF-8"
                 envMap["LC_ALL"] = "C.UTF-8"
-                // Timezone: PRootKernel.boot() already seeded customEnvironment["TZ"],
-                // but set a fresh value here too in case the kernel was booted earlier
-                // and the system timezone changed since.
                 envMap["TZ"] = PRootKernel.posixTz()
-                // [T-net-android-phase3] Settings > Network "Shell" route (empty
-                // = direct, unchanged); the user's own variables below win.
                 envMap.putAll(com.openminis.app.network.NetworkShellEnvironment.proxyVariables())
                 envMap.putAll(
                     terminalEnvironment(
@@ -181,8 +119,6 @@ class TerminalSession(private val context: Context) {
                     )
                 )
 
-                // [T-android-seccomp-selfheal / GH#186] Applied last so nothing
-                // above can clobber it once this device is known to need it.
                 if (useNoSeccomp) {
                     envMap[SeccompFallbackPolicy.NO_SECCOMP_ENV] = SeccompFallbackPolicy.NO_SECCOMP_VALUE
                 }
@@ -208,10 +144,6 @@ class TerminalSession(private val context: Context) {
                     kotlinx.coroutines.delay(300)
                     writeInput("cd /var/minis && clear\n".toByteArray())
                 }
-                // [T-android-session-private-mounts] Say which files this
-                // terminal sees. Written to the screen, not typed into the
-                // shell, so it never lands in history. Delayed past the
-                // `clear` above so it is not wiped.
                 scope.launch {
                     kotlinx.coroutines.delay(if (sessionId != null) 600 else 300)
                     _outputBytes.emit(banner(sessionId).toByteArray())
@@ -219,18 +151,11 @@ class TerminalSession(private val context: Context) {
 
                 readerJob = scope.launch { readLoop() }
 
-                // Wait for child exit in a sibling coroutine.
                 val spawnedAt = System.currentTimeMillis()
                 scope.launch {
                     val status = PtyBridge.waitFor(childPid)
                     Log.i(TAG, "Child exited: status=$status")
 
-                    // [T-android-seccomp-selfheal / GH#186] PtyBridge reports a
-                    // signal death as -(128+signal) (pty_bridge.c:234), so
-                    // negate before consulting the policy. If the interactive
-                    // shell died on an early fatal signal, restart it once with
-                    // PROOT_NO_SECCOMP=1 rather than leaving the user staring
-                    // at a dead terminal they cannot fix from the UI.
                     val aliveMs = System.currentTimeMillis() - spawnedAt
                     if (SeccompFallbackPolicy.shouldRetryWithoutSeccomp(
                             exitCode = if (status < 0) -status else null,
@@ -269,7 +194,6 @@ class TerminalSession(private val context: Context) {
         while (_state.value == State.RUNNING) {
             val n = PtyBridge.readBytes(fd, buf, 0, buf.size)
             if (n <= 0) {
-                // EOF or error → child exited / fd closed
                 if (n < 0) Log.d(TAG, "readBytes returned errno=${-n}")
                 break
             }
@@ -278,38 +202,18 @@ class TerminalSession(private val context: Context) {
         }
     }
 
-    /** Send raw bytes to PTY master. Suitable for keystrokes, control codes, etc. */
     fun sendRawBytes(bytes: ByteArray) {
         if (bytes.isEmpty() || masterFd < 0) return
         scope.launch { writeInput(bytes) }
     }
 
-    /**
-     * Send a UTF-8 string to the PTY, mirroring iOS TerminalInputView.insertText
-     * semantics while covering the cases that iOS handles implicitly through UIKit:
-     *
-     *  - Unicode (CJK, emoji, combining chars): UTF-8 encoded verbatim.
-     *  - Line endings: `\r\n` and bare `\n` both collapse to `\r`. A TTY expects
-     *    CR for Enter; the kernel's ICRNL termios flag translates CR → NL on the
-     *    shell's read side, so the shell sees a newline as usual.
-     *  - Large pastes: chunked into ≤2048-byte writes and yielded between chunks
-     *    so the PTY's input buffer has time to drain and bytes aren't dropped.
-     *
-     * Ctrl sequences, arrow keys, and function keys come through TerminalInputView
-     * (hardware keys / accessory bar) as already-translated byte arrays via
-     * [sendRawBytes]. They deliberately do NOT go through [sendText] — that
-     * mirrors the iOS split where insertText handles printable text and
-     * pressesBegan handles function/arrow keys.
-     */
     fun sendText(text: String) {
         if (text.isEmpty()) return
         val normalized = normalizeLineEndings(text)
         sendRawBytes(normalized.toByteArray(Charsets.UTF_8))
     }
 
-    /** Collapse CRLF / LF to CR so a real TTY treats them as Enter. */
     private fun normalizeLineEndings(text: String): String {
-        // Fast path: no newlines to rewrite.
         if ('\n' !in text && '\r' !in text) return text
         val sb = StringBuilder(text.length)
         var i = 0
@@ -319,7 +223,6 @@ class TerminalSession(private val context: Context) {
             when (c) {
                 '\r' -> {
                     sb.append('\r')
-                    // Swallow a following \n so \r\n becomes a single \r.
                     if (i + 1 < n && text[i + 1] == '\n') i++
                 }
                 '\n' -> sb.append('\r')
@@ -330,21 +233,15 @@ class TerminalSession(private val context: Context) {
         return sb.toString()
     }
 
-    /** Legacy API — same as [sendText] but appends a newline. Kept for the deprecated line-input UI. */
     @Deprecated("Use sendText / sendRawBytes instead — real TTY doesn't line-buffer.")
     fun sendInput(text: String) {
-        // Use CR, not LF — a real TTY treats CR as Enter (termios ICRNL handles the rest).
         sendRawBytes((normalizeLineEndings(text) + "\r").toByteArray(Charsets.UTF_8))
     }
 
-    /** Send SIGINT (Ctrl+C handled by kernel thanks to termios ISIG). */
     fun sendInterrupt() {
-        // With a real PTY, writing 0x03 to the master triggers SIGINT via
-        // termios VINTR — which is the correct, portable path.
         sendRawBytes(byteArrayOf(0x03))
     }
 
-    /** Resize PTY window — emits SIGWINCH so the shell redraws its prompt. */
     fun setWindowSize(newCols: Int, newRows: Int) {
         if (newCols <= 0 || newRows <= 0) return
         cols = newCols
@@ -363,27 +260,17 @@ class TerminalSession(private val context: Context) {
         masterFd = -1
         childPid = 0
         if (fd >= 0) PtyBridge.closeFd(fd)
-        if (pid > 0) PtyBridge.sendSignal(pid, 15) // SIGTERM
+        if (pid > 0) PtyBridge.sendSignal(pid, 15)
         if (_state.value != State.STOPPED) _state.value = State.STOPPED
         liveSessions.removeAll { it.get() === this || it.get() == null }
     }
 
-    /**
-     * Push a new TZ value into the running interactive shell via stdin.
-     * Uses CR as the line terminator (termios ICRNL maps it to NL for the shell).
-     */
     private fun applyTimezone(tz: String) {
         if (masterFd < 0) return
         val line = "export TZ='${tz.replace("'", "'\\''")}'\r"
         sendRawBytes(line.toByteArray(Charsets.UTF_8))
     }
 
-    /**
-     * Push a block of env vars into the running interactive shell via stdin.
-     * Each key is `export`ed on its own line with POSIX single-quote escaping.
-     * Empty values are exported verbatim — this lets a proxy-unset transition
-     * clear previously-set proxy vars in one round trip.
-     */
     private fun applyEnvMap(env: Map<String, String>) {
         if (masterFd < 0 || env.isEmpty()) return
         val sb = StringBuilder()
@@ -394,7 +281,6 @@ class TerminalSession(private val context: Context) {
         sendRawBytes(sb.toString().toByteArray(Charsets.UTF_8))
     }
 
-    /** Signal UI to wipe the emulator. No PTY bytes are written. */
     fun clearOutput() {
         _clearVersion.value = _clearVersion.value + 1
     }
@@ -402,9 +288,6 @@ class TerminalSession(private val context: Context) {
     private suspend fun writeInput(bytes: ByteArray) {
         val fd = masterFd
         if (fd < 0) return
-        // PTY master writes may return a short count at PIPE_BUF (~4096) boundaries
-        // or under backpressure. Loop until all bytes are written; cap per-call size
-        // to CHUNK so large pastes don't monopolize the PTY or block the caller.
         var off = 0
         while (off < bytes.size) {
             val take = minOf(CHUNK_SIZE, bytes.size - off)
@@ -414,22 +297,14 @@ class TerminalSession(private val context: Context) {
                 return
             }
             if (rc == 0) {
-                // Shouldn't happen on a healthy fd; bail rather than spin.
                 Log.w(TAG, "writeBytes returned 0 at off=$off size=${bytes.size}")
                 return
             }
             off += rc
-            // Yield after each chunk so the PTY reader side has time to drain.
             if (off < bytes.size) kotlinx.coroutines.yield()
         }
     }
 
-    /**
-     * One-line notice of what `/var/minis` means in this terminal. A chat's
-     * terminal shares that chat's workspace with its agent; the global one
-     * belongs to no chat, and saying so up front prevents "I saved it in the
-     * terminal and the agent can't see it".
-     */
     private fun banner(sessionId: String?): String =
         if (sessionId != null) {
             "\u001b[2m[Minis] /var/minis/{workspace,attachments,offloads,browser} are this chat's " +
@@ -446,8 +321,6 @@ class TerminalSession(private val context: Context) {
         val cmd = mutableListOf<String>()
         cmd.add(rootfsManager.prootBinary.absolutePath)
         cmd.add("-0")
-        // T141: see PRootKernel.buildProotCommand for rationale — translates
-        // hardlinks to symlinks so apk install of binutils/gcc works.
         cmd.add("--link2symlink")
         cmd.add("-r"); cmd.add(rootfsManager.rootfsDir.absolutePath)
         cmd.add("-b"); cmd.add("/dev")
@@ -455,45 +328,16 @@ class TerminalSession(private val context: Context) {
         cmd.add("-b"); cmd.add("/sys")
         cmd.add("-w"); cmd.add("/root")
 
-        // [T-android-session-private-mounts] The same mount set the agent's
-        // shell for [sessionId] gets (SessionMounts is the single builder), so
-        // a file saved here is the file the agent sees. This used to replay
-        // the global PRootKernel.bindMounts, whose per-session entries were
-        // whichever chat last built a shell — a random chat's workspace.
-        // No session (global entry): global dirs and external mounts only.
         cmd.addAll(SessionMounts.toProotArgs(SessionMounts.forContext(context, sessionId).mounts))
 
         val handlers = NativeOffloadServer.registeredHandlers
-        // [T-native-offload-bind] Only when our server is listening: otherwise
-        // the handler stubs run and report the CLI unavailable, instead of
-        // proot connecting to a name another process holds (and hanging).
         if (handlers.isNotEmpty() && NativeOffloadServer.awaitListening()) {
             cmd.add("--native-offload=${NativeOffloadServer.socketName}:${handlers.joinToString(",")}")
         }
 
-        // [T-android-fake-netlink-tty-parity] Same rtnetlink emulation the
-        // agent's shell gets — see PRootKernel.buildProotCommand, which is the
-        // authoritative copy of this rationale.
-        //
-        // c9318f42f added `--fake-netlink` to that builder only, so the two
-        // ways into the sandbox disagreed: a tool run by the agent saw an
-        // (empty) interface list, while the SAME tool typed into this terminal
-        // hit the real AF_NETLINK refusal from Android's untrusted_app SELinux
-        // domain. A sandbox that behaves differently depending on which screen
-        // you launched from is a debugging trap regardless of which behaviour
-        // is the better one, so the flag is mirrored here.
-        //
-        // The ⚠️ on the original still stands, and now covers this call site
-        // too: an empty interface list is a deliberate lie that unblocks
-        // callers which only need enumeration to succeed, at the cost of
-        // moving the failure later for callers that then bind a local address.
-        // Whatever exposure decision that flag gets, both builders take it
-        // together.
         cmd.add("--fake-netlink")
-        // [FEAT-261021-11] Shell transparent forwarding (see PRootKernel).
         cmd.addAll(com.openminis.app.network.ShellTransparentNet.prootArgs(rootfsManager.prootBinary))
 
-        // Login + interactive so /etc/profile is sourced (readline, history, color aliases).
         cmd.add("/bin/sh")
         cmd.add("-l")
         cmd.add("-i")

@@ -25,12 +25,6 @@ import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 
-/**
- * [T-envvar-disable] A disabled environment variable keeps its value and note,
- * is not injected anywhere, stays masked in tool output, and - the hard part -
- * survives everything a build from before the feature can do to
- * `env-vars.json`: rewrite it, edit a note, rename, delete and re-create.
- */
 class EnvVarDisableTest {
 
     private lateinit var dir: File
@@ -48,7 +42,6 @@ class EnvVarDisableTest {
     private fun metadata() = File(dir, EnvVarRepository.METADATA_FILE)
     private fun entry(r: EnvVarRepository, key: String) = r.entries.value.first { it.key == key }
 
-    /** What a pre-feature build writes: id / key / note / createdAt, nothing else. */
     private fun writeAsOldBuild(vararg entries: Triple<String, String, String>) {
         val arr = JSONArray()
         for ((id, key, note) in entries) {
@@ -57,7 +50,6 @@ class EnvVarDisableTest {
         metadata().writeText(arr.toString())
     }
 
-    // ---- storage and compatibility -------------------------------------
 
     @Test fun `old metadata without any state loads as enabled and stays that way`() {
         writeAsOldBuild(Triple("a", "API_KEY", "n"))
@@ -65,7 +57,6 @@ class EnvVarDisableTest {
         val r = repo()
         assertTrue(entry(r, "API_KEY").enabled)
         assertEquals(mapOf("API_KEY" to "v"), r.allAsDict())
-        // Round trip through this build keeps the metadata shape old builds read.
         r.update("a", "API_KEY", "v2", "note")
         val saved = JSONArray(metadata().readText()).getJSONObject(0)
         assertFalse("enabled is never written into env-vars.json", saved.has("enabled"))
@@ -86,7 +77,6 @@ class EnvVarDisableTest {
         r.add("GH_TOKEN", "x", "old note")
         val id = entry(r, "GH_TOKEN").id
         r.setEnabled(id, false)
-        // Downgrade: the older build edits the note (same id) and rewrites the file.
         writeAsOldBuild(Triple(id, "GH_TOKEN", "edited by an old build"))
         secrets["GH_TOKEN"] = "changed by an old build"
         val upgraded = repo()
@@ -110,7 +100,6 @@ class EnvVarDisableTest {
         r.add("GH_TOKEN", "x")
         val oldId = entry(r, "GH_TOKEN").id
         r.setEnabled(oldId, false)
-        // The old build deletes it and adds one with the same name: a new id.
         writeAsOldBuild(Triple("brand-new-id", "GH_TOKEN", ""))
         val upgraded = repo()
         assertTrue("a new variable never inherits a deleted one's state", entry(upgraded, "GH_TOKEN").enabled)
@@ -132,8 +121,8 @@ class EnvVarDisableTest {
         r.add("K", "1", "n")
         val id = entry(r, "K").id
         r.setEnabled(id, false)
-        r.update(id, "K", "2", "n2")      // value + note (restore, minis-config note, deep link form)
-        r.update(id, "K2", "2", "n2")     // rename
+        r.update(id, "K", "2", "n2")
+        r.update(id, "K2", "2", "n2")
         assertFalse(entry(r, "K2").enabled)
         assertFalse(entry(repo(), "K2").enabled)
         val update = EnvVarRepository::class.java.methods.first { it.name == "update" }
@@ -150,7 +139,6 @@ class EnvVarDisableTest {
         val again = repo()
         again.update(id, "K", "2", "note changed")
         assertEquals(stamp, EnvVarStateStore(dir).state(id)!!.enabledUpdatedAt)
-        // Device clock moved back: the newer action still gets the newer stamp.
         val s2 = EnvVarStateStore(dir)
         s2.setEnabled(id, "K", true, now = 1_000)
         assertTrue(s2.state(id)!!.enabledUpdatedAt > stamp)
@@ -178,7 +166,6 @@ class EnvVarDisableTest {
         assertEquals(setOf("TOKEN"), repo().duplicateKeys())
     }
 
-    // ---- injection and redaction ----------------------------------------
 
     @Test fun `allAsDict skips disabled, redaction still covers them`() {
         val r = repo()
@@ -217,7 +204,6 @@ class EnvVarDisableTest {
         assertTrue(terminal.contains("terminalEnvironment(\n                        PRootKernel.customEnvironment,\n                        ExecutionCoordinator.envVarRepository?.allAsDict().orEmpty(),"))
     }
 
-    // ---- minis-config ----------------------------------------------------
 
     @Test fun `minis-config envvars KEY enabled reads and writes, sensitive and revertable`() {
         val r = repo()
@@ -228,12 +214,10 @@ class EnvVarDisableTest {
         assertEquals(ConfigValue.Bool(true), field.read())
         field.write(ConfigValue.Bool(false))
         assertFalse(entry(r, "GH_TOKEN").enabled)
-        // A note write through minis-config keeps it disabled.
         EnvVarsCollection(r).fields("GH_TOKEN").first { it.path == "envvars.GH_TOKEN.note" }.write(ConfigValue.Str("n"))
         assertFalse(entry(r, "GH_TOKEN").enabled)
     }
 
-    // ---- backup wire format -----------------------------------------------
 
     private val metaList = ListSerializer(BackupEnvVarMeta.serializer())
 
@@ -245,7 +229,6 @@ class EnvVarDisableTest {
         assertTrue(json, json.contains("\"enabled\":false"))
         val back = BackupFormat.json.decodeFromString(metaList, json)
         assertEquals(listOf(true, false), back.map { it.enabled })
-        // A package from before the feature (either platform) has no field.
         val old = BackupFormat.json.decodeFromString(metaList,
             """[{"id":"1","key":"K","note":"","createdAt":"2026-08-21T00:00:00Z"}]""")
         assertTrue(old.single().enabled)
@@ -259,7 +242,6 @@ class EnvVarDisableTest {
         assertTrue(exporter.contains("enabled = it.enabled"))
     }
 
-    // ---- round 2: $$ references, MCP form, strings ------------------------
 
     @Test fun `a $$ reference to a disabled variable resolves to empty with a warning, not an error`() {
         val r = repo()
@@ -270,12 +252,11 @@ class EnvVarDisableTest {
         assertEquals("", value)
         assertEquals(1, warnings.size)
         assertTrue(warnings.single(), warnings.single().contains("OFF_KEY") && warnings.single().contains("disabled"))
-        // Enabled and literal values are unchanged; a missing one still fails loudly.
         assertEquals("on-value", resolveEnvReference(r, "$$" + "ON_KEY", "apiKey"))
         assertEquals("sk-literal", resolveEnvReference(r, "sk-literal", "apiKey"))
         try {
             resolveEnvReference(r, "$$" + "NOPE", "apiKey"); throw AssertionError("expected InvalidValue")
-        } catch (e: ConfigError.InvalidValue) { /* expected */ }
+        } catch (e: ConfigError.InvalidValue) {  }
     }
 
     @Test fun `the minis-config bridge returns write warnings to the agent`() {

@@ -6,11 +6,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [PAR-261022-02] A group's avatar is a WeChat-style tile of its most recently
- * updated members (Windows UI-261022-02..04): which members it shows, in what
- * order, and where their cells sit.
- */
 class GroupMemberTileTest {
 
     private fun folder(id: String) =
@@ -37,7 +32,6 @@ class GroupMemberTileTest {
 
     @Test
     fun `the tile follows the members' update order, not the list order`() {
-        // A pinned member is listed first in an open group; the tile still goes by recency.
         val tile = tileOf(listOf(session("old", 1), session("new", 9), session("mid", 5)))
         assertEquals(listOf("new", "mid", "old"), tile.map { it.category })
     }
@@ -50,7 +44,6 @@ class GroupMemberTileTest {
 
     @Test
     fun `an empty group has no cells`() {
-        // Freshly created, so the empty group keeps its card.
         val blocks = partitionByFolder(
             sessions = emptyList(),
             folders = listOf(folder("a").copy(createdAt = 1_000L)),
@@ -63,7 +56,6 @@ class GroupMemberTileTest {
 
     @Test
     fun `cells follow the WeChat layouts`() {
-        // 44dp tile, 4dp inset, 2dp gap: cells are 17dp; far = 23, middle = 13.5.
         val one = memberTileCells(1).single()
         assertEquals(MemberTileCell(13.5f, 13.5f, 17f), one)
         assertEquals(listOf(MemberTileCell(4f, 13.5f, 17f), MemberTileCell(23f, 13.5f, 17f)), memberTileCells(2))
@@ -74,7 +66,6 @@ class GroupMemberTileTest {
         val four = memberTileCells(4)
         assertEquals(memberTileCells(MEMBER_TILE_MAX), four)
         assertEquals(listOf(4f to 4f, 23f to 4f, 4f to 23f, 23f to 23f), four.map { it.x to it.y })
-        // Every cell stays inside the tile with the inset all round.
         four.forEach { assertTrue(it.x >= 4f && it.x + it.side <= 40f && it.y + it.side <= 40f) }
     }
 }

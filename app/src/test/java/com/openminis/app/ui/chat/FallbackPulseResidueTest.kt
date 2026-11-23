@@ -13,26 +13,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-navbar-failed-tint-residue] The red fallback pulse behind the chat title
- * must always end at no tint.
- *
- * Reported on a Huawei tablet: after the default group's model failed and the
- * chat auto-switched group, a pink box stayed behind the title for good -
- * through chat switches and taps. A pulse cancelled mid-flash (its key changed
- * when the two-pane screen was re-bound to another chat's view model) left
- * alpha where the fade stopped, and the next run returned without touching it.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class FallbackPulseResidueTest {
 
-    /** Records every write; animateTo suspends for one half-flash like the real one. */
     private class FakeAlpha : PulseAlpha {
         override var value = 0f
         val writes = mutableListOf<Float>()
         override suspend fun animateTo(target: Float) {
             delay(FALLBACK_PULSE_HALF_MS / 2L)
-            value = (value + target) / 2f // mid-fade, where a cancellation leaves it
+            value = (value + target) / 2f
             delay(FALLBACK_PULSE_HALF_MS / 2L)
             value = target
             writes += target
@@ -60,7 +49,6 @@ class FallbackPulseResidueTest {
         pulse.join()
         assertTrue("precondition: the cancelled pulse left a tint", alpha.value > 0f)
 
-        // The screen is re-bound to chat B: its counter and baseline are equal.
         runFallbackPulse(current = 0, baseline = 0, alpha = alpha)
         assertEquals(0f, alpha.value)
     }
@@ -68,7 +56,6 @@ class FallbackPulseResidueTest {
     @Test
     fun `fail on chat A then open chat B shows no tint`() = runTest {
         val chatB = FakeAlpha()
-        // B never fell back; its baseline is taken when the screen binds to it.
         runFallbackPulse(current = 0, baseline = 0, alpha = chatB)
         assertEquals(0f, chatB.value)
         assertEquals(emptyList<Float>(), chatB.writes)
@@ -93,7 +80,6 @@ class FallbackPulseResidueTest {
         assertEquals(0f, alpha.value)
     }
 
-    /** The same cancellation through Compose's real Animatable, driven by a test frame clock. */
     @Test
     fun `real Animatable - cancelled pulse is reset by the next run`() = runTest {
         val clock = object : MonotonicFrameClock {
@@ -120,7 +106,6 @@ class FallbackPulseResidueTest {
         }
     }
 
-    /** ChatScreen wires the pulse per view model and through runFallbackPulse. */
     @Test
     fun `chat screen keys the pulse on the view model`() {
         val src = File("src/main/java/com/openminis/app/ui/chat/ChatScreen.kt").readText()

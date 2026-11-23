@@ -87,63 +87,18 @@ import com.openminis.app.ui.components.rememberDecorativeTick
 import com.openminis.app.ui.components.decorativePhase
 import androidx.compose.ui.graphics.graphicsLayer
 
-/**
- * [T-android-voice-panel] Inline voice input panel — Android port of iOS
- * InlineVoiceInputView + VoiceInputViewModel behaviors that map onto the
- * SpeechRecognitionManager engine stack:
- *
- *  • Two modes: compact (~92dp, mic only + buffered-chars hint) and expanded
- *    (transcript band + status tips + focal mic + delete + engine chip).
- *    Expanded state is remembered across sessions (VoiceModePrefs, backed by
- *    SharedPreferences), reset to expanded on text→voice entry and collapsed
- *    after a send — same rules.
- *  • Tap mic: start capture; tap again to stop ("Tap to transcribe"). The
- *    system engine also auto-stops on silence (matches iOS VAD auto-stop);
- *    finals APPEND to the running transcript, partials preview live.
- *  • Transcript mirrors into the composer text both ways; double-tap to edit
- *    (capture paused), Exit chip / mic resumes.
- *  • Delete key: tap = one char, hold = repeat delete, long-press menu-free
- *    (hold ≥2s keeps deleting; "clear all" via transcript long-press like iOS
- *    context menu is covered by the hold-to-repeat reaching empty).
- *  • Engine chip "Group · Model ⇅" opens the single-select voice-input picker.
- *  • Globe menu switches the recognition language (system engine locales).
- */
 
-/**
- * Voice-mode runtime state (mirrors iOS VoiceModePreference).
- *
- * Distinct from [com.openminis.app.ui.chat.ComposerInputModePrefs], which is a
- * different concern: that one records which composer mode the user PREFERS
- * (written on send, currently read by nobody since auto-enter-voice was removed
- * in T-android-remove-auto-enter-voice). This object is the LIVE state of the
- * panel for the current process.
- *
- * Only [expanded] is a genuine user preference and is persisted. The other
- * three are intentionally transient:
- *  - [isVoiceActive] must start false every launch — the composer always opens
- *    in text mode (T-android-remove-auto-enter-voice); persisting it would
- *    resurrect the auto-enter behaviour that was deliberately removed.
- *  - [enteredFromText] is a one-shot within a single transition.
- *  - [lastSpokenAssistantKey] guards against re-reading a reply; persisting it
- *    would wrongly suppress read-aloud for that message after a restart.
- */
 object VoiceModePrefs {
 
     private const val PREFS = "voice_prefs"
     private const val KEY_EXPANDED = "voice.panel.expanded"
 
-    /** Set once from [init]; without it [expanded] can't reach SharedPreferences. */
     private var appContext: android.content.Context? = null
 
     var isVoiceActive by mutableStateOf(false)
 
     private var expandedState by mutableStateOf(true)
 
-    /**
-     * Panel expanded vs compact. Backed by SharedPreferences so the choice
-     * survives process death — previously this was in-memory only despite the
-     * panel's KDoc claiming it was "remembered across sessions".
-     */
     var expanded: Boolean
         get() = expandedState
         set(value) {
@@ -152,13 +107,10 @@ object VoiceModePrefs {
                 ?.edit()?.putBoolean(KEY_EXPANDED, value)?.apply()
         }
 
-    /** One-shot: text→voice entry opens expanded that one time. */
     var enteredFromText = false
 
-    /** Hash of the last auto-spoken assistant reply so history isn't re-read. */
     var lastSpokenAssistantKey: Int = 0
 
-    /** Load the persisted [expanded] value. Idempotent; safe to call per composition. */
     fun init(context: android.content.Context) {
         if (appContext != null) return
         val ctx = context.applicationContext
@@ -180,40 +132,16 @@ internal fun InlineVoiceInputPanel(
     onInputTextChange: (String) -> Unit,
     ensureMicPermission: suspend () -> Boolean,
     modifier: Modifier = Modifier,
-    // [T-android-correction-context-wiring] Supplies the conversation context
-    // for AI correction, built from the chat's current messages. Mirrors iOS
-    // InlineVoiceInputView's `conversationContext` closure. Defaults to EMPTY so
-    // the legacy/standalone construction still compiles and runs.
-    //
-    // [T-android-voice-viewport-context] Receives the screen snapshot taken by
-    // [captureScreen] (null when there is none) so the correction can use what
-    // the user is looking at, not only the newest turns.
     conversationContextProvider: (com.openminis.app.speech.correction.ScreenContextBuilder.Snapshot?) ->
         com.openminis.app.speech.correction.ConversationContext = {
         com.openminis.app.speech.correction.ConversationContext.EMPTY
     },
-    // [T-android-voice-viewport-context] Called on the main thread when a
-    // correction starts: the list's layout is only consistent there, and the
-    // context is then built from this immutable copy off the UI thread.
     captureScreen: () -> com.openminis.app.speech.correction.ScreenContextBuilder.Snapshot? = { null },
-    // [T-android-context-usage-hint] Latest context-usage line, or null.
-    // Optional so the standalone/preview constructions still compile.
-    //
-    // Unlike the composer — where the line holds the placeholder until focus
-    // or typing retires it — this panel shows it for a fixed spell and then
-    // returns to its normal tip cycle. There is no focus event here to hang a
-    // lifecycle on, and the panel's status row is already a rotating surface,
-    // so a timed slot is the honest fit rather than a port of the composer's
-    // rules. Mirrors iOS `InlineVoiceInputView`.
     contextUsageHint: com.openminis.app.ui.chat.ContextUsageHint? = null,
-    /** [T-android-picker-provider-edit] Open a provider's settings from the voice picker; null hides the button. */
     onEditProvider: ((instanceId: String) -> Unit)? = null,
 ) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val sttState by SpeechRecognitionManager.state.collectAsState()
-    // [T-android-voice-asr-stall-skip] A cloud ASR attempt has gone 5 s without
-    // a result and a next voice model exists: offer "Switch Model" beside the
-    // mic (iOS e62117091). The mic keeps cancelling the transcription.
     val asrStalled by remember { SpeechRecognitionManager.asrStalled() }.collectAsState()
     val asrToastContext = LocalContext.current
     val systemAsrName = stringResource(R.string.voice_asr_system_recognition)
@@ -231,8 +159,6 @@ internal fun InlineVoiceInputPanel(
     val supportedLocales by SpeechRecognitionManager.supportedLocales.collectAsState()
     val levels by SpeechRecognitionManager.audioLevels.collectAsState()
 
-    // Load the persisted expanded/compact choice before it is read below.
-    // Idempotent, so running on every composition is harmless.
     val panelContext = androidx.compose.ui.platform.LocalContext.current
     VoiceModePrefs.init(panelContext)
 
@@ -240,11 +166,6 @@ internal fun InlineVoiceInputPanel(
     var transcript by remember { mutableStateOf(inputText) }
     var isEditing by remember { mutableStateOf(false) }
 
-    // [T-android-context-usage-hint] The usage line currently occupying the
-    // status row, cleared when its 3.5s spell expires.
-    //
-    // Keyed on the generation so each new reply gets its own timer; a
-    // recomposition inside the window neither restarts nor duplicates it.
     var shownUsageHint by remember {
         mutableStateOf<com.openminis.app.ui.chat.ContextUsageHint?>(null)
     }
@@ -252,24 +173,14 @@ internal fun InlineVoiceInputPanel(
         val hint = contextUsageHint ?: return@LaunchedEffect
         shownUsageHint = hint
         kotlinx.coroutines.delay(3_500)
-        // Only retire OUR generation: if a newer hint arrived while we slept,
-        // its own effect owns the slot and this one must not clear it.
         if (shownUsageHint?.generation == hint.generation) shownUsageHint = null
     }
 
-    // [T-android-voice-correction] Transcript captured when edit mode opens, so
-    // leaving it can hand the before/after pair to the learning recorder. The
-    // recorder decides whether the change is a CORRECTION (phonetically close)
-    // or the user simply rewriting; nothing here needs to judge that.
     var editSnapshot by remember { mutableStateOf<String?>(null) }
 
-    // [T-android-voice-correction] Manual AI correction of the transcript.
     var isCorrecting by remember { mutableStateOf(false) }
     var showCorrectionConsent by remember { mutableStateOf(false) }
 
-    // Every exit path funnels through here so no route can silently skip
-    // capture. Capture is fire-and-forget — leaving edit mode never waits on
-    // segmentation or SQLite.
     fun leaveEditMode() {
         val before = editSnapshot
         editSnapshot = null
@@ -288,7 +199,6 @@ internal fun InlineVoiceInputPanel(
     var resultTipIndex by remember { mutableIntStateOf(0) }
     var showModelSelector by remember { mutableStateOf(false) }
     var showLanguageMenu by remember { mutableStateOf(false) }
-    // Base text captured at capture start; partials render as base + partial.
     var captureBase by remember { mutableStateOf("") }
 
     val isRecording = sttState == RecognitionState.RECORDING || sttState == RecognitionState.STARTING
@@ -313,16 +223,10 @@ internal fun InlineVoiceInputPanel(
 
     fun setTranscript(text: String) {
         transcript = text
-        // [T-voice-send-waits-for-asr] A deferred send copies this explicitly.
         VoiceSendGate.transcript = text
         if (inputText != text) onInputTextChange(text)
     }
 
-    // Runs the correction engine over the current transcript and applies the
-    // result in place. Two outcomes are reported DIFFERENTLY on purpose: "no
-    // corrections needed" is a semantic verdict, while a timeout or API error
-    // is a failure — collapsing them would disguise an outage as "your text
-    // was fine".
     fun runCorrection() {
         val text = transcript.trim()
         if (text.isEmpty() || isCorrecting) return
@@ -336,29 +240,15 @@ internal fun InlineVoiceInputPanel(
             return
         }
         isCorrecting = true
-        // [T-voice-correction-stale-result] The composition this correction is
-        // for; a send bumps the generation.
         val startGeneration = VoiceSendGate.generation
-        // [T-android-voice-viewport-context] Snapshot the screen NOW, on the
-        // main thread, before anything scrolls.
         val screenSnapshot = runCatching { captureScreen() }.getOrNull()
         scope.launch {
-            // [T-android-correction-context-wiring] Feed the real conversation
-            // context (rare-term digest + recent excerpts) instead of EMPTY, so
-            // the model can resolve homophones against proper nouns / terms the
-            // conversation already established. Built off the UI thread.
             val convoContext = withContext(Dispatchers.Default) {
                 runCatching { conversationContextProvider(screenSnapshot) }
                     .getOrDefault(com.openminis.app.speech.correction.ConversationContext.EMPTY)
             }
             val suggestion = engine.correct(text, context = convoContext)
             isCorrecting = false
-            // [T-voice-correction-stale-result] With a 15 s budget per model and
-            // up to three models (4633ee38e), a correction can land minutes
-            // after the tap. If the user dictated more, edited, or sent in the
-            // meantime, applying it would overwrite the newer text or put a
-            // sent message back in the composer: drop it, quietly (no toast for
-            // text that is no longer on screen).
             if (transcript.trim() != text || VoiceSendGate.generation != startGeneration) {
                 com.openminis.app.speech.VoicePipelineLog.event(
                     "correction.stale",
@@ -371,9 +261,6 @@ internal fun InlineVoiceInputPanel(
                 suggestion.hasChange -> {
                     VoiceSendGate.abandonFinishForSend("AI correction")
                     setTranscript(suggestion.corrected)
-                    // Applying a correction the user ASKED for is itself the
-                    // acceptance signal; requiring a second confirming tap is
-                    // why iOS measured an acceptance rate of zero.
                     com.openminis.app.speech.correction.VoiceCorrection
                         .captureSuggestionAccepted(
                             panelContext,
@@ -391,8 +278,6 @@ internal fun InlineVoiceInputPanel(
                     ).show()
                 }
                 else -> {
-                    // [T-voice-correction-fallback] Every model failed: say why,
-                    // on a second line, instead of only "failed".
                     val reason = com.openminis.app.speech.correction.CorrectionFailureReason.res(suggestion)
                     val message = panelContext.getString(R.string.voice_correction_failed) +
                         (reason?.let { "\n" + panelContext.getString(it) } ?: "")
@@ -411,23 +296,7 @@ internal fun InlineVoiceInputPanel(
         SpeechRecognitionManager.stopRecording()
     }
 
-    // Result callbacks shared by a live capture and a retry of kept audio.
-    //
-    // [T-android-vad] Commit only on a FINAL result.
-    //
-    // Previously every interim hypothesis was written straight into the
-    // composer, which is what made Android feel live while iOS waited for a
-    // silence window. The engines no longer forward partials at all, so in
-    // practice this fires once per utterance — but the guard is explicit
-    // rather than assumed, so a future engine that does emit partials cannot
-    // silently reintroduce streaming.
-    //
-    // Appending (not replacing) matches iOS: successive utterances join with a
-    // single space (VoiceInputPanel.swift:931).
     fun onRecognized(text: String, isFinal: Boolean) {
-        // [T-android-voice-pipeline-trace] Log every reason a result is
-        // dropped: silently discarding a FINAL transcript looks exactly like
-        // "nothing came back" to the user.
         if (isEditing) {
             if (isFinal) com.openminis.app.speech.VoicePipelineLog.event("panel.drop", "why" to "editing", "chars" to text.length)
             return
@@ -450,9 +319,6 @@ internal fun InlineVoiceInputPanel(
             com.openminis.app.speech.RecognitionError.NO_MATCH -> {}
             com.openminis.app.speech.RecognitionError.PERMISSION_DENIED ->
                 permissionDenied = true
-            // [T-voice-mic-preempted] A capture failure shows a translated
-            // cause, not the engine's English ("AudioRecord not initialized.");
-            // the engine detail is already in the log.
             com.openminis.app.speech.RecognitionError.MIC_IN_USE ->
                 transcribeError = panelContext.getString(R.string.voice_mic_in_use)
             com.openminis.app.speech.RecognitionError.AUDIO_ERROR ->
@@ -461,18 +327,12 @@ internal fun InlineVoiceInputPanel(
         }
     }
 
-    // [T-voice-asr-failure-retry-prompt] A failure whose audio the engine kept
-    // goes to the Retry / Discard prompt instead of being dropped. Bound to the
-    // composition generation at capture start, so a failure that lands after
-    // the composition was sent or cleared is logged but not prompted.
     fun failureSink(captureGeneration: Int): (SpeechRecognitionManager.FailedAudio) -> Unit = { failed ->
         com.openminis.app.speech.VoicePipelineLog.event("panel.failedAudio", "kind" to failed.error.name)
         VoiceSendGate.recordFailure(failed, captureGeneration)
     }
 
     fun startCapture() {
-        // Route the engine per the resolved choice (mirrors iOS provider resolve
-        // on prepare/refresh).
         val engineId = if (choice.isSystem) "system" else "provider"
         com.openminis.app.speech.VoicePipelineLog.event("panel.start", "engine" to engineId)
         SpeechRecognitionManager.selectEngine(engineId)
@@ -488,9 +348,6 @@ internal fun InlineVoiceInputPanel(
         )
     }
 
-    // [T-voice-asr-failure-retry-prompt] Retry: re-transcribe the kept audio;
-    // its result appends to the transcript like any take, and a second failure
-    // queues it again.
     fun retryFailedUtterance() {
         val item = VoiceSendGate.takeForRetry() ?: return
         captureBase = transcript
@@ -507,9 +364,6 @@ internal fun InlineVoiceInputPanel(
     fun handleMicTap() {
         when {
             isTranscribing -> {
-                // Spinner while idle → X cancels the in-flight transcription.
-                // [T-voice-send-busy] Before the cancel: its IDLE must not read
-                // as "recognition finished" to a pending send.
                 VoiceSendGate.abandonFinishForSend("transcription cancelled")
                 com.openminis.app.speech.VoicePipelineLog.event("panel.cancel", "src" to "micTap")
                 SpeechRecognitionManager.cancelRecording()
@@ -517,8 +371,6 @@ internal fun InlineVoiceInputPanel(
             isRecording -> stopCapture()
             else -> scope.launch {
                 VoiceSendGate.abandonFinishForSend("mic tapped to record again")
-                // Re-check on every tap: a permission granted moments after a
-                // DENIED race (settings-gate cancel) must not dead-end the mic.
                 if (!ensureMicPermission()) {
                     permissionDenied = true
                     return@launch
@@ -530,16 +382,10 @@ internal fun InlineVoiceInputPanel(
         }
     }
 
-    // ── Lifecycle: prepare on mount (default groups + engine warm), stop on exit.
     LaunchedEffect(Unit) {
         providerRepository.ensureDefaultVoiceInputGroup()
         providerRepository.ensureDefaultVoiceOutputGroup()
-        // [T-android-voice-correction] Load the jieba dictionaries now, while
-        // the user is still reaching for the mic. The first segment call costs
-        // seconds (~5MB dictionary + HMM model); paying it here rather than on
-        // the first capture keeps correction from feeling broken.
         com.openminis.app.speech.correction.VoiceCorrection.warmUp(panelContext)
-        // Seed the transcript from whatever was typed (text→voice carry).
         transcript = inputText
         VoiceSendGate.transcript = inputText
         if (VoiceModePrefs.enteredFromText) {
@@ -550,7 +396,6 @@ internal fun InlineVoiceInputPanel(
     }
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose {
-            // [T-voice-send-busy] Voice mode or the chat was left.
             VoiceSendGate.abandonFinishForSend("voice panel closed")
             if (SpeechRecognitionManager.state.value != RecognitionState.IDLE) {
                 com.openminis.app.speech.VoicePipelineLog.event("panel.cancel", "src" to "dispose")
@@ -559,18 +404,13 @@ internal fun InlineVoiceInputPanel(
         }
     }
 
-    // External input change (send clears it; "add reply to input") → sync back.
     LaunchedEffect(inputText) {
         if (inputText != transcript) {
             transcript = inputText
             VoiceSendGate.transcript = inputText
             captureBase = inputText
             if (inputText.isEmpty()) {
-                // [T-voice-asr-failure-retry-prompt] The composition is gone
-                // (sent): a failure still in flight for it must not prompt.
                 VoiceSendGate.bumpGeneration()
-                // A send emptied the composer → collapse to compact (iOS
-                // collapseAfterSendToken) and stop any live capture.
                 if (SpeechRecognitionManager.state.value != RecognitionState.IDLE) {
                     com.openminis.app.speech.VoicePipelineLog.event("panel.cancel", "src" to "inputCleared", "state" to SpeechRecognitionManager.state.value)
                     SpeechRecognitionManager.cancelRecording()
@@ -582,12 +422,10 @@ internal fun InlineVoiceInputPanel(
             }
         }
     }
-    // Recognized text while compact → expand so the user sees it.
     LaunchedEffect(transcript) {
         if (transcript.isNotEmpty() && !expanded) persistExpanded(true)
     }
 
-    // ── Tip cycling (4s), mirrors iOS beginRecordingLabelCycle/ResultTipCycle.
     LaunchedEffect(isRecording) {
         recordingTipIndex = 0
         while (isRecording) {
@@ -606,12 +444,6 @@ internal fun InlineVoiceInputPanel(
     val screenH = LocalConfiguration.current.screenHeightDp.dp
     val maxPanel = screenH * 0.6f
 
-    // [T-android-voice-entry-always-available] No usable ASR engine. The mic
-    // button no longer hides in this case (hiding it stranded users inside
-    // voice mode), so the panel owns the explanation: say WHY nothing will be
-    // transcribed and link to the two things that fix it — the system speech
-    // service, or an ASR provider configured in Minis. The composer's toggle
-    // stays visible throughout, so leaving is always one tap away.
     val engineAvailable by SpeechRecognitionManager.isAvailable.collectAsState()
     if (!engineAvailable) {
         VoiceEngineUnavailableNotice(
@@ -630,7 +462,6 @@ internal fun InlineVoiceInputPanel(
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
-            // Top-left: expand/collapse chevron.
             CircleIconButton(
                 icon = if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
                 contentDescription = stringResource(
@@ -639,16 +470,9 @@ internal fun InlineVoiceInputPanel(
                 modifier = Modifier.align(Alignment.TopStart),
             ) { persistExpanded(!expanded) }
 
-            // [T-android-voice-correction] One-time collection-consent prompt,
-            // shown on the very first tap of the correction button. After the
-            // user answers — either way — it never appears again, and the
-            // correction runs regardless: consent governs whether we STORE the
-            // learning data, not whether the feature works.
             if (showCorrectionConsent) {
                 androidx.compose.material3.AlertDialog(
                     onDismissRequest = {
-                        // Dismissing without choosing is not an answer; leave
-                        // hasPrompted unset so the question can be asked again.
                         showCorrectionConsent = false
                     },
                     title = { Text(stringResource(R.string.voice_correction_consent_title)) },
@@ -678,12 +502,6 @@ internal fun InlineVoiceInputPanel(
                 )
             }
 
-            // [T-android-voice-correction] Top-right slot: the AI-correction
-            // button REPLACES the language globe once there is a transcript to
-            // fix (mirrors iOS). Same 30dp circle, so swapping the glyph never
-            // reflows the panel. Correction is a manual, one-shot action — no
-            // debounce, no automatic pass — because a surprise rewrite of what
-            // the user just dictated is worse than no correction at all.
             if (!isEditing && transcript.isNotBlank()) {
                 Box(modifier = Modifier.align(Alignment.TopEnd)) {
                     if (isCorrecting) {
@@ -699,10 +517,6 @@ internal fun InlineVoiceInputPanel(
                                 R.string.voice_correction_button_a11y,
                             ),
                         ) {
-                            // First tap ever shows the one-time consent prompt;
-                            // afterwards it runs directly. The correction itself
-                            // runs regardless of the answer — consent governs
-                            // STORING data, not using the feature.
                             if (!com.openminis.app.speech.correction.VoiceCorrectionConsent
                                     .hasPrompted(panelContext)
                             ) {
@@ -795,11 +609,6 @@ internal fun InlineVoiceInputPanel(
         }
     }
 
-    // [T-voice-asr-failure-retry-prompt] A failed transcription keeps its audio
-    // and asks, one utterance at a time, instead of dropping it — long speech
-    // is hard to repeat. Shown only while no session runs (a retry needs the
-    // recognizer idle) and outside transcript editing. Not dismissable by
-    // back / outside tap: the audio stays until the user decides.
     val failedPrompt = VoiceSendGate.queue.current
     if (failedPrompt != null && sttState == RecognitionState.IDLE && !isEditing) {
         val failed = failedPrompt.audio
@@ -851,7 +660,6 @@ internal fun InlineVoiceInputPanel(
     }
 }
 
-// ── Expanded layout ─────────────────────────────────────────────────────────
 
 @Composable
 private fun ExpandedContent(
@@ -872,7 +680,6 @@ private fun ExpandedContent(
     onExitEdit: () -> Unit,
     onDeleteLast: () -> Unit,
     onOpenSelector: () -> Unit,
-    // [T-android-context-usage-hint] Line currently owning the status row.
     contextUsageLine: com.openminis.app.ui.chat.ContextUsageHint? = null,
     asrStalled: Boolean = false,
     onSwitchModel: () -> Unit = {},
@@ -883,7 +690,6 @@ private fun ExpandedContent(
             .padding(top = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Transcript band — grows, then scrolls; double-tap to edit.
         if (isEditing || transcript.isNotEmpty()) {
             TranscriptArea(
                 transcript = transcript,
@@ -895,16 +701,10 @@ private fun ExpandedContent(
             Spacer(Modifier.height(6.dp))
         }
 
-        // Status line (+ Exit chip while editing). Inset 36dp each side so a
-        // long message never runs under the corner circle buttons.
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 36.dp),
         ) {
-            // [T-android-context-usage-hint] The usage line borrows this row
-            // for its spell. Recording wins immediately — once the user is
-            // speaking, "Listening…" is the only status that matters, so the
-            // hint yields without waiting out its timer.
             val usageLine = contextUsageLine?.takeIf { !isRecording && !isTranscribing }
             if (usageLine != null) {
                 Text(
@@ -942,7 +742,6 @@ private fun ExpandedContent(
             }
         }
 
-        // Transcribe-error pill.
         if (transcribeError != null) {
             Spacer(Modifier.height(4.dp))
             Row(
@@ -965,10 +764,7 @@ private fun ExpandedContent(
 
         Spacer(Modifier.height(10.dp))
 
-        // Focal mic + delete to its right (only when there's text).
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            // Never disabled: tapping while "denied" re-runs the permission
-            // flow (covers the granted-after-race case).
             MicCircleButton(
                 diameter = ExpandedMic,
                 isRecording = isRecording,
@@ -977,12 +773,6 @@ private fun ExpandedContent(
                 enabled = true,
                 onTap = onMicTap,
             )
-            // [T-android-voice-asr-stall-skip] The "Switch Model" pill and the
-            // transcript delete share the right-hand side and key off the ONE
-            // flag, so they never show together (iOS 7d9a86e0b): pill while
-            // stalled, delete only with text and no stall. The flag drops as
-            // soon as the stall ends (skipped, finished, failed, cancelled),
-            // and delete returns with it; the swap is cross-faded.
             androidx.compose.animation.Crossfade(targetState = asrStalled, label = "asrStallSwap") { stalled ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1002,7 +792,6 @@ private fun ExpandedContent(
 
         Spacer(Modifier.height(8.dp))
 
-        // Active ASR chip: "Voice Input · Model ⇅".
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -1041,7 +830,6 @@ private fun ExpandedContent(
     }
 }
 
-// ── Compact layout ──────────────────────────────────────────────────────────
 
 @Composable
 private fun CompactContent(
@@ -1069,7 +857,6 @@ private fun CompactContent(
             )
             Spacer(Modifier.height(4.dp))
         }
-        // [T-android-voice-asr-stall-skip] Pill to the right of the centred mic.
         Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             MicCircleButton(
                 diameter = CompactMic,
@@ -1094,12 +881,6 @@ private fun CompactContent(
     }
 }
 
-/**
- * [T-android-voice-asr-stall-skip] "Switch Model": skip the stalled
- * transcription to the next voice model of the Voice Input group (System
- * recognition last), keeping the audio. iOS e62117091 (forward.end.fill +
- * short label, capsule in the panel's icon-button style).
- */
 @Composable
 private fun SwitchModelPill(onClick: () -> Unit) {
     val a11y = stringResource(R.string.voice_asr_switch_model_a11y)
@@ -1129,7 +910,6 @@ private fun SwitchModelPill(onClick: () -> Unit) {
     }
 }
 
-// ── Pieces ──────────────────────────────────────────────────────────────────
 
 @Composable
 private fun TranscriptArea(
@@ -1142,8 +922,6 @@ private fun TranscriptArea(
     val screenH = LocalConfiguration.current.screenHeightDp.dp
     val bandMax = screenH * 0.6f - ExpandedBase
     if (isEditing) {
-        // [T-android-voice-dblclick-select] A platform editor, so a double tap
-        // selects the word under the finger as on iOS; see VoiceTranscriptEditor.
         VoiceTranscriptEditor(
             value = transcript,
             onValueChange = onTranscriptChange,
@@ -1179,24 +957,6 @@ private fun TranscriptArea(
     }
 }
 
-/**
- * [T-android-voice-mic-shadow] The original `shadow(6.dp)` look, drawn
- * manually so it has no downward cast.
- *
- * Compose's `shadow()` exposes no offset. Elevation feeds a renderer that
- * lights the shape from a point above the screen, and the resulting spot
- * shadow is displaced down the y-axis in proportion to the elevation — so the
- * only way to shrink the displacement through that API is to shrink the
- * elevation, which shrinks the shadow itself and changes the button's look.
- * (The light position IS adjustable, but it is a window-level attribute and
- * would move every shadow in the app.)
- *
- * Drawing it here sidesteps both problems: a radial gradient centred on the
- * circle, painted behind the content, gives the same soft halo with zero
- * offset. The radius extends [spread] beyond the circle's edge and the alpha
- * ramp is weighted so most of the darkness sits close in, matching the falloff
- * of the elevation shadow it replaces.
- */
 private fun Modifier.micShadowNoOffset(
     spread: androidx.compose.ui.unit.Dp,
     color: Color = Color.Black,
@@ -1205,9 +965,6 @@ private fun Modifier.micShadowNoOffset(
     val r = size.minDimension / 2f
     val spreadPx = spread.toPx()
     val outer = r + spreadPx
-    // Stops chosen so the gradient is near-opaque at the circle's edge and
-    // fades out over the spread, rather than easing linearly across the whole
-    // radius (which reads as a wide, flat smudge).
     val edge = r / outer
     drawCircle(
         brush = androidx.compose.ui.graphics.Brush.radialGradient(
@@ -1237,10 +994,6 @@ private fun MicCircleButton(
     Box(
         modifier = Modifier
             .size(diameter)
-            // [T-android-voice-mic-shadow] Same white circle and same soft
-            // halo as before; only the downward cast is gone. See
-            // micShadowNoOffset for why this is drawn rather than expressed as
-            // an elevation.
             .micShadowNoOffset(10.dp)
             .background(Color.White, CircleShape)
             .clip(CircleShape)
@@ -1271,34 +1024,15 @@ private fun MicCircleButton(
     }
 }
 
-/**
- * [T-android-transcribing-ring] The spinning arc shown while transcription is
- * in flight, drawn ON the white mic button's rim.
- *
- * Port of iOS InlineVoiceInputView's ring: a Circle trimmed to 75/360 with a
- * 2.5pt round-cap stroke, at the SAME diameter as the white disc, rotating once
- * every 0.9s.
- *
- * Drawn with Canvas rather than CircularProgressIndicator because that
- * composable insets its arc — it reserves its own internal padding and centres
- * the stroke inside the layout bounds — so even at fillMaxSize the arc floated
- * well inside the disc instead of tracing its edge (the reported symptom, made
- * worse here by an extra 3.dp padding). Here the arc's radius is set explicitly
- * to (diameter - stroke) / 2, which puts the stroke's CENTRELINE exactly on the
- * circle's edge, so it reads as riding the rim like iOS.
- */
 @Composable
 private fun TranscribingRing(
     diameter: androidx.compose.ui.unit.Dp,
     color: Color,
 ) {
     val stroke = 2.5.dp
-    // [T-android-decorative-anim-perf] Static arc, rotated as a layer from
-    // the shared tick: recorded once, no per-frame Canvas re-record.
     val tick = rememberDecorativeTick()
     Canvas(modifier = Modifier.size(diameter).graphicsLayer { rotationZ = decorativePhase(tick.value, 900) * 360f }) {
         val strokePx = stroke.toPx()
-        // Inset by half the stroke so the stroke's centreline sits on the rim.
         val inset = strokePx / 2f
         drawArc(
             color = color,
@@ -1315,27 +1049,12 @@ private fun TranscribingRing(
     }
 }
 
-/** 7 dark bars inside the white mic button (iOS InlineMiniWaveform). */
 @Composable
 private fun InlineMiniWaveform(levels: List<Float>) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        // [T-android-voice-parity] Indexed, and each bar animates.
-        //
-        // Two fixes over the previous `forEach { level -> Box(...) }`:
-        //  1. The bars were redrawn with raw values on every StateFlow
-        //     emission — no smoothing at all, where iOS runs a per-bar spring
-        //     (response 0.18, dampingFraction 0.6 —
-        //     InlineVoiceInputView.swift:1302). Android's level source is also
-        //     coarser (onRmsChanged at ~10-20 Hz vs iOS's ~94 Hz PCM tap), so
-        //     unsmoothed bars step visibly. `spring` with dampingRatio 0.6 and
-        //     stiffness 900 is the closest Compose analogue to a 0.18 s spring.
-        //  2. `forEach` gave Compose no per-slot identity, so a shifted list
-        //     re-associated animation state to the wrong bar. The index is a
-        //     stable slot key: bar N keeps its own animation across frames
-        //     while the VALUE flowing through it shifts left.
         val tail = levels.takeLast(7)
         tail.forEachIndexed { index, level ->
             val animated by animateFloatAsState(
@@ -1353,7 +1072,6 @@ private fun InlineMiniWaveform(levels: List<Float>) {
     }
 }
 
-/** Delete key: tap = one char, hold = repeat every 120ms (iOS VoiceDeleteButton). */
 @Composable
 private fun VoiceDeleteButton(onDeleteOne: () -> Unit) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -1434,17 +1152,6 @@ private fun statusLabel(
     if (permissionDenied) return stringResource(R.string.voice_panel_permission_denied)
     if (isEditing) return stringResource(R.string.voice_panel_editing)
     if (isRecording) {
-        // [T-android-voice-parity] iOS cycles FOUR entries here, with
-        // "Listening…" deliberately repeated at index 1 and 3 so the steady
-        // label occupies half the cycle and the actionable hint doesn't nag
-        // (InlineVoiceInputView.swift:1123-1130). We mirror that rhythm.
-        //
-        // iOS's other actionable slot is "Long press to paste"; Android does
-        // NOT have that gesture — long-pressing the transcript CLEARS it here
-        // (see onLongPress -> onClearAll below). Advertising a paste gesture
-        // that instead wipes the user's text would be worse than a shorter
-        // cycle, so that slot carries the delete hint the panel actually
-        // implements.
         val tips = listOf(
             stringResource(R.string.voice_panel_tip_tap_to_transcribe),
             stringResource(R.string.voice_panel_tip_listening),
@@ -1465,21 +1172,6 @@ private fun statusLabel(
     return stringResource(R.string.voice_panel_tap_to_speak)
 }
 
-/**
- * [T-android-voice-entry-always-available] Shown in place of the recording UI
- * when no speech engine can transcribe right now.
- *
- * This exists because the composer's mic/keyboard toggle is no longer hidden
- * when speech is unavailable — hiding it was what stranded users inside voice
- * mode. The control stays, so this panel has to answer "why is nothing
- * happening?" and offer the two real fixes:
- *
- *  - the device's speech service (Google app / OEM equivalent) is missing or
- *    disabled → open system voice-input settings;
- *  - no ASR provider is configured in Minis → open Provider settings.
- *
- * Leaving is always available: the toggle in the composer is untouched.
- */
 @Composable
 private fun VoiceEngineUnavailableNotice(
     expanded: Boolean,
@@ -1531,9 +1223,6 @@ private fun VoiceEngineUnavailableNotice(
             horizontalArrangement = Arrangement.Center,
         ) {
             NoticeActionButton(stringResource(R.string.voice_panel_no_engine_open_system)) {
-                // Best-effort: the exact voice-input screen varies by OEM, so
-                // fall back to the app's own settings page rather than crashing
-                // on a device that doesn't expose the specific action.
                 val opened = runCatching {
                     ctx.startActivity(
                         android.content.Intent("android.settings.VOICE_INPUT_SETTINGS")
@@ -1565,7 +1254,6 @@ private fun VoiceEngineUnavailableNotice(
     }
 }
 
-/** Small pill button used by [VoiceEngineUnavailableNotice]. */
 @Composable
 private fun NoticeActionButton(label: String, onClick: () -> Unit) {
     Box(

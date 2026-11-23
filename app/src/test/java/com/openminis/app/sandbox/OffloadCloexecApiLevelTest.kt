@@ -5,12 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-offload-cloexec-api29] Android 10 crashed the first time a shell started
- * on 1.15-beta.3: Os.fcntlInt is hidden below API 30, linking it threw
- * NoSuchMethodError, and the `catch (e: Exception)` around it did not catch an
- * Error.
- */
 class OffloadCloexecApiLevelTest {
 
     @Test

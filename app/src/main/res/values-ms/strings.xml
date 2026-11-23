@@ -1,4 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Minis</string>
     <string name="new_chat">Sembang Baharu</string>
@@ -1898,7 +1897,6 @@
     <string name="chat_share_n_selected">%1$d Dipilih</string>
     <string name="chat_share_select_all">Pilih Semua</string>
     <string name="chat_share_deselect_all">Nyahpilih Semua</string>
-    <!-- [T-port-user-ask] user_ask card and settings; text from the iOS string catalog. -->
     <string name="user_ask_needs_answer">Memerlukan jawapan anda</string>
     <string name="user_ask_needs_approval">Memerlukan kelulusan anda</string>
     <string name="user_ask_high_risk">Tindakan berisiko tinggi</string>
@@ -1941,17 +1939,14 @@
     <string name="user_ask_setting_indefinitely">Tanpa had</string>
     <string name="user_ask_setting_minutes">%1$d min</string>
     <string name="user_ask_setting_footer">Membenarkan pembantu meminta anda memilih antara pilihan, atau mengesahkan tindakan berisiko sebelum dilakukan, melalui kad dalam sembang. Hanya dalam sembang yang anda sertai — bukan untuk sub-ejen, Pintasan atau tugas berjadual. Apabila dimatikan, pembantu membuat keputusan sendiri dan tidak melakukan tindakan berisiko tanpa kebenaran anda.</string>
-    <!-- [T-android-user-ask-notify] user_ask background notification. -->
     <string name="user_ask_setting_notify">Beritahu semasa di latar belakang</string>
     <string name="user_ask_notif_high_risk">Memerlukan kelulusan · Risiko tinggi</string>
     <string name="user_ask_notif_open_app">Buka apl</string>
     <string name="user_ask_notif_hidden_body">Ada soalan menunggu jawapan anda</string>
     <string name="user_ask_notif_channel_name">Soalan untuk anda</string>
     <string name="user_ask_notif_channel_description">Soalan pembantu semasa Minis di latar belakang, boleh dijawab daripada pemberitahuan</string>
-    <!-- [T-tool-preview-longpress-close] Long-press the tool status bar preview -->
     <string name="tool_preview_close_menu">Tutup tetingkap pratonton</string>
     <string name="tool_preview_closed_toast">Tetingkap pratonton ditutup. Anda boleh menghidupkannya semula dalam Tetapan &gt; Paparan.</string>
-    <!-- [T-mcp-oauth-signin-android] MCP browser sign-in (iOS #432) -->
     <string name="mcp_form_auth_mode">Kebenaran</string>
     <string name="mcp_form_auth_none">Tiada</string>
     <string name="mcp_signin_not_signed_in">Belum log masuk</string>

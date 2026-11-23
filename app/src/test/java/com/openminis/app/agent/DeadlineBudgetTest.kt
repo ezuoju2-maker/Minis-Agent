@@ -24,10 +24,9 @@ class DeadlineBudgetTest {
     fun `slice never exceeds remaining or desired`() {
         var now = 0L
         val b = DeadlineBudget(totalMs = 10_000, clock = { now }, startAt = 0L)
-        assertEquals(5_000L, b.sliceFor(desiredMs = 60_000)) // fair share, not desired
-        assertEquals(2_000L, b.sliceFor(desiredMs = 2_000))  // desired smaller
+        assertEquals(5_000L, b.sliceFor(desiredMs = 60_000))
+        assertEquals(2_000L, b.sliceFor(desiredMs = 2_000))
         now = 8_000L
-        // 2000 left: fair share gives 1000 now, reserving 1000 for a later step.
         assertEquals(1_000L, b.sliceFor(desiredMs = 9_000))
     }
 

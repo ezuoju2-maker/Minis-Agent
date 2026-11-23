@@ -5,7 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [T-android-jankdiag] The frame / sample aggregation behind the [JankDiag] summaries. */
 class JankDiagStatsTest {
     private fun frame(totalMs: Double, layoutMs: Double = 0.0): LongArray {
         val a = LongArray(JankFrameWindow.Stage.entries.size)
@@ -15,8 +14,8 @@ class JankDiagStatsTest {
     }
 
     @Test fun `window counts jank against the frame deadline and reports percentiles`() {
-        val w = JankFrameWindow(initialCapacity = 4) // grows past its initial size
-        val deadline = 8_333_333L // 120 Hz
+        val w = JankFrameWindow(initialCapacity = 4)
+        val deadline = 8_333_333L
         var vsync = 1_000_000_000L
         repeat(90) { w.add(frame(6.0, 1.0), deadline, vsync); vsync += deadline }
         repeat(10) { w.add(frame(20.0, 9.0), deadline, vsync); vsync += deadline }

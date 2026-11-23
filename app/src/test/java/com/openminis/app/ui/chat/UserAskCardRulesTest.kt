@@ -10,7 +10,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [T-port-user-ask] The card's pure rules: phase, typography, collapsed text. */
 class UserAskCardRulesTest {
 
     private fun phase(live: String?, results: Boolean, parses: Boolean, status: ToolBlockStatus?) =
@@ -28,9 +27,6 @@ class UserAskCardRulesTest {
     }
 
     @Test fun `chips are compact - TaskCardChip's line ratio at every font scale, 1dp vertical padding`() {
-        // [T-user-ask-chip-height] The header and "Recommended" chips inherited
-        // the chat body's line height plus 2dp padding, so their tint block was
-        // much taller than the text.
         assertEquals(1.1f, UserAskTypography.CHIP_LINE_RATIO, 0.001f)
         for (scale in listOf(0.5f, 0.85f, 1f, 1.3f, 2f)) {
             val t = UserAskTypography.forScale(scale)
@@ -45,9 +41,6 @@ class UserAskCardRulesTest {
     }
 
     @Test fun `pending header - i of N and the countdown are pinned right, the title ellipsizes in its own group`() {
-        // [T-user-ask-header-right-align] Tablet, landscape: a title with
-        // weight(1f, fill = false) and a weight(1f) Spacer split the spare width
-        // 1:1, so "2/4  4:57" stopped mid-row with a wide gap on the right.
         val card = ProductionSources.read("ui/chat/UserAskCard.kt")
         val header = card.substringAfter("private fun PendingHeader(").substringBefore("\n}\n")
         assertTrue(header.contains("modifier = Modifier.fillMaxWidth(),"))
@@ -57,7 +50,6 @@ class UserAskCardRulesTest {
         val leading = card.substringAfter("private fun PendingHeaderLeading(").substringBefore("\n}\n")
         assertTrue(leading.contains("Row(modifier = modifier,"))
         assertTrue(leading.contains("maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),"))
-        // File-wide: no composable mixes a fill = false weight with a weighted Spacer.
         for (fn in card.split("\n@Composable\n").drop(1)) {
             val name = fn.substringAfter("fun ").substringBefore("(")
             assertTrue(
@@ -106,9 +98,6 @@ class UserAskCardRulesTest {
     }
 
     @Test fun `the question's Show more toggle follows the text layout, not its length`() {
-        // [T-user-ask-fold-by-layout] It used to appear above 140 characters,
-        // while the fold is at three LINES: a 60-character CJK question, or a
-        // short multi-line command, was cut with no way to open it.
         assertEquals(3, UserAskQuestionFold.FOLDED_LINES)
         assertTrue("folded and cut", UserAskQuestionFold.isFoldable(expanded = false, hasVisualOverflow = true, lineCount = 3))
         assertTrue("folded and fits: no toggle", !UserAskQuestionFold.isFoldable(expanded = false, hasVisualOverflow = false, lineCount = 3))
@@ -119,7 +108,6 @@ class UserAskCardRulesTest {
         assertTrue("no character-count rule left", !Regex("""question\.length\s*>""").containsMatchIn(card))
         assertTrue(card.contains("maxLines = if (expanded) Int.MAX_VALUE else UserAskQuestionFold.FOLDED_LINES"))
         assertTrue(card.contains("onTextLayout = { foldable = UserAskQuestionFold.isFoldable(expanded, it.hasVisualOverflow, it.lineCount) }"))
-        // The toggle is a full-height tap target, and a cut question opens on a tap on itself.
         val toggle = card.substringAfter("if (foldable) {").substringBefore("when (q.type)")
         assertTrue(toggle.contains(".heightIn(min = UserAskTypography.MIN_TAP_HEIGHT)"))
         assertTrue(toggle.contains(".expandToggleClickable(pressedShape = RectangleShape, onClick = toggleFold)"))

@@ -8,14 +8,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-calendar-exact-target] android-calendar write targeting (iOS
- * 8200eeb81 + 381e59dc7, issue #282).
- *
- * --calendar matched by substring and fell back to the auto-picked calendar on
- * a miss, still reporting success; for `update` a typo therefore MOVED the
- * event to the default calendar.
- */
 class CalendarExactTargetTest {
 
     private val work = CalRef(3, "Work", "me@gmail.com")
@@ -31,9 +23,7 @@ class CalendarExactTargetTest {
 
     @Test
     fun `a substring no longer lands in another calendar`() {
-        // "Wor" used to match whichever of Work/Workout came first.
         assertTrue(CalendarOffloadHandler.pickCalendarByName("Wor", cals) is CalPick.Missing)
-        // "Work" must not pick "Workout" even when it is listed first.
         assertEquals(CalPick.Found(work), CalendarOffloadHandler.pickCalendarByName("Work", cals))
     }
 

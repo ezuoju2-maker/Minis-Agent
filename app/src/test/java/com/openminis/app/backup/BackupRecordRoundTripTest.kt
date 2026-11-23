@@ -12,27 +12,12 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * The JSONL record contract, tested at the level both platforms actually share:
- * the bytes on the wire.
- *
- * The exporter and importer themselves need a Context and Room, so they are not
- * unit-testable without Robolectric. What IS testable — and is what breaks
- * cross-platform restore when it drifts — is the shape of a record and the
- * date encoding that carries every merge decision.
- */
 class BackupRecordRoundTripTest {
 
     private fun iso(millis: Long): String = SimpleDateFormat(
         "yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US
     ).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(millis)
 
-    /**
-     * iOS encodes dates with Swift's `.iso8601` strategy, which is
-     * `yyyy-MM-dd'T'HH:mm:ss'Z'` in UTC. A locale-dependent formatter would
-     * produce Buddhist or Hijri years under some device settings and silently
-     * write dates the other platform reads as garbage.
-     */
     @Test
     fun `dates are iso8601 utc and locale-independent`() {
         val stamp = 1_755_000_000_000L
@@ -43,8 +28,6 @@ class BackupRecordRoundTripTest {
 
         val previousLocale = Locale.getDefault()
         try {
-            // A calendar whose default era/numerals differ. If the formatter
-            // is not pinned to Locale.US this comes back with a different year.
             Locale.setDefault(Locale.forLanguageTag("th-TH-u-ca-buddhist-nu-thai"))
             assertEquals(encoded, BackupExporter.iso8601(stamp))
         } finally {
@@ -52,10 +35,6 @@ class BackupRecordRoundTripTest {
         }
     }
 
-    /**
-     * The envelope is what §2.2 rule 3 dispatches on: `t` selects the record
-     * type, `v` allows per-record migration, `d` is the payload.
-     */
     @Test
     fun `records travel inside a t-v-d envelope`() {
         val dir = createTempDir()
@@ -71,13 +50,6 @@ class BackupRecordRoundTripTest {
         dir.deleteRecursively()
     }
 
-    /**
-     * Session field names are camelCase — iOS writes these models through
-     * Swift's synthesized Codable encoder, so the manifest's snake_case (§2.1)
-     * does NOT apply inside the records. Getting this backwards makes every
-     * record unreadable across platforms while still parsing as valid JSON,
-     * which is the worst kind of drift: silent.
-     */
     @Test
     fun `session records use camelCase wire names`() {
         val s = sessionLike()
@@ -87,23 +59,16 @@ class BackupRecordRoundTripTest {
         )) {
             assertTrue("missing wire key '$key'", key in s)
         }
-        // snake_case here would be the drift this test exists to catch.
         assertTrue("model_id" !in s)
         assertTrue("created_at" !in s)
         assertTrue("updated_at" !in s)
     }
 
-    /**
-     * `errorInfo` is device-local (§0.2): an error sticker for a turn that
-     * failed on the old device would restore as a red badge against a message
-     * that never failed for this install.
-     */
     @Test
     fun `message records omit the device-local error field`() {
         val m = messageLike()
         assertTrue("errorInfo must not travel", "errorInfo" !in m)
         assertTrue("error_info must not travel", "error_info" !in m)
-        // But the fields a restore genuinely needs must all be present.
         for (key in listOf(
             "id", "sessionId", "role", "parts", "createdAt", "sortOrder",
             "streamInterruptCount", "reasoningContent",
@@ -112,23 +77,15 @@ class BackupRecordRoundTripTest {
         }
     }
 
-    /**
-     * `parts` must pass through as structured JSON, not as a re-encoded string.
-     * The column already holds exactly the ContentPart array iOS writes, so
-     * splicing it keeps MediaRef paths and tool payloads byte-identical and
-     * preserves part types this build does not model.
-     */
     @Test
     fun `message parts stay structured and preserve unknown part types`() {
         val partsJson = """[{"type":"text","value":"hi"},{"type":"futurePart","value":{"x":1}}]"""
         val parsed = BackupFormat.json.parseToJsonElement(partsJson)
-        // Re-serialising must not lose the unknown member.
         val round = parsed.toString()
         assertTrue("futurePart" in round)
         assertTrue("""{"x":1}""".replace(" ", "") in round.replace(" ", ""))
     }
 
-    /** Both ISO strings and raw epoch millis must parse, per §2.2 tolerance. */
     @Test
     fun `timestamps parse from iso strings and from raw millis`() {
         val stamp = 1_755_000_000_000L
@@ -142,9 +99,6 @@ class BackupRecordRoundTripTest {
         assertNull(millisOf(fromIso, "absent"))
     }
 
-    // Mirrors of the exporter's record builders. Kept here rather than calling
-    // BackupExporter directly because constructing it needs a Context; the
-    // shapes are asserted against the same key lists the exporter writes.
     private fun sessionLike(): JsonObject = BackupFormat.json.parseToJsonElement(
         """
         {"id":"s1","title":"t","category":null,"modelId":"m","createdAt":"${iso(1)}",
@@ -162,7 +116,6 @@ class BackupRecordRoundTripTest {
         """.trimIndent()
     ).jsonObject
 
-    /** Same parse the importer uses for a merge decision. */
     private fun millisOf(obj: JsonObject, key: String): Long? {
         val raw = obj[key]?.runCatching { jsonPrimitive.content }?.getOrNull() ?: return null
         raw.toLongOrNull()?.let { return it }

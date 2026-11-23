@@ -8,13 +8,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-container-network-dns] (OpenMinis#396) Custom sandbox DNS: what counts as
- * a server, what resolv.conf gets, and when the system DNS still wins.
- */
 class RootfsCustomDnsTest {
 
-    // ── IPv4 ────────────────────────────────────────────────────────────────
 
     @Test
     fun `valid IPv4 addresses`() {
@@ -30,7 +25,6 @@ class RootfsCustomDnsTest {
         }
     }
 
-    // ── IPv6 ────────────────────────────────────────────────────────────────
 
     @Test
     fun `valid IPv6 addresses`() {
@@ -53,7 +47,6 @@ class RootfsCustomDnsTest {
         }
     }
 
-    // ── parsing a user's list ───────────────────────────────────────────────
 
     @Test
     fun `newlines, commas, semicolons and spaces all separate entries`() {
@@ -84,7 +77,6 @@ class RootfsCustomDnsTest {
         assertTrue(r.servers.isEmpty())
     }
 
-    // ── auto / custom decision ──────────────────────────────────────────────
 
     @Test
     fun `auto follows the system whatever servers are stored`() {
@@ -111,7 +103,6 @@ class RootfsCustomDnsTest {
         assertEquals(DnsMode.CUSTOM, DnsMode.fromWire(" Custom "))
     }
 
-    // ── resolv.conf ─────────────────────────────────────────────────────────
 
     @Test
     fun `custom resolv conf lists the servers and nothing from the network`() {
@@ -127,7 +118,6 @@ class RootfsCustomDnsTest {
         assertEquals("1.1.1.1\n2400:3200::1", ContainerDns.normalize(" 1.1.1.1 , 2400:3200::1 , 1.1.1.1"))
     }
 
-    // ── RootfsManager wiring ────────────────────────────────────────────────
 
     @Test
     fun `refreshDns takes the custom branch before reading the system, and auto is unchanged`() {
@@ -137,10 +127,8 @@ class RootfsCustomDnsTest {
         val systemAt = body.indexOf("cm?.activeNetwork")
         assertTrue(planAt in 0 until systemAt)
         assertTrue(body.contains("writeResolvConf(ContainerDns.customResolvConf(plan.servers))"))
-        // The auto path still reads LinkProperties and keeps its public fallback.
         assertTrue(body.contains("linkProps.dnsServers"))
         assertTrue(body.contains("nameserver 8.8.8.8"))
-        // Every write goes through the one helper.
         assertEquals(1, Regex("""File\(rootfsDir, "etc/resolv\.conf"\)""").findAll(src).count())
     }
 

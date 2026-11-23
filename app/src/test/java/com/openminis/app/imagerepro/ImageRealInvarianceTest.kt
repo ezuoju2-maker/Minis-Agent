@@ -11,29 +11,10 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * Behaviour-invariance evidence for the image-pipeline extraction
- * (refactor+test, no behaviour change).
- *
- * Every case runs through ChatViewModel's OWN private entry points —
- * escapeJson, buildUserPartsJson, buildMediaRefPartJson, uniqueUploadFileName,
- * MessageEntity.toLLMMessage, applyRequestImageBudget, resizeJpegToMaxEdge —
- * plus ReadImageTool.execute and the public ImageBudget functions, on fixed
- * inputs. The instance is allocated without its constructor and only the
- * fields those functions read are set. Before the extraction those entry points
- * held the code; after it they delegate to the extracted functions. [GOLDEN]
- * holds the sha256 of every output captured on the code BEFORE the extraction
- * (HEAD 3605f1fd1); the same harness must reproduce them after it.
- *
- * JVM note: BitmapFactory is stubbed here, so every decode returns null and
- * every resize is a no-op on both sides — those rows show the control flow is
- * unchanged, not that pixels are.
- */
 class ImageRealInvarianceTest {
 
     private val F = ImageRealFixtures
 
-    /** sha256 of each case's canonical output, captured before the extraction. */
     private val GOLDEN: Map<String, String> = mapOf(
         "escapeJson" to "0323faa76dffe7cbcab864e8cbf50a4998337b409bfd2e2297639f501cf2fb3e",
         "userParts.text+ref+xml" to "1960b86f0afbceb8e80bdc589c5b3d45cf0b7b09b53fc32dd73894f50df877f1",
@@ -50,13 +31,7 @@ class ImageRealInvarianceTest {
         "toLLMMessage.a1" to "d6ba4f8d286096d378e7ebe167918b6ea370ea1327417c08b56ad2c69de8513f",
         "toLLMMessage.u5" to "a21de287ea326a0bac0280006cc742c4e3c8d7847a6ae39545a453e5e0ae78ff",
         "toLLMMessage.u6" to "87190c014b213fb689b4d2454de903638d9fe23ce8cf615660ec13100425bcff",
-        // [T-request-budget-post-gate] Changed on purpose: the budget now measures the
-        // gate's output (these undecodable 6 MB images go out at ~8.4 MB, so fewer fit);
-        // was ca7831113041c4f724c992da05919d968496a7e2f01dfdcba851df1744ae116c.
         "applyRequestImageBudget" to "e1d85bf6a8f895a565208420bec92ad3fefd8b03a10a3f60b0dafcd85959d7d7",
-        // [T-request-budget-post-gate] Changed on purpose: the budget now measures the
-        // gate's output (these undecodable 6 MB images go out at ~8.4 MB, so fewer fit);
-        // was e0905eea8f888376191f3e167de17211d0d63aaf40e6de76b691a2493581aa02.
         "applyRequestImageBudget.spillover" to "3c65e2ed38399aafc17c5584e0408234596a9fb271adda00fedf3753ac6d1c5d",
         "resizeJpegToMaxEdge" to "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b",
         "readImage.blank" to "4181ac48432b2751e71c90902f333cbd5c6ccfae3995606f53c8dbbbb815355f",
@@ -96,27 +71,22 @@ class ImageRealInvarianceTest {
         val files = F.tempDir("imgreal-inv")
         val vm = vm(files)
 
-        // escapeJson
         out["escapeJson"] = F.callPrivate(vm, "escapeJson", "a\"b\\c\nd\re\tf\u0001g 中文 /x") as String
 
-        // buildUserPartsJson
         val ref = """{"type":"mediaRef","value":{"id":"m1","relativePath":"2026/10/04/sess-1/m1.jpg","mimeType":"image/jpeg"}}"""
         out["userParts.text+ref+xml"] = F.callPrivate(vm, "buildUserPartsJson", "hi \"there\"", listOf(ref), "<user-attached-files>\n</user-attached-files>", null) as String
         out["userParts.emptyText+ref"] = F.callPrivate(vm, "buildUserPartsJson", "", listOf(ref), null, null) as String
         out["userParts.emptyText+none"] = F.callPrivate(vm, "buildUserPartsJson", "", emptyList<String>(), null, null) as String
         out["userParts.bodyParts"] = F.callPrivate(vm, "buildUserPartsJson", "ignored", listOf(ref), null, listOf("""{"type":"text","value":"a"}""", ref)) as String
 
-        // buildMediaRefPartJson
         out["mediaRef.full"] = F.callPrivate(vm, "buildMediaRefPartJson", MediaRef("m1", "2026/10/04/sess-1/m1.jpg", "image/jpeg", "IMG 1.jpg"), "/var/minis/attachments/uploads/IMG_1.jpg") as String
         out["mediaRef.bare"] = F.callPrivate(vm, "buildMediaRefPartJson", MediaRef("m2", "r/m2.png", "image/png", null), null) as String
 
-        // uniqueUploadFileName
         val up = java.io.File(files, "uploads").apply { mkdirs() }
         java.io.File(up, "a.jpg").writeText("x"); java.io.File(up, "a_1.jpg").writeText("x")
         out["uniqueName"] = listOf("a.jpg", "我的 图.png", "", "dir/x.y.z", "back\\slash.gif", "noext")
             .joinToString("|") { F.callPrivate(vm, "uniqueUploadFileName", up, it) as String }
 
-        // toLLMMessage
         val media = java.io.File(files, "media").apply { mkdirs() }
         val jpg = F.jpeg(64, 32)
         val png = F.png(10, 10)
@@ -137,7 +107,6 @@ class ImageRealInvarianceTest {
             out["toLLMMessage.${e.id}"] = F.dump(F.callPrivate(vm, "toLLMMessage", e) as LLMMessage)
         }
 
-        // applyRequestImageBudget: 7 × 6 MB-raw images, some without a path (spillover).
         val big = (0 until 7).map { i -> F.png(8, 8).copyOf(64) + ByteArray(6 * 1024 * 1024 + i) }
         val history = listOf(
             LLMMessage(LLMMessage.Role.USER, "u", contentParts = listOf(
@@ -158,14 +127,11 @@ class ImageRealInvarianceTest {
         out["applyRequestImageBudget.spillover"] = java.io.File(files, "minis-sessions/sess-1/attachments/spillover")
             .listFiles().orEmpty().map { it.name + ":" + it.length() }.sorted().joinToString(",")
 
-        // resizeJpegToMaxEdge (JVM: decode stub → null)
         out["resizeJpegToMaxEdge"] = (F.callPrivate(vm, "resizeJpegToMaxEdge", F.jpeg(64, 32), 2000) as ByteArray?)?.let { F.sha256(it) }.toString()
 
-        // ReadImageTool: deterministic branches only (path resolution of other paths reads global mount state).
         out["readImage.blank"] = ReadImageTool.execute("""{"path":"","tool_title":"t"}""").let { "${it.output}|${it.success}|${it.toolTitle}" }
         out["readImage.badJson"] = ReadImageTool.execute("not json").let { "${it.output}|${it.success}" }
 
-        // ImageBudget public functions (JVM stub path).
         val heicJpg = F.jpeg(64, 32)
         out["budget.prepare.jpegAsHeic"] = ImageBudget.prepareForUpload(heicJpg, "image/heic")!!.let { F.sha256(it.bytes) + "," + it.mimeType }
         out["budget.prepare.png"] = ImageBudget.prepareForUpload(png, "image/png")!!.let { F.sha256(it.bytes) + "," + it.mimeType }
@@ -190,7 +156,7 @@ class ImageRealInvarianceTest {
     @Test fun `extracted code reproduces the pre-extraction outputs byte for byte`() {
         val now = outputs().mapValues { F.sha256(it.value) }
         for ((k, v) in now) println("[GOLDEN] \"$k\" to \"$v\",")
-        if (GOLDEN.isEmpty()) return // bootstrap run on the pre-extraction code
+        if (GOLDEN.isEmpty()) return
         assertEquals(GOLDEN.keys, now.keys)
         for (k in GOLDEN.keys) assertEquals("output changed: $k", GOLDEN[k], now[k])
     }

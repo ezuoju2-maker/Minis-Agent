@@ -8,21 +8,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T25] Sub-agent lifecycle, as one table.
- *
- * The rules this pins were shipped one at a time and live in three places
- * (AgentJobRegistry, HelperRunner, AgentCallback). Android commits:
- * c21fa4b0d (Stop on one card stops the batch; a finished sibling cannot re-wake
- * the stopped parent), 140844023 (every callback reaches the parent — one per
- * sub agent, never coalesced; iOS b56101f3b), 8d320582c (control-call
- * classification: `child_session_id` is tested before `resumed`), and the
- * resume path (iOS 4a1ddb032: a resumed run keeps its named sub agent).
- *
- * Each row is a full scenario against the REAL registry (reset per row). The
- * table runs as one test so the whole state machine is read in one place; a
- * failing row names itself.
- */
 class SubAgentLifecycleTableTest {
 
     private val parent = "P-lifecycle"
@@ -65,7 +50,6 @@ class SubAgentLifecycleTableTest {
 
     private val table: List<Row> = listOf(
 
-        // ── Stop: one card, whole batch ─────────────────────────────────
         Row("cancel one of a batch of 3 → all 3 cancelled, each hook fired once") {
             val a = child("a"); val b = child("b"); val c = child("c")
             val hooks = mutableMapOf<String, Int>()
@@ -105,15 +89,12 @@ class SubAgentLifecycleTableTest {
             assertEquals("an unrelated child is untouched", AgentJobState.RUNNING, state(other.id))
         },
 
-        // ── A finished sibling cannot re-wake a stopped parent ──────────
         Row("parent stopped, sibling finishes → its callback is NOT dispatched") {
             val dispatched = mutableListOf<String>()
             AgentJobRegistry.followUpDispatcher = { _, _, jobId -> dispatched += jobId }
             val a = child("a"); val b = child("b")
             AgentJobRegistry.markRunning(a.id, "S-a") {}
             AgentJobRegistry.markRunning(b.id, "S-b") {}
-            // Stop's FIRST step is the mute; b's completion lands in the window
-            // before the cancel reaches it (the 48ms race in the iOS log).
             AgentJobRegistry.muteDelegationResults(parent)
             AgentJobRegistry.finish(b.id, AgentJobState.DONE, "late result")
             assertEquals("the stopped parent must stay quiet", emptyList<String>(), dispatched)
@@ -136,7 +117,6 @@ class SubAgentLifecycleTableTest {
             assertEquals(listOf(a.id), dispatched)
         },
 
-        // ── Resume keeps the named sub agent ────────────────────────────
         Row("interrupted → resumed run keeps its sub agent name end to end") {
             val resumed = child("Survey", agentName = "LENS", wasResumed = true, runSessionId = "S-child")
             assertEquals("LENS", resumed.agentName)
@@ -164,7 +144,6 @@ class SubAgentLifecycleTableTest {
             assertEquals("S-child", payload.getString("child_session_id"))
         },
 
-        // ── Steer reaches the child; a finished child rejects it ────────
         Row("steer is delivered to a running child and refused once it finished") {
             val a = child("a")
             AgentJobRegistry.markRunning(a.id, "S-a") {}
@@ -177,7 +156,6 @@ class SubAgentLifecycleTableTest {
             assertEquals("nothing delivered after the finish", 1, received.size)
         },
 
-        // ── Every completion wakes the parent — once each ───────────────
         Row("3 sub agents finishing → 3 callbacks, never one coalesced batch") {
             val dispatched = mutableListOf<Pair<String, String>>()
             AgentJobRegistry.followUpDispatcher = { p, text, jobId -> dispatched += jobId to text; check(p == parent) }
@@ -189,7 +167,6 @@ class SubAgentLifecycleTableTest {
             AgentJobRegistry.finish(jobs[2].id, AgentJobState.DONE, "third")
             assertEquals(3, dispatched.size)
             assertEquals(jobs.map { it.id }.toSet(), dispatched.map { it.first }.toSet())
-            // Each envelope is a parseable callback for ITS job, carrying its own status.
             val parsed = dispatched.map { AgentCallback.parse(it.second)!! }
             assertEquals(listOf("done", "timeout", "done"), parsed.map { it.status })
             assertEquals(dispatched.map { it.first }, parsed.map { it.jobId })
@@ -207,7 +184,6 @@ class SubAgentLifecycleTableTest {
             assertEquals(AgentJobState.DONE, state(a.id))
         },
 
-        // ── Control-call classification order ───────────────────────────
         Row("resumed=true with child_session_id is still a delegation card") {
             val payload = HelperRunner.resultJson(
                 status = "completed", result = "x", modelLabel = "m", tierUsed = HelperModelTier.PRIMARY,
@@ -248,16 +224,13 @@ class SubAgentLifecycleTableTest {
             assertTrue(HelperRunner.isControlOnly("""{"action":"status"}""", """{"agents":[{"child_session_id":"c1"}]}"""))
         },
 
-        // ── The sibling line on every callback ───────────────────────────
         Row("a callback tells the parent about the rest of the batch") {
             val a = child("a"); val b = child("b"); val c = child("c")
             AgentJobRegistry.markRunning(a.id, "S-a") {}
             AgentJobRegistry.markRunning(b.id, "S-b") {}
-            // c stays PENDING (waiting for a slot).
             AgentJobRegistry.finish(a.id, AgentJobState.DONE, "r")
             val cb = AgentJobRegistry.completionCallback(AgentJobRegistry.job(a.id)!!, "r")
             val siblings = cb.siblings ?: ""
-            // One running + one pending are both "still running" from the parent's side.
             assertTrue("running and pending siblings must be reported: '$siblings'", siblings.contains("2 still running"))
             assertEquals(
                 "Other sub agents in this conversation: 2 still running.",

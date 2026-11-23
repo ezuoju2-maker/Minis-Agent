@@ -17,20 +17,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * (GH#245) The timing rules behind the browser tab pool's self-healing, tested
- * with virtual-time coroutines (no WebView), plus source pins on the call
- * sites that consume them.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class BrowserActionGuardTest {
 
-    // -- Cancellation through the per-tab lock ------------------------------
 
     @Test
     fun `a cancellation inside withLock releases the lock`() = runTest {
-        // Guards the conclusion the fix rests on: the CLI's 90s withTimeout
-        // cancels into the pool, and the lock must come free with it.
         val mutex = Mutex()
         val holder = launch { mutex.withLock { awaitCancellation() } }
         testScheduler.advanceUntilIdle()
@@ -42,9 +34,6 @@ class BrowserActionGuardTest {
 
     @Test
     fun `the split lock-then-finally pattern releases the lock when the CLI times out`() = runTest {
-        // Mirrors executeSerialized after the split: lockWithin, then the
-        // action in try, unlock in finally. The CLI's outer withTimeout fires
-        // while the action is stuck.
         val mutex = Mutex()
         try {
             withTimeout(90_000L) {
@@ -77,7 +66,6 @@ class BrowserActionGuardTest {
         assertFalse(mutex.isLocked)
     }
 
-    // -- Action deadline -----------------------------------------------------
 
     @Test
     fun `a healthy action returns its value and flags nothing`() = runTest {
@@ -110,11 +98,9 @@ class BrowserActionGuardTest {
             onSuspect = { suspects += it },
         ) { throw WebViewWedgedException("browser tab stopped responding") }
         assertEquals(BrowserActionGuard.Outcome.Wedged("browser tab stopped responding"), out)
-        // The manager already flagged itself before throwing.
         assertTrue(suspects.isEmpty())
     }
 
-    // -- Cancellation threshold ---------------------------------------------
 
     @Test
     fun `a quick cancellation (user pressed Stop) is rethrown and does not flag the tab`() = runTest {
@@ -140,7 +126,6 @@ class BrowserActionGuardTest {
         val suspects = mutableListOf<String>()
         var ranOn = false
         try {
-            // Deadline above the outer timeout so the CANCEL path is what fires.
             withTimeout(90_000L) {
                 BrowserActionGuard.runGuarded(
                     deadlineMs = 300_000L,
@@ -160,7 +145,7 @@ class BrowserActionGuardTest {
     @Test
     fun `the thresholds are ordered so the pool trips before the CLI gives up`() {
         val cli = 90_000L
-        val longestLegitAction = 60_000L // fetch promise await; wait_for_dom_stable cap
+        val longestLegitAction = 60_000L
         assertTrue(BrowserActionGuard.JS_EVAL_TIMEOUT_MS < BrowserActionGuard.WEDGE_SUSPECT_MS)
         assertTrue(BrowserActionGuard.WEDGE_SUSPECT_MS < BrowserActionGuard.ACTION_DEAD_TIMEOUT_MS)
         assertTrue(BrowserActionGuard.ACTION_DEAD_TIMEOUT_MS > longestLegitAction)
@@ -169,7 +154,6 @@ class BrowserActionGuardTest {
         assertTrue("CLI timeout still 90s", handler.contains("EXECUTE_TIMEOUT_MS = 90_000L"))
     }
 
-    // -- Source pins on the consumers ---------------------------------------
 
     private val manager by lazy { ProductionSources.read("browser/BrowserUseManager.kt") }
     private val pool by lazy { ProductionSources.read("browser/BrowserTabPool.kt") }

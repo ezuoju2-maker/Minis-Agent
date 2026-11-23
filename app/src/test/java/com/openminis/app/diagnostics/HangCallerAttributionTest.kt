@@ -7,21 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-hang-caller-attribution] A main-thread stall must name who hung,
- * not only which framework call was slow.
- *
- * A user device (zzz, OnePlus PKG110, 2026-09-22 14:04:40) froze for 12.4 s in
- * text layout and was killed. Every JankDiag sample in the daily log was five
- * framework frames — `Paint.nGetRunCharacterAdvance`, `LineBreaker
- * .nComputeLineBreaks`, `StaticLayout.generate`… — so the log proved the main
- * thread was laying out text and said nothing about which screen or component
- * asked for it. The investigation could narrow it to "a dialog opened from the
- * session list" and no further.
- *
- * These pin the two fields that would have closed that gap: the screen on top
- * and the first app frame beneath the framework noise.
- */
 class HangCallerAttributionTest {
 
     @After fun resetScreen() = HangDetector.noteScreen(null)
@@ -29,7 +14,6 @@ class HangCallerAttributionTest {
     private fun frame(cls: String, method: String, line: Int) =
         StackTraceElement(cls, method, "${cls.substringAfterLast('.')}.kt", line)
 
-    /** The shape of the real stall: framework on top, our caller underneath. */
     private val textLayoutStall = arrayOf(
         frame("android.graphics.Paint", "nGetRunCharacterAdvance", -2),
         frame("android.text.TextLine", "handleText", 1371),
@@ -51,7 +35,6 @@ class HangCallerAttributionTest {
 
     @Test
     fun `a pure framework stack reports no app frame rather than a wrong one`() {
-        // Better an honest "none" than attributing the stall to a framework class.
         assertNull(HangDetector.firstAppFrame(textLayoutStall.take(5).toTypedArray()))
         assertNull(HangDetector.firstAppFrame(emptyArray()))
     }
@@ -73,7 +56,6 @@ class HangCallerAttributionTest {
     fun `the published screen is what the sample reports`() {
         HangDetector.noteScreen("chat/{sessionId}")
         assertEquals("chat/{sessionId}", HangDetector.currentScreen)
-        // A missing or blank route must not print an empty `screen=` field.
         HangDetector.noteScreen("  ")
         assertEquals("unknown", HangDetector.currentScreen)
         HangDetector.noteScreen(null)
@@ -82,15 +64,12 @@ class HangCallerAttributionTest {
 
     @Test
     fun `the stall log keeps enough frames to leave the compose text stack`() {
-        // 25 frames stopped inside Compose's own layout machinery. The deeper
-        // log is what lets a text-layout stall reach an app frame at all.
         assertTrue(
             "STALL_STACK_DEPTH must stay well above the old 25-frame cut",
             HangDetector.STALL_STACK_DEPTH >= 100,
         )
     }
 
-    // ── The live paths must actually use the pieces above ─────────────────
 
     private fun src(path: String): String {
         val f = File(path)

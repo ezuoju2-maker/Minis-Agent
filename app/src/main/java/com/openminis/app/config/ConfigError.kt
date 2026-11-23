@@ -1,13 +1,5 @@
 package com.openminis.app.config
 
-/**
- * Failure modes a [ConfigField] operation may surface. Matches iOS
- * `ConfigError`. Bridge-level error codes:
- *   TypeMismatch / InvalidValue / OutOfRange / RegexMismatch  → 1
- *   PermissionDenied                                          → 126
- *   UnknownPath                                               → 1
- *   IoError                                                   → 1
- */
 sealed class ConfigError(message: String) : Exception(message) {
     class TypeMismatch(expected: String) :
         ConfigError("type_mismatch: expected $expected")
@@ -32,7 +24,6 @@ sealed class ConfigError(message: String) : Exception(message) {
     class UnknownPath(path: String) :
         ConfigError("unknown_path: $path")
 
-    /** Raised by collection.add when a child with the same natural key already exists. */
     class AlreadyExists(reason: String) :
         ConfigError("already_exists: $reason")
 

@@ -6,12 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [FIX-261022-01, OpenMinis#426] The block parser's patterns are compiled once,
- * not per line. A Regex(...) built inside the per-line loop compiled a fresh ICU
- * pattern each time; on a long session the native mappings piled up until
- * vm.max_map_count was hit and Scudo aborted the process.
- */
 class MarkdownParserRegexHoistTest {
 
     @Test

@@ -8,26 +8,12 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Model ids with dots in config paths.
- *
- * History: [T-android-config-model-id-dot] (440465f7b / 2bb448166, port of iOS
- * eaf30cda5) escaped dots as `~d` so the registry's `limit = 3` splitter would
- * not cut the id. That worked but was undiscoverable (OpenMinis#390). Since
- * [T-config-path-dotted-id] (iOS cef38f13b) the registry takes everything
- * between the first and last dot as the id, so paths carry the RAW id — see
- * ConfigPathSplitTest. What remains here is the legacy escape: builds from
- * 09-19 until #390 wrote `~d` paths into audit keys and scripts, and those must
- * keep resolving, through the REAL ModelsCollection decoder and lookup rule.
- */
 class ModelConfigPathDotTest {
 
-    /** The pre-#390 encoder, kept only to produce legacy inputs. */
     private fun legacyEncode(id: String): String = id.replace("~", "~~").replace(".", "~d")
 
     private fun decode(segment: String) = ModelsCollection.decodeLegacySegment(segment)
 
-    // ---- Legacy decode --------------------------------------------------------
 
     @Test
     fun `legacy paths round-trip across the id shapes users actually type`() {
@@ -46,8 +32,8 @@ class ModelConfigPathDotTest {
 
     @Test
     fun `the old escape was injective`() {
-        val a = "u/a.b"      // a real dot
-        val b = "u/a~db"     // literal "~d" the user typed
+        val a = "u/a.b"
+        val b = "u/a~db"
         assertNotEquals(legacyEncode(a), legacyEncode(b))
         assertEquals(a, decode(legacyEncode(a)))
         assertEquals(b, decode(legacyEncode(b)))
@@ -61,7 +47,6 @@ class ModelConfigPathDotTest {
         assertNotEquals("two-pass decode must be wrong here", tricky, twoPass)
     }
 
-    // ---- Lookup rule: raw first, legacy second ----------------------------------
 
     private val real = setOf("U/mimo-v2.6-pro", "U/kimi-k3", "U/lit~deral", "U/lit.eral")
     private fun find(id: String) = ModelsCollection.lookupIn(id) { c -> c.takeIf { it in real } }
@@ -79,7 +64,6 @@ class ModelConfigPathDotTest {
 
     @Test
     fun `raw wins, so an id that literally contains ~d is not decoded into another`() {
-        // "U/lit~deral" would decode to "U/lit.eral", which ALSO exists.
         assertEquals("U/lit~deral", find("U/lit~deral"))
     }
 
@@ -89,7 +73,6 @@ class ModelConfigPathDotTest {
         assertNull(find("U/no~dpe"))
     }
 
-    // ---- Source facts -------------------------------------------------------------
 
     private val src by lazy {
         File("src/main/java/com/openminis/app/config/collections/ModelsCollection.kt").readText()

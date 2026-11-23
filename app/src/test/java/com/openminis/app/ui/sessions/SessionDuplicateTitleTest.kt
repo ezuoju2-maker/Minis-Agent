@@ -7,7 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [ISS-038] Duplicated sessions get distinct, localized titles (port of iOS 03da252a1). */
 class SessionDuplicateTitleTest {
 
     private val known = listOf("Copy", "副本")

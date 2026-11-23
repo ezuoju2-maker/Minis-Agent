@@ -21,17 +21,6 @@ import com.openminis.app.provider.thinking.ThinkingRule
 import com.openminis.app.provider.thinking.ThinkingRuleCoding
 import org.json.JSONObject
 
-/**
- * [T-android-thinking-rules-phase2 / parity with iOS ThinkingRulesCollection.swift]
- * Exposes user-authored custom thinking rules to minis-config under
- * `thinkingrules.<instanceId>:<ruleId>.<field>`.
- *
- * Only CUSTOM rules are enumerable; built-in rules are never children, so they have no
- * writable path — "you cannot modify a built-in" is a structural guarantee, not a runtime
- * check. Child id is the composite `<instanceId>:<ruleId>` because the config path splits
- * give a collection exactly ONE id segment; instance ids are UUIDs (no colon), so a split
- * on the FIRST ':' cleanly separates instance from rule.
- */
 class ThinkingRulesCollection(
     private val repo: ProviderRepository,
 ) : ConfigCollection {
@@ -44,7 +33,6 @@ class ThinkingRulesCollection(
     override val risk: ConfigRisk get() = ConfigRisk.SENSITIVE
     override val addPayloadSchema: ConfigSchema get() = ConfigSchema.Json
 
-    // ---- child enumeration ----
 
     override fun childIds(): List<String> = buildList {
         for (inst in repo.config.value.instances) {
@@ -67,7 +55,6 @@ class ThinkingRulesCollection(
         return Triple(instanceId, ruleId, rule)
     }
 
-    // ---- fields ----
 
     override fun fields(forId: String): List<ConfigField> {
         val (instanceId, ruleId, _) = ruleOf(forId) ?: return emptyList()
@@ -147,7 +134,6 @@ class ThinkingRulesCollection(
         },
     )
 
-    // ---- add / remove ----
 
     override fun add(payload: ConfigValue): String {
         val obj = (payload as? ConfigValue.Obj)?.value
@@ -180,8 +166,6 @@ class ThinkingRulesCollection(
             wireFormat = fmt,
             label = label,
         )
-        // New rules insert at the top (priority 0) — a rule overriding a built-in is
-        // useless below it.
         val ruleId = repo.saveThinkingRule(instanceId, rule, id = null)
         return "$instanceId:$ruleId"
     }
@@ -197,7 +181,6 @@ class ThinkingRulesCollection(
         repo.deleteThinkingRule(instanceId, ruleId)
     }
 
-    // ---- [T-config-readable] Readable descriptions (mirrors iOS ThinkingRulesCollection) ----
 
     override val readableSubjectFormat: String get() = "Thinking rule “%1\$@” – %2\$@"
 
@@ -235,7 +218,6 @@ class ThinkingRulesCollection(
         return if (s.equals("all", ignoreCase = true) || s.isBlank()) ReadableArg.Key("All models") else ReadableArg.Text(s)
     }
 
-    /** wire_format JSON → the one-line summary the rule list shows. */
     private fun wireFormatPhrase(v: ConfigValue): ReadableArg {
         if (v == ConfigValue.Null || (v is ConfigValue.Str && v.value.isBlank())) return ReadableArg.Key("(none)")
         val fmt = runCatching { ThinkingRuleCoding.decodeWireFormat(jsonStringFromConfigValue(v)) }.getOrNull()
@@ -243,7 +225,6 @@ class ThinkingRulesCollection(
         return ReadableArg.Text(com.openminis.app.ui.settings.wireFormatSummary(fmt))
     }
 
-    // ---- JSON <-> ConfigValue bridge ----
 
     private fun configValueFromJson(json: String?): ConfigValue {
         if (json.isNullOrBlank()) return ConfigValue.Str("")

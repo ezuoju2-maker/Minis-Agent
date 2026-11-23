@@ -10,29 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * [T15] Compaction loop: transcript framing, split-and-merge, and old-task
- * bleed (9f4edcc7c, 655a8709d, b2353df64, 6732e39eb, 92370d9ab, cfa475937;
- * issues #275 #235).
- *
- * User report: the summary after /compact had nothing to do with the
- * conversation — a fast model "answered" the last user turn of the transcript
- * instead of summarising it (15-char summary), and after a compaction the
- * agent resumed an OLD task the summary described as a goal.
- *
- * `generateCompactSummaryWithSplitting`, `generateCompactSummary`'s framing
- * and `buildConversationTextForSummary` live on ChatViewModel; they are
- * ported verbatim here with the leaf LLM call injected, and the framing /
- * prompt wording is pinned by source grep. The real predicate
- * `ChatViewModel.shouldSplitOnError` and the real budget
- * `ChatViewModel.MAX_COMPACT_LLM_CALLS` are used, not copies.
- *
- * Divider placement after an in-loop compaction is already pinned by
- * CompactDividerPlacementTest (cfa475937) and is not duplicated here.
- */
-// ── ports (file-level so the nested Splitter can share them) ───────────────
 
-/** Port of buildConversationTextForSummary (ChatViewModel ~L4465). */
 private fun buildConversationTextForSummary(history: List<LLMMessage>): String = buildString {
     for (msg in history) {
         val role = msg.role.name.lowercase()
@@ -59,15 +37,9 @@ private const val FRAME_INSTRUCTION =
         "Write everything in past tense, framed as \"what was discussed / what " +
         "was done\", NOT as an ongoing goal or todo list."
 
-/** Port of the user-message construction in generateCompactSummary (~L4593). */
 private fun compactUserMessage(conversationText: String): String =
     FRAME_HEAD + conversationText + FRAME_TAIL + FRAME_INSTRUCTION
 
-/**
- * Port of generateCompactSummaryWithSplitting (~L4506). [leaf] receives the
- * FRAMED user message (what the model sees) and returns the summary text. The
- * real `ChatViewModel.shouldSplitOnError` and `MAX_COMPACT_LLM_CALLS` are used.
- */
 private class Splitter(private val leaf: (String) -> String) {
     val callsIssued = AtomicInteger(0)
     val leafInputs = mutableListOf<String>()
@@ -100,17 +72,14 @@ class CompactLoopFramingTest {
     private fun u(t: String) = LLMMessage(LLMMessage.Role.USER, t)
     private fun a(t: String) = LLMMessage(LLMMessage.Role.ASSISTANT, t)
 
-    /** A fake model that refuses anything over [maxChars] as an untyped provider error. */
     private fun sizeLimitedLeaf(maxChars: Int, onOk: (String) -> String): (String) -> String = { framed ->
         if (framed.length > maxChars) throw LLMError.ProviderError("[400] context_length_exceeded: input too long", httpStatus = 400)
         onOk(framed)
     }
 
-    /** Names that only appear in the framed input's transcript body. */
     private fun topicsIn(framed: String): List<String> =
         listOf("TOPIC-ALPHA", "TOPIC-BETA", "TOPIC-GAMMA").filter { framed.contains(it) }
 
-    // ── case 1: over threshold -> split -> merge ───────────────────────────
 
     @Test
     fun `an input the model refuses is halved, each half summarised, then joined`() {
@@ -127,17 +96,14 @@ class CompactLoopFramingTest {
     @Test
     fun `size-independent failures do not split and the call budget bounds the fan-out`() {
         val history = (0 until 8).map { u("m$it") }
-        // 429: never split, one call, rethrown.
         val rl = Splitter { throw LLMError.RateLimited() }
         try { rl.summarize(history); assertTrue("must throw", false) } catch (e: LLMError.RateLimited) { }
         assertEquals(1, rl.callsIssued.get())
-        // Always-failing provider error: splits, but never past the budget.
         val always = Splitter { throw LLMError.ProviderError("too long") }
         try { always.summarize(history); assertTrue("must throw", false) } catch (e: Exception) { }
         assertTrue("calls=${always.callsIssued.get()}", always.callsIssued.get() <= ChatViewModel.MAX_COMPACT_LLM_CALLS)
     }
 
-    // ── case 2: framing markers ────────────────────────────────────────────
 
     @Test
     fun `framing markers wrap the transcript and never leak into the summary`() {
@@ -150,11 +116,8 @@ class CompactLoopFramingTest {
         assertTrue(framed.endsWith(FRAME_INSTRUCTION))
         assertTrue("transcript sits between head and tail",
             framed.indexOf(transcript) > framed.indexOf(FRAME_HEAD) && framed.indexOf(transcript) < framed.indexOf(FRAME_TAIL))
-        // The last user turn is NOT the last thing the model reads — the
-        // instruction is, which is what stops "answering" it.
         assertTrue(framed.lastIndexOf("user: please build") < framed.lastIndexOf("Do NOT continue the conversation above"))
 
-        // A leaf that echoes only what sits between the markers yields a summary free of them.
         val s = Splitter { f -> f.substringAfter(FRAME_HEAD).substringBefore(FRAME_TAIL).lines().first() }
         val summary = s.summarize(history)
         assertEquals("user: please build TOPIC-ALPHA", summary)
@@ -162,7 +125,6 @@ class CompactLoopFramingTest {
         assertFalse(summary.contains("Compact this conversation"))
     }
 
-    // ── case 3: two topics -> both kept, no third, no bleed ────────────────
 
     @Test
     fun `two unrelated halves both survive the merge and neither half sees the other`() {
@@ -175,13 +137,10 @@ class CompactLoopFramingTest {
         assertEquals("SUM[TOPIC-ALPHA]\n\nSUM[TOPIC-BETA]", out)
         assertTrue(out.contains("TOPIC-ALPHA") && out.contains("TOPIC-BETA"))
         assertFalse("no fabricated third topic", out.contains("TOPIC-GAMMA"))
-        // Bleed check: the ALPHA leaf never saw BETA and vice versa, and neither
-        // half was handed a "Previous context summary" of the other.
         val halves = s.leafInputs.drop(1)
         assertEquals(listOf("TOPIC-ALPHA"), topicsIn(halves[0]))
         assertEquals(listOf("TOPIC-BETA"), topicsIn(halves[1]))
         assertTrue(halves.none { it.contains("Previous context summary:") })
-        // Oldest-first order is preserved in the join.
         assertTrue(out.indexOf("TOPIC-ALPHA") < out.indexOf("TOPIC-BETA"))
     }
 
@@ -194,7 +153,6 @@ class CompactLoopFramingTest {
         assertTrue(framed.indexOf("Previous context summary:") < framed.indexOf("New conversation to merge:"))
     }
 
-    // ── drift guard ────────────────────────────────────────────────────────
 
     @Test
     fun `drift guard - framing, past-tense prompt and summary wrapper still in production`() {
@@ -203,15 +161,10 @@ class CompactLoopFramingTest {
         assertTrue(vm.contains("append(\"\\n\\n---\\nEND OF CONVERSATION TO COMPACT.\\n\\n\")"))
         assertTrue(vm.contains("Do NOT continue the conversation above — summarize it."))
         assertTrue(vm.contains("NOT as an ongoing goal or todo list."))
-        // System prompt: the structured summary's `## Pending` section replaced
-        // the old "no carried-over objectives" prose (old-task bleed guard).
-        // It now ALLOWS a real unfinished task but forbids inventing goals.
         assertTrue(vm.contains("## Pending"))
         assertTrue(vm.contains("NEVER invent goals"))
-        // Summary wrapper at read time: newest user instruction wins.
         assertTrue(vm.contains("The user's most recent message (below or in the next turn) takes precedence"))
         assertTrue(vm.contains("do not resume the old plan from this summary"))
-        // Split-and-merge: textual join, halves get NO previous summary, depth cap 3.
         assertTrue(vm.contains("val summary1 = generateCompactSummaryWithSplitting(firstHalf, null, depth + 1)"))
         assertTrue(vm.contains("val summary2 = generateCompactSummaryWithSplitting(secondHalf, null, depth + 1)"))
         assertTrue(vm.contains("summary1 + \"\\n\\n\" + summary2"))

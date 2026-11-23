@@ -77,64 +77,27 @@ import com.openminis.app.ui.settings.KEY_RETURN_KEY_BEHAVIOR
 import com.openminis.app.ui.settings.getAppearancePrefs
 import com.openminis.app.ui.theme.ChatColors
 
-/**
- * [T-send-longpress-return-mode] Pure logic behind the composer Send button's
- * long-press "Return key" chooser. Kept free of Android/Compose types so it is
- * JUnit-testable; the composables below are thin wiring over it.
- *
- * The chooser writes the SAME preference the Appearance → Return Key setting
- * owns (`returnKeyBehavior`, Int 0=Newline, 1=Send) so the two can never
- * disagree — there is deliberately no second "temporary" flag.
- */
 object SendReturnMode {
-    /** Matches AppearanceScreen's `returnKeyBehavior` values. */
     const val PREF_NEWLINE = 0
     const val PREF_SEND = 1
 
-    /**
-     * A tap that lands within this window after the chooser was dismissed is
-     * the same finger that dismissed it (outside-tap on a non-focusable popup
-     * also reaches the window below). Swallow it so closing the menu by tapping
-     * the Send button does not also send the draft.
-     */
     const val DISMISS_TAP_GUARD_MS = 350L
 
-    /** Pref value → "does Return send?". Unknown values read as Newline, same
-     *  as `returnKeySendsMessage()` (only exactly 1 means Send). */
     fun sendsFromPref(value: Int): Boolean = value == PREF_SEND
 
-    /** "does Return send?" → pref value written back. */
     fun prefFromSends(sends: Boolean): Int = if (sends) PREF_SEND else PREF_NEWLINE
 
-    /**
-     * Whether a TAP on the Send button should send. The button stays
-     * gesture-enabled even when there is nothing to send (so long-press works
-     * on the grey button); the "disabled" part lives here instead.
-     */
     fun tapShouldSend(canActivate: Boolean, menuVisible: Boolean, msSinceMenuDismiss: Long): Boolean {
         if (!canActivate) return false
         if (menuVisible) return false
         return msSinceMenuDismiss < 0 || msSinceMenuDismiss >= DISMISS_TAP_GUARD_MS
     }
 
-    /**
-     * Pivot, as a fraction of the popup's size, that sits on the anchor's
-     * centre. Used as the scale transformOrigin so the menu visibly grows out of
-     * the Send button. May fall outside 0..1 (the anchor is outside the popup
-     * when the menu sits above it) — TransformOrigin accepts that and it is
-     * exactly what makes the scale originate at the button.
-     */
     fun pivotFraction(anchorCenter: Int, popupStart: Int, popupSize: Int): Float {
         if (popupSize <= 0) return 0.5f
         return (anchorCenter - popupStart).toFloat() / popupSize.toFloat()
     }
 
-    /**
-     * Popup placement: right edges aligned with the anchor (Send sits at the
-     * trailing edge of the composer), preferring ABOVE the button with [gapPx]
-     * clearance, flipping below only when there is no room above. Returns
-     * (x, y) clamped inside the window.
-     */
     fun placement(
         anchorLeft: Int, anchorTop: Int, anchorRight: Int, anchorBottom: Int,
         windowWidth: Int, windowHeight: Int,
@@ -149,15 +112,6 @@ object SendReturnMode {
     }
 }
 
-/**
- * [T-send-longpress-return-mode] Observable read of the Return-key preference.
- * The old composer read `returnKeySendsMessage(context)` as a plain value, so a
- * change only showed up whenever something else happened to recompose the
- * composer. Backing it with a SharedPreferences listener makes a change from the
- * Send-button chooser (or Settings) recompose the text field immediately, which
- * also swaps `ImeAction` — CoreTextField restarts the IME session when its
- * ImeOptions change, so the soft keyboard's action key updates in place.
- */
 @Composable
 fun rememberReturnKeySendsMessage(context: Context): State<Boolean> {
     val prefs = remember(context) { getAppearancePrefs(context) }
@@ -165,50 +119,30 @@ fun rememberReturnKeySendsMessage(context: Context): State<Boolean> {
         mutableStateOf(SendReturnMode.sendsFromPref(prefs.getInt(KEY_RETURN_KEY_BEHAVIOR, SendReturnMode.PREF_NEWLINE)))
     }
     DisposableEffect(prefs) {
-        // Held strongly by this effect: SharedPreferences keeps listeners in a
-        // WeakHashMap, so an inline lambda would be collected and go silent.
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { p, key ->
             if (key == KEY_RETURN_KEY_BEHAVIOR) {
                 state.value = SendReturnMode.sendsFromPref(p.getInt(KEY_RETURN_KEY_BEHAVIOR, SendReturnMode.PREF_NEWLINE))
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
-        // Re-sync in case it changed between remember and registration.
         state.value = SendReturnMode.sendsFromPref(prefs.getInt(KEY_RETURN_KEY_BEHAVIOR, SendReturnMode.PREF_NEWLINE))
         onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
     return state
 }
 
-/** [T-send-longpress-return-mode] Single writer used by the chooser. */
 fun setReturnKeySendsMessage(context: Context, sends: Boolean) {
     getAppearancePrefs(context).edit()
         .putInt(KEY_RETURN_KEY_BEHAVIOR, SendReturnMode.prefFromSends(sends))
         .apply()
 }
 
-/**
- * [T-send-longpress-return-mode] The composer's Send / Enqueue button.
- *
- * - Tap sends exactly as before (via [onSend]) — but only when [canActivate];
- *   otherwise the tap is a no-op. The button is NOT `clickable(enabled=false)`
- *   any more, because a disabled clickable swallows long-press too and the user
- *   asked for the chooser to work on the grey (empty-composer) button.
- * - Long-press opens [SendReturnModeMenu] anchored to this button.
- * - TalkBack gets a custom action that opens the same menu, so it is reachable
- *   without a long-press gesture.
- */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ComposerSendButton(
     canActivate: Boolean,
     onSend: () -> Unit,
     modifier: Modifier = Modifier,
-    /**
-     * [T-voice-send-busy] A voice send is waiting for recognition: a greyed
-     * circle with a spinner that takes no taps, until the message has gone
-     * out or the wait was abandoned (iOS b48cfdbfe).
-     */
     busy: Boolean = false,
 ) {
     val context = LocalContext.current
@@ -237,9 +171,6 @@ fun ComposerSendButton(
                     val since = if (lastDismissAt < 0) -1L else SystemClock.uptimeMillis() - lastDismissAt
                     if (SendReturnMode.tapShouldSend(canActivate, menuVisible, since)) onSend()
                 },
-                // Unconditional: the chooser must open on the grey (nothing
-                // to send) button too. combinedClickable already fires the
-                // LongPress haptic.
                 onLongClick = { menuVisible = true },
             )
             .semantics {
@@ -280,21 +211,6 @@ fun ComposerSendButton(
     }
 }
 
-/**
- * [T-send-longpress-return-mode] Popup that grows out of the Send button.
- *
- * Animation: one spring-driven `progress` 0→1 feeds scale (0.35→1) and alpha
- * through `graphicsLayer`, with `transformOrigin` computed from the real
- * placement so the pivot sits on the button's centre — the menu visibly
- * expands out of the button and collapses back into it. Unlike [MinisMenu]
- * (enter-only; the Popup unmounts instantly on dismiss) the Popup here stays
- * mounted until the reverse spring finishes, and a re-open mid-collapse simply
- * retargets the same Animatable, so it never jumps.
- *
- * Non-focusable on purpose: a focusable popup window takes input focus, which
- * hides the soft keyboard — wrong for a "quick temporary switch" while typing.
- * Outside taps still dismiss it (dismissOnClickOutside).
- */
 @Composable
 private fun SendReturnModeMenu(
     expanded: Boolean,
@@ -322,11 +238,6 @@ private fun SendReturnModeMenu(
     }
 }
 
-/**
- * The popup shell shared by the Send button's Return-key chooser and
- * (since [T-stop-mode-longpress]) the Stop button's stop-mode chooser: a
- * header plus single-choice [rows], growing out of the anchor button.
- */
 @Composable
 private fun ComposerChoiceMenu(
     expanded: Boolean,
@@ -339,10 +250,8 @@ private fun ComposerChoiceMenu(
     LaunchedEffect(expanded) {
         if (expanded) {
             mounted = true
-            // Slightly under-damped → a small, lively overshoot on open.
             progress.animateTo(1f, spring(dampingRatio = 0.72f, stiffness = 420f))
         } else if (mounted) {
-            // Critically damped and stiffer → quick, clean collapse.
             progress.animateTo(0f, spring(dampingRatio = 1f, stiffness = 900f))
             mounted = false
         }
@@ -381,9 +290,6 @@ private fun ComposerChoiceMenu(
         properties = PopupProperties(focusable = false, dismissOnClickOutside = true),
     ) {
         val shape = RoundedCornerShape(20.dp)
-        // Same surface language as MinisMenu (elevated container in dark,
-        // white in light, launcher-style soft halo, hairline border), with a
-        // touch of translucency so the composer reads through the edges.
         val container = if (ChatColors.isDark) MaterialTheme.colorScheme.surfaceContainerHigh else Color.White
         val border = if (ChatColors.isDark) {
             BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
@@ -470,18 +376,12 @@ private fun ReturnModeRow(
     }
 }
 
-/**
- * [T-stop-mode-longpress] Observable read of Confirm Before Stopping, so the
- * chooser's check mark follows a change made in Settings or minis-config.
- * Same listener pattern as [rememberReturnKeySendsMessage].
- */
 @Composable
 fun rememberConfirmBeforeStopping(context: Context): State<Boolean> {
     val prefs = remember(context) { getAppearancePrefs(context) }
     val read = { p: SharedPreferences -> p.getBoolean(StopConfirmPolicy.SETTINGS_KEY, StopConfirmPolicy.DEFAULT_ENABLED) }
     val state = remember(prefs) { mutableStateOf(read(prefs)) }
     DisposableEffect(prefs) {
-        // Held strongly by this effect: SharedPreferences keeps listeners weakly.
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { p, key ->
             if (key == StopConfirmPolicy.SETTINGS_KEY) state.value = read(p)
         }
@@ -492,21 +392,10 @@ fun rememberConfirmBeforeStopping(context: Context): State<Boolean> {
     return state
 }
 
-/** [T-stop-mode-longpress] Single writer used by the stop-mode chooser. */
 fun setConfirmBeforeStopping(context: Context, confirm: Boolean) {
     getAppearancePrefs(context).edit().putBoolean(StopConfirmPolicy.SETTINGS_KEY, confirm).apply()
 }
 
-/**
- * [T-stop-mode-longpress] The composer's Stop button. Tap = [onStop] (the
- * caller decides whether to confirm first, via [StopConfirmPolicy]);
- * long-press = a chooser between Stop Immediately and Confirm Before Stopping,
- * writing the same preference as Settings > Appearance. Mirrors iOS
- * ChatSendButton.stopModeMenu.
- *
- * The dismiss-tap guard matters more here than on Send: the outside tap that
- * closes the chooser often lands on this very button, and must not stop the task.
- */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ComposerStopButton(

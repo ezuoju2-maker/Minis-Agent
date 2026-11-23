@@ -5,24 +5,6 @@ import org.json.JSONObject
 import java.io.File
 import java.util.Locale
 
-/**
- * [self-improvement / structured-memory] Durable, structured facts extracted
- * from conversations, shared across sessions via the global memory directory
- * (which SessionMounts already mounts into every sandbox at /var/minis/memory
- * and which BackupExporter/Importer already cover).
- *
- * Unlike the free-text daily logs (MemoryRepository), a fact has a stable
- * identity (subject + predicate). Writing the same fact again STRENGTHENS it
- * (occurrences++, confidence up, updatedAt refreshed) instead of appending a
- * duplicate — this is what makes the agent "get wiser with use": a preference
- * stated twice outranks one mentioned once, and conflicting values are
- * resolved by confidence then recency.
- *
- * Storage is JSONL (one fact per line) rather than a Room table: the facts
- * stay visible/editable as a file like the rest of memory, need no schema
- * migration, and the expected scale (hundreds to a few thousand) is fine for
- * an O(n) scan with no FTS/embedding dependency.
- */
 class MemoryFactRepository(private val memoryDir: File) {
 
     data class Fact(
@@ -35,7 +17,6 @@ class MemoryFactRepository(private val memoryDir: File) {
         val updatedAt: Long = System.currentTimeMillis(),
         val sourceSessionId: String = "",
     ) {
-        /** Stable identity for upsert / conflict resolution. */
         val key: String get() = "${subject.lowercase(Locale.US)}\u0000${predicate.lowercase(Locale.US)}"
     }
 
@@ -46,7 +27,6 @@ class MemoryFactRepository(private val memoryDir: File) {
         private const val MAX_CONFIDENCE = 1.0f
         private const val CONFIDENCE_STEP = 0.15f
         private const val MAX_INJECT_CHARS = 2_000
-        /** [advanced-recall] A fact's recency weight halves every 30 days. */
         private const val HALF_LIFE_DAYS = 30.0
     }
 
@@ -56,10 +36,8 @@ class MemoryFactRepository(private val memoryDir: File) {
         memoryDir.mkdirs()
     }
 
-    /** Serialize-anywhere guard: all mutations go through the monitor. */
     private val lock = Any()
 
-    // -- read --
 
     private fun loadAllLocked(): List<Fact> {
         val f = file
@@ -101,17 +79,10 @@ class MemoryFactRepository(private val memoryDir: File) {
             ).append('\n')
         }
         tmp.writeText(sb.toString())
-        // Atomic-ish replace so a crash mid-write cannot corrupt all facts.
         if (file.exists()) file.delete()
         tmp.renameTo(file)
     }
 
-    /**
-     * Upsert a fact. Re-stating an existing (subject,predicate) strengthens it;
-     * a new value for the same key keeps the higher-confidence one and decays
-     * the weaker, so a confidently-known preference is not erased by a stray
-     * contradictory mention.
-     */
     fun upsert(
         subject: String,
         predicate: String,
@@ -138,14 +109,12 @@ class MemoryFactRepository(private val memoryDir: File) {
                     updatedAt = now,
                 )
             } else if (v.length > old.value.length && old.confidence < 0.6f) {
-                // A richer, weakly-held value supersedes a tentative one.
                 facts[idx] = old.copy(
                     value = v, occurrences = old.occurrences + 1,
                     confidence = minOf(MAX_CONFIDENCE, old.confidence + CONFIDENCE_STEP),
                     updatedAt = now,
                 )
             } else {
-                // Keep the incumbent; a repeated contradiction erodes it a little.
                 facts[idx] = old.copy(
                     confidence = maxOf(0.1f, old.confidence - CONFIDENCE_STEP / 2),
                     occurrences = old.occurrences + 1,
@@ -159,7 +128,6 @@ class MemoryFactRepository(private val memoryDir: File) {
         "Fact remembered: $s · $p = $v"
     }
 
-    /** Keyword search ranked by confidence × recency. */
     fun search(keywords: String, limit: Int = 10): String = synchronized(lock) {
         val terms = keywords.trim().lowercase(Locale.US).split(Regex("\\s+")).filter { it.isNotEmpty() }
         val facts = loadAllLocked()
@@ -179,15 +147,7 @@ class MemoryFactRepository(private val memoryDir: File) {
         sb.toString().trim()
     }
 
-    /** High-value facts to auto-inject into the system prompt (bounded chars). */
     fun topFacts(limit: Int = 12): String = synchronized(lock) {
-        // [advanced-recall] Rank by confidence × recency so a fact reinforced
-        // recently outranks an equally-confident but stale one — the "wiser
-        // with use" signal reaches the prompt, not just search().
-        // IMPORTANT: the ordering uses only each fact's OWN fields (no
-        // System.currentTimeMillis()), so for a given fact set the output is
-        // byte-stable across requests — required by prompt caching. recencyBoost
-        // is anchored to a fixed epoch, not to "now", for exactly this reason.
         val ranked = loadAllLocked()
             .filter { it.confidence >= 0.6f }
             .sortedByDescending { it.confidence * 1000 + it.occurrences + recencyBoost(it.updatedAt) }
@@ -204,28 +164,9 @@ class MemoryFactRepository(private val memoryDir: File) {
 
     fun count(): Int = synchronized(lock) { loadAllLocked().size }
 
-    // ---------------------------------------------------------------------
-    // [advanced-recall] Hybrid, weighted recall + temporal decay. New API only;
-    // the original search()/topFacts() semantics are untouched so all existing
-    // callers and tests keep their exact behaviour.
-    // ---------------------------------------------------------------------
 
     data class ScoredFact(val fact: Fact, val score: Double)
 
-    /**
-     * Ranked recall with field weighting and fractional term overlap.
-     *
-     * Differences from the legacy [search]:
-     *  - a query matches on ANY term (not ALL), scored by how many terms hit;
-     *  - subject / predicate matches weigh more than value matches;
-     *  - confidence is multiplied by an exponential recency decay (half-life
-     *    [HALF_LIFE_DAYS]) so a once-strong but stale fact sinks below a
-     *    recently reinforced one — "wiser with use" without unbounded growth;
-     *  - ties break deterministically by key for reproducible injection.
-     *
-     * The returned strings are the same `- subject: predicate = value` lines
-     * used by [search], safe to inject verbatim.
-     */
     fun recall(query: String, limit: Int = 10): String = synchronized(lock) {
         val terms = query.trim().lowercase(Locale.US).split(Regex("\\s+")).filter { it.isNotEmpty() }
         val facts = loadAllLocked()
@@ -242,7 +183,7 @@ class MemoryFactRepository(private val memoryDir: File) {
                 val inP = p.contains(t)
                 val inV = v.contains(t)
                 if (inS || inP || inV) hits += 1.0
-                if (inS) hits += 0.5   // identity fields weigh more
+                if (inS) hits += 0.5
                 if (inP) hits += 0.5
             }
             val coverage = hits / terms.size
@@ -261,11 +202,6 @@ class MemoryFactRepository(private val memoryDir: File) {
         sb.toString().trim()
     }
 
-    /**
-     * Inject the most relevant facts for an arbitrary query, blending base
-     * confidence with query relevance and temporal decay, bounded by chars.
-     * Complements [topFacts] (which ignores the current query).
-     */
     fun recallForPrompt(query: String, limit: Int = 8, maxChars: Int = MAX_INJECT_CHARS): String =
         synchronized(lock) {
             if (query.isBlank()) return@synchronized topFacts(limit)
@@ -298,6 +234,6 @@ class MemoryFactRepository(private val memoryDir: File) {
     private fun recencyBoost(updatedAt: Long): Double {
         if (updatedAt <= 0L) return 0.0
         val days = (System.currentTimeMillis() - updatedAt) / 86_400_000.0
-        return maxOf(0.0, 30.0 - days) // facts touched today get the biggest boost
+        return maxOf(0.0, 30.0 - days)
     }
 }

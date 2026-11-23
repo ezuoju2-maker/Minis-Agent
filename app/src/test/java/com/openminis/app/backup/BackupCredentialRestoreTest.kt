@@ -8,12 +8,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-backup-restore-semantics / B01] Spec row (h): which credentials a restore
- * writes over the device's, from the `credentials` cases of
- * `src/shared/backup-restore/b01_restore_scenarios.json`. Restoring used to
- * keep every credential already present.
- */
 class BackupCredentialRestoreTest {
 
     private val doc: JSONObject by lazy {
@@ -23,7 +17,6 @@ class BackupCredentialRestoreTest {
         JSONObject(f.readText())
     }
 
-    // ── (h) credentials ──────────────────────────────────────────────────
 
     private class FakeStore(
         private val values: MutableMap<BackupCredentialRestore.Slot, String>,
@@ -55,9 +48,6 @@ class BackupCredentialRestoreTest {
             val c = cases.getJSONObject(i)
             val s = slot(c.getString("slot"))
             val values = mutableMapOf<BackupCredentialRestore.Slot, String>()
-            // An email / GCP project row describes the device's sign-in, so the
-            // device has its token (iOS's harness passes it too): the three are
-            // one login ([T-backup-oauth-login-bundle]).
             if (s == BackupCredentialRestore.Slot.OAUTH_EMAIL || s == BackupCredentialRestore.Slot.OAUTH_GCP_PROJECT) {
                 values[BackupCredentialRestore.Slot.OAUTH_TOKEN] = "{\"access_token\":\"local\"}"
             }
@@ -102,8 +92,6 @@ class BackupCredentialRestoreTest {
 
     @Test
     fun `h - a signed-out device takes the backup's whole login, not just its token`() {
-        // [T-backup-oauth-login-bundle] Logout drops the token but leaves the
-        // email and GCP project of the old account behind.
         val values = mutableMapOf(
             BackupCredentialRestore.Slot.OAUTH_EMAIL to "a@old",
             BackupCredentialRestore.Slot.OAUTH_GCP_PROJECT to "project-a",

@@ -9,22 +9,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-codex-gpt-image25-android] Pins what actually goes on the wire for the
- * Codex image models.
- *
- * The distinction these cover is invisible in a diff: gpt-image-2 sends a bare
- * `{type:image_generation}` and lets the backend pick the model, while the 2.5
- * variants name themselves in that same object. Getting it backwards would
- * either pin gpt-image-2's behaviour to something the backend currently
- * chooses, or silently route sunburst/flare to the default model — and both
- * failures look like a correct request in the logs.
- *
- * `buildCodexImageBody` is private and the Codex constructor hardcodes
- * chatgpt.com, so this reaches it reflectively rather than through
- * MockWebServer. That is the honest trade: it tests body construction, not the
- * transport.
- */
 class CodexImageModelTest {
 
     private fun imageModel(id: String) = LLMModel(
@@ -69,11 +53,6 @@ class CodexImageModelTest {
         }
     }
 
-    /**
-     * The envelope is the same for all three: the wire model stays gpt-5.5 and
-     * only the tool object varies. A change here would mean the 2.5 variants
-     * took a different request shape, not just a different image model.
-     */
     @Test
     fun `every codex image model keeps the same wire envelope`() {
         for (id in listOf("gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare")) {
@@ -84,7 +63,6 @@ class CodexImageModelTest {
         }
     }
 
-    /** The prompt is carried through, so a body that builds is not an empty one. */
     @Test
     fun `the user prompt reaches the request`() {
         val input = bodyFor("gpt-image-2.5-flare").getJSONArray("input").getJSONObject(0)

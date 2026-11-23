@@ -9,15 +9,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-/**
- * [T-android-voice-correction] Single entry point for the correction feature —
- * builds the object graph once and exposes the few calls the UI layer needs.
- *
- * Everything here degrades to a no-op when the database can't be opened, so a
- * caller never has to null-check or reason about availability. Capture calls
- * are fire-and-forget on an IO scope: the user's typing or recording must never
- * wait on segmentation or SQLite.
- */
 object VoiceCorrection {
 
     private const val TAG = "VoiceCorrection"
@@ -32,13 +23,9 @@ object VoiceCorrection {
     private var engine: VoiceCorrectionEngine? = null
     private var vocabularyBuilder: TypedVocabularyBuilder? = null
 
-    // [T-android-correction-context-wiring] Kept so buildConversationContext can
-    // feed the same segmenter + rarity ranking the retrieval path uses, without
-    // exposing them or rebuilding jieba. Null until ensureInitialized succeeds.
     private var segment: ((String) -> List<String>)? = null
     private var rank: ((String) -> Int?)? = null
 
-    /** Build the graph. Idempotent; safe to call from any entry point. */
     @Synchronized
     fun ensureInitialized(context: Context) {
         if (initialized) return
@@ -62,10 +49,6 @@ object VoiceCorrection {
 
         recorder = VoiceCorrectionRecorder(app, database, segment)
 
-        // [T-android-safemode-lateinit-crash-147] subsystemsReady() first: the
-        // safe call only rules out a null Application, while the lateinit
-        // getter itself throws when onCreate early-returned under safe-mode.
-        // Null here already degrades gracefully (correction is skipped).
         val repository = (app as? MinisApp)
             ?.takeIf { it.subsystemsReady() }
             ?.providerRepository
@@ -82,8 +65,6 @@ object VoiceCorrection {
             )
         }
 
-        // Straight from the Room singleton rather than adding an accessor to
-        // MinisApp — AppDatabase.getInstance is already the shared handle.
         val dao = runCatching {
             com.openminis.app.data.db.AppDatabase.getInstance(app).chatDao()
         }.getOrNull()
@@ -92,39 +73,16 @@ object VoiceCorrection {
         }
     }
 
-    /**
-     * Prime the segmenter dictionaries off the critical path. The first jieba
-     * call loads ~5MB and takes seconds; without this the first correction (or
-     * first capture) stalls visibly.
-     */
     fun warmUp(context: Context) {
         ensureInitialized(context)
         scope.launch { engine?.warmUp() }
     }
 
-    /** The correction engine, or null when unavailable. */
     fun engine(context: Context): VoiceCorrectionEngine? {
         ensureInitialized(context)
         return engine
     }
 
-    /**
-     * [T-android-correction-context-wiring] Build the budgeted conversation
-     * context for a correction pass from the chat's in-memory UI messages.
-     * Android port of iOS `voiceCorrectionContext(from:)` (AIChatView.swift).
-     *
-     * Only real conversation turns feed the context:
-     *  - `system` rows (compact dividers + systemInfo notices) are dropped, so
-     *    UI copy never leaks into the rare-terms digest — mirrors iOS filtering
-     *    out compactDivider / systemInfo.
-     *  - assistant prose lives in text `toolBlocks`, not always in `content`
-     *    (which can hold a stale title fragment), so for assistant turns the
-     *    joined text blocks are the source of truth and `content` is the
-     *    fallback. tool_use / thinking / info blocks stay out — commands and
-     *    traces are not conversational vocabulary.
-     * Returns [ConversationContext.EMPTY] when correction is unavailable or
-     * there is nothing to draw from.
-     */
     fun buildConversationContext(
         context: Context,
         messages: List<com.openminis.app.ui.chat.ChatMessage>,
@@ -134,8 +92,6 @@ object VoiceCorrection {
         val seg = segment ?: return ConversationContext.EMPTY
         val rnk = rank ?: return ConversationContext.EMPTY
 
-        // [T-android-voice-viewport-context] The on-screen blocks, next to (not
-        // instead of) the history-mined ones below.
         val screenContext = runCatching {
             ScreenContextBuilder.build(screen, latestReply(messages))
         }.onFailure { Log.w(TAG, "screen context failed", it) }.getOrNull()
@@ -149,12 +105,6 @@ object VoiceCorrection {
         return CorrectionContextBuilder.build(source, seg, rnk).copy(screen = screenContext)
     }
 
-    /**
-     * [T-android-voice-viewport-context] The newest assistant reply's text,
-     * read the same way [toSourceMessages] reads assistant turns (text blocks
-     * first, `content` as fallback, attachment markup stripped). Its message id
-     * lets the screen block drop the same reply's on-screen rows.
-     */
     internal fun latestReply(
         messages: List<com.openminis.app.ui.chat.ChatMessage>,
     ): ScreenContextBuilder.LatestReply? {
@@ -171,13 +121,6 @@ object VoiceCorrection {
         return null
     }
 
-    /**
-     * Debug builds print the exact text the screen blocks carry, so extraction
-     * can be checked against what is on the phone: filter logcat on
-     * `CorrectionContext` and look for `[Screen:viewport]` / `[Screen:latest]`.
-     * Release builds keep only the counts line from [ScreenContextBuilder.build]:
-     * this is conversation content. Chunked because logcat truncates long lines.
-     */
     private fun logScreenContext(screen: ScreenContext) {
         if (!com.openminis.app.BuildConfig.DEBUG) return
         fun chunked(prefix: String, text: String) {
@@ -193,19 +136,13 @@ object VoiceCorrection {
         }
     }
 
-    /**
-     * [T-android-correction-context-wiring] The pure UI-message → source-message
-     * transform behind [buildConversationContext]. Kept device-independent (no
-     * segmenter / SQLite) so the role filter and assistant-text-block extraction
-     * can be unit-tested. See [buildConversationContext] for the rules.
-     */
     internal fun toSourceMessages(
         messages: List<com.openminis.app.ui.chat.ChatMessage>,
     ): List<CorrectionSourceMessage> = messages.mapNotNull { msg ->
         val role = when (msg.role) {
             "user" -> CorrectionSourceMessage.Role.USER
             "assistant" -> CorrectionSourceMessage.Role.ASSISTANT
-            else -> return@mapNotNull null // drop system dividers / notices
+            else -> return@mapNotNull null
         }
         var text = msg.content
         if (role == CorrectionSourceMessage.Role.ASSISTANT && msg.toolBlocks.isNotEmpty()) {
@@ -218,11 +155,7 @@ object VoiceCorrection {
         if (stripped.isBlank()) null else CorrectionSourceMessage(role, stripped)
     }
 
-    // -- capture (fire-and-forget) --
 
-    /**
-     * The user edited an ASR transcript. Capability #2.
-     */
     fun captureTranscriptEdit(
         context: Context,
         before: String,
@@ -238,10 +171,6 @@ object VoiceCorrection {
         }
     }
 
-    /**
-     * The user selected text in a plain input field and replaced it.
-     * Capability #3 — silent background capture, no UI.
-     */
     fun captureTextInputEdit(
         context: Context,
         before: String,
@@ -257,7 +186,6 @@ object VoiceCorrection {
         }
     }
 
-    /** The user applied an AI correction — metrics only. */
     fun captureSuggestionAccepted(
         context: Context,
         original: String,
@@ -272,7 +200,6 @@ object VoiceCorrection {
         }
     }
 
-    /** Mine typed vocabulary if the throttle allows. Cheap to call on send. */
     fun mineVocabularyIfNeeded(context: Context) {
         ensureInitialized(context)
         val b = vocabularyBuilder ?: return
@@ -282,7 +209,6 @@ object VoiceCorrection {
         }
     }
 
-    /** Wipe all learning data. Backs the settings "Clear Collected Data" action. */
     fun clearAllData(context: Context) {
         ensureInitialized(context)
         scope.launch {
@@ -291,7 +217,6 @@ object VoiceCorrection {
         }
     }
 
-    /** Row counts for the settings screen. */
     suspend fun counts(context: Context): Map<String, Int> {
         ensureInitialized(context)
         return db?.counts() ?: emptyMap()

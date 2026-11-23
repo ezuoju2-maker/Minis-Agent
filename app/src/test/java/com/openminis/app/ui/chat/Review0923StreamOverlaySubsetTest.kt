@@ -5,19 +5,6 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Review 2026-09-23 — guards 5b51f07f9 (T-android-stream-overlay-subset).
- *
- * [streamingOverlaySubset] replaced [mergeStreamingOverlay] for the auto-follow
- * trigger and the child live-tool tile. Its correctness rests on two claims:
- *  1. every message it returns is byte-identical to the same message in the
- *     full merge (same fields overlaid), in the same order;
- *  2. when the streaming message is the newest assistant turn (the normal
- *     case), "last assistant" read from the subset equals the one read from
- *     the full merge; and when nothing in the map matches, callers must fall
- *     back to the canonical list (the subset is empty, never the full list).
- * No test exercised the function itself before this one.
- */
 class Review0923StreamOverlaySubsetTest {
 
     private fun user(id: String) = ChatMessage(id = id, role = "user", content = "q$id")
@@ -40,7 +27,6 @@ class Review0923StreamOverlaySubsetTest {
     @Test
     fun `empty streaming map gives an empty subset, never the full list`() {
         assertTrue(streamingOverlaySubset(history, emptyMap()).isEmpty())
-        // The full merge short-circuits to the same instance instead.
         assertSame(history, mergeStreamingOverlay(history, emptyMap()))
     }
 
@@ -66,9 +52,6 @@ class Review0923StreamOverlaySubsetTest {
 
     @Test
     fun `a delta whose message is not in the list yields nothing, so callers must fall back`() {
-        // Race: streamingById published before _messages carried the new
-        // bubble. The subset is empty; ChatScreen / rememberChildLiveToolBlock
-        // then read msgs.lastOrNull { assistant } — the finalized previous turn.
         val subset = streamingOverlaySubset(history, mapOf("not-yet-inserted" to delta))
         assertTrue(subset.isEmpty())
         val chosen = subset.lastOrNull { it.role == "assistant" }

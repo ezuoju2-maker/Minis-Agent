@@ -14,17 +14,6 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Host-side implementation of `android-contacts` — reads + writes the device
- * contacts via the ContactsContract ContentProvider.
- *
- * Usage:
- *   android-contacts list [--max N]
- *   android-contacts search <query> [--max N]
- *   android-contacts get <id>
- *   android-contacts delete <id>
- *   android-contacts --help
- */
 class ContactsOffloadHandler(private val context: Context) : NativeOffloadHandler {
 
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
@@ -32,17 +21,10 @@ class ContactsOffloadHandler(private val context: Context) : NativeOffloadHandle
         if (rawArgs.isEmpty() || rawArgs[0] == "-h" || rawArgs[0] == "--help") {
             return NativeOffloadResult(0, HELP_TEXT)
         }
-        // T54: parse for shared --compact / -q / --quiet handling. Subcommand
-        // dispatch still uses the raw `rawArgs` because Contacts encodes
-        // positional args (id, query) in subcommand-specific positions and
-        // OffloadArgs strips flag/positional ordering away.
         val parsedArgs = OffloadArgs(rawArgs)
 
-        // T330: tri-state agent gate before any work or system permission ask.
         OffloadGate.enforce("contacts", "android-contacts", parsedArgs, request)?.let { return it }
 
-        // delete needs WRITE_CONTACTS in addition to READ; the read-only path
-        // is fine with READ_CONTACTS alone.
         val needsWrite = rawArgs[0] == "delete"
         ensurePermission(needsWrite = needsWrite, args = parsedArgs)?.let { return it }
 
@@ -80,13 +62,6 @@ class ContactsOffloadHandler(private val context: Context) : NativeOffloadHandle
         return read && write
     }
 
-    /**
-     * Drive the same system-dialog → settings-gate flow as location/calendar.
-     * Returns null if permission ends up granted, otherwise a ready-to-return
-     * error result describing why we gave up. When [needsWrite] is true the
-     * permission set additionally includes WRITE_CONTACTS — required by the
-     * `delete` subcommand.
-     */
     private fun ensurePermission(needsWrite: Boolean = false, args: OffloadArgs): NativeOffloadResult? {
         if (hasPermission(needsWrite)) return null
         val perms = if (needsWrite) {
@@ -225,14 +200,6 @@ class ContactsOffloadHandler(private val context: Context) : NativeOffloadHandle
         }
     }
 
-    /**
-     * Delete a single contact by aggregated `Contacts._ID`. We first try the
-     * aggregated `Contacts.CONTENT_URI` path which cascades raw rows on most
-     * accounts; when that returns 0 we fall back to deleting every
-     * `RawContacts` row whose `CONTACT_ID` matches — this catches stub rows
-     * that the aggregated URI silently refuses (commonly orphaned raw rows
-     * left by sync adapters or test inserts).
-     */
     private fun doDelete(args: List<String>, parsedArgs: OffloadArgs): NativeOffloadResult {
         val id = args.firstOrNull()?.toLongOrNull()
             ?: return NativeOffloadResult(2, "android-contacts delete: missing or invalid <id>\n")
@@ -243,11 +210,6 @@ class ContactsOffloadHandler(private val context: Context) : NativeOffloadHandle
             arrayOf(id.toString()),
         )
         if (deleted <= 0) {
-            // Fallback: delete raw_contacts rows linked to this aggregated id.
-            // We don't have the account credentials needed for the
-            // CALLER_IS_SYNCADAPTER hard-delete dance, so this leaves a
-            // tombstone that real sync adapters will eventually purge — fine
-            // for our use case (the contact disappears from Contacts immediately).
             deleted = context.contentResolver.delete(
                 ContactsContract.RawContacts.CONTENT_URI,
                 "${ContactsContract.RawContacts.CONTACT_ID} = ?",

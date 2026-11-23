@@ -7,44 +7,37 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 
-/**
- * Parses ANSI SGR escape sequences into Compose AnnotatedString with color/style spans.
- * Supports: standard 8 colors, bright colors, bold, italic, underline, strikethrough, reset.
- */
 object AnsiParser {
 
     private val standardColors = arrayOf(
-        Color(0xFF000000), // 0 black
-        Color(0xFFCC0000), // 1 red
-        Color(0xFF00CC00), // 2 green
-        Color(0xFFCCCC00), // 3 yellow
-        Color(0xFF5555FF), // 4 blue
-        Color(0xFFCC00CC), // 5 magenta
-        Color(0xFF00CCCC), // 6 cyan
-        Color(0xFFCCCCCC), // 7 white
+        Color(0xFF000000),
+        Color(0xFFCC0000),
+        Color(0xFF00CC00),
+        Color(0xFFCCCC00),
+        Color(0xFF5555FF),
+        Color(0xFFCC00CC),
+        Color(0xFF00CCCC),
+        Color(0xFFCCCCCC),
     )
 
     private val brightColors = arrayOf(
-        Color(0xFF555555), // 8  bright black
-        Color(0xFFFF5555), // 9  bright red
-        Color(0xFF55FF55), // 10 bright green
-        Color(0xFFFFFF55), // 11 bright yellow
-        Color(0xFF5555FF), // 12 bright blue
-        Color(0xFFFF55FF), // 13 bright magenta
-        Color(0xFF55FFFF), // 14 bright cyan
-        Color(0xFFFFFFFF), // 15 bright white
+        Color(0xFF555555),
+        Color(0xFFFF5555),
+        Color(0xFF55FF55),
+        Color(0xFFFFFF55),
+        Color(0xFF5555FF),
+        Color(0xFFFF55FF),
+        Color(0xFF55FFFF),
+        Color(0xFFFFFFFF),
     )
 
-    // Matches CSI SGR sequences: ESC [ <params> m
     private val CSI_REGEX = Regex("""\x1B\[([0-9;]*)m""")
 
-    // Matches all other escape sequences (non-SGR) to strip them
     private val OTHER_ESC_REGEX = Regex(
         """\x1B(?:\[[0-9;]*[A-Za-ln-z]|\][^\x07]*(?:\x07|\x1B\\)|[()][0-2AB]|[A-Za-z])"""
     )
 
     fun parse(text: String, defaultColor: Color = Color(0xFFD4D4D4)): AnnotatedString {
-        // First strip non-SGR escape sequences
         val cleaned = OTHER_ESC_REGEX.replace(text, "")
 
         return buildAnnotatedString {
@@ -56,7 +49,6 @@ object AnsiParser {
 
             var pos = 0
             for (match in CSI_REGEX.findAll(cleaned)) {
-                // Append text before this escape
                 if (match.range.first > pos) {
                     val style = buildStyle(fg, bold, italic, underline, strikethrough)
                     pushStyle(style)
@@ -65,7 +57,6 @@ object AnsiParser {
                 }
                 pos = match.range.last + 1
 
-                // Parse SGR params
                 val params = match.groupValues[1]
                     .split(';')
                     .mapNotNull { it.toIntOrNull() }
@@ -91,7 +82,6 @@ object AnsiParser {
                 }
             }
 
-            // Append remaining text
             if (pos < cleaned.length) {
                 val style = buildStyle(fg, bold, italic, underline, strikethrough)
                 pushStyle(style)

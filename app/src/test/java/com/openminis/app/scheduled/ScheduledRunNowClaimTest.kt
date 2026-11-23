@@ -17,10 +17,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * [T-sched-run-now] "Run now" on the timer pill and the alarm's own fire take
- * a task's pending run through one atomic claim, so a run executes once.
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class ScheduledRunNowClaimTest {
@@ -46,7 +42,6 @@ class ScheduledRunNowClaimTest {
         repeatMode = ScheduledRepeatMode.DAILY, prompt = "p",
     )
 
-    // (a)
     @Test
     fun `a pending run is taken once, counted once, and the next one is an interval later`() {
         manager.store().upsert(interval("a", max = 5))
@@ -59,13 +54,11 @@ class ScheduledRunNowClaimTest {
         assertEquals(1, manager.get("a")!!.triggeredCount)
     }
 
-    // (b)
     @Test
     fun `a run already running or being started is refused and nothing changes`() {
         manager.store().upsert(interval("b", max = 5))
         assertNull(manager.claimRunNow("b", isRunning = { it == "b" }))
         assertEquals(null, manager.get("b")!!.triggeredCount)
-        // Nothing pending: disabled, exhausted, on-completion.
         manager.store().upsert(interval("b2", max = 2, count = 2))
         assertNull(manager.claimRunNow("b2"))
         manager.store().upsert(interval("b3").copy(enabled = false))
@@ -74,16 +67,13 @@ class ScheduledRunNowClaimTest {
         assertNull(manager.claimRunNow("b4"))
     }
 
-    // (c)
     @Test
     fun `the alarm's fire and Run now racing for the same due run - exactly one wins, every time`() {
         val pool = Executors.newFixedThreadPool(2)
         try {
             repeat(200) { i ->
                 val id = "c$i"
-                // Due right now: the alarm for this slot is being delivered.
                 manager.store().upsert(interval(id, ivSec = 60, max = 10, anchor = System.currentTimeMillis() - 60_000))
-                // The run the menu showed when the user tapped.
                 val shown = ScheduledTaskManager.pendingRunKey(manager.get(id)!!, System.currentTimeMillis())
                 val wins = AtomicInteger()
                 val go = CountDownLatch(1)
@@ -121,7 +111,6 @@ class ScheduledRunNowClaimTest {
         assertTrue(ScheduledTaskManager.pendingRunKey(daily("k"), calNow)!!.startsWith("slot:"))
     }
 
-    // (d)
     @Test
     fun `a double tap starts once`() {
         manager.store().upsert(interval("d", max = 5))
@@ -149,20 +138,16 @@ class ScheduledRunNowClaimTest {
         go.countDown()
         assertTrue(done.await(10, TimeUnit.SECONDS))
         pool.shutdownNow()
-        // claimRunNow alone advances the anchor, so each later claim takes the NEXT
-        // run: the coordinator's in-flight / running checks are what stop a double
-        // tap (above). Here every claim is a distinct run, counted exactly once.
         assertEquals(wins.get(), manager.get("d2")!!.triggeredCount)
     }
 
-    // (e)
     @Test
     fun `a counted loop uses up its count once per run, manual or natural`() {
         manager.store().upsert(interval("e", ivSec = 60, max = 2, anchor = System.currentTimeMillis() - 30_000))
-        assertNotNull(manager.claimRunNow("e"))                 // run 1 of 2, early
+        assertNotNull(manager.claimRunNow("e"))
         assertEquals(1, manager.get("e")!!.remainingFires)
         assertTrue(manager.get("e")!!.enabled)
-        assertNotNull(manager.claimRunNow("e"))                 // run 2 of 2: the last
+        assertNotNull(manager.claimRunNow("e"))
         val last = manager.get("e")!!
         assertEquals(2, last.triggeredCount)
         assertFalse("finished like a natural last fire", last.enabled)
@@ -178,7 +163,6 @@ class ScheduledRunNowClaimTest {
         val taken = ScheduledTaskManager.runNowTransition(d, now)!!
         assertEquals(slot, taken.runNowSlotMs)
         assertTrue(taken.enabled)
-        // The following day's slot (a DST change can move it by an hour).
         val next = taken.nextTriggerMs(now)!!
         assertTrue("the pill counts down to the following day", kotlin.math.abs(next - (slot + 86_400_000L)) <= 3_600_000L)
         assertTrue(ScheduledTaskManager.calendarSlotTakenByRunNow(taken, slot))

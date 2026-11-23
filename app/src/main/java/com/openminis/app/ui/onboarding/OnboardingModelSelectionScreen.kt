@@ -59,16 +59,11 @@ import androidx.compose.ui.unit.sp
 import com.openminis.app.data.model.ModelGroup
 import com.openminis.app.data.repository.ProviderRepository
 
-/**
- * Onboarding step 2: pick 1-3 models from configured providers
- * and create a "Default Models" group. Mirrors iOS OnboardingModelSelectionView.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OnboardingModelSelectionScreen(
     providerRepository: ProviderRepository,
     onBack: () -> Unit,
-    /** [T-onboarding-model-fetch-fallback] Open Add Custom Model for this provider. */
     onAddCustomModel: (instanceId: String) -> Unit = {},
 ) {
     val config by providerRepository.config.collectAsState()
@@ -81,14 +76,8 @@ fun OnboardingModelSelectionScreen(
         it.providerInstanceId in enabledInstanceIds && !it.isHidden
     }
 
-    // [T-onboarding-model-fetch-fallback] State of the page's own bounded
-    // fetch, which runs only while the list is empty. Saveable so a trip to
-    // Add Custom Model and back keeps the failure section instead of
-    // restarting a 20 s spinner.
     var fetching by remember { mutableStateOf(false) }
     var fetchAttempted by rememberSaveable { mutableStateOf(false) }
-    // Non-null = the fetch finished and the page is still empty; the text is
-    // the provider's own error, or "" when there is nothing beyond the headline.
     var failureDetail by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val timeoutText = stringResource(
@@ -100,7 +89,7 @@ fun OnboardingModelSelectionScreen(
         providerRepository.config.value.modelEntries.count { it.providerInstanceId in instanceIds && !it.isHidden }
 
     fun runBoundedFetch() {
-        if (fetching) return // Retry while in flight is a no-op.
+        if (fetching) return
         val current = providerRepository.config.value
         val targets = current.instances.filter { inst ->
             inst.isEnabled && current.modelEntries.none { it.providerInstanceId == inst.id && !it.isHidden }
@@ -108,7 +97,6 @@ fun OnboardingModelSelectionScreen(
         fetchAttempted = true
         failureDetail = null
         if (targets.isEmpty()) {
-            // No enabled provider at all: nothing to wait for.
             if (visibleEntryCount(enabledInstanceIds) == 0) failureDetail = ""
             return
         }
@@ -122,8 +110,6 @@ fun OnboardingModelSelectionScreen(
                     }
                     vendorError
                 }
-                // Failure is a property of the EMPTY page, not of a provider: a
-                // partial result simply lists what arrived.
                 val ids = providerRepository.config.value.instances.filter { it.isEnabled }.map { it.id }.toSet()
                 if (visibleEntryCount(ids) == 0) {
                     failureDetail = if (result.timedOut) timeoutText else result.errors.distinct().joinToString("\n")
@@ -140,13 +126,7 @@ fun OnboardingModelSelectionScreen(
             runBoundedFetch()
             return@LaunchedEffect
         }
-        // Normal path: refresh model lists for every enabled instance when the
-        // screen appears, so the user sees the live provider catalog (not just
-        // the built-in placeholder list seeded by addInstance). Mirrors iOS
-        // fetchModelsWithFallback chain.
         for (instance in enabledInstances) {
-            // [T-provider-refresh-outlives-screen] (GH#265) Repository scope, so
-            // tapping Continue quickly does not cancel the fetch half-way.
             providerRepository.triggerAsyncModelReconcile(instance.id)
         }
     }
@@ -317,14 +297,6 @@ fun OnboardingModelSelectionScreen(
     }
 }
 
-/**
- * [T-onboarding-model-fetch-fallback] Shown when the bounded fetch finished
- * and the page is still empty: a headline, the provider's own error under it
- * (omitted when it would only repeat the headline), Retry, and Add Model
- * Manually. A custom model belongs to exactly one provider, so with several
- * enabled providers the button opens a menu to pick one; with none (every
- * provider disabled) it hides and Skip remains.
- */
 @Composable
 private fun ModelFetchFailure(
     detail: String,

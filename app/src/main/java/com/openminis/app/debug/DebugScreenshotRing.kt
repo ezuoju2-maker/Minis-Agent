@@ -15,12 +15,6 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.resume
 
-/**
- * Capacity-bounded ring buffer of labelled screenshots, mirroring iOS
- * `debug.screenshot.{capture,list,get,clear}`. Stores PNG bytes in memory —
- * 16 entries max, oldest evicted. Each entry is keyed by a monotonically
- * increasing id so callers can reference snapshots by `{id}` after a tap.
- */
 object DebugScreenshotRing {
 
     private const val CAPACITY = 16

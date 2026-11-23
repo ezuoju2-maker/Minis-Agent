@@ -10,26 +10,6 @@ import org.junit.Test
 import java.io.File
 import java.util.UUID
 
-/**
- * Review 2026-09-23 — the bounded ChatViewModel cache, driven through the REAL
- * `ChatViewModelStore` object rather than a re-implemented model.
- *
- * Guards: 478470224 (LRU cap), 552d90538 (memory pressure), cc1606df0 +
- * c2862bf3c (NORMAL / CHILD pools, sticky membership), aa3aab6bb
- * (never evict the key being inserted; isLiveStore for the headless runner).
- *
- * The existing ChatViewModelStore*Test / EvictionGuardTest classes pin source
- * facts and a hand-written model of the eviction arithmetic, on the
- * assumption that the store cannot run on the JVM. It can: the module sets
- * `unitTests.isReturnDefaultValues = true` (android.util.Log is a no-op) and
- * ViewModelStore / ViewModelProvider are plain JVM classes. No ChatViewModel
- * is ever built here, so every store answers "not busy" and only the
- * on-screen and just-inserted carve-outs protect anything — exactly the
- * inputs these cases need.
- *
- * The store is a process singleton, so every test uses fresh UUID keys and
- * releases them in [tearDown].
- */
 class Review0923ViewModelStoreRealTest {
 
     private val created = mutableListOf<String>()
@@ -52,7 +32,6 @@ class Review0923ViewModelStoreRealTest {
 
     @Test
     fun `the normal pool trims to its cap, oldest idle first`() {
-        // [T-new-limits] The cap went 4 -> 8; read it rather than restate it.
         val cap = ChatViewModelStore.MAX_CACHED_NORMAL
         val ids = (1..cap + 1).map { id("n") }
         val stores = ids.map { open(it) }
@@ -64,7 +43,6 @@ class Review0923ViewModelStoreRealTest {
     fun `a re-opened session moves to the most-recently-used end`() {
         val ids = (1..ChatViewModelStore.MAX_CACHED_NORMAL).map { id("n") }
         val stores = ids.map { open(it) }.toMutableList()
-        // Touch the oldest: it must now outlive the second-oldest.
         assertSame(stores[0], open(ids[0]))
         open(id("n"))
         assertTrue("touched session survives", live(ids[0], stores[0]))
@@ -103,7 +81,6 @@ class Review0923ViewModelStoreRealTest {
         assertTrue(live(real, store))
         assertTrue("the draft key resolves through the alias", live(draft, store))
         assertEquals(real, ChatViewModelStore.resolvePersistedId(draft))
-        // Four normals must not push the renamed CHILD out: its tag moved with it.
         val normals = (1..5).map { id("n") }
         normals.forEach { open(it) }
         assertTrue("renamed child stays out of the normal pool", live(real, store))
@@ -122,30 +99,14 @@ class Review0923ViewModelStoreRealTest {
         assertTrue(live(b, sb))
     }
 
-    /**
-     * [BUG] Stickiness only lasts as long as the store. Eviction removes the
-     * pool tag together with the store, and every path that RE-ACQUIRES a
-     * finished child — AgentTranscriptScreen (HelperUi.kt:1231), the delegate
-     * detail sheet's image poll (HelperUi.kt:914), the Stop glyph
-     * (ChatScreen.kt:4525) — calls `HeadlessChatRunner.viewModelFor(ctx, id)`
-     * with the NORMAL default. So opening the transcript of a sub agent whose
-     * store was evicted re-creates it in the NORMAL pool and evicts one of the
-     * user's own warm chats: the cross-pool interference cc1606df0 removed.
-     *
-     * Proposed fix: pass PoolKind.CHILD at those three re-acquire sites (the
-     * session row's `isChild` is available), or keep `poolKinds` entries on
-     * eviction and drop them only on `release`.
-     */
     @Test
     fun `re-opening an evicted child transcript must not evict a normal chat`() {
         val child = id("c")
         open(child, ChatViewModelStore.PoolKind.CHILD)
-        // Six more children push the first one out of the child pool.
         repeat(6) { open(id("c"), ChatViewModelStore.PoolKind.CHILD) }
         val normals = (1..4).map { id("n") }
         val normalStores = normals.map { open(it) }
 
-        // What AgentTranscriptScreen does: default kind.
         open(child)
 
         normals.forEachIndexed { i, sid ->
@@ -156,7 +117,6 @@ class Review0923ViewModelStoreRealTest {
         }
     }
 
-    // ---- source invariants for the re-acquire sites --------------------------
 
     private fun read(path: String): String =
         File(path).also { assertTrue("missing ${it.absolutePath}", it.exists()) }.readText()
@@ -169,17 +129,6 @@ class Review0923ViewModelStoreRealTest {
         assertTrue("createChildViewModel + delegate_task tag CHILD (found $claims)", claims >= 2)
     }
 
-    /**
-     * [RISK] `ChatScreen`'s onDispose clears the on-screen id unconditionally.
-     * On a CHAT -> CHAT navigation (notification / deep link while a chat is
-     * open, MainActivity.kt:727) the NavHost keeps the outgoing destination
-     * composed through its exit transition, so the incoming screen's
-     * `setActiveSession(X)` runs first and the outgoing one's
-     * `setActiveSession(null)` lands after it. The chat on screen is then
-     * unprotected from eviction and `minis-config session.*` reports "No
-     * active session". Fix: clear only if the slot still holds this screen's
-     * id (compare-and-clear).
-     */
     @Test
     fun `ChatScreen clears the on-screen id only if it still owns it`() {
         val src = read("src/main/java/com/openminis/app/ui/chat/ChatScreen.kt")

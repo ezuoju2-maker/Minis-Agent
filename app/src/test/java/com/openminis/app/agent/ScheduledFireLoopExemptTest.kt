@@ -5,17 +5,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-loop-reminder-scheduled-exempt] A scheduled task that polls (the same
- * shell command every 2 minutes) repeats one identical tool call per fire by
- * design. Each fire exempts its next recorded call, so the poll never adds up
- * to a loop warning; everything else keeps the old behaviour.
- */
 class ScheduledFireLoopExemptTest {
 
     private val poll = mapOf("command" to "osascript read-iterm2-screen")
 
-    /** One scheduled fire: exempt, then the poll call (same result each time). */
     private fun fire(d: ToolLoopDetector): Pair<LoopCheckResult, LoopCheckResult> {
         d.exemptNextCallForScheduledFire()
         val pre = d.check("shell", poll)
@@ -51,10 +44,8 @@ class ScheduledFireLoopExemptTest {
     @Test
     fun `the exemption does not stack and covers only one call`() {
         val d = ToolLoopDetector()
-        // Several fires that made no tool call bank nothing beyond one.
         repeat(5) { d.exemptNextCallForScheduledFire() }
         repeat(11) { d.record("shell", poll, "same screen", null) }
-        // 1 exempted, 10 counted.
         assertEquals(10, d.historySnapshot().size)
     }
 
@@ -82,16 +73,13 @@ class ScheduledFireLoopExemptTest {
     @Test
     fun `the chat exempts a fire where it starts running, never at enqueue`() {
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
-        // Idle fire: in the send funnel, right before the run claims the stream.
         val send = vm.substring(vm.indexOf("    private fun sendMessage(\n"))
         val claim = send.indexOf("AppLogger.info(TAG_STREAM, \"send _isStreaming=true")
         val exempt = send.indexOf("toolLoopDetector.exemptNextCallForScheduledFire()")
         assertTrue(exempt in 0 until claim)
         assertTrue(send.substring(0, exempt).contains("ScheduledTaskMarker.parse(text) != null"))
-        // Queued fire: at the tool-boundary insert and at the drain.
         assertTrue(vm.contains("if (scheduledInsert) toolLoopDetector.exemptNextCallForScheduledFire()"))
         assertTrue(vm.contains("if (queued.any { it.isScheduledFire }) toolLoopDetector.exemptNextCallForScheduledFire()"))
-        // Not at enqueue: the running turn's next call would consume it.
         val enqueue = vm.substring(vm.indexOf("    fun enqueuePrompt(")).substringBefore("\n    fun removeQueuedPrompt(")
         assertTrue(!enqueue.contains("exemptNextCallForScheduledFire"))
     }

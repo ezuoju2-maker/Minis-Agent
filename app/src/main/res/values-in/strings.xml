@@ -1,9 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Indonesian (id). Directory is values-in, NOT values-id: Android's
-     resource resolver normalises Indonesian to the legacy code `in` on
-     every API level (verified on Android 13 and 17), so a values-id
-     directory is never consulted and the app would silently fall back
-     to English. -->
 <resources>
     <string name="app_name">Minis</string>
     <string name="new_chat">Obrolan Baru</string>
@@ -1903,7 +1897,6 @@
     <string name="chat_share_n_selected">%1$d Dipilih</string>
     <string name="chat_share_select_all">Pilih Semua</string>
     <string name="chat_share_deselect_all">Batalkan Semua Pilihan</string>
-    <!-- [T-port-user-ask] user_ask card and settings; text from the iOS string catalog. -->
     <string name="user_ask_needs_answer">Butuh jawabanmu</string>
     <string name="user_ask_needs_approval">Butuh persetujuanmu</string>
     <string name="user_ask_high_risk">Tindakan berisiko tinggi</string>
@@ -1946,17 +1939,14 @@
     <string name="user_ask_setting_indefinitely">Tanpa batas</string>
     <string name="user_ask_setting_minutes">%1$d mnt</string>
     <string name="user_ask_setting_footer">Memungkinkan asisten memintamu memilih opsi, atau mengonfirmasi tindakan berisiko sebelum dilakukan, lewat kartu di chat. Hanya di chat yang kamu ikuti — tidak untuk sub-agen, Pintasan, atau tugas terjadwal. Jika mati, asisten memutuskan sendiri dan tidak melakukan tindakan berisiko tanpa persetujuanmu.</string>
-    <!-- [T-android-user-ask-notify] user_ask background notification. -->
     <string name="user_ask_setting_notify">Beri notifikasi di latar belakang</string>
     <string name="user_ask_notif_high_risk">Butuh persetujuan · Risiko tinggi</string>
     <string name="user_ask_notif_open_app">Buka app</string>
     <string name="user_ask_notif_hidden_body">Ada pertanyaan yang menunggu jawabanmu</string>
     <string name="user_ask_notif_channel_name">Pertanyaan untukmu</string>
     <string name="user_ask_notif_channel_description">Pertanyaan dari asisten saat Minis di latar belakang, bisa dijawab dari notifikasi</string>
-    <!-- [T-tool-preview-longpress-close] Long-press the tool status bar preview -->
     <string name="tool_preview_close_menu">Tutup jendela pratinjau</string>
     <string name="tool_preview_closed_toast">Jendela pratinjau ditutup. Anda dapat mengaktifkannya lagi di Pengaturan &gt; Tampilan.</string>
-    <!-- [T-mcp-oauth-signin-android] MCP browser sign-in (iOS #432) -->
     <string name="mcp_form_auth_mode">Otorisasi</string>
     <string name="mcp_form_auth_none">Tidak ada</string>
     <string name="mcp_signin_not_signed_in">Belum masuk</string>

@@ -10,26 +10,11 @@ import java.net.Socket
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * "Network Diagnostics" (Settings > Network button and `debug.net.diagnose`):
- * checks each stage a connection goes through - policy -> local entry ->
- * tailnet / upstream proxy / direct -> target - and says, per stage, pass /
- * fail / skipped and why. The output is redacted: no entry password, proxy
- * credential, auth key, login link or token ever appears in it; proxies are
- * named, not addressed.
- *
- * Blocking (dials). Run off the main thread.
- */
 object NetworkDiagnostics {
 
     private const val TAG = "Network"
     const val PROBE_HOST = "www.apple.com"
     private const val PROBE_PORT = 443
-    /**
-     * Route checks dial a host users rarely put in a bypass list, so a broken
-     * proxy shows up on the scopes that use it (www.apple.com is a common
-     * bypass entry and would report "direct" instead).
-     */
     const val ROUTE_PROBE_HOST = "example.com"
     private const val TIMEOUT_MS = 8000
 
@@ -59,14 +44,12 @@ object NetworkDiagnostics {
         val s = NetworkHub.settings.value
         val rt = NetworkRuntime.snapshot
 
-        // 1. Module / policy
         when {
             s.forceDirect -> checks += Check("Module", Result.PASS, "off (Restore Direct Connections): every connection is direct, settings kept")
             s.isUnconfigured || (!s.needsEntry && !s.nodeWanted) -> checks += Check("Module", Result.PASS, "nothing configured: every connection is direct (unchanged behaviour)")
             else -> checks += Check("Module", Result.PASS, "on: default route=${routeLabel(s, s.defaultRoute)}, tailscale=${s.tailscaleEnabled}, proxies=${s.proxies.size}")
         }
 
-        // 2. OS network
         val cm = context.getSystemService(ConnectivityManager::class.java)
         val net = cm?.activeNetwork
         val caps = net?.let { cm.getNetworkCapabilities(it) }
@@ -80,7 +63,6 @@ object NetworkDiagnostics {
             checks += Check("Device network", Result.FAIL, "no network with internet access (offline / airplane mode)")
         }
 
-        // 3. DNS + direct path (system, not through Go)
         val t0 = System.nanoTime()
         val dns = runCatching { InetAddress.getAllByName(PROBE_HOST).first() }
         if (dns.isSuccess) {
@@ -94,14 +76,12 @@ object NetworkDiagnostics {
             checks += Check("Direct connection", Result.SKIP, "no DNS")
         }
 
-        // Nothing below runs Go code for an app that never turned the module on.
         if (!s.needsEntry && !s.nodeWanted) {
             checks += Check("Local entry", Result.SKIP, "not needed (no route uses it)")
             checks += Check("Tailscale", Result.SKIP, if (s.forceDirect) "off (Restore Direct Connections)" else "off")
             return finish(checks)
         }
 
-        // 4. Local entry
         val entry = runCatching { TailscaleNode.health() }.getOrNull()
         val listening = entry?.optBoolean("alive") == true
         when {
@@ -127,7 +107,6 @@ object NetworkDiagnostics {
             }
         }
 
-        // 5. Tailscale
         var tsRunning = false
         var magicName: String? = null
         if (s.nodeWanted) {
@@ -164,7 +143,6 @@ object NetworkDiagnostics {
             checks += Check("Tailscale", Result.SKIP, "off")
         }
 
-        // 6. Upstream proxies that some route uses
         val used = (listOf(s.defaultRoute) + s.scopes.values + s.providerRoutes.values)
             .mapNotNull { (NetworkRoute.parse(it) as? NetworkRoute.Proxy)?.id }.toSet()
         for (p in s.proxies) {
@@ -180,7 +158,6 @@ object NetworkDiagnostics {
             checks += Check("Proxy (deleted)", Result.WARN, "a route names a proxy that no longer exists; it connects directly")
         }
 
-        // 7. Where each scope goes, end to end through the entry's own logic
         if (listening) {
             for (tag in listOf("default") + NetworkScope.entries.map { it.tag }) {
                 val t3 = System.nanoTime()
@@ -192,29 +169,16 @@ object NetworkDiagnostics {
                 else Check("Route $tag", Result.FAIL, "$route -> $kind: ${classifyText(err)}")
             }
         }
-        // [FEAT-261021-18] G5: a WebView without PROXY_OVERRIDE stays direct
-        // whatever the Browser route says (WebViewNetworkProxy); say so here
-        // too, not only under Settings > Network.
         if (rt.endpoint(NetworkScope.BROWSER.tag) != null && !WebViewNetworkProxy.isSupported()) {
             checks += Check("Browser (WebView)", Result.WARN,
                 "this device's WebView cannot use a proxy: the browser connects directly, whatever its route")
         }
-        // [FEAT-261021-23] The shell's UDP and DNS (proot's xnet, stage 2).
         checks += shellUdpDnsChecks(listening, magicName)
-        // [FEAT-261021-18] What the shell does not route, said here so
-        // nobody takes it for working.
         checks += Check("Inbound / ICMP", Result.SKIP,
             "not supported: tailnet devices cannot connect to services in the shell, and ping is not routed")
         return finish(checks)
     }
 
-    /**
-     * [FEAT-261021-23] "Shell UDP": a round trip through the entry's UDP
-     * relay; "Shell DNS": a MagicDNS name (when the node has a peer) and a
-     * public name looked up as the shell's intercepted DNS is answered, with
-     * the shell's own nameserver. SKIP while the shell's forwarding is off -
-     * its UDP and DNS are then direct, exactly as before.
-     */
     private fun shellUdpDnsChecks(entryListening: Boolean, magicName: String?): List<Check> {
         val s2 = ShellTransparentNet.currentStage2()
         if (!entryListening || s2 == null) {
@@ -256,15 +220,6 @@ object NetworkDiagnostics {
         return out
     }
 
-    /**
-     * [FEAT-261021-18] The entry's HTTP front checks its own password: a
-     * CONNECT without it must get 407 (so another app on this device, which
-     * can reach 127.0.0.1, cannot use it), and one with it must tunnel. The
-     * target is a throwaway listener of this check on loopback, which every
-     * route reaches directly, so an upstream proxy or tailnet problem cannot
-     * fail it, and the entry's own ports see no stray connection. The probe
-     * tag is "diag".
-     */
     private fun httpFrontSelfTest(httpPort: Int, password: String) {
         java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { target ->
             target.soTimeout = 5000
@@ -281,7 +236,7 @@ object NetworkDiagnostics {
             require(anonymous.contains(" 407")) { "a client without the password was not refused: ${anonymous.take(60)}" }
             val ok = connect(okhttp3.Credentials.basic("diag", password))
             require(ok.contains(" 200")) { "CONNECT with the password failed: ${ok.take(60)}" }
-            target.accept().close() // the tunnel really reached the target
+            target.accept().close()
         }
     }
 
@@ -301,7 +256,6 @@ object NetworkDiagnostics {
 
     private fun classify(t: Throwable?): String = classifyText((t?.javaClass?.simpleName ?: "") + ": " + (t?.message ?: ""))
 
-    /** Short reason class + the message, as the logs classify it. */
     fun classifyText(msg: String): String {
         val m = msg.lowercase()
         val cls = when {

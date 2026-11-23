@@ -3,23 +3,10 @@ package com.openminis.app.agent.userask
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * [T-port-user-ask-recovery] What survives a process kill while a question
- * waits, and what to do with it on the next launch - the pure half of iOS's
- * UserAskRecord / UserAskRecovery (f21eaa98e P2, 7a818b8c0), final state.
- *
- * Android writes a turn's assistant row (the one carrying the tool_use) only
- * together with the batch's tool results, so without a copy a killed app would
- * have nothing to attach the answer to. The record keeps that row's parts
- * JSON, exactly as the turn would have persisted it.
- */
 data class UserAskRecord(
     val ask: PendingAsk,
-    /** Parts JSON of the assistant row (tool_use included), as persistAssistantTurn writes it. */
     val assistantPartsJson: String? = null,
-    /** Other tool_use ids of the same batch: recovery gives them an "interrupted, not run" result. */
     val siblingToolUseIds: List<String> = emptyList(),
-    /** The assistant row was written during recovery so the card shows again; delivery then appends only the results. */
     val assistantPersisted: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject()
@@ -43,34 +30,20 @@ data class UserAskRecord(
 }
 
 enum class UserAskRecoveryAction {
-    /** A tool_result for this toolCallId is already in the transcript (or it was consumed). */
     ALREADY_DELIVERED,
-    /** Answered / dismissed / timed out but never handed to the model. */
     DELIVER,
-    /** Still pending and past its wall-clock deadline: time it out, then deliver. */
     TIME_OUT_THEN_DELIVER,
-    /** Still pending and in time: show the card again and keep waiting. */
     AWAIT_USER,
-    /**
-     * [T-user-ask-deferred] A deferred ask resolved while nothing handed the
-     * answer on: fill in its stored result and, for a real answer, send it.
-     */
     DELIVER_DEFERRED,
 }
 
 object UserAskRecovery {
-    /** Records older than this are dropped unseen (iOS purge maxAge). */
     const val MAX_AGE_MS = 7L * 24 * 3600 * 1000
 
-    /** The result a sibling tool of a recovered batch gets: it never ran. */
     const val INTERRUPTED_RESULT =
         "<system-reminder>The app was closed before this tool finished; it did not run. Run it again if it is still needed.</system-reminder>"
 
     fun action(r: UserAskRecord, nowMs: Long, toolResultInStore: Boolean): UserAskRecoveryAction = when {
-        // [T-user-ask-deferred] Its `deferred` result is in the store from the
-        // start; what matters is whether the ANSWER was handed on (iOS). A
-        // deferred record whose result never reached the store (killed before
-        // the batch was written) is recovered like any other ask.
         r.ask.deferred && toolResultInStore -> when {
             r.ask.consumed -> UserAskRecoveryAction.ALREADY_DELIVERED
             r.ask.state.isTerminal -> UserAskRecoveryAction.DELIVER_DEFERRED
@@ -83,22 +56,15 @@ object UserAskRecovery {
         else -> UserAskRecoveryAction.AWAIT_USER
     }
 
-    /** Whether a recovered run continues: only after a real answer or a timeout - the user ended a stopped or replaced one. */
     fun resumesRun(ask: PendingAsk): Boolean = ask.state == UserAskState.ANSWERED || ask.state == UserAskState.TIMED_OUT
 
-    /** Drop delivered records and anything older than [MAX_AGE_MS]. */
     fun purge(records: Map<String, UserAskRecord>, nowMs: Long): Map<String, UserAskRecord> =
         records.filterValues { !it.ask.consumed && nowMs - it.ask.createdAtMs < MAX_AGE_MS }
 
-    /**
-     * Fallback when the saved assistant row is missing: the answers go to the
-     * model as a plain message instead of being lost.
-     */
     fun plainTextFallback(ask: PendingAsk): String =
         (listOf("(Recovered after the app restarted — answers to your earlier user_ask; the original request could not be restored, so please pick up from here.)") +
             answerLines(ask, withStatus = true)).joinToString("\n")
 
-    /** One line per question: "1. question → status: answer (note: …)". */
     fun answerLines(ask: PendingAsk, withStatus: Boolean): List<String> {
         val statuses = ask.resultStatuses
         return ask.questions.mapIndexed { i, q ->
@@ -117,7 +83,6 @@ object UserAskRecovery {
         }
     }
 
-    /** tool_use ids, in order, of a saved assistant row's parts JSON. */
     fun toolUseOrder(assistantPartsJson: String?): List<Pair<String, String>> {
         val arr = runCatching { JSONArray(assistantPartsJson ?: "") }.getOrNull() ?: return emptyList()
         return (0 until arr.length()).mapNotNull { i ->
@@ -128,12 +93,6 @@ object UserAskRecovery {
         }
     }
 
-    /**
-     * The tool_result row recovery appends: the ask's result, and the
-     * "interrupted" note for every other tool of the batch, in tool_use order
-     * (Anthropic requires results to mirror the calls). Same shape as
-     * ChatViewModel.persistToolResultMessage.
-     */
     fun resultRowPartsJson(ask: PendingAsk, resultJson: String, toolOrder: List<Pair<String, String>>): String {
         val order = toolOrder.ifEmpty { listOf(ask.toolCallId to UserAskPromptText.TOOL_NAME) }
         val arr = JSONArray()
@@ -156,7 +115,6 @@ object UserAskRecovery {
     }
 }
 
-/** JSON for PendingAsk, tolerant of missing fields (older records decode). */
 object UserAskCodec {
     fun toJson(a: PendingAsk): JSONObject = JSONObject()
         .put("requestId", a.requestId)
@@ -231,7 +189,6 @@ object UserAskCodec {
             multiSelect = o.optBoolean("multiSelect", false),
             impact = o.optStringOrNull("impact"),
             risk = UserAskRisk.parse(o.optString("risk")) ?: UserAskRisk.MEDIUM,
-            // A confirm never carries a default (removed policy).
             defaultIndex = if (type == UserAskQuestionType.OPTIONS && o.has("defaultIndex") && !o.isNull("defaultIndex")) o.optInt("defaultIndex") else null,
         )
     }
@@ -252,53 +209,27 @@ object UserAskCodec {
     )
 }
 
-/**
- * [T-user-ask-deferred] user_ask in a run no one can answer (iOS
- * UserAskDeferred, 7a818b8c0): the card is shown and stays open, the tool
- * returns at once, and the answer reaches the model later as the user's next
- * message.
- */
 object UserAskDeferred {
     const val STATUS = "deferred"
     const val NOTE = UserAskPromptText.DEFERRED_NOTE
 
-    /**
-     * [T-user-ask-deferred-ttl] How long a deferred card stays open (iOS
-     * 07fbac2c1). Asked in a run nobody watches, so far longer than the
-     * interactive countdown, but it ends: on expiry it times out like any ask
-     * - the stored `deferred` result becomes the timeout result, no message
-     * is sent, a pending notification is withdrawn and none is posted again.
-     */
     const val LIFETIME_MS = 60 * 60_000L
 
-    /** The bubble note under the answers, for the model (stripped from the bubble). */
     const val ANSWER_REMINDER = "<system-reminder>The user's answers to your earlier question card.</system-reminder>"
 
-    /**
-     * [T-user-ask-deferred-delivery] How long a deferred answer waits for a
-     * running compaction before it is submitted anyway (iOS: 600 x 0.5 s).
-     */
     const val COMPACTION_WAIT_MS = 5 * 60_000L
 
-    /** What the tool call returns at once; keys sorted like iOS (note, results; i, status). */
     fun toolResult(questionCount: Int): String =
         (0 until maxOf(questionCount, 1)).joinToString(",", "{\"note\":${JSONObject.quote(NOTE)},\"results\":[", "]}") {
             "{\"i\":$it,\"status\":\"$STATUS\"}"
         }
 
-    /** The user's next message once they answer: the answers as they would say them, then a note for the model. */
     fun answerMessage(ask: PendingAsk): String =
         (UserAskRecovery.answerLines(ask, withStatus = false) + ANSWER_REMINDER).joinToString("\n")
 
-    /** Only a real answer starts a turn; a dismissed, replaced or timed-out card just closes. */
     fun sendsAnswer(ask: PendingAsk): Boolean = ask.deferred && ask.state == UserAskState.ANSWERED
 }
 
-/**
- * [T-user-ask-deferred] [partsJson] with the output of the toolResult part for
- * [toolUseId] (and its snapshot text) replaced by [output]; null when no such
- * part is in it.
- */
 internal fun UserAskRecovery.replaceToolResultOutput(partsJson: String, toolUseId: String, output: String): String? {
     if (!partsJson.contains(toolUseId)) return null
     val arr = runCatching { JSONArray(partsJson) }.getOrNull() ?: return null

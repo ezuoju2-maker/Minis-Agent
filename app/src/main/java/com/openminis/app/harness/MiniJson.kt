@@ -1,20 +1,5 @@
 package com.openminis.app.harness
 
-/**
- * v2.0 · A tiny, dependency-free JSON codec for the agent harness.
- *
- * Why reimplement JSON? The harness must compile and run on a plain JVM
- * (CI, unit tests, deterministic replay) with NOTHING but the Kotlin stdlib —
- * no org.json, no Android, no kotlinx-serialization, no coroutines. That makes
- * the core event log portable into a desktop replay tool, a server-side
- * evaluator or a τ-bench style simulator without dragging an Android runtime
- * along. It supports exactly the subset the harness emits: objects, arrays,
- * strings (with escapes), numbers, booleans and null.
- *
- * The parser is strict on structure and deliberately forgiving on trailing
- * whitespace. Any malformed input throws — callers decide whether to reject a
- * checkpoint (see EventSourcedRun.restore) rather than silently corrupting it.
- */
 object MiniJson {
 
     fun quote(value: String): String = buildString {
@@ -53,7 +38,6 @@ object MiniJson {
 
     fun obj(vararg pairs: Pair<String, Any?>): String = stringify(pairs.toMap())
 
-    /** Parse into Map<String, Any?>, List<Any?>, String, Long/Double, Boolean or null. */
     fun parse(text: String): Any? {
         val p = Parser(text)
         val v = p.readValue()
@@ -111,7 +95,7 @@ object MiniJson {
         }
 
         private fun readObject(): Map<String, Any?> {
-            pos++ // {
+            pos++
             val out = LinkedHashMap<String, Any?>()
             skipWs()
             if (!atEnd() && s[pos] == '}') { pos++; return out }
@@ -134,7 +118,7 @@ object MiniJson {
         }
 
         private fun readArray(): List<Any?> {
-            pos++ // [
+            pos++
             val out = ArrayList<Any?>()
             skipWs()
             if (!atEnd() && s[pos] == ']') { pos++; return out }
@@ -151,7 +135,7 @@ object MiniJson {
         }
 
         private fun readString(): String {
-            pos++ // opening quote
+            pos++
             val sb = StringBuilder()
             while (pos < s.length) {
                 val c = s[pos++]

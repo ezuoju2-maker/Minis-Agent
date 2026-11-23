@@ -8,16 +8,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-port-fold-tools] Port of iOS ToolFoldPlannerTests: which runs of tool
- * calls the chat folds into one "Ran N tools" row, and when.
- *
- * Block notation: T = succeeded tool, F = failed, C = cancelled, R = unfinished
- * (running / streaming), K = thinking, t = non-empty multi-line text, o =
- * non-empty ONE-line text, e = empty text, B = barrier (info / sub agent /
- * user_ask). Output: one "lo-hi:tools/failed/cancelled" per group, or "none".
- * Like the list, [show] runs markingNotes first.
- */
 class ToolFoldPlannerTest {
 
     private fun parse(s: String): List<ToolFoldPlanner.Input> = s.map { c ->
@@ -147,7 +137,6 @@ class ToolFoldPlannerTest {
         assertEquals(0, probed)
     }
 
-    // --- AssistantBlock adapters and the live horizon ---------------------------
 
     private var n = 0
     private fun tool(status: ToolBlockStatus = ToolBlockStatus.SUCCESS, name: String = "shell_execute", ms: Long = 0) =
@@ -185,35 +174,27 @@ class ToolFoldPlannerTest {
         assertEquals(listOf(k.id, a.id, b.id), r.memberIds)
         assertEquals(2000L, r.durationMs)
         assertEquals(1, r.group.failedCount)
-        // No recorded time at all: no duration.
         assertEquals(null, ToolFoldPlanner.foldedRuns(listOf(tool(), tool(), reply)).single().durationMs)
     }
 
     @Test
     fun `live horizon - nothing folds while a reply streams or tools run, a long request end folds`() {
         val t1 = tool(); val t2 = tool()
-        // Request 2 is a long reply that is still streaming (no tools yet).
         val long = text("Found it.\nThe config is wrong.")
         assertEquals(0, ToolFoldPlanner.liveHorizon(listOf(t1, t2, long)))
-        // It called a tool whose arguments are still streaming: not ended.
         val r = tool(ToolBlockStatus.STREAMING)
         assertEquals(0, ToolFoldPlanner.liveHorizon(listOf(t1, t2, long, r)))
-        // Its arguments are complete (the tool runs): that request ended.
         val running = r.copy(toolStatus = ToolBlockStatus.RUNNING)
         assertEquals(4, ToolFoldPlanner.liveHorizon(listOf(t1, t2, long, running)))
-        // A one-line remark is no separator.
         assertEquals(0, ToolFoldPlanner.liveHorizon(listOf(t1, t2, text("Next."), running)))
-        // A later request started: the earlier long request is ended for sure.
         val t3 = running.copy(toolStatus = ToolBlockStatus.SUCCESS)
         val next = text("Checking")
         assertEquals(4, ToolFoldPlanner.liveHorizon(listOf(t1, t2, long, t3, next)))
-        // A running message is planned up to its horizon; an ended one whole.
         val msg = ChatMessage(id = "m", role = "assistant", content = "", isStreaming = true, toolBlocks = listOf(t1, t2, long, t3, tool(), text("Done.\nOk.")))
         assertEquals(1, ToolFoldPlanner.foldedRuns(msg).size)
         assertEquals(2, ToolFoldPlanner.foldedRuns(msg.copy(isStreaming = false)).size)
     }
 
-    // --- Rows ------------------------------------------------------------------
 
     private fun rowsFor(m: ChatMessage) = buildFlatChatItems(listOf(m))
 
@@ -235,7 +216,6 @@ class ToolFoldPlannerTest {
         val open = applyToolFolds(rows, runs, setOf(a.id)).map { it.key }
         val gi = open.indexOf("toolgroup:m:${a.id}")
         assertEquals(listOf("thinking:m:${k.id}", "tool:m:${a.id}", "tool:m:${b.id}"), open.subList(gi + 1, gi + 4))
-        // Nothing to fold: the same list instance.
         assertSame(rows, applyToolFolds(rows, emptyMap(), emptySet()))
     }
 
@@ -247,22 +227,17 @@ class ToolFoldPlannerTest {
         val c = ToolFoldController()
         assertSame(rows, c.fold(rows, listOf(m), emptyList()))
         val shownUnfolded = ToolFoldController().apply { enabled = true; browsing = true }
-        // A fresh controller has shown nothing: a just-opened chat folds at once.
         assertTrue(shownUnfolded.fold(rows, listOf(m), emptyList()).any { it is FlatChatItem.AssistantToolGroup })
 
         val d = ToolFoldController().apply { enabled = true }
-        // While the task runs its rows are shown unfolded (horizon 0)...
         val live = m.copy(isStreaming = true, toolBlocks = listOf(a, b, text("Done.\nAll")))
         assertFalse(d.fold(rowsFor(live), listOf(live), listOf(live)).any { it is FlatChatItem.AssistantToolGroup })
-        // ...the task ends while the user is scrolled up: held, still rows.
         d.browsing = true
         assertFalse(d.fold(rows, listOf(m), emptyList()).any { it is FlatChatItem.AssistantToolGroup })
-        // Back at the bottom: it folds, and stays folded when they scroll up again.
         d.browsing = false
         assertTrue(d.fold(rows, listOf(m), emptyList()).any { it is FlatChatItem.AssistantToolGroup })
         d.browsing = true
         assertTrue(d.fold(rows, listOf(m), emptyList()).any { it is FlatChatItem.AssistantToolGroup })
-        // A tap opens it in place and ticks `changes`.
         val before = d.changes.value
         d.toggle(a.id)
         assertTrue(d.changes.value > before)
@@ -271,9 +246,6 @@ class ToolFoldPlannerTest {
 
     @Test
     fun `a running task folds its finished requests - the live copy is checked, not the empty stored one`() {
-        // [T-fold-live-turn] During a turn the stored message has no tool blocks
-        // (they stream into the overlay); the fold used to test the stored copy's
-        // block count first, so a running task never folded until it ended.
         val a = tool(); val b = tool()
         val sep = text((1..ToolFoldPlanner.SEPARATOR_MINIMUM_LINES + 1).joinToString("\n") { "line $it" })
         val c = tool()
@@ -284,14 +256,12 @@ class ToolFoldPlannerTest {
         assertTrue(out.map { it.key }.toString(), out.any { it is FlatChatItem.AssistantToolGroup && it.runKey == a.id })
     }
 
-    // --- Wiring ----------------------------------------------------------------
 
     @Test
     fun `the chat list folds its rows, renders and toggles the group row`() {
         val screen = ProductionSources.read("ui/chat/ChatScreen.kt")
         assertTrue(screen.contains("flatItems = toolFold.fold("))
         assertTrue(screen.contains("toolFold.changes,"))
-        // [T-user-ask-resolved-expand] The tap also anchors the row's top first (ToggleAnchorTest).
         val tap = screen.substringAfter("is FlatChatItem.AssistantToolGroup -> ToolGroupRow(item) {").substringBefore("\n                            }")
         assertTrue(tap.contains("toolFold.toggle(item.runKey)"))
         assertTrue(screen.contains("snapshotFlow { userScrolledAway }.collect { toolFold.browsing = it }"))
@@ -302,8 +272,6 @@ class ToolFoldPlannerTest {
 
     @Test
     fun `the setting is on by default, in Appearance and the config registry`() {
-        // [PAR-261022-05] Every read site goes through one default, so an
-        // untouched install folds while a stored false is kept.
         assertTrue(com.openminis.app.ui.settings.FOLD_TOOLS_DEFAULT)
         val app = ProductionSources.read("ui/settings/AppearanceScreen.kt")
         assertTrue(app.contains("const val KEY_FOLD_TOOLS = \"fold_consecutive_tools\""))

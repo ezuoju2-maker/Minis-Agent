@@ -5,12 +5,6 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/**
- * [T-skill-crlf] A SKILL.md written on Windows (CRLF line endings, sometimes a
- * UTF-8 BOM) must parse exactly like the same file with LF endings. iOS
- * imported such files as "Untitled Skill"; this pins the Android parser to the
- * same cases as MinisTests/Standalone/SkillMDLineEndingTests.swift.
- */
 class SkillMdLineEndingTest {
 
     private val lf = "---\nname: Test Skill\ndescription: 测试技能\nversion: 1.0.0\n---\n# Body\n\nLine two\n"

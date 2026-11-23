@@ -8,18 +8,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 
-/**
- * Task Android-J: byte-level proof that the two fixes change only the requests
- * they are meant to change.
- *
- * Every C01–C32 scenario (live, and restart where it has one) plus the P-a5
- * request is built through RequestContextBuilder and serialized by all four
- * providers; each raw body is hashed (sha256, the session's temp root
- * normalized to `<ROOT>`). [BEFORE] holds the hashes captured on the code
- * BEFORE the fixes (HEAD 5d912c58f). After the fixes every hash must be
- * identical except the ones listed in [CHANGED_BY_FIX], each with its reason.
- * One test per scenario, so a run holds one scenario's bodies at a time.
- */
 @RunWith(Parameterized::class)
 class CtxFixJWireShaTest(private val id: String) {
 
@@ -291,7 +279,6 @@ class CtxFixJWireShaTest(private val id: String) {
             "P-a5.live.gemini" to "f1424268a36eb6630a8a64b8bd73f7afed1b94d4efe7b59578f1dd66ef6434bf",
         )
 
-        /** Bodies a fix is meant to change, with the fix that changes them. */
         private val CHANGED_BY_FIX: Map<String, String> = mapOf(
             "C26.live.anthropic" to "fix 1 (#404): summary after the carrier's tool_result; Anthropic / Gemini put results first",
             "C26.live.gemini" to "fix 1 (#404): summary after the carrier's tool_result; Anthropic / Gemini put results first",
@@ -334,7 +321,6 @@ class CtxFixJWireShaTest(private val id: String) {
             CtxSession(sc.id.lowercase(), sc.window).use { s ->
                 sc.build(s)
                 val liveCtx = hashPhase("live", s, out)
-                // beforeRestart only records facts and edits storage; it needs no bodies.
                 sc.beforeRestart(s, CtxRun(sc, s, CtxPhase("live", liveCtx, emptyMap(), s.history.toList()), null))
                 sc.restart?.let { it(s); hashPhase("restart", s, out) }
             }
@@ -342,7 +328,6 @@ class CtxFixJWireShaTest(private val id: String) {
         return out
     }
 
-    /** One provider body at a time: a C24 body is ~29 MB of base64, so none is kept. */
     private fun hashPhase(name: String, s: CtxSession, out: MutableMap<String, String>): com.openminis.app.ui.chat.RequestContextBuilder.RequestContext {
         val ctx = s.request()
         for (p in CtxProvider.entries) out["$id.$name.${p.id}"] = hash(CtxSession.wire(p, ctx.messages), s.root.absolutePath)
@@ -350,10 +335,6 @@ class CtxFixJWireShaTest(private val id: String) {
     }
 
     @Test fun `only the bodies the fixes target differ from before`() {
-        // BEFORE 基线哈希捕获于产品改动之前（旧品牌 Minis / 旧 system prompt / 旧图像管线 / 旧 compact summary）。
-        // 以下 9 个场景的请求体已因合法产品改动整体变化：全局品牌 Minis→DeepSeek（SOUL/runtime marker/success page），
-        // system prompt 新增 skill_save/memory_fact/长任务引导，compact summary 改为结构化摘要，图像管线重构。
-        // 基线哈希不能就地伪造（那样会掩盖真实回归），故仅跳过这些已明确过期的场景；其余场景仍逐字节守护。
         assumeFalse(
             "BEFORE 哈希基线已过期：品牌/提示词/图像管线合法改动改变了此场景的请求体，不能伪造基线 hash",
             id in setOf("C16", "C17", "C18", "C19", "C21", "C22", "C26", "C27", "C31"),

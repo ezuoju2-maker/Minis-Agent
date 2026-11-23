@@ -46,12 +46,6 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * [T-multi-select-share] The export's header (iOS ChatExportHeaderView): the
- * assistant's avatar as a ringed circle, the title and "<model> · <date>" under it,
- * the Open Minis icon and name at the right — avatar, title block and brand on one
- * centre line — and a hairline below. Shared by the long image and the PDF.
- */
 @Composable
 internal fun ChatExportHeaderView(title: String, subtitle: List<String>, widthDp: Float, pageColor: Color) {
     val palette = LocalChatPalette.current
@@ -61,11 +55,7 @@ internal fun ChatExportHeaderView(title: String, subtitle: List<String>, widthDp
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ExportAvatar()
-            // Takes the width the brand leaves, so "model · date" wraps only when
-            // it truly runs into the brand.
             Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
-                // Explicit styles, no inherited body tracking / line height, so the
-                // three header lines are set alike (iOS: plain system font).
                 Text(
                     text = title,
                     style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
@@ -80,8 +70,6 @@ internal fun ChatExportHeaderView(title: String, subtitle: List<String>, widthDp
                 val context = LocalContext.current
                 val icon = remember(context) { appIconBitmap(context) }
                 if (icon != null) {
-                    // The icon is pale on white: a hairline keeps its edge visible
-                    // on a light page.
                     Image(
                         bitmap = icon,
                         contentDescription = null,
@@ -91,7 +79,6 @@ internal fun ChatExportHeaderView(title: String, subtitle: List<String>, widthDp
                             .border(0.5.dp, palette.separator, RoundedCornerShape(5.5.dp)),
                     )
                 }
-                // Product name: not localized.
                 Text(
                     text = "Open Minis",
                     style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.sp),
@@ -105,12 +92,6 @@ internal fun ChatExportHeaderView(title: String, subtitle: List<String>, widthDp
     }
 }
 
-/**
- * "model · date" on one line when it fits; otherwise one part per line, so a narrow
- * page never splits the date itself. Chosen by measuring, not by gluing characters:
- * joiners inside a CJK date make a PDF's text layer map 月 / 日 to look-alike
- * radicals, breaking copy and search (iOS 9c23a4003).
- */
 @Composable
 private fun SubtitleLine(parts: List<String>, color: Color) {
     val style = TextStyle(fontSize = 13.sp, color = color, letterSpacing = 0.sp)
@@ -132,11 +113,6 @@ private fun SubtitleLine(parts: List<String>, color: Color) {
     }
 }
 
-/**
- * The assistant's avatar as the chat header resolves it — the user's SOUL icon
- * (image or emoji), else the default gradient sparkle — drawn as a 28dp circle with a
- * hairline ring: an image fills it, a glyph sits centred on a light disc.
- */
 @Composable
 private fun ExportAvatar() {
     val palette = LocalChatPalette.current
@@ -161,18 +137,12 @@ private fun ExportAvatar() {
 
 private val AVATAR = 28.dp
 
-/**
- * The launcher icon as a square picture (the adaptive icon's layers full-bleed, the
- * way the iOS app icon is square), or null when it cannot be loaded.
- */
 private fun appIconBitmap(context: Context): ImageBitmap? = runCatching {
     val drawable = context.packageManager.getApplicationIcon(context.packageName)
     val size = 96
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     if (drawable is AdaptiveIconDrawable) {
-        // Layers are 108dp with the visible 72dp in the middle: draw them at 1.5x,
-        // centred, so the square shows exactly the visible part.
         val inset = size / 4
         for (layer in listOfNotNull(drawable.background, drawable.foreground)) {
             layer.setBounds(-inset, -inset, size + inset, size + inset)
@@ -185,7 +155,6 @@ private fun appIconBitmap(context: Context): ImageBitmap? = runCatching {
     bitmap.asImageBitmap()
 }.getOrNull()
 
-/** The header's line under the title: the model and the date, either dropped when unknown. */
 internal fun chatExportSubtitle(model: String?, dateMs: Long?, locale: Locale = Locale.getDefault()): List<String> {
     val date = dateMs?.let { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, locale).format(Date(it)) }
     return listOfNotNull(model?.trim(), date).filter { it.isNotEmpty() }

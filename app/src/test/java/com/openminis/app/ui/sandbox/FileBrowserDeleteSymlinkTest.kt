@@ -19,11 +19,6 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
 
-/**
- * [T-filebrowser-delete-symlink-target] Deleting a row in Browse Files that is
- * a symlink to a folder deleted the folder's contents (iOS add538cd0): the old
- * delete ran `File.deleteRecursively()`, whose walk follows links.
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
 class FileBrowserDeleteSymlinkTest {
@@ -31,7 +26,6 @@ class FileBrowserDeleteSymlinkTest {
     @get:Rule
     val tmp = TemporaryFolder()
 
-    /** A real folder holding one file, and a link to it in another folder. */
     private fun linkedTree(): Triple<File, File, File> {
         val target = tmp.newFolder("real")
         val precious = File(target, "precious.txt").apply { writeText("keep me") }
@@ -47,7 +41,6 @@ class FileBrowserDeleteSymlinkTest {
     fun `the old deleteRecursively on a link deletes what the link points to`() {
         val (target, precious, link) = linkedTree()
         link.deleteRecursively()
-        // The reported bug, reproduced: the folder behind the link lost its file.
         assertFalse(precious.exists())
         assertTrue(target.isDirectory)
     }
@@ -91,7 +84,6 @@ class FileBrowserDeleteSymlinkTest {
 
     @Test
     fun `a stale DELETE_ITEM on what is now a link still removes only the link`() {
-        // The row's snapshot can predate the link; delete re-checks the path.
         val (target, precious, link) = linkedTree()
         assertTrue(FileBrowserDeletePolicy.delete(link, Action.DELETE_ITEM))
         assertFalse(exists(link))
@@ -113,7 +105,6 @@ class FileBrowserDeleteSymlinkTest {
     @Test
     fun `the policy table`() {
         val cases = listOf(
-            // linuxPath, isSymlink -> action
             Triple("/var/minis/skills", false, Action.REFUSE_MOUNT_POINT),
             Triple("/var/minis/memory", true, Action.REFUSE_MOUNT_POINT),
             Triple("/var/minis/shared/", false, Action.REFUSE_MOUNT_POINT),
@@ -127,7 +118,6 @@ class FileBrowserDeleteSymlinkTest {
             Triple("/sys", false, Action.REFUSE_MOUNT_POINT),
             Triple("/var/minis/mounts/Docs", false, Action.REFUSE_MOUNT_POINT),
             Triple("/var/minis/mounts/Docs", true, Action.REFUSE_MOUNT_POINT),
-            // Inside a bind: ordinary rows.
             Triple("/var/minis/skills/foo", false, Action.DELETE_ITEM),
             Triple("/var/minis/workspace/out.png", false, Action.DELETE_ITEM),
             Triple("/var/minis/workspace/link", true, Action.DELETE_LINK_ONLY),
@@ -136,7 +126,6 @@ class FileBrowserDeleteSymlinkTest {
             Triple("/var/minis", false, Action.DELETE_ITEM),
             Triple("/proc2", false, Action.DELETE_ITEM),
             Triple("/root/link", true, Action.DELETE_LINK_ONLY),
-            // Outside the Linux view (e.g. an external folder's own browser).
             Triple(null, false, Action.DELETE_ITEM),
             Triple(null, true, Action.DELETE_LINK_ONLY),
         )
@@ -163,7 +152,6 @@ class FileBrowserDeleteSymlinkTest {
 
     @Test
     fun `the view model deletes only the link and refuses a bind target`() {
-        // A rootfs-shaped tree browsed with its Linux paths, like Browse Files.
         val rootfs = tmp.newFolder("rootfs")
         File(rootfs, "var/minis/skills").mkdirs()
         val target = tmp.newFolder("userdata")
@@ -205,12 +193,10 @@ class FileBrowserDeleteSymlinkTest {
         val screen = ProductionSources.read("ui/sandbox/FileBrowserScreen.kt")
         assertTrue(screen.contains("R.string.filebrowser_delete_mount_point_refused"))
 
-        // Browse Files from Rootfs settings names rows by their Linux path.
         val nav = ProductionSources.read("ui/navigation/AppNavigation.kt")
         val rootfsBrowse = nav.substringAfter("composable(Routes.ROOTFS_MANAGEMENT)").substringBefore("onMirrorCategoryClick")
         assertTrue(rootfsBrowse.contains("displayLinuxPrefix = \"/\""))
 
-        // The fixed binds are the ones PRootKernel registers and SessionMounts mounts.
         val kernel = ProductionSources.read("sandbox/PRootKernel.kt")
         assertTrue(kernel.contains("cmd.add(\"/dev\")") && kernel.contains("cmd.add(\"/proc\")") && kernel.contains("cmd.add(\"/sys\")"))
         assertTrue(kernel.contains("listOf(\"memory\", \"skills\", \"shared\", \"mcp-servers\")"))

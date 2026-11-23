@@ -7,19 +7,12 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-session-skill-detail] In the chat's Skills sheet a row opens the
- * skill's detail (SKILL.md, other files, file preview) like iOS
- * SessionSkillDetailView, and a skill installed from a URL offers "Copy
- * Source URL" on long-press like Settings -> Skills.
- */
 class SessionSkillsSheetDetailTest {
 
     private val sheet = ProductionSources.read("ui/chat/SessionSkillsSheet.kt")
     private val row = ProductionSources.read("ui/settings/SkillRowItem.kt")
     private val preview = ProductionSources.read("ui/sandbox/FilePreviewScreen.kt")
 
-    // -- page stack --
 
     @Test
     fun `back goes file to detail to list`() {
@@ -44,7 +37,6 @@ class SessionSkillsSheetDetailTest {
         assertEquals(emptyList<String>(), sessionSkillOtherFiles(emptyList()))
     }
 
-    // -- wiring --
 
     @Test
     fun `a row tap opens the detail page instead of doing nothing`() {
@@ -63,15 +55,12 @@ class SessionSkillsSheetDetailTest {
             assertTrue("$state must be held above the page switch", beforeSwitch.contains(state))
         }
         assertTrue(sheet.contains(".verticalScroll(listScroll)"))
-        // Toggles still write through to the repository, as before.
         assertTrue(sheet.contains("skillRepository.setSessionOverride(sessionId, skill.id, enabled)"))
     }
 
     @Test
     fun `back arrow and system back pop one page, and only off the list`() {
         assertTrue(sheet.contains("if (page == SessionSkillsPage.List) false else {\n                page = page.back()\n                true"))
-        // The sheet's built-in back-dismiss runs ahead of a BackHandler in its
-        // content, so it is switched off whenever a sheet takes back itself.
         val std = ProductionSources.read("ui/chat/StandardChatSheet.kt")
         assertTrue(std.contains("properties = ModalBottomSheetProperties(shouldDismissOnBackPress = onBack == null),"))
         assertTrue(std.contains("if (!onBack()) {\n                    scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }"))
@@ -128,7 +117,6 @@ class SessionSkillsSheetDetailTest {
         }
     }
 
-    // -- strings --
 
     private val res = java.io.File(ProductionSources.mainRoot()!!.parentFile.parentFile.parentFile.parentFile, "res")
 

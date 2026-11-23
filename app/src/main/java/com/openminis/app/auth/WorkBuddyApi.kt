@@ -15,39 +15,6 @@ import java.security.SecureRandom
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-/**
- * WorkBuddy / CodeBuddy (Tencent) upstream protocol.
- *
- * Ported from the open-source WorkBuddy2API-Android gateway (jilin0105 /
- * WorkBuddy2API-Android, MIT) so Minis can offer WorkBuddy as an
- * account-login "built-in model platform": the user signs in with their own
- * WorkBuddy account and the app consumes that account's included model quota
- * through the same OpenAI-compatible `/v2/chat/completions` endpoint the
- * official client uses.
- *
- * This is an UNOFFICIAL integration. It mimics the official CodeBuddy CLI
- * client identity because the upstream applies channel verification to the
- * chat endpoint. Use is subject to the upstream terms of service.
- *
- * Wire facts (verified against the reference project + official desktop app):
- *  - login    : POST {backend}/v2/plugin/auth/state?platform=CLI   -> state + authUrl
- *  - poll     : GET  {backend}/v2/plugin/auth/token?state=...      -> accessToken/domain/...
- *  - profile  : GET  {backend}/v2/plugin/login/account?state=...   -> uid/enterpriseId
- *  - refresh  : POST {backend}/v2/plugin/auth/token/refresh
- *  - models   : GET  {backend}/console/enterprises/personal/models -> models[] + agents[]
- *  - credits  : POST {host}/billing/meter/get-user-resource-summary
- *               POST {host}/billing/meter/get-user-resource-paid-packages   (browser UA)
- *  - checkin  : POST {backend}/v2/billing/meter/daily-checkin             (returns no credits)
- *  - gift     : POST {backend}/billing/meter/claim-gift
- *  - comp     : POST {backend}/billing/meter/claim-compensation
- *  - streak   : GET  {backend}/activity/growth/streak
- *  - chat     : POST {backend}/v2/chat/completions (OpenAI-compatible + channel headers)
- *
- * Everything surfaced in the UI comes from these endpoints — no invented
- * numbers. The check-in endpoint deliberately returns no credit amount, so the
- * only honest way to report "how much did I get today" is a before/after
- * snapshot diff, which [checkin] does.
- */
 object WorkBuddyApi {
     private const val TAG = "WorkBuddyApi"
 
@@ -55,7 +22,6 @@ object WorkBuddyApi {
     const val INTERNATIONAL_BACKEND = "https://www.codebuddy.ai"
     const val DOMESTIC_DOMAIN = "www.codebuddy.cn"
     const val INTERNATIONAL_DOMAIN = "www.codebuddy.ai"
-    /** Web origin used by the official desktop billing page (国内). */
     const val DOMESTIC_WEB = "https://www.workbuddy.cn"
 
     val JSON = "application/json; charset=utf-8".toMediaType()
@@ -69,7 +35,6 @@ object WorkBuddyApi {
             .build()
     }
 
-    // ---- official client identity (from @tencent-ai/codebuddy-code CLI) ----
     private const val CLI_VERSION = "2.169.0"
     private const val PRODUCT_NAME = "CodeBuddy"
     private const val PLATFORM = "CLI"
@@ -77,7 +42,6 @@ object WorkBuddyApi {
     private const val BROWSER_UA =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
-    /** Headers sent before a user is identified (auth state / token polling). */
     fun noAuthHeaders(domain: String): MutableMap<String, String> = mutableMapOf(
         "X-No-Authorization" to "true",
         "X-No-User-Id" to "true",
@@ -105,12 +69,6 @@ object WorkBuddyApi {
         "X-Stainless-Retry-Count" to "0",
     )
 
-    /**
-     * Base identity headers for an authenticated plugin request.
-     * Mirrors the reference `headersFor`: Content-Type/Accept, bearer, X-User-Id
-     * (the account uid — REQUIRED by the models endpoint), enterprise/tenant,
-     * domain, CLI UA + product identity headers.
-     */
     fun authHeaders(
         token: String,
         domain: String,
@@ -139,7 +97,6 @@ object WorkBuddyApi {
         return bytes.joinToString("") { "%02x".format(it) }.take(n)
     }
 
-    /** Per-request channel-verification + tracing headers for the chat endpoint. */
     fun chatExtraHeaders(conversationId: String): Map<String, String> {
         val messageId = UUID.randomUUID().toString().replace("-", "")
         val conversationRequestId = UUID.randomUUID().toString().replace("-", "")
@@ -174,7 +131,6 @@ object WorkBuddyApi {
         }
     }
 
-    // ---- raw HTTP helpers ----
     private fun request(url: String, method: String, body: JSONObject?, headers: Map<String, String>): Request {
         val b = body?.toString()?.toRequestBody(JSON)
         return Request.Builder().url(url).method(method, b).apply {
@@ -192,7 +148,6 @@ object WorkBuddyApi {
         return RawResponse(code, text)
     }
 
-    /** Unwrap {code,data,msg}; throw with the upstream message when code != 0. */
     private fun unwrap(text: String): JSONObject {
         val root = try { JSONObject(text) } catch (_: Exception) { JSONObject() }
         if (root.has("code") && root.optInt("code", -1) != 0) {
@@ -211,7 +166,6 @@ object WorkBuddyApi {
         return result ?: root
     }
 
-    /** Short, human-readable description of a non-2xx body (msg first, raw text as fallback). */
     private fun describeBody(text: String): String {
         val t = text.trim().replace(Regex("\\s+"), " ")
         if (t.isEmpty()) return ""
@@ -236,7 +190,6 @@ object WorkBuddyApi {
         val nickname: String = "",
     )
 
-    // ---- login ----
     suspend fun beginLogin(region: String): LoginSession = withContext(Dispatchers.IO) {
         val backend = if (region == "international") INTERNATIONAL_BACKEND else DOMESTIC_BACKEND
         val domain = if (region == "international") INTERNATIONAL_DOMAIN else DOMESTIC_DOMAIN
@@ -312,36 +265,24 @@ object WorkBuddyApi {
         )
     }
 
-    // ---- models ----
     data class ModelsResult(val models: List<WorkBuddyModel>, val error: String?, val fetchedAt: Long = System.currentTimeMillis())
 
-    /**
-     * One entry of the live catalogue. Every field below is read from the
-     * upstream payload — nothing is synthesised, so the list is exactly what
-     * this account is entitled to.
-     */
     data class WorkBuddyModel(
         val id: String,
         val displayName: String,
         val contextWindow: Int? = null,
         val maxOutputTokens: Int? = null,
-        /** Upstream cost multiplier, e.g. 0.79 for "x0.79 credits". null = not labelled. */
         val creditsPerCall: Double? = null,
         val vendor: String? = null,
         val supportsVision: Boolean = false,
         val supportsTools: Boolean = false,
         val supportsReasoning: Boolean = false,
         val onlyReasoning: Boolean = false,
-        /** Listed in the CLI agent group (the official "推荐" set). */
         val recommended: Boolean = false,
     )
 
-    /** Fetch the model catalog. Returns an error message (instead of empty) on failure. */
     suspend fun fetchModelsDetailed(account: Account): ModelsResult = withContext(Dispatchers.IO) {
         val h = authHeaders(account.accessToken, account.domain, account.enterpriseId, account.uid)
-        // The enterprise-personal catalogue is the authoritative one. A second
-        // path is probed only when it yields nothing, because gateway builds
-        // differ and a silent empty list would look like "0 models" in the UI.
         val paths = listOf(
             "/console/enterprises/personal/models",
             "/v2/plugin/models",
@@ -364,7 +305,6 @@ object WorkBuddyApi {
         ModelsResult(emptyList(), lastError ?: "模型接口未返回数据")
     }
 
-    /** Parse one models payload, tolerating both {code,data} and bare-array shapes. */
     private fun parseModelsResponse(text: String): ModelsResult {
         return try {
             val bare = runCatching { JSONArray(text) }.getOrNull()
@@ -388,11 +328,6 @@ object WorkBuddyApi {
         }
     }
 
-    /**
-     * The upstream marks its "recommended" set through `agents[]`, where the
-     * entry named `cli` carries the model ids the official client shows first.
-     * It is a HINT, not a filter: the catalogue itself is the entitlement.
-     */
     private fun recommendedIds(models: JSONArray, data: JSONObject): Set<String> {
         val out = linkedSetOf<String>()
         val agents = data.optJSONArray("agents") ?: JSONArray()
@@ -407,11 +342,9 @@ object WorkBuddyApi {
                 }
             }
         }
-        // Older payloads put the same list on the top level.
         data.optJSONArray("cli_recommended")?.let { arr ->
             for (j in 0 until arr.length()) arr.opt(j)?.toString()?.let(out::add)
         }
-        // Fallback: some builds flag the model row itself.
         for (i in 0 until models.length()) {
             val m = models.optJSONObject(i) ?: continue
             if (m.optBoolean("recommended", false) || m.optBoolean("cliRecommended", false)) {
@@ -422,15 +355,12 @@ object WorkBuddyApi {
         return out
     }
 
-    /** Convenience wrapper used by the model-refresh path. */
     suspend fun fetchModels(account: Account): List<WorkBuddyModel> = fetchModelsDetailed(account).models
 
     private fun parseModels(models: JSONArray, recommended: Set<String>): List<WorkBuddyModel> {
         val out = mutableListOf<WorkBuddyModel>()
         for (i in 0 until models.length()) {
             val m = models.optJSONObject(i) ?: continue
-            // Different deployments name the identifier differently; the chat
-            // request needs the wire id, the UI needs a readable name.
             val id = sequenceOf("id", "modelId", "model", "modelName", "name", "key")
                 .map { m.optString(it, "") }
                 .firstOrNull { it.isNotBlank() }
@@ -461,8 +391,6 @@ object WorkBuddyApi {
                 recommended = recommended.contains(id),
             )
         }
-        // Dedupe on id, keeping the first (upstream sometimes repeats a model
-        // per vendor prefix).
         return out.distinctBy { it.id }
     }
 
@@ -473,7 +401,6 @@ object WorkBuddyApi {
         return token.toDoubleOrNull()?.takeIf { it.isFinite() }
     }
 
-    // ---- credits ----
     data class CreditPackage(
         val name: String,
         val total: Double,
@@ -489,16 +416,6 @@ object WorkBuddyApi {
         val error: String? = null,
     )
 
-    /**
-     * Query the account's quota. Mirrors the reference `fetchCredits`:
-     * the desktop personal-usage endpoints are
-     *   /billing/meter/get-user-resource-summary        (summary)
-     *   /billing/meter/get-user-resource-paid-packages  (paged)
-     * both POST, with a BROWSER UA (the gateway WAF blocks non-browser UAs on
-     * billing). Hosts are probed backend-then-web-domain. Field names are the
-     * upstream PascalCase ones (CycleTotalCapacity / CycleRemainCapacity, or
-     * CapacitySize / CapacityRemain for non-cyclic packages).
-     */
     suspend fun fetchCredits(account: Account): Credits = withContext(Dispatchers.IO) {
         val h = mutableMapOf(
             "Content-Type" to "application/json",
@@ -542,15 +459,12 @@ object WorkBuddyApi {
         data.optJSONArray("Packages")?.let { if (it.length() > 0) return it }
         data.optJSONObject("Response")?.optJSONObject("Data")?.optJSONArray("Packages")
             ?.let { if (it.length() > 0) return it }
-        // Summary shape: accounts / packages arrays under various keys.
         for (key in listOf("Accounts", "accounts", "packages", "PackageList")) {
             data.optJSONArray(key)?.let { if (it.length() > 0) return it }
         }
-        // Summary may itself be one object describing the total.
         for (key in listOf("Summary", "summary", "UserResource", "UserResourceSummary")) {
             data.optJSONObject(key)?.let { return JSONArray().put(it) }
         }
-        // Flat summary: the payload itself carries the capacity fields.
         val keys = data.keys()
         while (keys.hasNext()) {
             val k = keys.next()
@@ -610,16 +524,13 @@ object WorkBuddyApi {
         return 0.0
     }
 
-    // ---- check-in ----
     data class CheckinResult(
         val alreadyChecked: Boolean,
         val message: String,
-        /** Snapshot diff around the check-in; null when the diff can't be computed. */
         val gained: Double?,
         val credits: Credits?,
     )
 
-    /** One probed endpoint, kept so failures can be described in full. */
     private data class Attempt(
         val label: String,
         val status: Int,
@@ -653,7 +564,6 @@ object WorkBuddyApi {
         append("\n").append(hint)
     }
 
-    /** Console-style headers: what the official web console sends for billing actions. */
     private fun webHeaders(account: Account): MutableMap<String, String> = mutableMapOf(
         "Content-Type" to "application/json",
         "Accept" to "application/json",
@@ -670,23 +580,7 @@ object WorkBuddyApi {
         }
     }
 
-    /**
-     * Daily check-in. The endpoint itself returns NO credit amount (it only
-     * "punches the card"), so we snapshot the balance before and after and
-     * report the difference — that is the only truthful "you got N today".
-     *
-     * The endpoint has moved between gateway builds (/v2/billing/... vs
-     * /billing/..., plugin host vs web host), so all known shapes are probed
-     * in order and the first one the account accepts wins. If none works, the
-     * thrown message lists every attempt with its HTTP status, upstream code
-     * and upstream text — no bare "HTTP 400".
-     */
     suspend fun checkin(account: Account, beforeRemain: Double?): CheckinResult = withContext(Dispatchers.IO) {
-        // The action has taken several shapes across gateway builds: plugin vs
-        // web identity, /v2 vs bare /billing path, empty body vs a timezone
-        // field. Probe the known shapes in order and take the first answer the
-        // account accepts. Deliberately short: a burst of failing POSTs to a
-        // billing endpoint looks like abuse.
         data class Probe(val label: String, val url: String, val web: Boolean, val body: JSONObject)
 
         val webUrl = "https://${account.domain}"
@@ -742,12 +636,6 @@ object WorkBuddyApi {
         )
     }
 
-    // ---- one-off rewards ----
-    /**
-     * Claim the new-user gift / an activity compensation package. Both are
-     * idempotent server-side: a second call returns credit 0 (or an
-     * "already claimed" message), which we surface as 0 rather than an error.
-     */
     suspend fun claimReward(account: Account, kind: String): Double? = withContext(Dispatchers.IO) {
         val (action, barePath) = when (kind) {
             "gift" -> "领取新手礼包" to "/billing/meter/claim-gift"
@@ -801,7 +689,6 @@ object WorkBuddyApi {
         )
     }
 
-    // ---- growth (read-only) ----
     data class Streak(
         val current: Int,
         val longest: Int?,
@@ -810,10 +697,6 @@ object WorkBuddyApi {
         val raw: String? = null,
     )
 
-    /**
-     * Consecutive check-in days. Only shown when the endpoint answers — the
-     * screen stays quiet otherwise rather than printing a fabricated streak.
-     */
     suspend fun fetchStreak(account: Account): Streak? = withContext(Dispatchers.IO) {
         val h = authHeaders(account.accessToken, account.domain, account.enterpriseId, account.uid)
         val resp = try {
@@ -839,11 +722,6 @@ object WorkBuddyApi {
 
     data class DayCell(val date: String, val score: Int)
 
-    /**
-     * Check-in calendar (one cell per day, `score` = credits earned that day).
-     * Used only as a visual proof of real activity data; when the endpoint
-     * answers with an unexpected shape we return null and the UI omits it.
-     */
     suspend fun fetchHeatmap(account: Account): List<DayCell>? = withContext(Dispatchers.IO) {
         val h = authHeaders(account.accessToken, account.domain, account.enterpriseId, account.uid)
         val resp = try {

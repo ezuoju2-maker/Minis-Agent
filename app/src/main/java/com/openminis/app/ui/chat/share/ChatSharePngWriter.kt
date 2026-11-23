@@ -8,18 +8,6 @@ import java.util.zip.CRC32
 import java.util.zip.Deflater
 import kotlin.math.abs
 
-/**
- * [T-multi-select-share] Writes an opaque RGB PNG row by row, so a long image of tens
- * of thousands of rows is encoded strip by strip without ever holding the whole
- * picture in memory (iOS composes one bitmap of up to 60 MP; an Android heap cannot
- * be relied on for that, and HWUI cannot draw a bitmap that tall anyway).
- *
- * The image data (one zlib stream across every row, cut into IDAT chunks) goes to
- * [idatFile] as it arrives; [finish] then writes the real file — signature, IHDR with
- * the final height, the IDAT chunks, IEND — once the height is known. Each row picks
- * the None / Sub / Up filter with the smallest sum of absolute values, the usual
- * libpng heuristic. Pure JVM: ChatSharePngWriterTest decodes the output with ImageIO.
- */
 internal class ChatSharePngWriter(private val width: Int, private val idatFile: File) : AutoCloseable {
     private val deflater = Deflater(6)
     private val idat = DataOutputStream(BufferedOutputStream(FileOutputStream(idatFile), 1 shl 16))
@@ -32,7 +20,6 @@ internal class ChatSharePngWriter(private val width: Int, private val idatFile: 
     var rows = 0
         private set
 
-    /** Appends [count] rows of ARGB pixels (alpha ignored) starting at [offset], [width] per row. */
     fun writeRows(argb: IntArray, offset: Int, count: Int) {
         for (r in 0 until count) {
             val base = offset + r * width
@@ -88,7 +75,6 @@ internal class ChatSharePngWriter(private val width: Int, private val idatFile: 
         pending.reset()
     }
 
-    /** Ends the image data and writes the complete PNG to [out]; [idatFile] is removed. */
     fun finish(out: File) {
         deflater.finish()
         while (!deflater.finished()) drain(Deflater.NO_FLUSH)
@@ -100,9 +86,9 @@ internal class ChatSharePngWriter(private val width: Int, private val idatFile: 
             val ihdr = java.io.ByteArrayOutputStream().also { b ->
                 DataOutputStream(b).apply {
                     writeInt(width); writeInt(rows)
-                    writeByte(8) // bit depth
-                    writeByte(2) // color type: RGB
-                    writeByte(0); writeByte(0); writeByte(0) // compression, filter, interlace
+                    writeByte(8)
+                    writeByte(2)
+                    writeByte(0); writeByte(0); writeByte(0)
                 }
             }.toByteArray()
             writeChunk(png, "IHDR", ihdr)

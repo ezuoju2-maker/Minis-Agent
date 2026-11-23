@@ -50,45 +50,20 @@ import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.map
 
-/** [T-android-scheduled-task-card] Amber — a timer, not an agent. */
 internal val ScheduledAccent = Color(0xFFF59E0B)
 
-/**
- * [T-android-scheduled-task-card / -next-fire / -cancel-from-card]
- * A fired scheduled task, rendered as a card instead of a user bubble.
- *
- * Three things the plain bubble could not say:
- *  - that a TASK wrote this, not the user;
- *  - WHEN it will run next, which until now was invisible after creation —
- *    the user had to go to Settings and read the list to find out;
- *  - that it can be stopped from right here, without going to find it.
- *
- * Cancelling asks first. A scheduled task is something the user deliberately
- * set up, so the cost of an accidental tap is not symmetric with the cost of
- * one extra confirmation.
- */
 @Composable
 internal fun ScheduledTaskCard(
     marker: ScheduledTaskMarker,
     modifier: Modifier = Modifier,
-    // [T-scheduled-task-detail] The chat this card is shown in; the detail
-    // page uses it for "this chat" wording and links to other chats.
     hostSessionId: String? = null,
 ) {
     val context = LocalContext.current
     val shape = RoundedCornerShape(12.dp)
     var confirming by remember { mutableStateOf(false) }
-    // Local echo: the card must stop claiming a next run the moment the user
-    // cancels from it; it then says "Schedule cancelled" in that slot.
     var cancelled by remember(marker.taskId) { mutableStateOf(false) }
-    // [T-scheduled-task-detail] Tapping the card opens the task's detail page.
     var showingDetail by remember { mutableStateOf(false) }
 
-    // [T-scheduled-task-detail] `now` decides whether the envelope's next-fire
-    // time is still ahead. Read only at composition, a card on screen kept
-    // "Next: <that time>" after the fire had happened, until something else
-    // recomposed it. [T-scheduled-card-subline] The line now says "in 4 min.",
-    // so it is also re-read at each minute boundary while that time is ahead.
     val now by produceState(System.currentTimeMillis(), marker.nextFireAtMs) {
         val next = marker.nextFireAtMs ?: return@produceState
         while (true) {
@@ -98,17 +73,11 @@ internal fun ScheduledTaskCard(
             value = System.currentTimeMillis()
         }
     }
-    // [T-scheduled-card-subline] Offer Cancel only while the task is still a
-    // live timer, as iOS does (`isCancellable`). The envelope is a snapshot, so
-    // a card scrolled back to from history offered to cancel a task that had
-    // long stopped. The store is the live truth here: it persists, so unlike
-    // iOS's in-memory registry it stays right across a relaunch.
     val store = remember { ScheduledTaskStore(context.applicationContext) }
     val live by remember(marker.taskId) {
         store.observe().map { tasks -> tasks.any { it.id == marker.taskId && it.enabled } }
     }.collectAsState(initial = remember(marker.taskId) { store.get(marker.taskId)?.enabled == true })
 
-    // [T-scheduled-card-subline] Port of the iOS card's subline.
     val phrases = ScheduledTaskDetailModel.CardPhrases(
         run = stringResource(R.string.scheduled_card_run),
         left = stringResource(R.string.scheduled_card_left),
@@ -116,18 +85,10 @@ internal fun ScheduledTaskCard(
         complete = stringResource(R.string.scheduled_card_task_complete),
         cancelled = stringResource(R.string.scheduled_card_cancelled),
     )
-    // A task that is no longer live withdraws a next fire still ahead.
     val subline = ScheduledTaskDetailModel.cardSubline(marker, cancelled, now, phrases, live = live) {
         relativeFireTime(context, it, now)
     }
 
-    // [T-sched-card-metrics] The sub-agent card's skeleton and metrics
-    // (TaskCardFrame). This card used to be much taller than the sub-agent
-    // card beside it: its texts set no line heights (inheriting the theme's
-    // 24sp body line height) and its "Cancel this scheduled task" TextButton,
-    // with Material's 40dp minimum height, set the card's height on its own.
-    // Cancel is now a 24dp disc in the same slot as the sub-agent card's Stop,
-    // before the chevron, so it cannot push the card taller.
     val cancelLabel = stringResource(R.string.scheduled_card_cancel)
     TaskCardFrame(
         accent = ScheduledAccent,
@@ -158,9 +119,6 @@ internal fun ScheduledTaskCard(
             TaskCardChip(stringResource(R.string.scheduled_card_label), ScheduledAccent)
             TaskCardTitle(marker.label.ifEmpty { marker.prompt.take(40) })
         }
-        // Always one status line, like the sub-agent card, so every card in the
-        // flow keeps the same height. [T-scheduled-card-subline] It is never
-        // empty for a fire: the prompt's first line is the last fallback.
         TaskCardStatusRow {
             Text(
                 subline,
@@ -169,10 +127,6 @@ internal fun ScheduledTaskCard(
                 color = ChatColors.secondaryText,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                // [T-scheduled-card-subline] Exactly the row's height, the
-                // glyphs laid out unclipped and centred: the fallback is a
-                // prompt's first line, which may open with an emoji taller
-                // than the CJK line the row is sized for.
                 modifier = Modifier
                     .height(taskCardStatusLineHeight())
                     .wrapContentHeight(Alignment.CenterVertically, unbounded = true),
@@ -202,8 +156,6 @@ internal fun ScheduledTaskCard(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    // Disable rather than delete: the run history stays
-                    // readable, and the task is recoverable from Settings.
                     ScheduledTaskManager(context.applicationContext as android.app.Application)
                         .setEnabled(marker.taskId, false)
                     cancelled = true
@@ -219,13 +171,6 @@ internal fun ScheduledTaskCard(
     }
 }
 
-/**
- * [T-scheduled-card-subline] "in 30 sec." / "in 4 min." / "in 2 hr." — iOS
- * `RelativeDateTimeFormatter` with `.short` units, which the iOS card uses for
- * "Next %@". ICU's short style gives the same forms; DateUtils does not (its
- * future form is sentence-cased, "In 4 min.", wrong mid-line). Units are
- * picked by [ScheduledTaskDetailModel.relativeUnit].
- */
 internal fun relativeFireTime(context: android.content.Context, atMs: Long, nowMs: Long): String {
     val locale = context.resources.configuration.locales[0] ?: Locale.getDefault()
     val f = android.icu.text.RelativeDateTimeFormatter.getInstance(

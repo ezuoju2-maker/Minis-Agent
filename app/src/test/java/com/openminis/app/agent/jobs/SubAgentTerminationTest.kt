@@ -18,12 +18,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-subagent-termination] Android port of iOS 76b9b0428: a sub agent run
- * records how it ended, a turn that ends with no text gets one closing
- * request, background callbacks record their delivery, and
- * `minis-sessions-cli status` reports it all.
- */
 class SubAgentTerminationTest {
 
     @After fun tearDown() {
@@ -31,7 +25,6 @@ class SubAgentTerminationTest {
         AgentJobRegistry.resetForTest()
     }
 
-    // ── classification ──────────────────────────────────────────────────
 
     private fun classify(
         loop: String = "completed", cancelled: Boolean = false, budget: Boolean = false,
@@ -66,7 +59,6 @@ class SubAgentTerminationTest {
         val shapes = SubAgentTerminationRules::shapesOf
         val user = msg(LLMMessage.Role.USER, "task")
         assertTrue(SubAgentTerminationRules.endsWithFinalTurn(shapes(listOf(user, msg(LLMMessage.Role.ASSISTANT, "the report")))))
-        // Narration next to a tool call, then the run stopped at the tool result.
         val narratedThenStopped = listOf(user, msg(LLMMessage.Role.ASSISTANT, "let me check X", tool = true), msg(LLMMessage.Role.USER, result = true))
         assertFalse(SubAgentTerminationRules.endsWithFinalTurn(shapes(narratedThenStopped)))
         assertFalse(SubAgentTerminationRules.endsWithFinalTurn(shapes(listOf(user, msg(LLMMessage.Role.ASSISTANT, "checking", tool = true)))))
@@ -87,7 +79,6 @@ class SubAgentTerminationTest {
         assertEquals(HelperRunner.NO_DELIVERABLE, HelperRunner.resolvedStatus("completed", labelled))
         assertEquals("completed", HelperRunner.resolvedStatus("completed", "the answer"))
         assertEquals("timeout", HelperRunner.resolvedStatus("timeout", labelled))
-        // childRunFacts still writes exactly that label when it falls back.
         val rows = listOf(
             row("a1", "assistant", """[{"type":"text","value":"let me check"},{"type":"toolUse","value":{"toolUseId":"t1","name":"shell_execute","input":"{}"}}]"""),
             row("u1", "user", """[{"type":"toolResult","value":{"toolUseId":"t1","name":"shell_execute","output":"x","success":true}}]"""),
@@ -96,7 +87,6 @@ class SubAgentTerminationTest {
         assertTrue(HelperRunner.childRunFacts(rows).lastText.startsWith(SubAgentTerminationRules.NO_FINAL_ANSWER_LABEL))
     }
 
-    // ── the runner's record ─────────────────────────────────────────────
 
     private fun termination(
         history: List<LLMMessage>, result: String, tool: SubAgentToolSnapshot?, loop: String = "completed",
@@ -106,30 +96,24 @@ class SubAgentTerminationTest {
     @Test fun `field shapes - a failed last tool, a successful one, narration, an answer`() {
         val user = msg(LLMMessage.Role.USER, "task")
         val stoppedAtResult = listOf(user, msg(LLMMessage.Role.ASSISTANT, tool = true), msg(LLMMessage.Role.USER, result = true))
-        // EEA94903: `rg … timeout:30` failed, then nothing.
         val failed = SubAgentToolSnapshot("shell_execute \"rg\"", "failed", "[Command timed out after 30s]")
         val t1 = termination(stoppedAtResult, "", failed)
         assertEquals(Reason.TOOL_ERROR, t1.reason)
         assertEquals("failed", t1.lastToolStatus)
         assertFalse(t1.partialOutputAvailable)
-        // D9976EE1: the last tool succeeded, then no text.
         assertEquals(Reason.MODEL_ERROR, termination(stoppedAtResult, "", failed.copy(status = "success")).reason)
-        // Narration before a tool call, then the run stopped: labelled fallback text.
         val narrated = listOf(user, msg(LLMMessage.Role.ASSISTANT, "checking", tool = true), msg(LLMMessage.Role.USER, result = true))
         val t3 = termination(narrated, SubAgentTerminationRules.NO_FINAL_ANSWER_LABEL + "\nchecking", failed.copy(status = "success"), closing = true)
         assertEquals(Reason.MODEL_ERROR, t3.reason)
         assertTrue(t3.partialOutputAvailable)
         assertTrue(t3.closingAttempted)
         assertEquals(HelperRunner.NO_DELIVERABLE, HelperRunner.reportedStatus("completed", "checking", t3))
-        // A real answer.
         val answered = narrated + msg(LLMMessage.Role.ASSISTANT, "the report")
         val t4 = termination(answered, "the report", failed.copy(status = "success"))
         assertEquals(Reason.COMPLETED, t4.reason)
         assertEquals("completed", HelperRunner.reportedStatus("completed", "the report", t4))
-        // Budget ran out and the wrap-up came back empty; a stop from the parent.
         assertEquals(Reason.TIMEOUT, termination(stoppedAtResult, "", null, budget = true).reason)
         assertEquals(Reason.CANCELLED, termination(answered, "the report", null, loop = "cancelled").reason)
-        // A "failed" loop (request error) without an answer.
         assertEquals(Reason.MODEL_ERROR, termination(stoppedAtResult, "", null, loop = "failed", error = "HTTP 429").reason)
     }
 
@@ -157,7 +141,6 @@ class SubAgentTerminationTest {
         assertEquals("model_error", p.getString("termination_reason"))
         assertEquals("pending", p.getString("delivery_state"))
         assertEquals("1970-01-01T00:00:01Z", p.getString("ended_at"))
-        // The final payload carries them too, with the note as `result`.
         val json = JSONObject(HelperRunner.resultJson(
             "no_deliverable", "", "m", HelperModelTier.PRIMARY, "primary", 3, 1000, "child", "job", termination = t,
         ))
@@ -165,7 +148,6 @@ class SubAgentTerminationTest {
         assertTrue(json.getString("result").startsWith(SubAgentTerminationRules.NO_ANSWER_NOTE_PREFIX))
     }
 
-    // ── the store ───────────────────────────────────────────────────────
 
     private fun tempFile() = java.io.File(java.nio.file.Files.createTempDirectory("subterm").toFile(), SubAgentTerminationStore.FILE_NAME)
 
@@ -184,19 +166,18 @@ class SubAgentTerminationTest {
         val f = tempFile()
         val store = SubAgentTerminationStore(f)
         store.begin("c1", "j1", "p1", nowMs = 10)
-        store.begin("c1", "j1", "p1", nowMs = 99) // same running job: no-op
+        store.begin("c1", "j1", "p1", nowMs = 99)
         store.end(SubAgentTermination("c1", "j1", "p1", Reason.TOOL_ERROR, delivery = Delivery.PENDING, startedAtMs = 500, endedAtMs = 600))
         assertEquals(10L, store.record("c1")!!.startedAtMs)
         store.setDeliveryForJob("j1", Delivery.QUEUED, "waiting behind the parent's running turn")
         store.end(store.record("c1")!!.copy(delivery = null))
         assertEquals("a later end without delivery keeps it", Delivery.QUEUED, store.record("c1")!!.delivery)
-        store.setDeliveryForJob("nope", Delivery.FAILED) // unknown job: no-op
+        store.setDeliveryForJob("nope", Delivery.FAILED)
         val reloaded = SubAgentTerminationStore(f).record("c1")!!
         assertEquals(Reason.TOOL_ERROR, reloaded.reason)
         assertEquals(Delivery.QUEUED, reloaded.delivery)
         assertEquals("waiting behind the parent's running turn", reloaded.deliveryDetail)
         assertEquals(600L, reloaded.endedAtMs)
-        // A new job in the same session restarts the record.
         store.begin("c1", "j2", "p1", nowMs = 700)
         assertEquals(Reason.RUNNING, store.record("c1")!!.reason)
         assertNull(store.record("c1")!!.delivery)
@@ -213,7 +194,6 @@ class SubAgentTerminationTest {
         assertEquals(0, SubAgentTerminationStore(f).count())
     }
 
-    // ── the closing request ─────────────────────────────────────────────
 
     @Test fun `the closing request goes once, to a helper, after a turn with no text, not on the last round`() {
         assertTrue(HelperRunner.shouldSendClosingRequest(isHelper = true, alreadySent = false, turnHasText = false, turn = 3, turnCap = 200))
@@ -234,7 +214,6 @@ class SubAgentTerminationTest {
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
         val loop = vm.substringAfter("// If no tool calls, we're done").substringBefore("// [T-android-scheduled-resume-nudge]")
         assertTrue(loop.contains("val closingRequestDue = com.openminis.app.agent.jobs.HelperRunner.shouldSendClosingRequest("))
-        // [T-android-empty-turn-this-turn] The per-turn test moved into EmptyTurnRecovery.turnHasText.
         assertTrue("this turn's text, not the bubble's", loop.contains("val turnHasText = EmptyTurnRecovery.turnHasText(turnText, allToolBlocks, turnStartBlockIndex)"))
         assertTrue(ProductionSources.read("ui/chat/EmptyTurnRecovery.kt")
             .contains("blocks.drop(turnStartBlockIndex.coerceAtLeast(0)).any { it.kind == \"text\" && it.content.isNotBlank() }"))
@@ -268,7 +247,6 @@ class SubAgentTerminationTest {
         assertTrue(app.contains("SubAgentTerminationStore.install(filesDir)"))
     }
 
-    // ── the callback (background mode) ──────────────────────────────────
 
     private fun backgroundJob(): AgentJob {
         val job = AgentJobRegistry.register(
@@ -319,7 +297,6 @@ class SubAgentTerminationTest {
         assertEquals(Delivery.FAILED, store.record("child")!!.delivery)
     }
 
-    // ── sessions-cli status ─────────────────────────────────────────────
 
     private fun row(id: String, role: String, parts: String) =
         MessageEntity(id = id, sessionId = "child", role = role, partsJson = parts, createdAt = 0, sortOrder = 0)
@@ -360,10 +337,8 @@ class SubAgentTerminationTest {
         assertEquals("failed", data.getString("last_tool_status"))
         assertEquals("tool_error", data.getString("termination_reason"))
         assertEquals("delivered", data.getString("delivery_state"))
-        // No assistant text at all: the session's recorded last activity stands in.
         val toolOnly = listOf(transcript[0], row("a1", "assistant", """[{"type":"toolUse","value":{"toolUseId":"t1","name":"file_read","input":"{}"}}]"""))
         assertEquals("Read file", SessionsOffloadHandler.statusData(session("Read file"), toolOnly, true, null).getString("last_message"))
-        // A plain chat has no termination fields.
         assertFalse(SessionsOffloadHandler.statusData(session(), transcript, true, null).has("termination_reason"))
     }
 

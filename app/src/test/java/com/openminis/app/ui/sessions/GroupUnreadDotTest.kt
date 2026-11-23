@@ -9,10 +9,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [UI-261023-07] Unread replies: which chats carry the dot, and which groups
- * pass it to their tile (iOS `SessionBadgeState.unread` / `anyUnread`).
- */
 class GroupUnreadDotTest {
 
     private val token = Any()
@@ -62,7 +58,6 @@ class GroupUnreadDotTest {
         SessionUnreadStore.startViewing(token) { "s1" }
         SessionUnreadStore.markUnread("s1")
         assertTrue(SessionUnreadStore.ids.value.isEmpty())
-        // Once the user has left, the next reply counts.
         SessionUnreadStore.stopViewing(token)
         SessionUnreadStore.markUnread("s1")
         assertEquals(setOf("s1"), SessionUnreadStore.ids.value)

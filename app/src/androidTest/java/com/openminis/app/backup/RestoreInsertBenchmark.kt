@@ -16,25 +16,12 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/**
- * [T-android-restore-perf] Measures the importer's insert pattern on the real
- * device, batched against unbatched.
- *
- * Field measurement this reproduces: a Pixel 4a restoring 202,705 messages ran
- * at 119 msg/s (8.4 ms each) with the app at ~135% CPU — flash commit latency,
- * because every insert was its own implicit transaction.
- *
- * Uses a real on-disk Room database, not in-memory: the whole point is fsync
- * cost, and an in-memory database has none, which would make both arms look
- * identically fast and prove nothing.
- */
 @RunWith(AndroidJUnit4::class)
 class RestoreInsertBenchmark {
 
     private lateinit var db: AppDatabase
     private lateinit var ctx: Context
 
-    /** Enough rows to dominate fixed costs, few enough to finish unbatched. */
     private val n = 2_000
 
     @Before
@@ -71,12 +58,10 @@ class RestoreInsertBenchmark {
         val dao = db.chatDao()
         dao.insertSession(session(0))
 
-        // Arm A: the OLD pattern — one implicit transaction per row.
         val unbatchedMs = kotlin.system.measureTimeMillis {
             for (i in 0 until n) dao.insertMessage(message(i, "s0"))
         }
 
-        // Clear, then Arm B: the NEW pattern — one transaction for all rows.
         dao.deleteMessages("s0")
         val batchedMs = kotlin.system.measureTimeMillis {
             db.withTransaction { for (i in 0 until n) dao.insertMessage(message(i, "s0")) }
@@ -98,16 +83,6 @@ class RestoreInsertBenchmark {
         )
     }
 
-    /**
-     * [T-android-restore-perf] The OTHER half of the fix: the per-message
-     * parent check.
-     *
-     * The importer ran `dao.getSession(sessionId)` once per message — 202,705
-     * queries on the measured package — where the answer was already in
-     * `restoredSessionIds`. This measures a query-per-row against a set lookup
-     * per row, both inside one transaction so the fsync cost the other test
-     * covers cannot mask the difference.
-     */
     @Test
     fun set_lookup_beats_a_query_per_message() = runBlocking {
         val dao = db.chatDao()
@@ -115,7 +90,6 @@ class RestoreInsertBenchmark {
         db.withTransaction { ids.forEach { dao.insertSession(session(it.removePrefix("s").toInt())) } }
         val known = ids.toHashSet()
 
-        // Arm A: a DB round trip per message, the old shape.
         val queryMs = kotlin.system.measureTimeMillis {
             db.withTransaction {
                 for (i in 0 until n) {
@@ -124,7 +98,6 @@ class RestoreInsertBenchmark {
                 }
             }
         }
-        // Arm B: the in-memory set, the new shape.
         var hits = 0
         val setMs = kotlin.system.measureTimeMillis {
             for (i in 0 until n) {

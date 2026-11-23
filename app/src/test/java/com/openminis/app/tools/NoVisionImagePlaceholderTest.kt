@@ -5,18 +5,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-image-path-metadata] The placeholder that stands in for image
- * pixels when the target model has no native vision.
- *
- * The rule under test: the image's sandbox path is surfaced whenever we have
- * one, INDEPENDENT of whether a Vision Group is configured. The Vision Group
- * decides which recourse to name, not whether the model learns where the file
- * is — `shell_execute` is exposed unconditionally and runs in the same PRoot
- * sandbox, so a path is actionable (file / identify / OCR / Pillow) with no
- * Vision Group at all. Withholding it produced a dead end; iOS observed a
- * model trying to route around that dead end by inventing a CLI.
- */
 class NoVisionImagePlaceholderTest {
 
     private val path = "/var/minis/attachments/img_1.png"
@@ -26,7 +14,6 @@ class NoVisionImagePlaceholderTest {
 
     @Test
     fun `no vision group still hands over the path`() {
-        // The regression this exists for.
         val out = text(path, group = false)
         assertTrue("the path must be in the text", out.contains(path))
         assertTrue("and a usable way to act on it", out.contains("shell_execute"))
@@ -34,8 +21,6 @@ class NoVisionImagePlaceholderTest {
 
     @Test
     fun `no vision group does NOT invite read_image`() {
-        // Without a group the tool gate never registers read_image for this
-        // model, so naming it would invite a call that cannot resolve.
         assertFalse(text(path, group = false).contains("read_image"))
     }
 
@@ -48,7 +33,6 @@ class NoVisionImagePlaceholderTest {
 
     @Test
     fun `vision group without a path still names the tool`() {
-        // Older history rows predate linuxPath.
         val out = text(null, group = true)
         assertTrue(out.contains("read_image"))
         assertFalse("must not print a null path", out.contains("null"))
@@ -79,7 +63,6 @@ class NoVisionImagePlaceholderTest {
         }
     }
 
-    // ---- [T-android-image-path-metadata] Vision models get the path too -----
 
     private fun note(p: String?) = VisionGroupResolver.visionImagePathNote(p)
 
@@ -91,9 +74,6 @@ class NoVisionImagePlaceholderTest {
 
     @Test
     fun `the note says it is the SAME image, not an extra one`() {
-        // The disambiguation is load-bearing: N images + N notes must not read
-        // as 2N images, or "how many pictures did I send?" is answered wrongly
-        // and read_image gets called believing it fetches something new.
         val out = note(path)!!.lowercase()
         assertTrue("must identify the image as the one already shown", out.contains("same image"))
         assertTrue("and explicitly deny it is additional", out.contains("not an additional one"))
@@ -101,7 +81,6 @@ class NoVisionImagePlaceholderTest {
 
     @Test
     fun `no path means no note at all, never a null string`() {
-        // Nothing appended beats appending "null".
         for (p in listOf(null, "", "   ")) {
             assertNull("blank/absent path must yield no note", note(p))
         }
@@ -109,8 +88,6 @@ class NoVisionImagePlaceholderTest {
 
     @Test
     fun `the vision note does not invite read_image as a fetch`() {
-        // The model can already see the image; the path is for file-level work
-        // (re-read at full res, crop, OCR, metadata), not for fetching it anew.
         val out = note(path)!!
         assertTrue(out.contains("only if you need to work on the file"))
     }

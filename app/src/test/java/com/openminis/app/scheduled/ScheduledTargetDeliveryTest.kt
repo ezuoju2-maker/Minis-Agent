@@ -6,7 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [T-android-scheduled-default-follow-up] Port of iOS ScheduledTargetDeliveryTests (c32dda5a7). */
 class ScheduledTargetDeliveryTest {
 
     private fun resolve(explicit: String?, session: String?, caller: String?) =

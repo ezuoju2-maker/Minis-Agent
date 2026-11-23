@@ -13,30 +13,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
-/**
- * @-mention file index for the chat composer. Mirrors iOS `FileMentionIndex`:
- * a 3-layer scanner that publishes candidates to the UI **as each layer
- * finishes** so the user sees session-local files immediately, then shared
- * roots, then (if mounts are attached) external mounts.
- *
- * ### Layers
- *   1. **Session roots** — `workspace/<sid>` + `attachments/<sid>`.
- *   2. **Shared roots** — `shared/`, `skills/`, `memory/`.
- *   3. **Mount roots** — each entry in [mountsProvider] (e.g. SAF-attached
- *      folders). Each mount always gets a self-entry so `@<mountName>` works.
- *
- * ### Scoring (for [matches])
- *   - basename equals query → 1000
- *   - basename starts with query → 800
- *   - basename contains query → 600
- *   - any path component contains → 400
- *   - full path contains → 200
- *   - else → filtered out
- *
- * Adjustments: `.mount` scope loses 10 points (prefer session-local), top-level
- * scope roots gain 50 points. Ties broken by `modifiedAt` descending, capped
- * at [DEFAULT_MATCH_LIMIT].
- */
 class FileMentionIndex(
     private val filesDir: File,
     private val mountsProvider: () -> List<MountEntry> = { emptyList() },
@@ -45,18 +21,6 @@ class FileMentionIndex(
 ) {
     constructor(context: Context) : this(File(context.filesDir, "minis-global"))
 
-    /**
-     * Scope priorities — `order` doubles as the empty-query default sort key
-     * (lower wins) AND drives `rankBoost`'s scope tiebreaker on top of the
-     * name-match score. The case order here mirrors the iOS counterpart in
-     * `FileMentionIndex.swift`:
-     *   skills > attachments > mount > shared > workspace > memory.
-     *
-     * `rankBoost` is added to the per-name score with a max delta (600) that
-     * is smaller than the gap between adjacent name-match tiers (1000), so a
-     * stronger name match in *any* scope still beats a weak match in a
-     * higher-priority scope.
-     */
     enum class Scope(val displayLabel: String, val order: Int, val rankBoost: Int) {
         SKILLS("skills", 0, 600),
         ATTACHMENTS("attachments", 1, 500),
@@ -69,7 +33,6 @@ class FileMentionIndex(
     data class MountEntry(val name: String, val root: File)
 
     data class Entry(
-        /** Linux-visible path (what gets inserted into the composer). */
         val linuxPath: String,
         val scope: Scope,
         val mountName: String?,
@@ -91,7 +54,6 @@ class FileMentionIndex(
     private var currentScanToken: UUID = UUID.randomUUID()
     private var currentJob: Job? = null
 
-    /** Rescan if the session changed or the cache went stale. Idempotent. */
     fun refreshIfNeeded(sessionId: String) {
         val now = System.currentTimeMillis()
         val sameSession = lastScanSessionId == sessionId
@@ -106,7 +68,6 @@ class FileMentionIndex(
         currentJob = scope.launch { scan(sessionId, token) }
     }
 
-    /** Force a rescan regardless of cache. */
     fun refresh(sessionId: String) {
         lastScanAt = 0
         refreshIfNeeded(sessionId)
@@ -116,7 +77,6 @@ class FileMentionIndex(
         _isScanning.value = true
         val collected = mutableListOf<Entry>()
         try {
-            // Layer 1: session-local roots.
             layerEntries(
                 sessionId = sessionId,
                 layers = listOf(
@@ -129,7 +89,6 @@ class FileMentionIndex(
                 publish(token, collected)
             }
 
-            // Layer 2: shared roots.
             layerEntries(
                 sessionId = sessionId,
                 layers = listOf(
@@ -143,17 +102,10 @@ class FileMentionIndex(
                 publish(token, collected)
             }
 
-            // Layer 3: mounts (each published individually so one slow mount
-            // doesn't block the rest).
             var budget = GLOBAL_SCAN_BUDGET - collected.size
             for (mount in mountsProvider()) {
                 if (currentScanToken != token) return
-                // T219: align with PRoot bind path + iOS prompt wording.
-                // Each mount lives under /var/minis/mounts/<name> inside the
-                // sandbox; inserting that exact path keeps the agent's mental
-                // model coherent across @-mention, prompt copy, and shell.
                 val mountLinuxRoot = "/var/minis/mounts/${mount.name}"
-                // Always inject the mount root so `@<name>` works even when budget is gone.
                 collected += Entry(
                     linuxPath = mountLinuxRoot,
                     scope = Scope.MOUNT,
@@ -189,7 +141,6 @@ class FileMentionIndex(
         for ((dir, scope) in layers) {
             if (!dir.isDirectory) continue
             val linuxRoot = linuxRootFor(scope)
-            // Always include the root itself so `@workspace` / `@shared` can be referenced.
             out += Entry(
                 linuxPath = linuxRoot,
                 scope = scope,
@@ -249,7 +200,6 @@ class FileMentionIndex(
 
     private suspend fun publish(token: UUID, collected: List<Entry>) {
         if (currentScanToken != token) return
-        // Deduplicate by linuxPath (later scans may revisit) and sort per defaultOrdering.
         val deduped = collected.associateBy { it.linuxPath }.values
         val sorted = deduped.sortedWith(defaultOrdering)
         withContext(Dispatchers.Main) {
@@ -258,28 +208,13 @@ class FileMentionIndex(
         }
     }
 
-    /**
-     * Rank entries against [query]. Empty query returns the freshest entries
-     * in `defaultOrdering` (already applied to `_entries.value`).
-     *
-     * Score components (added together, biggest first):
-     *   • name-match tier (0 / 1000 … 10000) — drives the primary order
-     *   • Scope.rankBoost (0–600) — secondary preference between scopes
-     *   • top-level scope-root bonus (0 / 50) — keeps a whole skill or
-     *     mount above its children
-     *   • recency micro-bonus (0–80) — newer wins on otherwise-equal items
-     *
-     * The smallest gap between adjacent name tiers (1000) is greater than
-     * the maximum sum of all secondary signals (600 + 50 + 80 = 730), so a
-     * stronger name match always wins regardless of scope.
-     */
     fun matches(query: String, limit: Int = DEFAULT_MATCH_LIMIT): List<Entry> {
         val all = _entries.value
         if (query.isBlank()) return all.take(limit)
         val q = query.lowercase()
 
         val now = System.currentTimeMillis()
-        val recencyDayCapMs: Long = 56L * 24 * 60 * 60 * 1000 // 8 weeks → 0..80
+        val recencyDayCapMs: Long = 56L * 24 * 60 * 60 * 1000
 
         val scored = mutableListOf<Pair<Int, Entry>>()
         for (entry in all) {
@@ -287,27 +222,22 @@ class FileMentionIndex(
             val path = entry.linuxPath.lowercase()
             val stem = base.substringBeforeLast('.', missingDelimiterValue = base)
 
-            // Tier-based name match — pick the strongest applicable tier.
             val nameScore = when {
-                base == q -> 10_000                                        // exact full name
-                stem.isNotEmpty() && stem == q -> 9_000                    // exact stem (basename minus ext)
-                base.startsWith(q) -> 7_000                                // prefix match
-                basenameWordBoundaryContains(base, q) -> 6_000             // word-boundary contains
-                q in base -> 4_000                                         // generic contains in basename
-                anyPathComponentMatches(path, q) -> 2_000                  // ancestor directory contains
-                q in path -> 1_000                                         // anywhere in full path
+                base == q -> 10_000
+                stem.isNotEmpty() && stem == q -> 9_000
+                base.startsWith(q) -> 7_000
+                basenameWordBoundaryContains(base, q) -> 6_000
+                q in base -> 4_000
+                anyPathComponentMatches(path, q) -> 2_000
+                q in path -> 1_000
                 else -> 0
             }
             if (nameScore == 0) continue
 
-            // Scope priority (max 600 — well below the 1000 tier gap).
             val scopeScore = entry.scope.rankBoost
 
-            // Top-level scope-root bonus: typing `@codex` should surface the
-            // whole `skills/codex-image` directory above its children.
             val topLevelBonus = if (isTopLevelScopeRoot(entry)) 50 else 0
 
-            // Recency micro-bonus (≤ 80). Linear decay over 8 weeks.
             val ageMs = (now - entry.modifiedAt).coerceAtLeast(0L)
             val recencyBonus = (80.0 *
                 (1.0 - (ageMs.toDouble() / recencyDayCapMs.toDouble()).coerceIn(0.0, 1.0)))
@@ -319,8 +249,6 @@ class FileMentionIndex(
         return scored
             .sortedWith(
                 compareByDescending<Pair<Int, Entry>> { it.first }
-                    // Tiebreak: prefer higher-priority scope, then fresher,
-                    // then shorter path (a "closer" file).
                     .thenBy { it.second.scope.order }
                     .thenByDescending { it.second.modifiedAt }
                     .thenBy { it.second.linuxPath.length }
@@ -329,20 +257,12 @@ class FileMentionIndex(
             .map { it.second }
     }
 
-    /**
-     * Word-boundary substring match for the basename. Returns true if
-     * `query` appears at the start of a word fragment delimited by
-     * `_`, `-`, ` `, `.`, `/` (e.g. matches `parser` in `markdown_parser.py`,
-     * `web` in `image-web-search.md`). Helps elevate the kind of partial
-     * match users intuitively expect over arbitrary-position substrings.
-     */
     private fun basenameWordBoundaryContains(base: String, query: String): Boolean {
         if (query.isEmpty() || base.isEmpty()) return false
         val separators = setOf('_', '-', ' ', '.', '/')
         var i = 0
         while (i < base.length) {
             if (base.startsWith(query, startIndex = i)) return true
-            // Advance to the next word boundary.
             val sep = (i until base.length).firstOrNull { separators.contains(base[it]) }
                 ?: return false
             i = sep + 1
@@ -350,22 +270,10 @@ class FileMentionIndex(
         return false
     }
 
-    /**
-     * Substring search across path components — the same path may match
-     * even when the basename doesn't (e.g. typing `@mounts` finds files
-     * inside `/var/minis/mounts/...`).
-     */
     private fun anyPathComponentMatches(path: String, query: String): Boolean {
         return path.split('/').any { it.contains(query) }
     }
 
-    /**
-     * Is this entry the immediate child of a scope root? e.g.
-     * `/var/minis/skills/foo`, `/var/minis/mounts/bar`,
-     * `/var/minis/shared/baz`. These first-class `@`-targets get a +50
-     * ranking bonus so typing `@foo` surfaces the whole skill directory
-     * above its individual files (mirrors iOS).
-     */
     private fun isTopLevelScopeRoot(entry: Entry): Boolean {
         if (!entry.isDirectory) return false
         val tops = listOf(
@@ -376,7 +284,6 @@ class FileMentionIndex(
         for (top in tops) {
             if (entry.linuxPath.startsWith(top)) {
                 val rest = entry.linuxPath.removePrefix(top)
-                // First-level child only — must not contain a further '/'.
                 return rest.isNotEmpty() && '/' !in rest
             }
         }

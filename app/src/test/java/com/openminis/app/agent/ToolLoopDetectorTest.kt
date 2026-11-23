@@ -5,19 +5,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * JVM unit tests for ToolLoopDetector. Each strategy gets its own isolated
- * detector instance so warning-bucket / history state doesn't bleed across
- * test methods.
- *
- * Notes on `expectedRecordWarnings`: the detector emits warnings via
- * `record()` once per `warningThreshold` call (i.e. at counts 10, 20, 30…).
- * Tests assert against that bucketed cadence, not on every call past
- * threshold, to mirror the real LLM-facing behavior.
- */
 class ToolLoopDetectorTest {
 
-    // ─── 1. generic_repeat ────────────────────────────────────────────────────
 
     @Test
     fun `generic_repeat does not warn under threshold`() {
@@ -41,7 +30,6 @@ class ToolLoopDetectorTest {
                 result = "ok", errorMessage = null)
             if (post.level == Level.WARNING) warnings++
         }
-        // Expect warnings exactly at bucket boundaries: count 10, count 20 → 2.
         assertEquals("should emit exactly two warnings (buckets 10 and 20)", 2, warnings)
     }
 
@@ -51,8 +39,6 @@ class ToolLoopDetectorTest {
         repeat(15) {
             val post = detector.record("command_status", mapOf("id" to "job-1"),
                 result = "running", errorMessage = null)
-            // Poll tool should follow the poll path; record() emits at >= warning
-            // threshold, but the warning text must reference polling, not generic.
             if (post.level == Level.WARNING) {
                 assertTrue("poll-path warning expected, got: ${post.message}",
                     post.message?.contains("Stop polling") == true)
@@ -62,8 +48,6 @@ class ToolLoopDetectorTest {
 
     @Test
     fun `generic_repeat is order-stable across param key reordering`() {
-        // Two different Map iteration orders, same logical params → same hash,
-        // so 5 of one + 5 of the other should land in the same bucket and warn.
         val a: Map<String, Any?> = linkedMapOf("a" to 1, "b" to 2)
         val b: Map<String, Any?> = linkedMapOf("b" to 2, "a" to 1)
         var warnings = 0
@@ -82,11 +66,6 @@ class ToolLoopDetectorTest {
 
     @Test
     fun `argsHash ignores tool_title counter suffix`() {
-        // Repro of the DeepSeek V4 Flash live failure: every call carried a
-        // `tool_title` like "Read /etc/hostname #1", "#2", … with the model's
-        // own counter. Without filtering tool_title, each call's argsHash
-        // differed, so 30 logically-identical reads produced zero warnings or
-        // blocks. The fix excludes tool_title from argsHashFor.
         val detector = ToolLoopDetector()
         repeat(10) { i ->
             detector.record(
@@ -112,19 +91,16 @@ class ToolLoopDetectorTest {
         )
     }
 
-    // ─── 2. unknown_tool_repeat ──────────────────────────────────────────────
 
     @Test
     fun `unknown_tool_repeat blocks at threshold`() {
         val detector = ToolLoopDetector()
-        // 9 unknown-tool records: under threshold, the 10th check() must allow.
         repeat(9) {
             detector.record("foobar", emptyMap(),
                 result = null, errorMessage = "Error: unknown tool: foobar")
         }
         val preUnder = detector.check("foobar", emptyMap())
         assertEquals("9 unknown records → still allowed", Level.NONE, preUnder.level)
-        // Add the 10th unknown-tool record; next check() must block.
         detector.record("foobar", emptyMap(),
             result = null, errorMessage = "Error: unknown tool: foobar")
         val pre = detector.check("foobar", emptyMap())
@@ -142,10 +118,6 @@ class ToolLoopDetectorTest {
             detector.record("foobar", emptyMap(),
                 result = null, errorMessage = "unknown tool: foobar")
         }
-        // 10 streaks of foobar, then one of bazquux → unknown-streak for foobar
-        // is broken (the new tail entry has a different unknownToolName), so
-        // check() must NOT escalate to CRITICAL via unknown_tool_repeat. A
-        // generic_repeat warning may still fire from the prior identical args.
         detector.record("bazquux", emptyMap(),
             result = null, errorMessage = "unknown tool: bazquux")
         val preFoobar = detector.check("foobar", emptyMap())
@@ -172,12 +144,10 @@ class ToolLoopDetectorTest {
                 result = null, errorMessage = "Error: file not found: /x")
         }
         val pre = detector.check("file_read", mapOf("path" to "/x"))
-        // generic_repeat would have warned, but no CRITICAL for unknown_tool here.
         assertNull("unrelated error must not be parsed as unknown-tool",
             pre.message?.takeIf { it.contains("unavailable tool") })
     }
 
-    // ─── 3. known_poll_no_progress ───────────────────────────────────────────
 
     @Test
     fun `known_poll_no_progress warns at threshold`() {
@@ -202,7 +172,6 @@ class ToolLoopDetectorTest {
             detector.record("command_status", mapOf("id" to "job-1"),
                 result = "running", errorMessage = null)
         }
-        // After 20 records the streak is 20; next check must block as CRITICAL.
         val pre = detector.check("command_status", mapOf("id" to "job-1"))
         assertEquals(Level.CRITICAL, pre.level)
         assertTrue(pre.message?.contains("Session execution blocked") == true)
@@ -215,10 +184,8 @@ class ToolLoopDetectorTest {
             detector.record("command_status", mapOf("id" to "job-1"),
                 result = "running", errorMessage = null)
         }
-        // Result changed → progress observed; streak should break.
         detector.record("command_status", mapOf("id" to "job-1"),
             result = "completed", errorMessage = null)
-        // Now even with the same args, no-progress streak = 1 (just the latest).
         val pre = detector.check("command_status", mapOf("id" to "job-1"))
         assertEquals("progress resets streak", Level.NONE, pre.level)
     }
@@ -231,19 +198,14 @@ class ToolLoopDetectorTest {
                 mapOf("action" to "poll", "id" to "p1"),
                 result = "still_running", errorMessage = null)
         }
-        // Streak now 10 → next check on the same poll args yields a WARNING.
         val pre = detector.check("process", mapOf("action" to "poll", "id" to "p1"))
         assertEquals(Level.WARNING, pre.level)
     }
 
-    // ─── 4. global_circuit_breaker ───────────────────────────────────────────
 
     @Test
     fun `global_circuit_breaker blocks any tool at 30`() {
         val detector = ToolLoopDetector()
-        // Use a non-poll tool to make sure the breaker — not the poll path —
-        // is the one tripping. With identical args+results it'd otherwise
-        // trip generic_repeat warnings only (warnings != block).
         repeat(30) {
             detector.record("custom_widget", mapOf("k" to "v"),
                 result = "no-progress", errorMessage = null)
@@ -262,13 +224,11 @@ class ToolLoopDetectorTest {
                 result = "result-$i", errorMessage = null)
         }
         val pre = detector.check("custom_widget", mapOf("k" to "v"))
-        // Each result distinct → no-progress streak = 1 → no breaker.
         assertTrue("breaker must not fire on varying results",
             pre.level != Level.CRITICAL ||
                 pre.message?.contains("global circuit breaker") != true)
     }
 
-    // ─── config / reset / hygiene ────────────────────────────────────────────
 
     @Test
     fun `reset clears history and warning buckets`() {
@@ -279,7 +239,6 @@ class ToolLoopDetectorTest {
         }
         detector.reset()
         assertEquals(0, detector.historySnapshot().size)
-        // After reset, 10 more identical calls should warn anew (buckets cleared).
         var warnings = 0
         repeat(10) {
             val r = detector.record("file_read", mapOf("path" to "/foo"),
@@ -299,9 +258,6 @@ class ToolLoopDetectorTest {
         ToolLoopConfig(criticalThreshold = 30, globalCircuitBreakerThreshold = 30)
     }
 
-    // [T-tool-title-reminder] Missing-title soft reminder: counted here, next to
-    // the loop warnings, and due on the 1st, 11th, 21st… missing-title call.
-    // Mirrors iOS ToolTitleReminderTests' cadence section.
 
     @Test
     fun `tool title reminder fires on 1st 11th 21st missing call only`() {
@@ -309,8 +265,8 @@ class ToolLoopDetectorTest {
         val fired = mutableListOf<Int>()
         var missing = 0
         for (i in 1..40) {
-            val titled = i % 4 == 0          // has a title → not counted
-            val declared = i % 5 != 0        // MCP-style tool without tool_title → not counted
+            val titled = i % 4 == 0
+            val declared = i % 5 != 0
             val args = org.json.JSONObject().put("command", "ls")
             if (titled) args.put("tool_title", "Step $i")
             if (declared && !titled) missing++

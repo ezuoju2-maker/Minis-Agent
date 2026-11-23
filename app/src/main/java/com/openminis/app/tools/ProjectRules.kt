@@ -3,26 +3,8 @@ package com.openminis.app.tools
 import com.openminis.app.agent.SystemPromptBuilder
 import java.io.File
 
-/**
- * [v1.62-project-rules] Project-level instructions, the AGENTS.md / CLAUDE.md
- * convention every modern agent honours.
- *
- * A repo user writes down how the project must be built, tested and styled; an
- * agent that ignores that file re-derives (or violates) the same conventions
- * every session. Claude Code reads CLAUDE.md up the directory chain; Codex,
- * Cursor and Copilot read AGENTS.md; this app had no equivalent.
- *
- * Design constraints:
- *  - Read-only, cached by (path, mtime, length) so a per-turn prompt build
- *    costs one stat, not a file read.
- *  - Bounded: at most 4 ancestor levels, 2 000 chars per file, 3 000 total.
- *  - Treated as project-authored CONTEXT, not system authority: the section
- *    says so explicitly, and lines that try to override the system prompt are
- *    dropped (same pattern set SOUL.md already uses).
- */
 object ProjectRules {
 
-    /** Recognised file names, highest priority first. */
     private val FILE_NAMES = listOf("AGENTS.md", "MINIS.md", "CLAUDE.md", ".minis/rules.md")
 
     private const val MAX_CHARS_PER_FILE = 2_000
@@ -35,10 +17,6 @@ object ProjectRules {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, String>?) = size > 8
     }
 
-    /**
-     * Section text for prompts, or "" when none exists. [startDir] is the host
-     * directory of the session's workspace.
-     */
     @Synchronized
     fun section(startDir: File, maxChars: Int = MAX_CHARS_TOTAL): String {
         val files = collect(startDir)
@@ -60,7 +38,6 @@ object ProjectRules {
         return if (sb.toString().endsWith("\n\n")) sb.toString().trimEnd() + "\n\n" else sb.toString()
     }
 
-    /** All rule files found walking up from [startDir], nearest first. */
     internal fun collect(startDir: File): List<File> {
         val out = ArrayList<File>()
         var dir: File? = startDir

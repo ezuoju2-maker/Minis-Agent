@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- [T-android-retry-badge] The retry badge before "… is thinking" and its retry log sheet. -->
 <resources>
     <string name="retry_badge_a11y">Retrying, attempt %1$d of %2$d. Tap to see the retries.</string>
     <string name="retry_sheet_title">Automatic retries</string>

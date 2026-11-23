@@ -7,17 +7,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-backup-fgs] Stage 2: a running backup survives the app being
- * backgrounded.
- *
- * Reported: a backup dies when the screen goes off or the phone hops cells.
- * Stage 1 moved the run to a process scope, which survives leaving the SCREEN
- * but not the process being frozen or reclaimed in the background. This pins
- * the foreground service that prevents that — the classification it announces
- * with (pure), and its wiring and lifecycle (source), since a Service needs a
- * device to run.
- */
 class BackupForegroundServiceTest {
 
     private fun result(vararg ok: Boolean) = BackupRunController.RunResult(
@@ -27,11 +16,9 @@ class BackupForegroundServiceTest {
         },
     )
 
-    // ── What the finished notification says ───────────────────────────────
 
     @Test
     fun `a local-only package is never announced as delivered`() {
-        // It is still inside the app; the notification is the prompt to move it.
         assertEquals(
             BackupForegroundService.Outcome.LOCAL_PENDING,
             BackupForegroundService.outcomeOf(result(), error = null),
@@ -53,7 +40,6 @@ class BackupForegroundServiceTest {
         )
     }
 
-    // ── Wiring & lifecycle ────────────────────────────────────────────────
 
     private fun src(path: String): String {
         val f = File(path)

@@ -9,11 +9,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-image-session-direct] A `minis://` image resolves in its own
- * chat's directory, read directly, whatever other chats are doing — and old
- * links with no session still load.
- */
 class MinisImageSessionResolveTest {
 
     private val filesDir: File = Files.createTempDirectory("minis-img").toFile()
@@ -30,7 +25,7 @@ class MinisImageSessionResolveTest {
     fun `with a session, the file comes from that session even when another chat ran last`() {
         val a = put("A", "attachments/cat.png", "A-cat")
         put("B", "attachments/cat.png", "B-cat")
-        PRootKernel.noteLegacySession(filesDir, "B") // B built a shell most recently
+        PRootKernel.noteLegacySession(filesDir, "B")
         val f = MinisImageFetcher.resolve(filesDir, "minis://attachments/cat.png", "A")
         assertEquals(a.absolutePath, f?.absolutePath)
     }
@@ -61,9 +56,8 @@ class MinisImageSessionResolveTest {
     @Test
     fun `an orphan link is found by searching the sessions when the direct lookups miss`() {
         val c = put("C", "attachments/orphan.png")
-        PRootKernel.noteLegacySession(filesDir, "B") // points elsewhere
+        PRootKernel.noteLegacySession(filesDir, "B")
         assertEquals(c.absolutePath, MinisImageFetcher.resolve(filesDir, "minis://attachments/orphan.png", null)?.absolutePath)
-        // A link copied from chat C into chat A still loads in A.
         assertEquals(c.absolutePath, MinisImageFetcher.resolve(filesDir, "minis://attachments/orphan.png", "A")?.absolutePath)
     }
 

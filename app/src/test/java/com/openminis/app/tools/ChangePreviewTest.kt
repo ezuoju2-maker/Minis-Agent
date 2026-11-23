@@ -4,10 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [code-ability] The change-preview diff must be deterministic, correct on the
- * common edit shapes, bounded on large input, and honest when it truncates.
- */
 class ChangePreviewTest {
 
     @Test
@@ -66,7 +62,6 @@ class ChangePreviewTest {
         val d = ChangePreview.diff("a\nb", "a\nc\nb")
         val ctx = d.filter { it.kind == ChangePreview.Line.Kind.CONTEXT }
         assertEquals(listOf(1, 2), ctx.map { it.oldNumber }.take(2))
-        // new line numbers skip after the insertion
         assertTrue(ctx.last().newNumber > ctx.last().oldNumber)
     }
 }

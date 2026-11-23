@@ -1,24 +1,16 @@
 package com.openminis.app.agent.shell
 
-/**
- * Builds the <system-reminder> appended after a sh tool-result when a script hit
- * bashism rules but ran under busybox sh (T-bash-on-demand §4.2). Isomorphic to
- * iOS BashismReminder.swift. Script lines are untrusted, so they are sanitized
- * before embedding (M4).
- */
 object BashismReminder {
 
-    /** M4: neutralize anything that could break out of the trusted wrapper. */
     fun sanitize(line: String): String {
         var s = line
-            .replace("<", "‹") // ‹
-            .replace(">", "›") // ›
+            .replace("<", "‹")
+            .replace(">", "›")
         s = s.filter { it.code >= 0x20 || it == ' ' }
         if (s.length > 120) s = s.substring(0, 120) + "…"
         return s
     }
 
-    /** Returns null when there is nothing worth telling the model. */
     fun build(hits: List<BashismDetector.Hit>, installFailure: String?): String? {
         if (hits.isEmpty()) return null
 

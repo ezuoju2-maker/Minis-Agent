@@ -13,21 +13,8 @@ import java.text.NumberFormat
 import java.util.Currency
 import java.util.Locale
 
-// [T-provider-quota] The store's on-disk shape, its keyed single flight, and
-// display formatting / tone / level rules. Port of iOS QuotaPersistence.swift.
-// Pure Kotlin: every user-visible word comes through [QuotaStrings].
 
-// MARK: - On-disk file
 
-/**
- * `noBackupFilesDir/quota/store.json`. Device-local only: the directory is
- * excluded from Android backup, the Minis backup exporter never reads it, and
- * no sync path carries it.
- *
- * Holds structured, secret-free data only: pools, bindings, subject
- * bookkeeping (a masked key label, never the key), capability records and
- * snapshot digests. No response bodies, headers or credentials.
- */
 @Serializable
 data class QuotaStoreFile(
     val version: Int = CURRENT_VERSION,
@@ -36,7 +23,6 @@ data class QuotaStoreFile(
     val bindings: List<QuotaPoolBinding> = emptyList(),
     val capabilities: List<QuotaCapabilityRecord> = emptyList(),
     val summaries: List<QuotaSnapshotSummary> = emptyList(),
-    /** Instance id -> the subject it last resolved to. */
     val instanceSubjects: Map<String, QuotaSubjectID> = emptyMap(),
 ) {
     companion object {
@@ -51,10 +37,6 @@ data class QuotaStoreFile(
 
         fun encode(file: QuotaStoreFile): String = json.encodeToString(serializer(), file)
 
-        /**
-         * null for an unreadable or future-version file. The caller then starts
-         * empty: quota data is a cache and is re-fetched, never worth a crash.
-         */
         fun decode(text: String): QuotaStoreFile? {
             val file = runCatching { json.decodeFromString(serializer(), text) }.getOrNull() ?: return null
             return file.takeIf { it.version <= CURRENT_VERSION }
@@ -62,14 +44,7 @@ data class QuotaStoreFile(
     }
 }
 
-// MARK: - Single flight
 
-/**
- * One in-flight operation per key. Concurrent callers with the same key (two
- * instances sharing one account, a tick racing a manual refresh) await the
- * same deferred instead of each issuing a request. The operation runs in
- * [scope], so a caller leaving does not cancel the fetch the others wait on.
- */
 class QuotaSingleFlight<K : Any, V>(private val scope: CoroutineScope) {
     private val inFlight = HashMap<K, Deferred<V>>()
 
@@ -90,13 +65,7 @@ class QuotaSingleFlight<K : Any, V>(private val scope: CoroutineScope) {
     }
 }
 
-// MARK: - Words
 
-/**
- * Every word the pure formatting rules need. The app supplies the string
- * resources (QuotaResourceStrings); [English] mirrors the iOS source strings
- * and backs the unit tests.
- */
 interface QuotaStrings {
     fun credits(): String
     fun requests(n: String): String
@@ -144,13 +113,8 @@ interface QuotaStrings {
     }
 }
 
-// MARK: - Formatting
 
 object QuotaFormat {
-    /**
-     * Amount in the pool's own unit. Currencies with the locale's currency
-     * style (symbol + minor digits); nothing is converted.
-     */
     fun amount(
         value: BigDecimal,
         unit: QuotaUnit,
@@ -182,7 +146,6 @@ object QuotaFormat {
         return f.format(value)
     }
 
-    /** "1.2M": for token counts. */
     fun compact(value: BigDecimal, locale: Locale = Locale.getDefault()): String {
         val abs = value.abs()
         val (div, suffix) = when {
@@ -196,24 +159,14 @@ object QuotaFormat {
         return f.format(value.divide(div, MathContext.DECIMAL64)) + suffix
     }
 
-    /**
-     * "81%": whole numbers, one decimal below 10% so a small value is not shown
-     * as 0%. Rounded in decimal (half up), so 4.25 is 4.3% on every device.
-     */
     fun percent(value: BigDecimal): String {
         val scale = if (value.signum() > 0 && value < BigDecimal.TEN) 1 else 0
         return "${value.setScale(scale, RoundingMode.HALF_UP).quotaString}%"
     }
 
-    /**
-     * [T-quota-percent-used] Every vendor's percent is shown as usage:
-     * "44% used". Claude (`utilization`) and ChatGPT / Codex (`used_percent`)
-     * both report what is used, so one wording fits all.
-     */
     fun percentUsedText(usedPercent: BigDecimal, strings: QuotaStrings = QuotaStrings.English): String =
         strings.used(percent(usedPercent))
 
-    /** "Granted CN¥10.00 · Topped up CN¥100.00". */
     fun breakdown(
         amounts: QuotaAmounts,
         unit: QuotaUnit,
@@ -226,14 +179,9 @@ object QuotaFormat {
         }
     }
 
-    /** Window id as shown: the stable id is already short ("5h", "7d", "day"). */
     fun windowLabel(w: QuotaWindow, strings: QuotaStrings = QuotaStrings.English): String =
         w.calendarPeriod?.let { strings.period(it) } ?: w.id
 
-    /**
-     * Short headline for compact places (picker section header): unit-true,
-     * with a meaning prefix, never a percent for a prepaid balance.
-     */
     fun shortText(
         pool: QuotaPool,
         status: PoolStatus,
@@ -259,24 +207,17 @@ object QuotaFormat {
     }
 }
 
-// MARK: - Status -> tone, and when a bar may be drawn
 
-/** Visual tier for a quota status; the view maps it to a colour. */
 @Suppress("EnumEntryName")
 enum class QuotaTone {
-    /** Available, but nothing measures "how much" (a prepaid balance): neutral, never green. */
     normal,
 
-    /** Available AND backed by a reliable percent: the one case green is used. */
     healthy,
 
-    /** Low or rate limited: orange. */
     caution,
 
-    /** Exhausted / rejected: red. */
     critical,
 
-    /** Unknown or expired data: grey, numbers are not trusted. */
     muted,
 }
 
@@ -293,41 +234,24 @@ object QuotaToneRules {
 
     fun tone(s: PoolStatus): QuotaTone = tone(s.status, s.freshness, s.utilization != null)
 
-    /** The compact picker pill never goes green; it only turns orange / red to warn. */
     fun pillTone(s: PoolStatus): QuotaTone = tone(s).let { if (it == QuotaTone.healthy) QuotaTone.normal else it }
 }
 
 object QuotaBarRules {
-    /**
-     * 0..1 fill for a progress bar, or null when no reliable percent exists.
-     * Over-100% (overage) draws full; the text still says the real figure.
-     */
     fun fraction(u: QuotaUtilization?): Double? {
         val d = u?.percent?.toDouble()?.div(100) ?: return null
         if (!d.isFinite()) return null
         return d.coerceIn(0.0, 1.0)
     }
 
-    /** Bar for a pool's own amounts. Never for a prepaid balance, a rate limit or an unlimited pool. */
     fun poolFraction(pool: QuotaPool): Double? =
         pool.amounts?.let { fraction(it.computedUtilization(pool.kind, pool.unlimited)) }
 
-    /** Bar for one window of a pool. */
     fun windowFraction(w: QuotaWindow, pool: QuotaPool): Double? =
         fraction(w.utilization(pool.kind, pool.unlimited))
 }
 
-// MARK: - Quota level (nav bar dot, picker tags, composer)
 
-/**
- * [T-quota-tag-level] Three levels, shared by the nav bar dot and the picker
- * tags so they can never disagree:
- * - [depleted] (red tag): nothing left - a percent at or past 100% used, a
- *   currency balance at or below 0, or the vendor refusing the account;
- * - [low] (yellow tag / yellow dot): under [QuotaLevelRules.LOW_REMAINING_PERCENT]
- *   left, or under [QuotaLevelRules.LOW_BALANCE_USD];
- * - [normal]: otherwise, and whenever there is no usable data.
- */
 @Suppress("EnumEntryName")
 enum class QuotaLevel { normal, low, depleted }
 
@@ -335,24 +259,14 @@ object QuotaLevelRules {
     val LOW_REMAINING_PERCENT = BigDecimal(10)
     val LOW_BALANCE_USD: BigDecimal = BigDecimal.ONE
 
-    /**
-     * Units of the currency per 1 USD. Deliberately fixed (no live FX): the
-     * rate only places a warning threshold and is never shown.
-     */
     val UNITS_PER_USD: Map<String, BigDecimal> =
         mapOf("USD" to BigDecimal.ONE, "CNY" to BigDecimal("7.2"), "CNH" to BigDecimal("7.2"))
 
     fun usd(amount: BigDecimal, currency: String): BigDecimal? =
         UNITS_PER_USD[currency.uppercase()]?.let { amount.divide(it, MathContext.DECIMAL128) }
 
-    /** Remaining share of a used percent. */
     fun remainingPercent(usedPercent: BigDecimal): BigDecimal = BigDecimal(100).subtract(usedPercent)
 
-    /**
-     * Over (status, pool) pairs. Prepaid currency balances of one account are
-     * judged TOGETHER (DeepSeek keeps one balance per currency: CN¥36 + $0 is
-     * not low); every other pool on its own; the worst level wins.
-     */
     fun level(items: List<Pair<PoolStatus, QuotaPool>>): QuotaLevel {
         var worst = QuotaLevel.normal
         var prepaidUSD = BigDecimal.ZERO
@@ -386,8 +300,6 @@ object QuotaLevelRules {
                     inUSD < LOW_BALANCE_USD -> worst = maxOf(worst, QuotaLevel.low)
                 }
             } else if (remaining.signum() <= 0) {
-                // Credits / relay quota units: only "nothing left" is judged by
-                // amount (no rate to place a $1 threshold); the rest via percent.
                 return QuotaLevel.depleted
             }
         }
@@ -398,12 +310,10 @@ object QuotaLevelRules {
         return worst
     }
 
-    /** The model's bound pools (its own and its account's). */
     fun level(v: ModelQuotaView, pools: Map<QuotaPoolKey, QuotaPool>): QuotaLevel =
         level(v.bound.mapNotNull { b -> pools[b.poolKey]?.let { b.status to it } })
 }
 
-/** [T-quota-low-dot] The nav bar dot turns yellow at [QuotaLevel.low] or worse. */
 object QuotaLowRules {
     fun isLow(v: ModelQuotaView, pools: Map<QuotaPoolKey, QuotaPool>): Boolean =
         QuotaLevelRules.level(v, pools) != QuotaLevel.normal

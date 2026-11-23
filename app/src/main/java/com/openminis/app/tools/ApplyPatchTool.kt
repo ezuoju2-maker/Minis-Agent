@@ -9,18 +9,6 @@ import com.openminis.app.sandbox.PRootKernel
 import org.json.JSONObject
 import java.io.File
 
-/**
- * [v1.62-apply-patch] `apply_patch` tool: the whole change set in one call.
- *
- * Validation happens before a single byte is written:
- *   - every path resolves through the per-session resolver and is not on a
- *     read-only mount (same rules as file_write / file_edit);
- *   - content that is an offload placeholder is refused (GH#374 class of bug);
- *   - every hunk must match — fuzzy matches accepted only when unambiguous.
- *
- * Then writes run through [ExecutionCoordinator] with a single timeout, and
- * any failure restores the files already written. All-or-nothing.
- */
 object ApplyPatchTool {
     const val NAME = "apply_patch"
 
@@ -79,7 +67,6 @@ object ApplyPatchTool {
                 return ToolExecutionResult("Error: patch rejected — $it", false, toolTitle = toolTitle)
             }
 
-            // 1. Resolve every path and read current contents.
             data class Target(val rel: String, val file: File, val content: String?, val op: ApplyPatch.Op)
 
             val targets = ArrayList<Target>()
@@ -108,7 +95,6 @@ object ApplyPatchTool {
                 targets.add(Target(op.path, file, content, op))
             }
 
-            // 2. Compute the complete outcome in memory (pure).
             val contents: Map<String, String?> = targets.associate { it.rel to it.content }
             val changes = ApplyPatch.apply(parsed.ops, contents)
             val totalBytes = changes.sumOf { it.after.length.toLong() }
@@ -119,7 +105,6 @@ object ApplyPatchTool {
                     false, toolTitle = toolTitle,
                 )
             }
-            // Placeholder guard: an offload stub must never become a file's body.
             changes.firstOrNull { ContextOffload.isOffloadPlaceholder(it.after) }?.let {
                 return ToolExecutionResult(
                     ContextOffload.placeholderWriteRefusal("patch", it.path),
@@ -127,7 +112,6 @@ object ApplyPatchTool {
                 )
             }
 
-            // 3. Report a compact per-file summary (this is what the model reads).
             val summary = buildString {
                 append(if (dryRun) "Dry run — validated, nothing written.\n" else "Patch applied atomically.\n")
                 for (c in changes) {
@@ -144,15 +128,11 @@ object ApplyPatchTool {
 
             if (dryRun) return ToolExecutionResult(summary, true, toolTitle = toolTitle)
 
-            // 4. Write through the execution coordinator (single timeout), with
-            //    an in-memory undo log for rollback.
             val created = ArrayList<File>()
             val written = LinkedHashMap<File, String?>()
             try {
                 FileToolIO.run("Applying patch", writes = true, timeoutMs = TIMEOUT_MS) {
                     for (c in changes) {
-                        // Resolve again against the change path (a move target
-                        // is a new file; a delete has an empty body).
                         val linuxPath = if (c.path.startsWith("/")) c.path else "$base/${c.path}"
                         val host = PRootKernel.resolveSessionHostPath(sessionId, linuxPath, context)
                             ?: throw IOException("cannot resolve ${c.path}")
@@ -166,11 +146,8 @@ object ApplyPatchTool {
                             host.writeText(c.after)
                         }
                     }
-                    // A move leaves both entries; deleting the source is the
-                    // second change with an empty body, handled above.
                 }
             } catch (e: Exception) {
-                // Roll back every file touched so far.
                 for ((f, old) in written) {
                     runCatching {
                         if (old == null) f.delete() else { f.parentFile?.mkdirs(); f.writeText(old) }

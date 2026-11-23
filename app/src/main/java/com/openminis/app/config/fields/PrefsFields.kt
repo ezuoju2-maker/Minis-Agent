@@ -11,12 +11,6 @@ import com.openminis.app.config.readable.ConfigReadable
 import com.openminis.app.config.readable.ConfigValueFormatter
 import com.openminis.app.config.readable.NumberUnit
 
-/**
- * Convenience wrappers for the most common backend (SharedPreferences).
- * Mirror iOS `AppStorage*Field`s. Add new variants here when a new
- * primitive type starts to recur — the bridge cares only about the
- * [ConfigValue] shape, so wrappers translate.
- */
 
 class PrefsBoolField(
     override val path: String,
@@ -52,7 +46,6 @@ class PrefsIntField(
     private val minValue: Int? = null,
     private val maxValue: Int? = null,
     override val risk: ConfigRisk = ConfigRisk.NORMAL,
-    /** [T-config-readable] Unit, and the label key shown for 0 (e.g. "Off"). */
     private val unit: NumberUnit = NumberUnit.PLAIN,
     private val zeroLabel: String? = null,
 ) : ConfigField {
@@ -82,14 +75,10 @@ class PrefsLongField(
     private val minValue: Long? = null,
     private val maxValue: Long? = null,
     override val risk: ConfigRisk = ConfigRisk.NORMAL,
-    /** [T-config-readable] Unit, and the label key shown for 0. */
     private val unit: NumberUnit = NumberUnit.PLAIN,
     private val zeroLabel: String? = null,
 ) : ConfigField {
     override val readable: ConfigReadable get() = ConfigReadable(ConfigValueFormatter.Number(unit, zeroLabel))
-    // Long values are surfaced as Int in the schema (Kotlin's range is
-    // wider than the bridge's ConfigValue.Int — for the few sync.maxFileSize
-    // -style fields we accept downcasting; the agent never sees > 2^31 here).
     override val valueSchema: ConfigSchema
         get() = ConfigSchema.Int(
             min = minValue?.toInt(),
@@ -121,10 +110,6 @@ class PrefsDoubleField(
     override val risk: ConfigRisk = ConfigRisk.NORMAL,
 ) : ConfigField {
     override val readable: ConfigReadable get() = ConfigReadable(ConfigValueFormatter.Number())
-    // SharedPreferences has no native Double; persist as Float bits via
-    // `Float.toRawBits` packed into a Long for full precision. Most call
-    // sites here use small floats (rate / pitch / volume) so the cast is
-    // lossless in practice.
     override val valueSchema: ConfigSchema
         get() = ConfigSchema.Double(min = minValue, max = maxValue)
     override val access: ConfigAccess get() = ConfigAccess.READWRITE
@@ -155,10 +140,6 @@ class PrefsStringField(
     private val maxLength: Int? = null,
     private val regex: String? = null,
     override val risk: ConfigRisk = ConfigRisk.NORMAL,
-    /**
-     * [T-config-readable] Required: a string field's values can be ids,
-     * language codes, free text… only the registration knows which.
-     */
     override val readable: ConfigReadable,
 ) : ConfigField {
     override val valueSchema: ConfigSchema
@@ -175,10 +156,6 @@ class PrefsStringField(
     }
 }
 
-/**
- * String-enum stored as a raw string in SharedPreferences. Schema's
- * StrEnum validates before write.
- */
 class PrefsEnumField(
     override val path: String,
     override val displayName: String,
@@ -186,7 +163,6 @@ class PrefsEnumField(
     private val prefs: SharedPreferences,
     private val key: String,
     private val cases: List<String>,
-    /** [T-config-readable] Required: raw case → label key, covering every case. */
     private val valueLabels: Map<String, String>,
     private val defaultValue: String,
     override val risk: ConfigRisk = ConfigRisk.NORMAL,
@@ -206,12 +182,6 @@ class PrefsEnumField(
     }
 }
 
-/**
- * Some legacy app preferences store the picker index as Int (e.g.
- * `theme_mode` is 0=System / 1=Light / 2=Dark) but we want the agent
- * to see clean string tokens. Reads map index → case; writes map case
- * → index. Mirrors iOS `AppStorageIntCodedEnumField`.
- */
 class PrefsIntCodedEnumField(
     override val path: String,
     override val displayName: String,
@@ -219,7 +189,6 @@ class PrefsIntCodedEnumField(
     private val prefs: SharedPreferences,
     private val key: String,
     private val cases: List<String>,
-    /** [T-config-readable] Required: raw case → label key, covering every case. */
     private val valueLabels: Map<String, String>,
     private val defaultIndex: Int,
     override val risk: ConfigRisk = ConfigRisk.NORMAL,

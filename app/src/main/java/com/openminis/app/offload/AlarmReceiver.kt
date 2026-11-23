@@ -7,10 +7,6 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.openminis.app.logging.AppLogger
 
-/**
- * BroadcastReceiver that fires when an alarm or timer triggers.
- * Shows a high-priority notification with the alarm label.
- */
 class AlarmReceiver : BroadcastReceiver() {
 
     companion object {
@@ -19,22 +15,10 @@ class AlarmReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        // [T-android-alarm-reschedule-on-restart] Both actions mean the same
-        // thing for us: AlarmManager has dropped our pending alarms and they
-        // need re-registering. BOOT_COMPLETED covers a reboot;
-        // MY_PACKAGE_REPLACED covers an app update, which is far more frequent
-        // and previously left every scheduled task dead until the next reboot.
-        // Same handling for both — rescheduleAll() is idempotent.
         if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
             intent.action == Intent.ACTION_MY_PACKAGE_REPLACED
         ) {
             AppLogger.info(TAG, "${intent.action} — re-registering scheduled task alarms")
-            // [T-android-scheduled-tasks-design] Re-register every enabled
-            // ScheduledTask with AlarmManager. The OS drops all pending
-            // alarms on reboot, so persisted tasks would silently stop
-            // firing without this. The legacy AlarmOffloadManager entries
-            // are repeating alarms and DO survive reboot via the OS, so
-            // we don't have to re-register them here.
             try {
                 com.openminis.app.scheduled.ScheduledTaskManager(context).rescheduleAll()
             } catch (t: Throwable) {
@@ -48,9 +32,6 @@ class AlarmReceiver : BroadcastReceiver() {
 
         AppLogger.debug(TAG, "Alarm triggered: id=$alarmId label=$label")
 
-        // Drop the entry from prefs for ONCE alarms / timers so the next
-        // `android-alarm list` call no longer surfaces them. DAILY/WEEKDAYS
-        // are kept (the OS re-fires them).
         if (alarmId != "unknown") {
             try {
                 AlarmOffloadManager(context).onAlarmFired(alarmId)
@@ -61,7 +42,6 @@ class AlarmReceiver : BroadcastReceiver() {
 
         val notificationId = alarmId.hashCode() and 0x7FFFFFFF
 
-        // Launch intent – open the app when the notification is tapped
         val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
         val contentPi = if (launchIntent != null) {
             PendingIntent.getActivity(

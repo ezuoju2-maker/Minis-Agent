@@ -16,15 +16,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-gpt61-sol] GPT-6.1 Sol on the Codex OAuth path (OpenAI DevDay
- * 2026-09-29; catalog data from CLIProxyAPI PR #6207).
- *
- * Same data-gap shape as GPT6SolLunaOpus55Test: the id is too new for the
- * bundled models.dev snapshot, so each fact below lives in one literal. The
- * extra trap here is the version dot: "gpt-6.1-sol" does not start with
- * "gpt-6-sol", so the existing thinking rule never matched it.
- */
 class GPT61SolTest {
 
     private lateinit var server: MockWebServer
@@ -56,11 +47,9 @@ class GPT61SolTest {
     @Test
     fun `thinking ceiling is max, not the xhigh default`() {
         assertEquals(ThinkingLevel.MAX, ThinkingLevelCatalog.declaredMaxLevel("gpt-6.1-sol"))
-        // Relays that normalise dots to dashes (same pair as iOS).
         assertEquals(ThinkingLevel.MAX, ThinkingLevelCatalog.declaredMaxLevel("gpt-6-1-sol"))
         assertEquals(ThinkingLevel.MAX, sol61.catalogMaxThinkingLevel)
         assertNotEquals(ThinkingLevel.XHIGH, sol61.catalogMaxThinkingLevel)
-        // A null flag still reaches MAX via the id rule; an explicit false is off.
         assertEquals(ThinkingLevel.MAX, sol61.copy(supportsReasoning = null).catalogMaxThinkingLevel)
         assertEquals(ThinkingLevel.OFF, sol61.copy(supportsReasoning = false).catalogMaxThinkingLevel)
     }
@@ -110,8 +99,6 @@ class GPT61SolTest {
 
     @Test
     fun `resolver and reasoning prefill keep gpt-6_1 in the gpt-6 family`() {
-        // The thinking resolver's OpenAI rows and the /v1/models prefill are
-        // `gpt-6` prefix matches; 6.1 must stay inside them.
         assertTrue("gpt-6.1-sol".startsWith("gpt-6"))
         val src = com.openminis.app.ProductionSources.read("provider/thinking/ThinkingRuleResolver.kt")
         assertTrue(src.contains("ThinkingRule.Scope.ModelPattern(\"gpt-6*\")"))

@@ -8,19 +8,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-thinking-rules-phase2] Custom-rule merge behaviour.
- *
- * The load-bearing safety invariant: an EMPTY custom-rule list must resolve
- * byte-identically to the built-in-only Phase 1 path. The golden-snapshot tests already
- * pin the built-in output; this file pins (a) empty = unchanged and (b) a custom rule
- * actually overrides.
- */
 class ThinkingRuleCustomMergeTest {
 
     @After
     fun tearDown() {
-        // Never leak cache state into other tests in the same JVM.
         ThinkingRuleResolver.setAllCustomRules(emptyMap())
     }
 
@@ -43,7 +34,6 @@ class ThinkingRuleCustomMergeTest {
         ThinkingRuleResolver.setAllCustomRules(emptyMap())
         val body = JSONObject()
         val trace = ThinkingRuleResolver.apply(body, ctx("some-model", "inst-A"))
-        // Default openai-compatible path: root reasoning_effort at HIGH.
         assertEquals("high", body.optString("reasoning_effort"))
         assertEquals("openai-compatible-default", trace.matchedRuleLabel)
         assertEquals(ThinkingRule.Kind.PROVIDER_TYPE_DEFAULT, trace.matchedRuleKind)
@@ -64,7 +54,6 @@ class ThinkingRuleCustomMergeTest {
         )
         val body = JSONObject()
         val trace = ThinkingRuleResolver.apply(body, ctx("some-model", "inst-A"))
-        // OmitEverything ⇒ NO thinking key at all.
         assertFalse(body.has("reasoning_effort"))
         assertFalse(body.has("thinking"))
         assertEquals("my-omit", trace.matchedRuleLabel)
@@ -84,11 +73,9 @@ class ThinkingRuleCustomMergeTest {
                 ),
             ),
         )
-        // Matching model → custom rule wins.
         val hit = JSONObject()
         assertEquals("ds-omit", ThinkingRuleResolver.apply(hit, ctx("deepseek-v4-chat", "inst-A")).matchedRuleLabel)
         assertFalse(hit.has("reasoning_effort"))
-        // Non-matching model → falls through to the built-in default.
         val miss = JSONObject()
         val missTrace = ThinkingRuleResolver.apply(miss, ctx("gpt-4o", "inst-A"))
         assertEquals("high", miss.optString("reasoning_effort"))

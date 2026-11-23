@@ -7,11 +7,6 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/**
- * [self-improvement] Structured fact memory: re-stating strengthens, conflicts
- * are resolved by confidence, and recall is ranked. These are the properties
- * that make the agent "get wiser with use" rather than just append logs.
- */
 class MemoryFactRepositoryTest {
     @get:Rule val tmp = TemporaryFolder()
 
@@ -58,7 +53,6 @@ class MemoryFactRepositoryTest {
     @Test
     fun `topFacts only injects confident facts and respects the char budget`() {
         val r = repo()
-        // One weak fact (0.5) and one strong fact (re-stated 3x → 0.95).
         r.upsert("user", "maybe likes", "tea")
         repeat(4) { r.upsert("user", "prefers editor", "vim") }
         val top = r.topFacts()

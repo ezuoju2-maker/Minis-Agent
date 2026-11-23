@@ -3,29 +3,6 @@ package com.openminis.app.ui.chat
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * Review 2026-09-23 — guards f0a57d93f / 656889f68 (T-android-md-parse-incremental).
- *
- * The incremental streaming parse freezes every block before the newest
- * "sealed" blank line and re-parses only the tail. That is only correct if the
- * block parser never lets a construct continue across a blank line that
- * [isSealedBoundary] accepts. The existing MarkdownIncrementalParseTest covers
- * ``` fences and `$$` math; these cases cover the parser constructs that DO
- * cross a blank line but that the boundary rule does not know about:
- *
- *  - bullet / ordered lists (`if (t.isEmpty()) { i++; continue }` inside the
- *    list loops — a "loose" list with a blank line between items is one list
- *    in a full parse),
- *  - an indented list-item continuation after a blank line,
- *  - `\[ … \]` display math, whose loop scans forward across blank lines.
- *
- * A mismatch means the live render shows a different block structure than the
- * frozen render of the same text, so the block re-lays out (flashes) at the
- * streaming -> frozen edge — the class of bug d24130e26 was about.
- *
- * Equivalence is compared on block `raw` via the production test hooks
- * [debugParseBlockRaws] / [debugParseIncrementalRaws].
- */
 class Review0923IncrementalParseEquivalenceTest {
 
     private fun chunked(full: String, step: Int): List<String> =
@@ -40,7 +17,6 @@ class Review0923IncrementalParseEquivalenceTest {
         )
     }
 
-    // ── constructs that cross a blank line (currently FAIL: real bug) ──────
 
     @Test
     fun `loose bullet list streams as one list, like the full parse`() {
@@ -57,7 +33,6 @@ class Review0923IncrementalParseEquivalenceTest {
         assertEquivalent("Before\n\n\\[\na = 1\n\nb = 2\n\\]\n\nAfter\n")
     }
 
-    // ── constructs that stop at a blank line (pass: pin they stay safe) ────
 
     @Test
     fun `blockquotes separated by a blank line`() {
@@ -71,9 +46,6 @@ class Review0923IncrementalParseEquivalenceTest {
 
     @Test
     fun `a dollar-dollar line inside a code fence does not corrupt later blocks`() {
-        // isSealedBoundary counts the `$$` inside the fence as an open math
-        // span, so nothing after it is ever frozen. That costs re-parse work
-        // but must never change the result.
         val d = "$" + "$"
         assertEquivalent("```sh\necho $d\n$d\n```\n\npara one\n\npara two\n")
     }

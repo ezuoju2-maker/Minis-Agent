@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Settings > Network. Translations shared with iOS come from its Localizable.xcstrings; locales without one fall back to English. -->
 <resources>
     <string name="network_title">네트워크</string>
     <string name="network_default_route">기본 경로</string>
@@ -51,6 +49,5 @@
     <string name="network_log_in">로그인</string>
     <string name="network_provider_route">네트워크</string>
     <string name="network_provider_route_footer">이 제공자의 요청이 연결되는 방식입니다. Tailscale과 프록시는 설정 &gt; 네트워크에서 설정하세요.</string>
-    <!-- [FEAT-261021-04] Settings > Network section -->
     <string name="network_routing_title">네트워크 라우팅</string>
 </resources>

@@ -10,28 +10,15 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-voice-viewport-context] The on-screen correction context: rows
- * are taken from the viewport centre outwards over two screen-heights, packed
- * nearest-first into 2000 chars, and the newest reply appears exactly once.
- *
- * Geometry mirrors the chat list: reverseLayout, so the newest row sits at
- * offset 0 and older rows at larger offsets. Viewport is 0..1000 px.
- */
 class ScreenContextBuilderTest {
 
     private val viewport = 1000
 
-    /** 30 rows, chronological; row i belongs to message "m$i". */
     private fun rows(n: Int = 30, text: (Int) -> String = { "第${it}条消息内容" }): List<Segment> =
         (0 until n).map { i ->
             Segment("k$i", "m$i", if (i % 2 == 0) Kind.USER else Kind.ASSISTANT, text(i))
         }
 
-    /**
-     * Lay out [visibleIdx] (chronological indices) reverse-style, each row
-     * [rowPx] tall, the newest visible row starting at [bottomOffset].
-     */
     private fun snapshot(
         segments: List<Segment>,
         visibleIdx: IntRange,
@@ -44,17 +31,14 @@ class ScreenContextBuilderTest {
         return Snapshot(segments, visible, 0, viewport, olderAtLargerOffsets = true)
     }
 
-    // ── Window selection ──────────────────────────────────────────────────
 
     @Test
     fun `the row at the viewport centre comes first, then outward`() {
         val segs = rows()
-        // Rows 10..14 fill 0..1000; row 12 spans 400..600, the centre.
         val (picks, _) = ScreenContextBuilder.selectWindow(snapshot(segs, 10..14), null)
         assertEquals(12, picks.first().index)
         val firstFive = picks.take(5).map { it.index }.toSet()
         assertTrue("the two neighbours on each side follow", firstFive.containsAll(listOf(10, 11, 13, 14)))
-        // Distances never decrease along the list.
         val d = picks.map { kotlin.math.abs(it.distance) }
         assertEquals(d.sorted(), d)
     }
@@ -62,9 +46,6 @@ class ScreenContextBuilderTest {
     @Test
     fun `the window is the viewport plus half a screen each side, no more`() {
         val segs = rows()
-        // Visible 10..14 (200 px each). Off-screen rows get estimated heights
-        // from the visible px-per-char, so each is ~200 px too: half a screen
-        // (500 px) past each edge reaches two to three more rows per side.
         val (picks, _) = ScreenContextBuilder.selectWindow(snapshot(segs, 10..14), null)
         val idx = picks.map { it.index }.toSet()
         assertTrue("rows just past both edges are in", idx.containsAll(listOf(8, 9, 15, 16)))
@@ -84,8 +65,6 @@ class ScreenContextBuilderTest {
     @Test
     fun `a forward-layout list is read the right way round too`() {
         val segs = rows()
-        // Older rows at SMALLER offsets; the flag is deliberately wrong to
-        // show the direction is read from the rows themselves.
         val visible = (10..14).mapIndexed { n, i -> VisibleItem("k$i", n * 200, 200) }
         val snap = Snapshot(segs, visible, 0, viewport, olderAtLargerOffsets = true)
         val byIdx = ScreenContextBuilder.selectWindow(snap, null).first.associateBy { it.index }
@@ -97,14 +76,14 @@ class ScreenContextBuilderTest {
     fun `rows without text and unknown keys are ignored, tool titles are kept`() {
         val segs = listOf(
             Segment("k0", "m0", Kind.USER, "打开设置"),
-            Segment("h1", "m1", null, ""), // assistant header
+            Segment("h1", "m1", null, ""),
             Segment("k2", "m1", Kind.TOOL, "查找存储设置"),
             Segment("k3", "m1", Kind.ASSISTANT, "已经打开了。"),
         )
         val visible = listOf(
             VisibleItem("k3", 0, 200), VisibleItem("k2", 200, 150),
             VisibleItem("h1", 350, 50), VisibleItem("k0", 400, 200),
-            VisibleItem("__resume_banner__", 600, 100), // not a chat row
+            VisibleItem("__resume_banner__", 600, 100),
         )
         val (picks, _) = ScreenContextBuilder.selectWindow(Snapshot(segs, visible, 0, 1000, true), null)
         assertEquals(listOf(0, 2, 3), picks.map { it.index }.sorted())
@@ -117,11 +96,9 @@ class ScreenContextBuilderTest {
         assertTrue(ScreenContextBuilder.selectWindow(snap, null).first.isEmpty())
     }
 
-    // ── Budget ────────────────────────────────────────────────────────────
 
     @Test
     fun `the viewport block never exceeds 2000 chars and keeps the centre`() {
-        // Long rows: each ~900 chars, so only a few fit.
         val segs = rows { i -> "行$i-" + "字".repeat(900) }
         val (picks, _) = ScreenContextBuilder.selectWindow(snapshot(segs, 10..14), null)
         val lines = ScreenContextBuilder.pack(picks, CorrectionContextBudget.SCREEN_VIEWPORT)
@@ -135,7 +112,6 @@ class ScreenContextBuilderTest {
         val long = "开头" + "中".repeat(200) + "结尾"
         val center = ScreenContextBuilder.Picked(2, Kind.USER, "中心", 0)
 
-        // An older row (above the centre) keeps its TAIL, the part next to it.
         val older = ScreenContextBuilder.Picked(1, Kind.USER, long, -300)
         val a = ScreenContextBuilder.pack(listOf(center, older), 150)
         assertEquals(2, a.size)
@@ -143,7 +119,6 @@ class ScreenContextBuilderTest {
         assertEquals("【用户】中心", a[1])
         assertTrue(a.joinToString("\n").length <= 150)
 
-        // A newer row (below the centre) keeps its HEAD.
         val newer = ScreenContextBuilder.Picked(3, Kind.ASSISTANT, long, 300)
         val b = ScreenContextBuilder.pack(listOf(center, newer), 150)
         assertEquals("【用户】中心", b[0])
@@ -159,7 +134,6 @@ class ScreenContextBuilderTest {
         assertEquals(1, lines.size)
     }
 
-    // ── Latest reply + de-duplication ─────────────────────────────────────
 
     @Test
     fun `the latest reply on screen appears once, in its own block`() {
@@ -219,7 +193,6 @@ class ScreenContextBuilderTest {
         assertFalse(ctx.latestReplyOnScreen)
     }
 
-    // ── Prompt ────────────────────────────────────────────────────────────
 
     @Test
     fun `the prompt keeps the history block and adds the screen block after it`() {
@@ -241,8 +214,6 @@ class ScreenContextBuilderTest {
             "原文", emptyList(), ConversationContext(recentExcerpts = listOf("【AI·最新】好的")),
         )
         assertFalse(prompt.contains("屏幕"))
-        // [T-android-voice-mixed-term-restore] The no-screen lead now also frames
-        // the transcript as a message to the AI (iOS 8622ea275).
         assertTrue(prompt.contains("请结合以上参考信息和对话上下文，推断用户这句要发给 AI 的话的整体意图，判断并修正"))
     }
 }

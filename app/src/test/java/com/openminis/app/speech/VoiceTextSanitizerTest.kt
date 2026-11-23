@@ -5,15 +5,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-voice-text-sanitizer] Pure-JVM tests for the read-aloud text
- * cleanup. Uses the default English link phrases so no Context is needed.
- */
 class VoiceTextSanitizerTest {
 
     private fun clean(s: String) = VoiceTextSanitizer.sanitize(s)
 
-    // -- Emphasis --
 
     @Test
     fun `strips bold italic and strikethrough but keeps the words`() {
@@ -26,11 +21,9 @@ class VoiceTextSanitizerTest {
 
     @Test
     fun `snake_case survives underscore emphasis stripping`() {
-        // The (?<!\w)_..._(?!\w) guards exist precisely for this.
         assertEquals("call read_image_file now", clean("call read_image_file now"))
     }
 
-    // -- Code --
 
     @Test
     fun `fenced code blocks are dropped entirely`() {
@@ -45,7 +38,6 @@ class VoiceTextSanitizerTest {
         assertEquals("run ls now", clean("run `ls` now"))
     }
 
-    // -- Links --
 
     @Test
     fun `markdown link keeps its description`() {
@@ -70,7 +62,6 @@ class VoiceTextSanitizerTest {
         assertFalse("url leaked: $out", out.contains("http"))
     }
 
-    // -- Block markers --
 
     @Test
     fun `headings blockquotes and bullets lose their markers`() {
@@ -96,7 +87,6 @@ class VoiceTextSanitizerTest {
         assertFalse(out.contains("---"))
     }
 
-    // -- Non-speakable glyphs --
 
     @Test
     fun `emoji are removed`() {
@@ -106,7 +96,6 @@ class VoiceTextSanitizerTest {
 
     @Test
     fun `emoji between words does not fuse the words together`() {
-        // Replaced with a space, not deleted.
         assertEquals("alpha beta", clean("alpha🔥beta"))
     }
 
@@ -115,7 +104,6 @@ class VoiceTextSanitizerTest {
         assertEquals("你好,世界。", clean("你好,世界。"))
     }
 
-    // -- Whitespace / empties --
 
     @Test
     fun `whitespace left by removals is collapsed`() {
@@ -124,7 +112,6 @@ class VoiceTextSanitizerTest {
 
     @Test
     fun `a message that is only a code block sanitizes to empty`() {
-        // Callers must treat empty as "nothing to speak".
         assertEquals("", clean("```\nval x = 1\n```"))
     }
 
@@ -134,7 +121,6 @@ class VoiceTextSanitizerTest {
         assertEquals("", clean("   \n  "))
     }
 
-    // -- host parsing --
 
     @Test
     fun `hostOf strips scheme www userinfo and port`() {
@@ -144,7 +130,6 @@ class VoiceTextSanitizerTest {
         assertEquals("example.com", VoiceTextSanitizer.hostOf("https://example.com"))
     }
 
-    // -- realistic composite --
 
     @Test
     fun `a realistic assistant reply is fully cleaned`() {

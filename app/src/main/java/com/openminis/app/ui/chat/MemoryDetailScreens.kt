@@ -36,24 +36,7 @@ import com.openminis.app.ui.theme.ChatColors
 import com.openminis.app.ui.components.MinisTextButton
 import com.openminis.app.i18n.uppercaseForDisplay
 
-/**
- * Stateless detail body composables used by [SessionMemorySheet] when a row
- * is tapped. The sheet swaps these in for the list view, swaps the header's
- * leading slot to a back-arrow, and (for write-detail) provides Edit / Save /
- * Revoke toolbar items in the trailing slot.
- *
- * All editing state lives in the parent (the sheet) so a single Save button
- * in the header can read the latest buffer without passing references around.
- */
 
-/**
- * Read-only / editable viewer for an auto-injected memory file (GLOBAL.md or
- * a daily log). Mirrors iOS `MemoryContentView`.
- *
- * When [isEditing] is true, [editedContent] is the current text and
- * [onEditedContentChange] is invoked on every keystroke. The parent owns
- * the buffer and renders the Save button.
- */
 @Composable
 fun MemoryFileViewerBody(
     initialContent: String,
@@ -64,8 +47,6 @@ fun MemoryFileViewerBody(
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         if (isEditing) {
-            // [T-android-editor-keyboard-overlap] The caret stays above the
-            // keyboard; see DocumentEditorField.
             com.openminis.app.ui.components.DocumentEditorField(
                 value = editedContent,
                 onValueChange = onEditedContentChange,
@@ -117,13 +98,6 @@ private fun SavedToast(modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * Detail body for a memory_write op-log entry. Shows the original written
- * content plus the tool result in read mode; in edit mode swaps to a
- * BasicTextField over the written content. Mirrors iOS
- * `MemoryWriteDetailView`. Toolbar (Edit / Save / Revoke) is rendered by the
- * parent sheet.
- */
 @Composable
 fun MemoryWriteDetailBody(
     record: MemoryToolRecord,
@@ -136,8 +110,6 @@ fun MemoryWriteDetailBody(
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (isEditing) {
-            // [T-android-editor-keyboard-overlap] The caret stays above the
-            // keyboard; see DocumentEditorField.
             com.openminis.app.ui.components.DocumentEditorField(
                 value = editedContent,
                 onValueChange = onEditedContentChange,
@@ -186,9 +158,6 @@ fun MemoryWriteDetailBody(
     }
 }
 
-/**
- * Detail body for a memory_get op-log entry. Mirrors iOS `MemoryGetDetailView`.
- */
 @Composable
 fun MemoryGetDetailBody(record: MemoryToolRecord) {
     Column(
@@ -241,10 +210,6 @@ private fun SectionHeader(text: String) {
     )
 }
 
-/**
- * Confirmation dialog for revoking a memory_write entry. Wording matches iOS
- * `MemoryWriteDetailView` so users on both platforms see the same prompt.
- */
 @Composable
 fun RevokeConfirmDialog(
     onConfirm: () -> Unit,
@@ -270,10 +235,6 @@ fun RevokeConfirmDialog(
     )
 }
 
-/**
- * Result-of-mutation dialog: shows the success/not-found/I-O-error message
- * from [MemoryRepository.EntryMutationResult].
- */
 @Composable
 fun MutationResultDialog(
     result: MemoryRepository.EntryMutationResult,

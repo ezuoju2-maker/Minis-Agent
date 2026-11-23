@@ -1,28 +1,13 @@
 package com.openminis.app.ui.chat
 
-/**
- * [T-android-math-overflow-wrap] Where a formula wider than the line may be
- * broken into rows. Port of iOS `SwiftMathRenderer.splitAtTopLevelRelations`
- * (7238a39d4); pure so `MathLineBreakerTest` runs it on the JVM.
- */
 internal object MathLineBreaker {
 
-    /**
-     * Relations a formula may break before. Commands must not be followed by
-     * a letter, so `\le` does not match `\left`.
-     */
     private val BREAK_RELATIONS = listOf(
         "\\Leftrightarrow", "\\Rightarrow", "\\approx", "\\equiv",
         "\\neq", "\\leq", "\\geq", "\\ne", "\\le", "\\ge",
         "=", "<", ">",
     )
 
-    /**
-     * Split [latex] before every relation that sits at brace depth 0 and
-     * outside `\left…\right`. Environments are left whole: their `&` / `\\`
-     * layout must not be cut apart. Returns `[latex]` when there is nowhere
-     * to break.
-     */
     fun splitAtTopLevelRelations(latex: String): List<String> {
         if (latex.contains("\\begin")) return listOf(latex)
         val pieces = mutableListOf<String>()
@@ -39,7 +24,6 @@ internal object MathLineBreaker {
 
         while (i < latex.length) {
             val c = latex[i]
-            // An escaped brace is a literal glyph, not grouping.
             if (c == '\\' && i + 1 < latex.length && (latex[i + 1] == '{' || latex[i + 1] == '}')) {
                 current.append(c).append(latex[i + 1])
                 i += 2
@@ -64,12 +48,6 @@ internal object MathLineBreaker {
         return pieces
     }
 
-    /**
-     * Greedy row packing, as iOS `wrapAtRelations`: keep appending pieces to
-     * the current row while [fits] says the joined row fits, else start a new
-     * row with the piece. A lone piece that does not fit still gets its own
-     * row (the caller scales it down).
-     */
     suspend fun packRows(pieces: List<String>, fits: suspend (String) -> Boolean): List<String> {
         val rows = mutableListOf<String>()
         var current = ""

@@ -5,10 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/**
- * [OpenMinis#277] Hardware-keyboard Ctrl+key, modified arrows and F-keys in
- * the terminal. Same probe table as iOS PhysicalKeyboardControlKeyTests.
- */
 class TerminalKeyMapperTest {
 
     private fun code(ch: Char) = TerminalKeyMapper.controlCode(ch)?.toInt()
@@ -49,7 +45,6 @@ class TerminalKeyMapperTest {
         assertEquals("\u001B[1;3C", arrow('C', alt = true))
         assertEquals("\u001B[1;5D", arrow('D', ctrl = true))
         assertEquals("\u001B[1;6B", arrow('B', shift = true, ctrl = true))
-        // Modifiers win over DECCKM, as in iOS sendModifiedArrow.
         assertEquals("\u001B[1;5C", arrow('C', app = true, ctrl = true))
     }
 

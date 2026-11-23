@@ -5,28 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Review 2026-09-23 — a manual modality override must be able to switch a
- * capability OFF, not only on.
- *
- * Guards 414745155 (GH#305, T-android-modality-normalize-override) and the
- * surrounding voice-modality work (aff8058f5).
- *
- * [BUG] 414745155 changed `ModelEntry.model` from
- *     overrides.outputModalities ?: effOut
- * to
- *     overrides.outputModalities.normalizeModalities() ?: effOut
- * and `normalizeModalities()` maps an EMPTY list to null. The detail screen
- * (ModelEntryDetailScreen) writes only the ticked non-text modalities, so
- * turning off the last one saves `[]` — which now falls back to the inferred
- * value. A model inference mis-files as TTS/ASR (the exact case the new
- * "paraformer"/"sensevoice" patterns widen) can no longer be corrected: the
- * switch saves, then re-opens ON, and the voice pickers keep listing it.
- * Before 414745155, `[] ?: effOut` was `[]` and the override applied.
- *
- * Minimal fix: normalize without collapsing emptiness for overrides, e.g.
- *     overrides.outputModalities?.let { it.normalizeModalities() ?: emptyList() } ?: effOut
- */
 class Review0923ModalityOverrideOffTest {
 
     private fun inferred(id: String) =

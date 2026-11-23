@@ -15,24 +15,6 @@ import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/**
- * [T-model-row-premature-wrap] One line of a model row: a text [lead] (model
- * name, or quota hint + model id) followed by fixed-size [tags] (quota pill,
- * Active badge, modality chips). Port of the iOS `ViewThatFits(in: .horizontal)`
- * pair in UnifiedModelPicker (b86aabda4, 74025d909):
- *  - when lead + tags fit the width, they share ONE line, the lead unwrapped;
- *  - otherwise the lead keeps the FULL width (and wraps only if it is longer
- *    than the whole line) and the tags move, together, to their own line below.
- *
- * A plain Row with `weight(1f, fill = false)` on the name (or a FlowRow) did
- * the opposite: the tags kept their width and the name wrapped into what was
- * left ("Claude Sonnet / 5 [14% used] [Active]"). A wrapped Text is only as
- * wide as its longest line, so the leftover showed up as empty space before
- * the quick-test button.
- *
- * [separator] (the "·" before modality chips) is drawn only in the one-line
- * form and only when there are tags, like iOS. No tags → just the lead.
- */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FitOrWrapLine(
@@ -51,10 +33,6 @@ fun FitOrWrapLine(
         )
     }
     val separatorContent: @Composable () -> Unit = { separator?.invoke() }
-    // A FlowRow, so that in the wrapped form an unusually long set of tags
-    // (a model with all seven modality chips on a narrow screen) continues on
-    // a further line instead of clipping the last chip. Its max intrinsic
-    // width is the single-line width, which is what the fit check uses.
     val tagsContent: @Composable () -> Unit = {
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(spacing),
@@ -119,13 +97,7 @@ fun FitOrWrapLine(
     }
 }
 
-/** The fit decision behind [FitOrWrapLine], kept pure for unit tests. */
 internal object FitOrWrapRules {
-    /**
-     * True when lead, optional separator and tags fit side by side (with [gap]
-     * between each) in [maxWidth]; an unbounded width always fits. No tags → one
-     * line trivially (the lead alone wraps, if it must, across the full width).
-     */
     fun fitsOnOneLine(maxWidth: Int?, leadWidth: Int, separatorWidth: Int?, tagsWidth: Int, gap: Int): Boolean {
         if (tagsWidth <= 0 || maxWidth == null) return true
         val needed = leadWidth + gap + (separatorWidth?.let { it + gap } ?: 0) + tagsWidth

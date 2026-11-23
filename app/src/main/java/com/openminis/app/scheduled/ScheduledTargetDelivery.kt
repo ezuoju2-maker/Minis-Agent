@@ -1,38 +1,13 @@
 package com.openminis.app.scheduled
 
-/**
- * [T-android-scheduled-default-follow-up] Where a scheduled task's fires land,
- * decided and announced in one place. Port of iOS `ScheduledTargetDelivery`
- * (c32dda5a7), without its child-of-current case (Android's CLI has no such
- * target).
- *
- * 1. Default target. `minis-scheduled create` without `--target` used to mean
- *    `new`, so a model that asked for "remind me in this chat" and simply left
- *    the flag out got every fire in a separate chat: the result never came
- *    back to the conversation that asked for it. Run from inside a chat, the
- *    default is now `follow-up` (this chat). With no chat behind the command
- *    (a script, an external automation) it stays `new`.
- * 2. Delivery sentence. `create` answers with one plain sentence saying where
- *    the fires will land, and whether the target was defaulted, so a wrong
- *    target is visible at once and can be corrected with delete + create
- *    instead of being discovered when the first fire goes missing.
- *
- * Pure (no Android types) so `ScheduledTargetDeliveryTest` runs on the JVM.
- */
 object ScheduledTargetDelivery {
 
-    /**
-     * `--target` to use: the explicit one (lower-cased), else `follow-up` when a
-     * session is known (`--session` or the chat running the CLI), else `new`.
-     * Returns the target and whether it was defaulted.
-     */
     fun resolveTarget(explicit: String?, session: String?, callerSession: String?): Pair<String, Boolean> {
         val e = explicit?.trim()
         if (!e.isNullOrEmpty()) return e.lowercase() to false
         return (if ((session ?: callerSession) != null) "follow-up" else "new") to true
     }
 
-    /** Where each fire lands, with what the sentence needs to name it. */
     sealed class Destination {
         abstract val kind: String
 
@@ -49,7 +24,6 @@ object ScheduledTargetDelivery {
         }
     }
 
-    /** One sentence for the model (English: CLI output is read by the model). */
     fun sentence(d: Destination, defaulted: Boolean): String = when (d) {
         is Destination.FollowUp -> {
             val name = sessionName(d.sessionId, d.title)
@@ -78,7 +52,6 @@ object ScheduledTargetDelivery {
                 "the existing reply is regenerated, and no new prompt is added."
     }
 
-    /** Structured twin of [sentence] for scripts. */
     fun summary(d: Destination, defaulted: Boolean): Map<String, Any> {
         val out = linkedMapOf<String, Any>("target" to d.kind, "defaulted" to defaulted)
         when (d) {

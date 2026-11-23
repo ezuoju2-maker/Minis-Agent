@@ -45,12 +45,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * [T-android-scheduled-tasks-run-records] Execution log for one scheduled
- * task. Lists each recorded run newest-first; a run that produced a chat
- * (non-null sessionId) is tappable → opens that chat. Backed by the live
- * tasks flow so new runs appear without re-entering the screen.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduledTaskRunsScreen(

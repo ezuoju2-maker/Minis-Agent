@@ -9,12 +9,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-search-folder-expand] Search results are grouped by folder, every folder
- * in them open with its matches, and a folder whose name matches brings all
- * its members (iOS 6b0ee14c1). Before, Android hid the whole folder block in
- * search and showed a flat list.
- */
 class SearchFolderExpandTest {
 
     private val now = 1_000_000_000L
@@ -36,9 +30,7 @@ class SearchFolderExpandTest {
         val results = listOf(s("hit", null, 40))
         val merged = SearchFolders.withFolderMembers(results, all, setOf("a"))
         assertEquals(listOf("x1", "hit", "x2"), merged.map { it.id })
-        // No folder hit: the search's own list, untouched.
         assertTrue(SearchFolders.withFolderMembers(results, all, emptySet()) === results)
-        // A member that already matched is not listed twice.
         assertEquals(listOf("x1", "x2"), SearchFolders.withFolderMembers(listOf(s("x1", "a", 50)), all, setOf("a")).map { it.id })
     }
 
@@ -52,7 +44,6 @@ class SearchFolderExpandTest {
         assertTrue(blocks.none { it.isCollapsed })
         assertEquals(listOf(listOf("a1"), listOf("b1")), blocks.map { it.ids })
         assertEquals(listOf("u"), ungrouped.map { it.id })
-        // The saved open folder neither closes the others nor is read.
         val (withOpen, _) = partitionByFolder(results, folders, expandedFolderId = "a", nowMs = now, searchResultsActive = true)
         assertTrue(withOpen.none { it.isCollapsed })
     }
@@ -66,7 +57,6 @@ class SearchFolderExpandTest {
         )
         assertEquals("a just-created empty folder is noise in a result set", listOf("hit"), blocks.map { it.folder.id })
         assertEquals(0, blocks.single().totalCount)
-        // Outside search the recency rule is unchanged.
         val (normal, _) = partitionByFolder(results, folders, expandedFolderId = null, nowMs = now)
         assertEquals(listOf("hit", "fresh"), normal.map { it.folder.id })
     }
@@ -94,14 +84,10 @@ class SearchFolderExpandTest {
         assertTrue(screen.contains("val searchResultsActive = isSearchActive && searchQuery.isNotBlank() && searchResultsReady"))
         assertTrue(screen.contains("val showFolderBlock = !isSearchActive || searchQuery.isBlank() || searchResultsActive"))
         assertTrue(screen.contains("searchResultsActive = searchResultsActive,"))
-        // A search pass never writes the normal pages back.
         assertTrue(screen.contains("if (searchResultsActive) return@LaunchedEffect\n        for (b in folderPartition.first) {"))
-        // The card: highlighted name and "N matching chats". (Its toggle and the
-        // mini-bar fold for this search only: SearchFolderCollapseTest.)
         assertTrue(screen.contains("searchQuery = if (searchResultsActive) searchQuery else null,"))
         assertTrue(screen.contains("if (searchQuery != null) highlightedAnnotatedString(block.folder.name, searchQuery)"))
         assertTrue(screen.contains("stringResource(R.string.sessionlist_folder_matching_chats, block.totalCount)"))
-        // A name-matched folder with no member is shown instead of "no results".
         assertTrue(screen.contains("if (sessions.isEmpty() && !(searchResultsActive && folderBlocks.isNotEmpty())) {"))
         val vm = ProductionSources.read("ui/sessions/SessionListViewModel.kt")
         assertTrue(vm.contains("SearchFolders.withFolderMembers(hits.map { it.session }, _allSessions.value, folderHits)"))

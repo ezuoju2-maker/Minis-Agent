@@ -7,12 +7,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-tool-title-reminder] The soft note for a missing tool_title: text,
- * detection and display stripping. The 1st/11th/21st cadence is tested in
- * ToolLoopDetectorTest, where the counting lives. Mirrors iOS
- * ToolTitleReminderTests.
- */
 class ToolTitleReminderTest {
 
     @Test fun detectsMissingTitle() {
@@ -51,7 +45,6 @@ class ToolTitleReminderTest {
         )
     }
 
-    /** Same text and marker as iOS, so a synced session is recognised on both. */
     @Test fun textMatchesIOS() {
         val ios = File("../../ios/Agent/Chat/AIChatViewModel+ConcurrentTools.swift")
         if (!ios.exists()) return

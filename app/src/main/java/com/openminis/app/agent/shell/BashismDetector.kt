@@ -5,18 +5,6 @@ import android.util.Log
 import org.json.JSONObject
 import java.util.regex.Pattern
 
-/**
- * Detects busybox-ash-incompatible bash syntax so `shell_execute` can install +
- * switch to bash only when needed (T-bash-on-demand). The rule table and its
- * fix hints are the SHARED JSON (assets/bashism/bashism_rules.json, generated
- * from src/shared/bashism — the same file iOS loads), so the two platforms can
- * never drift.
- *
- * Algorithm (design §1), isomorphic to iOS BashismDetector.swift:
- *   1. strip heredoc BODIES (data, not shell syntax — the F1 false-positive fix),
- *   2. line-by-line regex scan of the remaining shell-layer text,
- *   3. 50ms wall-clock fuse (fail-open) + 4KB per-line cap (M2 ReDoS guard).
- */
 object BashismDetector {
 
     enum class Tier { S, E, T1 }
@@ -50,7 +38,6 @@ object BashismDetector {
     @Volatile private var rules: List<Rule> = emptyList()
     @Volatile private var loaded = false
 
-    /** Must be called once (e.g. from Application.onCreate) with app context. */
     fun ensureLoaded(context: Context) {
         if (loaded) return
         synchronized(this) {
@@ -67,7 +54,6 @@ object BashismDetector {
         }
     }
 
-    /** Test seam: load rules directly from a JSON string (JVM unit tests). */
     fun loadRulesForTest(rulesJson: String) {
         rules = parseRules(rulesJson)
         loaded = true
@@ -109,28 +95,23 @@ object BashismDetector {
         }
     }
 
-    /**
-     * Original line paired with the text to scan; heredoc-body lines (and the
-     * delimiter line) map to null so they are skipped while line numbers stay
-     * aligned to the original script.
-     */
     fun shellLayerLines(script: String): List<Pair<Int, String?>> {
         val lines = script.split("\n")
         val out = ArrayList<Pair<Int, String?>>()
         var i = 0
         while (i < lines.size) {
             val line = lines[i]
-            out.add((i + 1) to line) // opening line IS shell-layer
+            out.add((i + 1) to line)
             val delims = ArrayList<String>()
             val m = heredocOpen.matcher(line)
             while (m.find()) delims.add(m.group(1)!!)
             i++
             for (delim in delims) {
                 while (i < lines.size && lines[i].trim() != delim) {
-                    out.add((i + 1) to null) // body line — do not scan
+                    out.add((i + 1) to null)
                     i++
                 }
-                if (i < lines.size) { // delimiter line
+                if (i < lines.size) {
                     out.add((i + 1) to null)
                     i++
                 }

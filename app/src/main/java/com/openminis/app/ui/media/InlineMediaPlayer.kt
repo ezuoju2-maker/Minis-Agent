@@ -70,10 +70,6 @@ import kotlinx.coroutines.isActive
 import java.io.File
 import kotlin.math.roundToInt
 
-/**
- * Inline audio player composable for embedding in chat messages.
- * Shows play/pause/stop controls and a progress bar.
- */
 @Composable
 fun InlineAudioPlayer(
     filePath: String,
@@ -94,7 +90,6 @@ fun InlineAudioPlayer(
             if (file.exists()) {
                 mediaPlayer.setDataSource(file.absolutePath)
             } else {
-                // Try as content URI
                 mediaPlayer.setDataSource(context, Uri.parse(filePath))
             }
             mediaPlayer.prepare()
@@ -117,7 +112,6 @@ fun InlineAudioPlayer(
         }
     }
 
-    // Progress ticker
     LaunchedEffect(isPlaying) {
         while (isPlaying && isActive) {
             try {
@@ -150,7 +144,6 @@ fun InlineAudioPlayer(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // Play/Pause button
                     IconButton(
                         onClick = {
                             if (isPlaying) {
@@ -194,7 +187,6 @@ fun InlineAudioPlayer(
                         }
                     }
 
-                    // Stop button
                     if (isPlaying) {
                         Spacer(Modifier.width(8.dp))
                         IconButton(
@@ -217,7 +209,6 @@ fun InlineAudioPlayer(
                     }
                 }
 
-                // File name
                 val fileName = filePath.substringAfterLast("/")
                 Text(
                     fileName,
@@ -231,10 +222,6 @@ fun InlineAudioPlayer(
     }
 }
 
-/**
- * Inline video player composable. On Android without ExoPlayer,
- * this uses a VideoView via AndroidView.
- */
 @Composable
 fun InlineVideoPlayer(
     filePath: String,
@@ -255,13 +242,11 @@ fun InlineVideoPlayer(
                     val uri = if (file.exists()) Uri.fromFile(file) else Uri.parse(filePath)
                     setVideoURI(uri)
 
-                    // Add basic media controller
                     val controller = android.widget.MediaController(ctx)
                     controller.setAnchorView(this)
                     setMediaController(controller)
 
                     setOnPreparedListener { mp ->
-                        // Auto-size to video dimensions
                         val videoWidth = mp.videoWidth
                         val videoHeight = mp.videoHeight
                         if (videoWidth > 0 && videoHeight > 0) {
@@ -270,9 +255,6 @@ fun InlineVideoPlayer(
                                 height = (width * ratio).toInt().coerceIn(100, 800)
                             }
                         }
-                        // Auto-play and surface the controller so the user sees
-                        // a live first frame instead of a black surface waiting
-                        // for an extra tap.
                         start()
                         controller.show(0)
                     }
@@ -297,16 +279,6 @@ private fun formatDuration(ms: Int): String {
     return "%d:%02d".format(min, sec)
 }
 
-/**
- * Fullscreen video player dialog. Matches iOS `MinisVideoFullscreenPlayer`:
- * - Black background, video centered via VideoView
- * - Top bar: close (X) + share action
- * - Bottom bar: play/pause + current time + slider + duration
- * - Tap the video to toggle controls (auto-hide after 3s)
- * - Drag down to dismiss with rubber-band feedback
- *
- * Uses AndroidView(VideoView) to avoid ExoPlayer dependency.
- */
 @Composable
 fun MinisFullscreenVideoPlayer(
     file: File,
@@ -329,21 +301,12 @@ private fun FullscreenVideoContent(file: File, onDismiss: () -> Unit) {
     val density = LocalDensity.current
     val view = LocalView.current
 
-    // Immersive system bars for the lifetime of this player. Mirrors iOS's
-    // fullScreenCover which hides the status bar. Restores the bars on dispose
-    // so the chat view comes back with its normal chrome.
     DisposableEffect(view) {
         val window = findDialogWindow(view)
         var originalLightStatusBars: Boolean? = null
         var originalLightNavigationBars: Boolean? = null
         if (window != null) {
-            // Draw behind the system bars so our black background reaches the
-            // top/bottom edges; the controller then hides them.
             androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
-            // Size the Dialog window to the full display so nothing from the
-            // underlying Activity (top bar, message list) peeks through at the
-            // top edge. Without MATCH_PARENT + layoutInDisplayCutoutMode the
-            // Dialog respects system-bar insets and leaves a gap.
             try {
                 val attrs = window.attributes
                 attrs.width = android.view.WindowManager.LayoutParams.MATCH_PARENT
@@ -364,7 +327,6 @@ private fun FullscreenVideoContent(file: File, onDismiss: () -> Unit) {
             val controller = androidx.core.view.WindowInsetsControllerCompat(window, window.decorView)
             originalLightStatusBars = controller.isAppearanceLightStatusBars
             originalLightNavigationBars = controller.isAppearanceLightNavigationBars
-            // Dark-background immersive: white icons if they ever peek in.
             controller.isAppearanceLightStatusBars = false
             controller.isAppearanceLightNavigationBars = false
             controller.systemBarsBehavior =
@@ -392,7 +354,6 @@ private fun FullscreenVideoContent(file: File, onDismiss: () -> Unit) {
 
     val dismissThresholdPx = with(density) { 120.dp.toPx() }
 
-    // Poll position while playing to drive the slider.
     LaunchedEffect(videoView, isPlaying, scrubbing) {
         while (isActive && videoView != null) {
             if (isPlaying && !scrubbing) {
@@ -406,7 +367,6 @@ private fun FullscreenVideoContent(file: File, onDismiss: () -> Unit) {
         }
     }
 
-    // Auto-hide controls after 3s while playing.
     LaunchedEffect(showControls, isPlaying, scrubbing) {
         if (showControls && isPlaying && !scrubbing) {
             delay(3000)
@@ -439,7 +399,6 @@ private fun FullscreenVideoContent(file: File, onDismiss: () -> Unit) {
                 )
             },
     ) {
-        // Video surface — offset with drag, toggle controls on tap.
         androidx.compose.ui.viewinterop.AndroidView(
             factory = { ctx ->
                 android.widget.VideoView(ctx).apply {
@@ -471,7 +430,6 @@ private fun FullscreenVideoContent(file: File, onDismiss: () -> Unit) {
                 ) { showControls = !showControls },
         )
 
-        // Top bar: close (always visible when controls shown).
         AnimatedVisibility(
             visible = showControls,
             enter = fadeIn(),
@@ -481,10 +439,6 @@ private fun FullscreenVideoContent(file: File, onDismiss: () -> Unit) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // Bars are hidden, but the status bar can reappear via
-                    // transient-swipe and the display cutout still occupies
-                    // the top edge — offset past both so the close/share
-                    // buttons never sit under the notch or status chrome.
                     .windowInsetsPadding(
                         WindowInsets.statusBars.union(WindowInsets.displayCutout),
                     )
@@ -516,7 +470,6 @@ private fun FullscreenVideoContent(file: File, onDismiss: () -> Unit) {
             }
         }
 
-        // Bottom controls: play/pause, current time, slider, duration.
         AnimatedVisibility(
             visible = showControls,
             enter = fadeIn(),
@@ -536,7 +489,6 @@ private fun FullscreenVideoContent(file: File, onDismiss: () -> Unit) {
                         try {
                             if (isPlaying) { v.pause(); isPlaying = false }
                             else {
-                                // If at end, restart from 0.
                                 if (durationMs in 1..(positionMs + 500)) {
                                     v.seekTo(0)
                                     positionMs = 0
@@ -617,18 +569,6 @@ private fun CircleControlButton(
     }
 }
 
-/**
- * Share a resolved media file via the system chooser (Save / Share / open in
- * another player). Uses FileProvider so the external handler gets a readable
- * content:// URI.
- */
-/**
- * Walk the Compose view's parent chain to find the hosting `Window`. When
- * Compose renders inside a `Dialog`, the ComposeView is attached to an
- * internal `DialogWindowProvider` whose `window` is the Dialog's Window
- * (distinct from the host Activity's Window). Returns null if the search
- * terminates before hitting a provider — callers should no-op in that case.
- */
 private fun findDialogWindow(view: android.view.View): android.view.Window? {
     var parent: Any? = view.parent
     while (parent != null) {

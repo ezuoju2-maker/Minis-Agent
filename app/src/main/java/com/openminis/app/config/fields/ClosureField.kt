@@ -8,15 +8,6 @@ import com.openminis.app.config.ConfigSchema
 import com.openminis.app.config.ConfigValue
 import com.openminis.app.config.readable.ConfigReadable
 
-/**
- * Hand-rolled field — use when the storage backend is not a simple
- * SharedPreferences key (a repository, a DB row, a singleton). Mirrors
- * iOS `ClosureField`.
- *
- * Schema validation runs in the bridge before [writer] is invoked; the
- * writer may still throw [ConfigError] on extra invariants ("the new
- * primary group must already exist").
- */
 class ClosureField(
     override val path: String,
     override val displayName: String,
@@ -25,13 +16,10 @@ class ClosureField(
     override val access: ConfigAccess = ConfigAccess.READWRITE,
     override val risk: ConfigRisk = ConfigRisk.NORMAL,
     override val revertable: Boolean = true,
-    /** [T-config-readable] Required (no default) — see [ConfigField.readable]. */
     override val readable: ConfigReadable,
     private val reader: () -> ConfigValue,
     private val writer: (ConfigValue) -> Unit,
-    /** [FEAT-261021-03] See [ConfigField.normalize]. */
     private val normalizer: ((ConfigValue) -> ConfigValue)? = null,
-    /** [FEAT-261021-03] See [ConfigField.validate]. */
     private val validator: ((ConfigValue) -> Unit)? = null,
 ) : ConfigField {
     override fun normalize(value: ConfigValue): ConfigValue = normalizer?.invoke(value) ?: value
@@ -45,12 +33,6 @@ class ClosureField(
     }
 }
 
-/**
- * A read-only field. Useful for stats / status surfaces (audit log
- * usage, summary aggregates). Any write attempt returns
- * `permission_denied`; the bridge shouldn't even reach `write` since
- * `access = READONLY`, but we throw to be safe.
- */
 class ReadOnlyField(
     override val path: String,
     override val displayName: String,
@@ -68,11 +50,6 @@ class ReadOnlyField(
     }
 }
 
-/**
- * A field that exists purely to be hidden. The registry keeps it
- * around so the bridge can return a precise `permission_denied` rather
- * than leaking implementation details with `unknown_path`.
- */
 class HiddenField(
     override val path: String,
     override val displayName: String,

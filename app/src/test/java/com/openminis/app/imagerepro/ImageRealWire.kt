@@ -10,15 +10,6 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.json.JSONObject
 
-/**
- * The four Android serializers, each returning the request body it really
- * builds for a history. Anthropic and Gemini keep their builders private, so
- * their bodies are captured off a local MockWebServer (nothing leaves the
- * machine); OpenAI Chat Completions and Responses expose internal builders.
- *
- * Unlike ImageReproWire there are no hand-built message shapes here: the
- * ImageReal* tests get their messages from the real extracted functions.
- */
 object ImageRealWire {
 
     val visionModel = LLMModel("vision-test", "Vision Test", "test", inputModalities = listOf("text", "image"))

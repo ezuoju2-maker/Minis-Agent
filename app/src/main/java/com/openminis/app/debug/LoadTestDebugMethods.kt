@@ -10,25 +10,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicIntegerArray
 
-/**
- * [T-loadtest-limits] DEV_TOOLS-only support for on-device load tests:
- *
- * - `debug.limits.get` / `debug.limits.set`: read or override, in memory, the
- *   concurrency caps admission uses - agent loop sessions (default 6), sub
- *   agent jobs PER PARENT conversation (3; [T-new-limits], the key is still
- *   `childJobs`, `childJobsPerParent` is accepted as an alias) and the shell
- *   process budget (16). Absent = unchanged,
- *   null / "default" = back to the default. A process restart always resets
- *   them, and release builds neither run the debug server nor accept the
- *   override (each setter checks BuildConfig.DEV_TOOLS too).
- * - `debug.loadtest.snapshot`: one cheap sample of the app process - Java and
- *   native heap, total PSS, thread count, the system's availMem / threshold /
- *   lowMemory, onTrimMemory counts per level since start, and the slot / queue
- *   counters - for the host-side sampler.
- */
 internal object LoadTestDebugMethods {
 
-    /** onTrimMemory calls per level (index = level, capped at 80). Recorded by MinisApp. */
     private val trimCounts = AtomicIntegerArray(81)
 
     fun noteTrim(level: Int) {
@@ -44,8 +27,6 @@ internal object LoadTestDebugMethods {
         return JSONObject()
             .put("sessions", SessionConcurrencyManager.maxConcurrent)
             .put("sessionsDefault", SessionConcurrencyManager.MAX_CONCURRENT)
-            // [T-new-limits] Per parent conversation since the cap stopped being
-            // global; the key keeps its name for existing load-test scripts.
             .put("childJobs", AgentJobRegistry.maxConcurrentChildJobsPerParent)
             .put("childJobsDefault", AgentJobRegistry.MAX_CONCURRENT_CHILD_JOBS_PER_PARENT)
             .put("childJobsScope", "per_parent_session")
@@ -54,7 +35,6 @@ internal object LoadTestDebugMethods {
             .put("shellProcessBudgetDefault", GlobalShellThrottle.PROCESS_BUDGET)
     }
 
-    /** null for "absent" (unchanged); Int? inside for a value or a reset. */
     private fun param(params: JSONObject, key: String): Pair<Boolean, Int?> {
         if (!params.has(key)) return false to null
         if (params.isNull(key)) return true to null
@@ -67,8 +47,6 @@ internal object LoadTestDebugMethods {
         requireDevTools()
         val (s, sv) = param(params, "sessions")
         if (s) SessionConcurrencyManager.debugSetMaxConcurrent(sv)
-        // `childJobsPerParent` wins when both are given; `childJobs` is the
-        // original key and still works.
         val (cp, cpv) = param(params, "childJobsPerParent")
         val (c, cv) = if (cp) cp to cpv else param(params, "childJobs")
         if (c) AgentJobRegistry.debugSetMaxConcurrentChildJobs(cv)
@@ -77,17 +55,6 @@ internal object LoadTestDebugMethods {
         return limitsGet()
     }
 
-    /**
-     * [T-loadtest-seed] Create a titled `loadtest-*` session, optionally with
-     * synthetic history, for load tests. A preset title means no title request
-     * goes to the user's (real, billed) title sub-model; synthetic rows build a
-     * 200-500 message history in seconds instead of hundreds of model turns.
-     *
-     * Params: title (must start with "loadtest-"), modelId, turns (user +
-     * assistant pairs, default 0), chars (per text message, default 400),
-     * toolEvery (every Nth turn is a shell tool call + result instead of plain
-     * text, 0 = never), toolOutputChars (default 4000).
-     */
     suspend fun seedSession(context: Context, params: JSONObject): JSONObject {
         requireDevTools()
         val title = params.optString("title")

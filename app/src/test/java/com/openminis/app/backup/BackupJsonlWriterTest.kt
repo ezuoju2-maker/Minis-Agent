@@ -9,13 +9,6 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 
-/**
- * Shard rollover and the §2.2 rule-3 envelope.
- *
- * Sharding exists so the importer never has to hold one giant file in memory;
- * the naming is wire format, because the other platform enumerates shards by
- * name (`messages.jsonl`, then `messages-0002.jsonl`).
- */
 class BackupJsonlWriterTest {
 
     private lateinit var dir: File
@@ -49,14 +42,8 @@ class BackupJsonlWriterTest {
         assertTrue(lines[1].contains("\"v\":2"))
     }
 
-    /**
-     * The first shard is unsuffixed and later ones are `-0002`, `-0003`… —
-     * zero-padded to four digits so lexical order matches numeric order, the
-     * same reason the upload parts are `%06d`.
-     */
     @Test
     fun `rolls over to a numbered shard once the cap is crossed`() {
-        // A tiny cap so a handful of records forces several shards.
         val writer = BackupJsonlWriter(dir, "messages", maxShardBytes = 120)
         writer.use { w ->
             repeat(10) { w.write("message", 1, payload("message-id-$it")) }
@@ -66,7 +53,6 @@ class BackupJsonlWriterTest {
         assertTrue("second shard must be zero-padded", "messages-0002.jsonl" in names)
         assertEquals(names.toList(), writer.shardPaths.sorted())
 
-        // No record may be lost across the rollover.
         val total = names.sumOf { File(dir, it).readLines().count { l -> l.isNotBlank() } }
         assertEquals(10, total)
         assertEquals(10, writer.writtenRecords)
@@ -91,7 +77,6 @@ class BackupJsonlWriterTest {
         assertEquals(onDisk, writer.totalBytes)
     }
 
-    /** Non-ASCII must survive as UTF-8 — session titles are routinely CJK. */
     @Test
     fun `writes utf8 payloads intact`() {
         BackupJsonlWriter(dir, "sessions").use { w ->

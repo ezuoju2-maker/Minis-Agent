@@ -3,16 +3,6 @@ package com.openminis.app.share
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Mirrors iOS Shared/PendingShare.swift wire format so Android and iOS
- * share extensions emit/consume the same on-disk JSON. Future-proofs a
- * cross-platform sync if it ever lands.
- *
- * Wire shape: `{items: [{kind, value}], timestamp}`
- *   - kind ∈ {"inlineText", "attachment"}
- *   - value: for inlineText = the text; for attachment = filename in
- *            the share staging dir (filesDir/share_extension/).
- */
 data class PendingShare(val items: List<Item>, val timestampMs: Long) {
     data class Item(val kind: Kind, val value: String) {
         enum class Kind(val wire: String) {

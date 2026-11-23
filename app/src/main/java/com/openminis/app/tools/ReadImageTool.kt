@@ -23,21 +23,6 @@ object ReadImageTool {
         propertyOrdering = listOf("tool_title", "path", "prompt"),
     )
 
-    /**
-     * T178: when the caller knows the owning session, prefer
-     * [PRootKernel.resolveSessionHostPath] so per-session subdirs
-     * (`/var/minis/{attachments,workspace,offloads,browser}/...`) resolve
-     * directly against this session's host dir instead of consulting the
-     * global, last-writer-wins `bindMounts` map. Without this, an agent
-     * loop in session A that calls `read_image` after session B booted
-     * its PRoot reads from session B's host dir — confirmed leak per
-     * docs/parity/cross-session-isolation-audit.md.
-     *
-     * The legacy single-arg overload is preserved for callers that don't
-     * know the session id (and falls back to the global map). Mirror iOS
-     * `ReadImageTool` which carries `sessionId` through its tool-call
-     * pipeline.
-     */
     fun execute(argsJson: String, sessionId: String? = null, context: Context? = null): ToolExecutionResult {
         return try {
             val args = JSONObject(argsJson)
@@ -69,18 +54,6 @@ object ReadImageTool {
         }
     }
 
-    /**
-     * [T-readimage-fail-visible] The tool result (and card text) for a
-     * read_image that could not load its file, saying WHICH failure it was
-     * (iOS readImageFailureText, 1eb3e2bef). The old "File not found" /
-     * "Cannot decode image" gave no size and no hint, and sent models off
-     * guessing at caches and delays when the file simply did not exist yet.
-     * [file] is the resolved host file (null when [resolved] is false).
-     *
-     * Differences from iOS, as on Windows: the format list is what
-     * BitmapFactory decodes here (HEIF only from Android 9, no TIFF), and a
-     * folder gets its own line instead of "not a decodable image".
-     */
     internal fun failureText(
         path: String,
         resolved: Boolean,
@@ -100,13 +73,6 @@ object ReadImageTool {
         return "Error: '$path' exists ($size bytes) but is not a decodable image. Supported: $formats."
     }
 
-    /**
-     * [T-image-real-tests] The "file → model image" half of [execute], split
-     * from path resolution so it can be called on a plain file. Unchanged:
-     * full decode, floor-fit within 2000 px, JPEG q85, metadata with the
-     * original pixel size. Graphics calls go through [ImageBudget.codec].
-     * Exceptions propagate to [execute]'s catch, as before.
-     */
     internal fun imageResult(file: java.io.File, path: String, toolTitle: String): ToolExecutionResult {
             val codec = ImageBudget.codec
             val original = codec.decodeFile(file.absolutePath)
@@ -136,8 +102,6 @@ object ReadImageTool {
                 imageData = imageBytes,
                 imageMimeType = "image/jpeg",
                 toolTitle = toolTitle,
-                // Surface the source file for inline preview in the tool result UI
-                // (mirrors iOS ToolLiveSheet.readImageTool case).
                 imageFilePath = file.absolutePath,
             )
     }

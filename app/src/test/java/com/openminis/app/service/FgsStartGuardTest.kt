@@ -10,15 +10,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-fgs-start-not-allowed-guard] A foreground-service start the system
- * refuses (Android 12+, background, no exemption) must not crash the process:
- * it crashed twice on the Pixel 4a from SessionActivityTracker.setActive, and
- * two crashes put the app in safe mode.
- */
 class FgsStartGuardTest {
 
-    /** A Context whose service starts behave like the system's. */
     private class FakeContext(private val refuse: Boolean) : ContextWrapper(null) {
         var calls = 0
         private fun answer(): ComponentName? {
@@ -52,8 +45,6 @@ class FgsStartGuardTest {
 
     @Test
     fun `the exception the device threw is what the guard catches`() {
-        // ForegroundServiceStartNotAllowedException -> ServiceStartNotAllowedException
-        // -> IllegalStateException: one catch covers it on every API level.
         assertTrue(IllegalStateException::class.java.isAssignableFrom(ForegroundServiceStartNotAllowedException::class.java))
     }
 
@@ -65,7 +56,6 @@ class FgsStartGuardTest {
         assertTrue(start.contains("return try {"))
         assertTrue(start.contains("} catch (e: IllegalStateException) {"))
         assertTrue(start.contains("context.startForegroundService(intent)"))
-        // Nothing else in the app calls the raw start for this service.
         val raw = ProductionSources.allKotlinFiles().filter { f ->
             val t = f.readText()
             t.contains("Intent(") && t.contains("AgentForegroundService::class.java") &&

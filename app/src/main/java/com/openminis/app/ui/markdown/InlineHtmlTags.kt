@@ -1,36 +1,9 @@
 package com.openminis.app.ui.markdown
 
-/**
- * [T-md-inline-html] The few HTML tags models mix into markdown (most often in
- * table cells): `<br>` and a handful of inline styles. Everything else - any
- * tag with attributes, `<div>`, `<span style=…>`, `<img>`, `<a>`, `<script>` -
- * stays literal text; nothing is parsed as HTML or executed.
- *
- * No HTML parser: the inline parsers call [brLength] / [openAt] when they meet
- * a `<`, so text without one costs a single char comparison per position.
- *
- * Rules (shared with iOS / Windows, src/shared/markdown/html-tags.md):
- *  - Only bare tags: `<` + name + optional spaces + `>` (any case); `<br>` may
- *    also end in `/>`. Attributes, `<b/>`, `</br>`, comments stay literal.
- *  - `<br>`, `<br/>`, `<br />` are a line break, also in table cells; a newline
- *    right after one adds nothing (`a<br>\nb` is one break, not a blank line).
- *  - `<b>`/`<strong>`, `<i>`/`<em>`, `<u>`, `<s>`/`<del>`/`<strike>`, `<code>`,
- *    `<sub>`, `<sup>` style their content only when the matching close tag is on
- *    the same line. Different names never pair; the outer pair of crossing tags
- *    wins and the inner unmatched one is literal. An open tag without one (a stream that has only delivered
- *    `<b>` so far) is shown literally until the close arrives; nothing after it
- *    is swallowed. Pairing within one line also keeps the streaming parser's
- *    "prefix ++ suffix == whole" split at newlines valid.
- *  - Code spans are skipped when looking for the close tag, and the callers
- *    never look inside code (fenced blocks are not inline text; `…` is
- *    consumed before its contents are scanned), so `<br>` in code stays as is.
- *  - Content is parsed again, so `<b>**x**</b>` and `**<b>x</b>**` both nest.
- */
 internal object InlineHtmlTags {
 
     enum class Kind { BOLD, ITALIC, UNDERLINE, STRIKE, CODE, SUB, SUP }
 
-    /** An open tag at some offset: its lowercased [name] and source [length]. */
     data class Open(val name: String, val kind: Kind, val length: Int)
 
     private val tags = listOf(
@@ -41,19 +14,13 @@ internal object InlineHtmlTags {
         Open("code", Kind.CODE, 6),
         Open("sub", Kind.SUB, 5), Open("sup", Kind.SUP, 5),
     )
-    private const val MAX_NAME = 6 // "strong", "strike"
+    private const val MAX_NAME = 6
 
-    /**
-     * Cheap pre-check for the inline parsers: every supported tag has a letter
-     * right after the `<`, so `1 < 2`, `a<-b` and a stray `</x>` are rejected
-     * without any further scan.
-     */
     fun mayStartTag(text: String, i: Int): Boolean =
         i + 1 < text.length && text[i + 1].let { it in 'a'..'z' || it in 'A'..'Z' }
 
     private fun isAsciiLetter(c: Char) = c in 'a'..'z' || c in 'A'..'Z'
 
-    /** Source length of a `<br>` / `<br >` / `<br/>` / `<br />` at [i] (any case), or 0. */
     fun brLength(text: String, i: Int): Int {
         if (text[i] != '<' || !text.regionMatches(i + 1, "br", 0, 2, ignoreCase = true)) return 0
         var j = i + 3
@@ -62,13 +29,11 @@ internal object InlineHtmlTags {
         return if (j < text.length && text[j] == '>') j + 1 - i else 0
     }
 
-    /** Where text resumes after a `<br>` of [length] at [i]: past one newline that follows it. */
     fun afterBr(text: String, i: Int, length: Int): Int {
         val end = i + length
         return if (end < text.length && text[end] == '\n') end + 1 else end
     }
 
-    /** The whitelisted open tag at [i] (`<name>` or `<name >`, any case), or null. */
     fun openAt(text: String, i: Int): Open? {
         if (text[i] != '<') return null
         var j = i + 1
@@ -77,7 +42,6 @@ internal object InlineHtmlTags {
         if (len == 0 || len > MAX_NAME) return null
         while (j < text.length && text[j] == ' ') j++
         if (j >= text.length || text[j] != '>') return null
-        // No allocation on the common path: compare in place against the few names.
         for (t in tags) {
             if (t.name.length == len && text.regionMatches(i + 1, t.name, 0, len, ignoreCase = true)) {
                 val length = j + 1 - i
@@ -87,7 +51,6 @@ internal object InlineHtmlTags {
         return null
     }
 
-    /** Length of the close tag `</name>` / `</name >` for [open] at [k], or 0. */
     private fun closeTagLength(text: String, k: Int, open: Open): Int {
         if (text[k] != '<' || k + 1 >= text.length || text[k + 1] != '/') return 0
         if (!text.regionMatches(k + 2, open.name, 0, open.name.length, ignoreCase = true)) return 0
@@ -96,24 +59,12 @@ internal object InlineHtmlTags {
         return if (j < text.length && text[j] == '>') j + 1 - k else 0
     }
 
-    /** Offset just past the close tag that [Pairs.closeOf] gave for [open]. */
     fun closeEnd(text: String, close: Int, open: Open): Int = close + closeTagLength(text, close, open)
 
-    /** Which open tag of one inline text is closed where; see [pairs]. */
     class Pairs internal constructor(private val closes: HashMap<Int, Int>) {
-        /** Start of the close tag pairing the open tag at [open], or -1. */
         fun closeOf(open: Int): Int = closes[open] ?: -1
     }
 
-    /**
-     * Pairs every whitelisted open tag of [text] with its close tag in ONE
-     * linear pass - a stack per name, cleared at each newline, code spans
-     * skipped - so a line of thousands of unclosed `<b>` costs O(n), not a
-     * search to the end of the line for each. Same-name tags nest. Crossing
-     * pairs of different names both pair here; the inner one is then inside
-     * the outer one's content, which is parsed again on its own and finds no
-     * partner there, so the outer pair wins as the spec asks.
-     */
     fun pairs(text: String): Pairs {
         val closes = HashMap<Int, Int>()
         val stacks = HashMap<String, ArrayDeque<Int>>()
@@ -145,7 +96,6 @@ internal object InlineHtmlTags {
         return Pairs(closes)
     }
 
-    /** The whitelisted name of a close tag `</name>` / `</name >` at [k], or null. */
     private fun closeNameAt(text: String, k: Int): String? {
         var j = k + 2
         while (j < text.length && j - k - 2 <= MAX_NAME && isAsciiLetter(text[j])) j++
@@ -156,17 +106,11 @@ internal object InlineHtmlTags {
         return tags.firstOrNull { it.name.length == len && text.regionMatches(k + 2, it.name, 0, len, ignoreCase = true) }?.name
     }
 
-    /** [pairs] of one text, computed on the first [closeOf] (a `<br>` needs none). */
     class LazyPairs(private val text: String) {
         private var pairs: Pairs? = null
         fun closeOf(open: Int): Int = (pairs ?: pairs(text).also { pairs = it }).closeOf(open)
     }
 
-    /**
-     * For Copy as plain text: `<br>` becomes a newline and paired style tags
-     * go, their content kept; unpaired or unknown tags and code spans stay as
-     * they are (the caller unwraps code afterwards).
-     */
     fun toPlain(s: String): String {
         if ('<' !in s && '&' !in s) return s
         val out = StringBuilder(s.length)
@@ -186,7 +130,6 @@ internal object InlineHtmlTags {
                     out.append(s, i, end + 1); i = end + 1; continue
                 }
             }
-            // `\<br>` and `&lt;br&gt;` are the literal text `<br>`, as on screen.
             if (isEscapedLiteral(s, i)) { out.append(s[i + 1]); i += 2; continue }
             if (c == '&') {
                 val entity = entityAt(s, i)
@@ -195,8 +138,6 @@ internal object InlineHtmlTags {
             if (c == '<' && mayStartTag(s, i)) {
                 val br = brLength(s, i)
                 if (br > 0) {
-                    // The caller joins lines with a newline of its own: a
-                    // `<br>` ending this line would make a blank line.
                     if (i + br < s.length) out.append('\n')
                     i = afterBr(s, i, br)
                     continue
@@ -215,12 +156,6 @@ internal object InlineHtmlTags {
         }
     }
 
-    /**
-     * For Copy as rich text: replaces `<br>` and paired whitelisted tags with
-     * [marker]-wrapped indexes into [sink] (canonical HTML, e.g. `<br/>`,
-     * `<strong>`), so the caller can escape everything else and restore them.
-     * A pair crossing an already open one is left as text, so the HTML nests.
-     */
     fun protectForHtml(s: String, sink: MutableList<String>, marker: Char): String {
         if ('<' !in s && '&' !in s) return s
         val pairs = pairs(s)
@@ -229,7 +164,6 @@ internal object InlineHtmlTags {
             sink.add(html)
             out.append(marker).append(sink.size - 1).append(marker)
         }
-        // Emitted pairs still open: (source offset of the close tag, its HTML).
         val open = ArrayDeque<Pair<Int, String>>()
         var i = 0
         while (i < s.length) {
@@ -240,7 +174,6 @@ internal object InlineHtmlTags {
                 i = s.indexOf('>', i) + 1
                 continue
             }
-            // Literal `<`/`&` (escaped or as an entity) stay literal in the HTML.
             if (isEscapedLiteral(s, i)) { token(escapeHtml(s[i + 1].toString())); i += 2; continue }
             if (s[i] == '&') {
                 val entity = entityAt(s, i)
@@ -267,7 +200,6 @@ internal object InlineHtmlTags {
     private fun escapeHtml(t: String): String =
         t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 
-    /** A backslash-escaped `<` or `&` at [i]: the character itself, never a tag or entity. */
     fun isEscapedLiteral(text: String, i: Int): Boolean =
         text[i] == '\\' && i + 1 < text.length && (text[i + 1] == '<' || text[i + 1] == '&')
 
@@ -275,14 +207,6 @@ internal object InlineHtmlTags {
         "lt" to "<", "gt" to ">", "amp" to "&", "quot" to "\"", "apos" to "'", "nbsp" to "\u00A0",
     )
 
-    /**
-     * The HTML entity at [i] - `&lt;` `&gt;` `&amp;` `&quot;` `&apos;` `&nbsp;`,
-     * or a numeric `&#60;` / `&#x3C;` - as (decoded text, source length), or
-     * null. The decoded text is appended as is and never scanned again, so
-     * `&lt;br&gt;` shows the literal `<br>` (spec "Showing a tag literally").
-     * Only these named entities: CommonMark knows all of HTML5's, iOS (cmark)
-     * decodes them all; the rest stay as written here.
-     */
     fun entityAt(text: String, i: Int): Pair<String, Int>? {
         if (text[i] != '&') return null
         val semi = text.indexOf(';', i + 1)
@@ -299,16 +223,6 @@ internal object InlineHtmlTags {
         return decoded to semi + 1 - i
     }
 
-    /**
-     * For one-line previews (session list, search snippets, skill subtitles,
-     * read-aloud): `<br>` becomes a space and every whitelisted style tag, open
-     * or close, paired or not, goes - its text stays. Other tags stay as written.
-     * Code is left exactly as it is: fenced blocks, indented code blocks and
-     * backtick spans are recognised FIRST and copied verbatim, so
-     * `` `a<br>b` `` still previews as `a<br>b`. `\<` and the entities of
-     * [entityAt] give their literal character, which is never re-scanned.
-     * Newlines are kept; the caller folds them.
-     */
     fun stripForPreview(text: String): String {
         if (text.indexOf('<') < 0 && text.indexOf('&') < 0) return text
         val out = StringBuilder(text.length)
@@ -362,7 +276,6 @@ internal object InlineHtmlTags {
                     var r = i
                     while (r < to && text[r] == '`') r++
                     val n = r - i
-                    // The matching run of exactly n backticks on this line.
                     var k = r
                     var close = -1
                     while (k < to) {

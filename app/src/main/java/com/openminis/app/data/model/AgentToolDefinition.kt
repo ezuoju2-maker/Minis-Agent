@@ -3,11 +3,6 @@ package com.openminis.app.data.model
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Provider-agnostic tool definition. Each tool registers with this structure,
- * and providers convert it to their native format (Anthropic input_schema,
- * Gemini function_declarations, OpenAI function calling).
- */
 data class AgentToolDefinition(
     val name: String,
     val description: String,
@@ -15,15 +10,6 @@ data class AgentToolDefinition(
     val required: List<String> = emptyList(),
     val propertyOrdering: List<String>? = null,
 ) {
-    /**
-     * [T-port-nested-json-string] The arguments with every nested-schema
-     * parameter that arrived as JSON-in-a-string decoded to the array / object
-     * its schema declares. Some OpenAI-compatible stacks (DeepSeek V4 Flash via
-     * SenseNova and Bailian, 5 of 7 user_ask calls on a Pixel 4a) send
-     * `"questions":"[{...}]"` instead of a nested array. Returns the same
-     * instance when nothing changed; a string that does not parse is left
-     * as is, so the tool's own parser can tell the model exactly what is wrong.
-     */
     fun coerceNestedJsonStrings(args: JSONObject): JSONObject {
         var out: JSONObject? = null
         for ((key, p) in parameters) {
@@ -39,7 +25,6 @@ data class AgentToolDefinition(
         return out ?: args
     }
 
-    /** Anthropic format: {name, description, input_schema: {type:object, properties, required}} */
     fun toAnthropicJson(): JSONObject {
         val props = JSONObject()
         for ((key, param) in parameters) {
@@ -57,7 +42,6 @@ data class AgentToolDefinition(
         }
     }
 
-    /** Gemini format: {name, description, parameters: {type:OBJECT, properties, required}} */
     fun toGeminiJson(): JSONObject {
         val props = JSONObject()
         for ((key, param) in parameters) {
@@ -76,7 +60,6 @@ data class AgentToolDefinition(
         }
     }
 
-    /** OpenAI format: {type:function, function: {name, description, parameters: {type:object, ...}}} */
     fun toOpenAIJson(): JSONObject {
         val props = JSONObject()
         for ((key, param) in parameters) {
@@ -102,19 +85,8 @@ data class AgentToolParam(
     val type: String,
     val description: String,
     val enumValues: List<String>? = null,
-    /**
-     * [T-port-nested-schema] Nested schema for a structured parameter (port of
-     * iOS 5bbab0250). The flat scalar fields cannot express `user_ask.questions`
-     * - an array of question objects, each with an array of option objects - so
-     * such a parameter used to travel as a JSON string inside the JSON (as
-     * browser_use `cookies` still does), which is fragile for a model to
-     * produce. When set, [type] should be "array" (or "object") and every
-     * provider renders the node in its own dialect. Scalars leave it null, and
-     * their output stays byte-identical to before.
-     */
     val schema: AgentSchemaNode? = null,
 ) {
-    /** Standard JSON Schema: Anthropic input_schema, OpenAI Chat and Responses. */
     fun toJson(): JSONObject {
         schema?.let { return it.toJsonSchema(gemini = false).apply { put("description", description) } }
         return JSONObject().apply {
@@ -124,7 +96,6 @@ data class AgentToolParam(
         }
     }
 
-    /** Gemini dialect (upper-case types). */
     fun toGeminiJson(): JSONObject {
         schema?.let { return it.toJsonSchema(gemini = true).apply { put("description", description) } }
         return JSONObject().apply {
@@ -135,17 +106,6 @@ data class AgentToolParam(
     }
 }
 
-/**
- * [T-port-nested-schema] A provider-neutral JSON Schema subset (iOS
- * `AgentSchemaNode`): string with enum, integer, boolean, array with item
- * bounds, object with properties + required.
- *
- * Bounds and nested `required` lists are advisory - not every provider honours
- * them - so a tool that uses a nested schema must re-validate its input in its
- * own parser. Unlike iOS (whose Anthropic SDK types cannot nest objects
- * outside array items) Android builds raw JSON, so every provider receives the
- * full tree, objects at any depth included.
- */
 sealed class AgentSchemaNode {
     abstract val description: String?
 
@@ -160,16 +120,10 @@ sealed class AgentSchemaNode {
     ) : AgentSchemaNode()
     data class Obj(
         override val description: String? = null,
-        /** Ordered: rendered in this order, the order the model reads them in. */
         val properties: List<Pair<String, AgentSchemaNode>>,
         val required: List<String> = emptyList(),
     ) : AgentSchemaNode()
 
-    /**
-     * Standard JSON Schema, or with [gemini] the Gemini dialect used by its
-     * scalar path on iOS: upper-case types, a string enum folded into the
-     * description as "(values: a, b)", and no array bounds.
-     */
     fun toJsonSchema(gemini: Boolean): JSONObject {
         fun t(s: String) = if (gemini) s.uppercase() else s
         val o = JSONObject()
@@ -212,11 +166,6 @@ sealed class AgentSchemaNode {
         return o
     }
 
-    /**
-     * [T-port-nested-json-string] [value] decoded where it is JSON-in-a-string
-     * for an array or object node, recursively; the same instance when nothing
-     * changed (scalars, already-native values, strings that do not parse).
-     */
     fun coerce(value: Any?): Any? = when (this) {
         is Arr -> {
             val arr = when (value) {
@@ -265,7 +214,6 @@ sealed class AgentSchemaNode {
         }
     }
 
-    /** Every description, name and enum value, for the context-size estimate. */
     val estimationText: String
         get() = when (this) {
             is Str -> listOfNotNull(description, enumValues?.joinToString(" ")).joinToString(" ")

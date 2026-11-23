@@ -52,20 +52,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 
-/**
- * Logs → Config Changes tab. Lists every config write attempt
- * recorded in [ConfigAuditLog]. Tap an applied entry to revert it.
- * Mirrors iOS `ConfigAuditView`.
- *
- * Reverts go through a local [AlertDialog] (not the gate's confirm
- * dialog) — the gate's dialog can't stack over the Logs sheet on
- * iOS, and the Android version follows the same shape so the audit
- * log is internally consistent across platforms.
- */
 @Composable
 fun ConfigAuditScreen(
     modifier: Modifier = Modifier,
-    /** [T-config-readable] Opens a record's detail page. */
     onOpenEntry: (String) -> Unit = {},
 ) {
     val log = remember { ConfigAuditLog.get() }
@@ -75,7 +64,6 @@ fun ConfigAuditScreen(
     var revertCandidate by remember { mutableStateOf<ConfigAuditEntry?>(null) }
     var revertResult by remember { mutableStateOf<RevertMessage?>(null) }
 
-    // Reload on every audit log mutation.
     LaunchedEffect(revision) {
         withContext(Dispatchers.IO) {
             val recent = log.recent(limit = 200)
@@ -100,11 +88,6 @@ fun ConfigAuditScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            // T292: "Clear All" button removed per product decision — config
-            // change history is meant to be a permanent audit trail. The
-            // ConfigAuditLog.clearAll() API is intentionally left in place
-            // for future use (e.g. an admin-only nuke command); only the UI
-            // affordance is gone.
         }
 
         if (entries.isEmpty()) {
@@ -148,13 +131,10 @@ fun ConfigAuditScreen(
         }
     }
 
-    // Confirm-revert dialog.
     revertCandidate?.let { entry ->
         AlertDialog(
             onDismissRequest = { revertCandidate = null },
             title = { Text(stringResource(R.string.logs_config_revert_dialog_title)) },
-            // [T-config-readable] Says what will be undone, in words when the
-            // row has them; older rows keep the raw key + new → old.
             text = { Text(text = configRevertMessage(entry, localize)) },
             confirmButton = {
                 val successTitle = stringResource(R.string.logs_config_revert_success_title)
@@ -191,7 +171,6 @@ fun ConfigAuditScreen(
         )
     }
 
-    // Result alert.
     revertResult?.let { msg ->
         AlertDialog(
             onDismissRequest = { revertResult = null },
@@ -219,8 +198,6 @@ private fun AuditRow(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-            // [T-config-readable] Tap a record for its details: the readable
-            // description plus the full raw change.
             .clickable(onClick = onOpen)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -247,8 +224,6 @@ private fun AuditRow(
             maxLines = 1,
             overflow = TextOverflow.MiddleEllipsis,
         )
-        // [T-config-readable] The readable description when the row has one;
-        // older rows keep the raw one-line diff.
         val readable = entry.readable?.displayText(localize).orEmpty()
         if (readable.isNotEmpty()) {
             ConfigReadableDivider()
@@ -322,12 +297,6 @@ private fun AuditRow(
     }
 }
 
-/**
- * T288: localized label for [ConfigAuditActor]. The enum's `raw` value is
- * the persisted English token ("agent" / "user-revert"); this composable
- * resolves it to the user's locale at render time without changing the
- * underlying audit-log payload.
- */
 @Composable
 private fun actorLabel(actor: ConfigAuditActor): String = when (actor) {
     ConfigAuditActor.AGENT -> stringResource(R.string.logs_config_source_agent)
@@ -336,11 +305,6 @@ private fun actorLabel(actor: ConfigAuditActor): String = when (actor) {
     ConfigAuditActor.USER_REVERT -> stringResource(R.string.logs_config_source_user_revert)
 }
 
-/**
- * Coarse, static relative time. Computed once per reload; no Timer
- * needed since the audit log's [ConfigAuditLog.revision] re-emits on
- * every mutation. Mirrors iOS `coarseRelativeTime`.
- */
 private fun coarseRelativeTime(ctx: android.content.Context, epochMs: Long): String {
     val now = System.currentTimeMillis()
     val secs = ((now - epochMs) / 1000L).coerceAtLeast(0)
@@ -349,7 +313,6 @@ private fun coarseRelativeTime(ctx: android.content.Context, epochMs: Long): Str
         secs < 3600 -> ctx.getString(R.string.logs_config_time_min_ago, (secs / 60).toInt())
         secs < 86_400 -> ctx.getString(R.string.logs_config_time_hr_ago, (secs / 3600).toInt())
         else -> {
-            // Yesterday/earlier — render an absolute short date.
             val sameDay = (now - epochMs) < 2 * 86_400_000L
             if (sameDay) ctx.getString(R.string.logs_config_time_yesterday)
             else java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT).format(java.util.Date(epochMs))

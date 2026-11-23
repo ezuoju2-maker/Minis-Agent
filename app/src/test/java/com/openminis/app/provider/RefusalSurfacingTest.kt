@@ -17,13 +17,6 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 
-/**
- * [FIX-261018-12] An Anthropic refusal must end the run WITH an error that
- * says why — also when the refused response carried tool calls. Port of the
- * iOS fix (field log 2026-10-18: a shell + a browser call, then
- * stop_reason=refusal with stop_details category "cyber"; the tools ran and
- * the run ended with nothing on screen).
- */
 class RefusalSurfacingTest {
     private lateinit var server: MockWebServer
     private lateinit var provider: AnthropicProvider
@@ -66,7 +59,6 @@ class RefusalSurfacingTest {
         assertEquals("refusal", finished.stopReason)
         assertEquals("cyber", finished.refusalCategory)
         assertEquals(explanation, finished.refusalExplanation)
-        // The tool call still streams; the agent loop is what drops it.
         assertTrue(chunks.any { it is LLMStreamChunk.ToolCallComplete })
     }
 
@@ -97,7 +89,6 @@ class RefusalSurfacingTest {
         assertEquals(generic, StopReasons.refusalErrorText(null, generic, "   "))
     }
 
-    /** Source pins for the agent-loop half (ChatViewModel cannot run headless). */
     @Test
     fun `agent loop drops refused tool calls before history and offers no Resume`() {
         val src = File("src/main/java/com/openminis/app/ui/chat/ChatViewModel.kt").readText()

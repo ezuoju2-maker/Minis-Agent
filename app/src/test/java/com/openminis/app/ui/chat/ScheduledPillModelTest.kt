@@ -12,12 +12,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-port-sched-pill] The scheduled-task pill under the chat's top bar: which
- * task it shows, the clock, the ring, the run counter and the hide rule, as
- * iOS ScheduledBannerTests pin them; plus which tasks count (the
- * keeps-the-chat-active rule) and the wiring.
- */
 class ScheduledPillModelTest {
 
     private fun job(
@@ -92,7 +86,6 @@ class ScheduledPillModelTest {
         assertFalse(ScheduledPillModel.isDismissed(setOf("a", "c"), setOf("a", "b")))
     }
 
-    // --- Which tasks -------------------------------------------------------------
 
     private val chat = "chat-1"
     private fun task(
@@ -128,7 +121,6 @@ class ScheduledPillModelTest {
         val l = jobs[1]
         assertTrue(l.isFiringNow)
         assertEquals("3/3", ScheduledPillModel.runCounter(l, running = true))
-        // Not running any more: the disabled task is gone.
         assertEquals(listOf("held"), ScheduledPillModel.jobs(chat, listOf(held, lastFire), emptySet(), now) { false }.map { it.id })
     }
 
@@ -141,7 +133,6 @@ class ScheduledPillModelTest {
         assertNull(ScheduledPillModel.runCounter(ScheduledPillModel.pillJob(once, 0, false), false))
     }
 
-    // --- Wiring ----------------------------------------------------------------
 
     @Test
     fun `mounted under the app bar in the top bar slot, cancel-all is the Stop scope`() {
@@ -158,8 +149,6 @@ class ScheduledPillModelTest {
 
     @Test
     fun `T-port-sched-pill-visible - a chat started fresh is matched by its real id, not the draft route id`() {
-        // ChatScreen's route id for a new chat is "__new__…" and never changes;
-        // the task names the real id the draft got on its first message.
         val now = 1_000_000L
         val t = task("t", triggered = 0, max = 3)
         assertTrue(ScheduledPillModel.jobs("__new__1791024000", listOf(t), emptySet(), now) { false }.isEmpty())
@@ -178,7 +167,7 @@ class ScheduledPillModelTest {
         val locales = listOf("values", "values-de", "values-es", "values-fil", "values-fr", "values-hr", "values-in", "values-ja",
             "values-ko", "values-ms", "values-pl", "values-pt-rBR", "values-ro", "values-ru", "values-th", "values-tr", "values-zh", "values-zh-rTW")
         val base = Regex("name=\"(sched_pill_[a-z0-9_]+)\"").findAll(File(res, "values/strings_sched_pill.xml").readText()).map { it.groupValues[1] }.toList()
-        assertEquals(19, base.size)  // + sched_pill_run_now [T-sched-run-now]
+        assertEquals(19, base.size)
         for (l in locales) {
             val text = File(res, "$l/strings_sched_pill.xml").readText()
             for (k in base) assertTrue("$l lacks $k", text.contains("name=\"$k\""))

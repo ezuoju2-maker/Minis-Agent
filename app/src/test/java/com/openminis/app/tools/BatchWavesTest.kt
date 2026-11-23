@@ -5,10 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [advanced-parallel] Dependency-wave scheduling: independent calls share a
- * wave (run concurrently), readers land strictly after the writers they need.
- */
 class BatchWavesTest {
 
     @Test
@@ -28,7 +24,6 @@ class BatchWavesTest {
     @Test
     fun `multiple writers then reader all precede it`() {
         val n = listOf("file_write", "shell_execute", "file_read")
-        // file_read waits for both writers (both wave 0) → wave 1.
         assertEquals(listOf(listOf(0, 1), listOf(2)), BatchToolOrder.waves(n))
     }
 
@@ -53,9 +48,6 @@ class BatchWavesTest {
 
     @Test
     fun `nested reader chain produces ordered waves`() {
-        // A reader with a writer before it goes to wave 1; that wave-1 reader
-        // is not itself a writer, so a following reader only waits for the
-        // wave-0 writer, and also lands in wave 1 — no unnecessary serialization.
         val n = listOf("file_write", "file_read", "file_read")
         assertEquals(listOf(listOf(0), listOf(1, 2)), BatchToolOrder.waves(n))
     }

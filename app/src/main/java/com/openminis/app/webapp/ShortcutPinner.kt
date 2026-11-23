@@ -11,11 +11,6 @@ import androidx.core.graphics.drawable.IconCompat
 import com.openminis.app.R
 import com.openminis.app.data.db.WebAppShortcutEntity
 
-/**
- * T-pwa-1 (renamed Pwa → WebApp): pin a WebApp shortcut to the user's
- * launcher. Wraps [ShortcutManagerCompat.requestPinShortcut] with the
- * fallbacks needed for pre-Oreo devices and unsupported launchers.
- */
 object ShortcutPinner {
 
     fun pin(

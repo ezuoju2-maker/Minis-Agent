@@ -19,38 +19,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [M12][T-provider-export-model-overrides][T-android-model-custom-params]
- * The per-model overrides layer must survive provider export → import.
- *
- * Background: export/import is FIELD-BY-FIELD, not whole-object serialization
- * (it has to be — the wire format is shared with iOS, which stores modality as
- * an OptionSet bitfield rather than string lists). That makes it the one place
- * in the app where adding a field to `ModelOverrides` silently loses it:
- * the data class decodes fine everywhere else, `isEmpty` accounts for it, the
- * settings UI writes it — and then a share/re-import drops it with no error.
- *
- *   939a913b1 / 6c43ed30c  exactly that: only displayName + maxOutputTokens were
- *                          serialized, so a hand-corrected contextWindow,
- *                          supportsReasoning or modality was lost on every
- *                          round-trip, and an iOS export's `modalityOverride`
- *                          bitfield was discarded entirely.
- *
- * `exportInstanceJson` / `importInstanceJson` are private members of
- * ProviderRepository and need a Context plus EncryptedSharedPreferences, so the
- * two halves are ported VERBATIM below — export from ProviderRepository.kt
- * ~2900-2995, import from ~3480-3550, bitfield helpers from ~3591-3656 — and
- * `the ported wire format matches the source` greps the production file for
- * every key so the port cannot drift away from what actually ships.
- *
- * The backup path is deliberately contrasted: `BackupExporter.exportProviders`
- * serializes the whole `ProviderConfig` through kotlinx, so it carries any field
- * the data class has, including ones this hand-written path forgets. That
- * asymmetry is what the KNOWN GAP at the bottom is about.
- */
 class ModelOverridesExportImportRoundTripTest {
 
-    // ── Ported bit layout (ProviderRepository.kt:57-65) ────────────────────
 
     private val bitTextIn = 1 shl 0
     private val bitTextOut = 1 shl 1
@@ -62,7 +32,6 @@ class ModelOverridesExportImportRoundTripTest {
     private val bitAudOut = 1 shl 7
     private val bitVidOut = 1 shl 8
 
-    /** Ported from ProviderRepository.modalityBitfieldFromLists. */
     private fun bitfieldFromLists(inputs: List<String>?, outputs: List<String>?): Int {
         var bits = 0
         inputs?.forEach { raw ->
@@ -85,7 +54,6 @@ class ModelOverridesExportImportRoundTripTest {
         return bits
     }
 
-    /** Ported from ProviderRepository.modalityListsFromBitfield. */
     private fun listsFromBitfield(bits: Int): Pair<List<String>?, List<String>?> {
         if (bits == 0) return null to null
         val inputs = buildList {
@@ -104,13 +72,11 @@ class ModelOverridesExportImportRoundTripTest {
         return inputs.ifEmpty { null } to outputs.ifEmpty { null }
     }
 
-    /** Ported from ProviderRepository.thinkingLevelFromWire. */
     private fun thinkingLevelFromWire(raw: String): ThinkingLevel? {
         if (raw.isEmpty()) return null
         return ThinkingLevel.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
     }
 
-    /** Ported from ProviderRepository.readModalitiesWithBitfieldFallback. */
     private fun readModalities(obj: JSONObject): Pair<List<String>?, List<String>?> {
         val nativeIn = obj.optJSONArray("inputModalities")?.let { arr ->
             (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { s -> s.isNotEmpty() } }
@@ -125,7 +91,6 @@ class ModelOverridesExportImportRoundTripTest {
         return listsFromBitfield(obj.optInt("modalityOverride", 0))
     }
 
-    // ── Ported export (ProviderRepository.kt ~2900-2995) ──────────────────
 
     private fun exportEntry(entry: ModelEntry): JSONObject = JSONObject().apply {
         put("modelId", entry.baseModel.id)
@@ -173,7 +138,6 @@ class ModelOverridesExportImportRoundTripTest {
         entry.baseModel.outputModalities?.let { put("outputModalities", JSONArray(it)) }
     }
 
-    // ── Ported import (ProviderRepository.kt ~3480-3550) ──────────────────
 
     private fun importEntry(m: JSONObject, providerType: ProviderType): ModelEntry {
         val modelId = m.optString("modelId", "")
@@ -248,7 +212,6 @@ class ModelOverridesExportImportRoundTripTest {
     private fun roundTrip(entry: ModelEntry, type: ProviderType = ProviderType.openAI) =
         importEntry(JSONObject(exportEntry(entry).toString()), type)
 
-    // ── The full overrides payload ────────────────────────────────────────
 
     private val fullOverrides = ModelOverrides(
         displayName = "Tuned Relay Model",
@@ -268,11 +231,6 @@ class ModelOverridesExportImportRoundTripTest {
         ),
     )
 
-    /**
-     * The headline case: everything the settings screen can set on one model,
-     * through export and back. This is what 939a913b1/6c43ed30c were reported
-     * against — a hand-corrected proxied model losing its edits when shared.
-     */
     @Test
     fun `every serialized override field survives the round trip`() {
         val original = ModelEntry(
@@ -298,12 +256,10 @@ class ModelOverridesExportImportRoundTripTest {
             (back.overrides.extraBodyParams!!["reasoning_effort"] as JsonPrimitive).content,
         )
         assertEquals("42", (back.overrides.extraBodyParams!!["seed"] as JsonPrimitive).content)
-        // Identity/visibility flags ride along.
         assertTrue(back.isCustom)
         assertTrue(back.isHidden)
     }
 
-    /** Two round-trips must be idempotent — re-sharing an import must not erode it. */
     @Test
     fun `a second round trip changes nothing`() {
         val original = ModelEntry("inst", LLMModel("relay/tuned", "Relay Tuned", "Custom"), fullOverrides)
@@ -313,7 +269,6 @@ class ModelOverridesExportImportRoundTripTest {
         assertEquals(once.baseModel, twice.baseModel)
     }
 
-    /** The baseModel layer round-trips too, including its modality lists. */
     @Test
     fun `the base model layer survives alongside the overrides`() {
         val original = ModelEntry(
@@ -330,19 +285,10 @@ class ModelOverridesExportImportRoundTripTest {
         assertEquals(false, back.baseModel.supportsReasoning)
         assertEquals(listOf("text", "image"), back.baseModel.inputModalities)
         assertEquals(listOf("text"), back.baseModel.outputModalities)
-        // The provider name is re-derived from the importing instance's TYPE,
-        // not carried on the wire — an OpenAI-typed import stamps "OpenAI".
         assertEquals(ProviderType.openAI.displayName, back.baseModel.provider)
     }
 
-    // ── Absence must stay absence ─────────────────────────────────────────
 
-    /**
-     * Every field is read behind a `has()` guard, so a legacy export (or a
-     * partial overrides object) must leave the unwritten fields null — "inherit"
-     * — rather than collapsing to 0 / 0.0 / empty. Synthesizing a value here
-     * would silently pin a model to a wrong context window.
-     */
     @Test
     fun `a legacy export restores with nulls, not zeros`() {
         val legacy = JSONObject(
@@ -363,7 +309,6 @@ class ModelOverridesExportImportRoundTripTest {
         assertNull("absent maxThinkingLevel must stay null", back.overrides.maxThinkingLevel)
     }
 
-    /** An entry with no overrides at all exports no `overrides` key and imports empty. */
     @Test
     fun `an untouched entry carries no overrides object`() {
         val plain = ModelEntry("inst", LLMModel("m", "M", "Custom"))
@@ -372,12 +317,6 @@ class ModelOverridesExportImportRoundTripTest {
         assertTrue(importEntry(JSONObject(json.toString()), ProviderType.openAI).overrides.isEmpty)
     }
 
-    /**
-     * 0.0 is a legitimate temperature (fully deterministic), so it must survive
-     * as a value rather than being indistinguishable from absent. This is the
-     * pair of edges the `has()`+`isEmpty` design exists for: absent → null
-     * (tested above), present-and-zero → 0.0 (here).
-     */
     @Test
     fun `a zero temperature survives and does not read as absent`() {
         val back = roundTrip(
@@ -387,11 +326,6 @@ class ModelOverridesExportImportRoundTripTest {
         assertFalse(back.overrides.isEmpty)
     }
 
-    /**
-     * `supportsReasoning = false` likewise: an explicit "no" must come back as
-     * false, not null, or the next model refresh restores the catalog's `true`
-     * and the user's answer reverts on its own.
-     */
     @Test
     fun `an explicit supportsReasoning false survives as false`() {
         val back = roundTrip(
@@ -400,7 +334,6 @@ class ModelOverridesExportImportRoundTripTest {
         assertEquals(false, back.overrides.supportsReasoning)
     }
 
-    /** An empty header map is not written, and comes back as null rather than {}. */
     @Test
     fun `an empty custom header map round-trips to null`() {
         val back = roundTrip(
@@ -409,7 +342,6 @@ class ModelOverridesExportImportRoundTripTest {
         assertNull(back.overrides.customHeaders)
     }
 
-    /** Nested extra-body structure must survive as JSON, not be flattened to a string. */
     @Test
     fun `nested extra body params keep their structure`() {
         val nested = Json.parseToJsonElement(
@@ -424,17 +356,9 @@ class ModelOverridesExportImportRoundTripTest {
         assertEquals("8192", (thinking["budget_tokens"] as JsonPrimitive).content)
     }
 
-    // ── Cross-platform modality interop ───────────────────────────────────
 
-    /**
-     * An iOS export carries modality ONLY as the `modalityOverride` Int
-     * OptionSet. Before 6c43ed30c Android spoke string lists exclusively and
-     * discarded the bitfield, so an iOS-shared provider arrived with no
-     * capability info — the model looked text-only.
-     */
     @Test
     fun `an iOS bitfield-only export decodes into Android lists`() {
-        // text in + text out + image in + pdf in  = iOS `.vision`
         val bits = bitTextIn or bitTextOut or bitImgIn or bitPdfIn
         val iosShaped = JSONObject(
             """{"modelId":"claude-sonnet-4-6","displayName":"Claude Sonnet 4.6",
@@ -448,11 +372,6 @@ class ModelOverridesExportImportRoundTripTest {
         assertEquals(listOf("text"), back.overrides.outputModalities)
     }
 
-    /**
-     * Android writes BOTH shapes, so its own export is lossless (lists win on
-     * read) while iOS can still consume the bitfield. Pinned in both
-     * directions, because dropping either half breaks one platform silently.
-     */
     @Test
     fun `an Android export emits both the lists and the interop bitfield`() {
         val entry = ModelEntry(
@@ -479,7 +398,6 @@ class ModelOverridesExportImportRoundTripTest {
         assertEquals(bitTextIn or bitImgIn or bitTextOut, o.getInt("modalityOverride"))
     }
 
-    /** Lists take precedence over the bitfield when both are present. */
     @Test
     fun `the native lists win over a disagreeing bitfield`() {
         val conflicting = JSONObject(
@@ -495,7 +413,6 @@ class ModelOverridesExportImportRoundTripTest {
         )
     }
 
-    /** Neither shape present → null, so the provider-default fallback applies. */
     @Test
     fun `no modality information at all leaves both sides null`() {
         val back = importEntry(
@@ -506,7 +423,6 @@ class ModelOverridesExportImportRoundTripTest {
         assertNull(back.baseModel.outputModalities)
     }
 
-    /** Every bit maps to exactly one name, both ways. */
     @Test
     fun `the bit layout round-trips every modality name`() {
         val ins = listOf("text", "image", "pdf", "audio", "video")
@@ -514,22 +430,11 @@ class ModelOverridesExportImportRoundTripTest {
         val (backIn, backOut) = listsFromBitfield(bitfieldFromLists(ins, outs))
         assertEquals(ins, backIn)
         assertEquals(outs, backOut)
-        // A zero bitfield is "nothing stated", not "empty lists".
         assertEquals(null to null, listsFromBitfield(0))
-        // `pdf` has no output bit on either platform — an output-side pdf is not
-        // a thing, and inventing a bit for it would desync the layouts.
         assertEquals(0, bitfieldFromLists(null, listOf("pdf")))
     }
 
-    // ── Backup: the whole-object path ─────────────────────────────────────
 
-    /**
-     * The backup category serializes the entire `ProviderConfig` through
-     * kotlinx, so it carries every field the data class declares — no
-     * field-by-field list to forget. Verified here against the same full
-     * overrides payload PLUS `maxThinkingLevel`, which is exactly the field the
-     * hand-written export path omits (see the KNOWN GAP below).
-     */
     @Test
     fun `the backup path carries every overrides field including thinking`() {
         val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -558,20 +463,6 @@ class ModelOverridesExportImportRoundTripTest {
         assertEquals(ThinkingLevel.XHIGH, overrides.maxThinkingLevel)
     }
 
-    /**
-     * `ModelOverrides.maxThinkingLevel` — the user's per-model thinking ceiling,
-     * and the HIGHEST-priority source in the thinking resolution chain — used to
-     * be written by neither `exportInstanceJson` nor `importInstanceJson`, so
-     * sharing a provider silently reset it to "inherit the catalog rule" and the
-     * model quietly reasoned harder (or less hard) than the user configured,
-     * with no message anywhere. Backup was unaffected (it serializes the whole
-     * ProviderConfig through kotlinx), which is precisely why it was invisible:
-     * the same setting survived a backup and died on a share.
-     *
-     * Now carried. The wire value is the LOWERCASE level id, matching iOS's
-     * `ThinkingLevel.rawValue` on the shared wire format, and the reader accepts
-     * either casing.
-     */
     @Test
     fun `maxThinkingLevel survives provider export and import`() {
         val original = ModelEntry(
@@ -583,19 +474,11 @@ class ModelOverridesExportImportRoundTripTest {
         val back = roundTrip(original)
 
         assertEquals(ThinkingLevel.XHIGH, back.overrides.maxThinkingLevel)
-        // The wire spelling is the cross-platform (iOS rawValue) form.
         assertEquals("xhigh", exported.getJSONObject("overrides").getString("maxThinkingLevel"))
-        // An entry carrying only this field is still exported at all — isEmpty
-        // accounts for it, so the overrides object is written.
         assertFalse(original.overrides.isEmpty)
         assertTrue(exported.has("overrides"))
     }
 
-    /**
-     * An iOS export spells the level in lower case; an Android payload written
-     * from the enum name would be upper case. Both must read back, or a
-     * cross-platform share drops the ceiling silently — the very bug above.
-     */
     @Test
     fun `either casing of the level id is accepted on import`() {
         for (token in listOf("xhigh", "XHIGH", "XHigh")) {
@@ -605,7 +488,6 @@ class ModelOverridesExportImportRoundTripTest {
             )
             assertEquals("token \"$token\"", ThinkingLevel.XHIGH, back.overrides.maxThinkingLevel)
         }
-        // OFF is a real ceiling ("never reason on this model"), not absence.
         val off = importEntry(
             JSONObject("""{"modelId":"m","displayName":"M","overrides":{"maxThinkingLevel":"off"}}"""),
             ProviderType.openAI,
@@ -613,12 +495,6 @@ class ModelOverridesExportImportRoundTripTest {
         assertEquals(ThinkingLevel.OFF, off.overrides.maxThinkingLevel)
     }
 
-    /**
-     * A level a NEWER build invented must come back null — "inherit the catalog
-     * rule" — rather than being clamped to XHIGH the way `ThinkingLevel.decoded`
-     * does for this app's own persisted data. Clamping a foreign token would
-     * pin a ceiling the sender never set.
-     */
     @Test
     fun `an absent or unknown level id imports as null`() {
         val absent = importEntry(
@@ -633,15 +509,7 @@ class ModelOverridesExportImportRoundTripTest {
         assertNull("an unknown level must not be guessed at", unknown.overrides.maxThinkingLevel)
     }
 
-    // ── Source-grep drift guard ───────────────────────────────────────────
 
-    /**
-     * The port above only protects what production actually does if the two stay
-     * in step. This asserts every key the port writes/reads is still named in
-     * ProviderRepository.kt, and — the part that catches the ORIGINAL bug class
-     * — that the set of `ModelOverrides` properties has not grown a field the
-     * export path does not mention.
-     */
     @Test
     fun `the ported wire format matches the source`() {
         val src = ProductionSources.read("data/repository/ProviderRepository.kt")
@@ -660,9 +528,6 @@ class ModelOverridesExportImportRoundTripTest {
             "absent temperature must stay null rather than 0.0",
             src.contains("""if (overridesObj.has("temperature"))"""),
         )
-        // The thinking ceiling must NOT go through ThinkingLevel.decoded — that
-        // clamps an unknown token to XHIGH, which would invent a ceiling the
-        // sender never set.
         assertTrue(
             "the ceiling is decoded by the null-on-unknown helper",
             src.contains("private fun thinkingLevelFromWire(raw: String): ThinkingLevel?"),
@@ -672,8 +537,6 @@ class ModelOverridesExportImportRoundTripTest {
             "the export writes the cross-platform lowercase level id",
             src.contains("""o.put("maxThinkingLevel", it.name.lowercase())"""),
         )
-        // Bit layout, verbatim — a renumbering here silently mis-decodes every
-        // iOS export.
         assertTrue(src.contains("MODALITY_BIT_TEXT_IN = 1 shl 0"))
         assertTrue(src.contains("MODALITY_BIT_TEXT_OUT = 1 shl 1"))
         assertTrue(src.contains("MODALITY_BIT_IMG_IN = 1 shl 2"))
@@ -681,13 +544,6 @@ class ModelOverridesExportImportRoundTripTest {
         assertTrue(src.contains("MODALITY_BIT_VID_OUT = 1 shl 8"))
     }
 
-    /**
-     * The generalized form of the reported bug: any NEW `ModelOverrides` field
-     * must be added to the export path too. This enumerates the data class's
-     * declared properties from its source and requires each name to appear in
-     * the export/import file. Every member is carried now, so the expected set
-     * of omissions is EMPTY — a new field that forgets this path fails here.
-     */
     @Test
     fun `every ModelOverrides field is named in the export path`() {
         val configSrc = ProductionSources.read("data/model/ProviderConfig.kt")

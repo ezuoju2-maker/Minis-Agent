@@ -1,9 +1,5 @@
 package com.openminis.app.ui.chat
 
-// [T-android-split-chat] Small UI-state toggle methods extracted from
-// ChatViewModel as extension functions (verbatim): tool-detail sheet,
-// browser sheet, memory sheet, attachment list. The 4 backing state fields
-// were flipped private->internal. No logic change.
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -97,13 +93,6 @@ internal fun ChatViewModel.dismissBrowserSheet() {
     _showBrowserSheet.value = false
 }
 
-/**
- * Open the session browser sheet, focused on the tab whose URL matches
- * [url]. If no pool tab currently has that URL, a new tab is created and
- * loaded. Used by the tool-call preview's globe button so the agent's
- * existing browser_use page is reused when available instead of spawning
- * a duplicate tab.
- */
 internal fun ChatViewModel.openBrowserSheetForUrl(url: String) {
     if (url.isBlank()) {
         browserTabPool.ensureTabForUI()

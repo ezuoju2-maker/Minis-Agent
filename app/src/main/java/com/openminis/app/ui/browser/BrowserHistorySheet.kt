@@ -71,7 +71,6 @@ fun BrowserHistorySheet(
                 .fillMaxHeight(0.8f)
                 .navigationBarsPadding(),
         ) {
-            // Header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -95,7 +94,6 @@ fun BrowserHistorySheet(
                 }
             }
 
-            // Search bar
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },

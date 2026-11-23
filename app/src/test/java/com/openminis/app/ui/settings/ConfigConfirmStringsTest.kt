@@ -10,20 +10,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-config-confirm-i18n] The minis-config approval dialog reads in the app
- * language, like iOS ConfigConfirmSheet. Found on the Pixel 4a in Chinese:
- * the title, Cancel / Apply / Reject All and the risk hints were English
- * literals. Every string must equal the iOS catalog's text in every locale
- * iOS translates it into, and the config screens must not grow new literals.
- */
 class ConfigConfirmStringsTest {
 
     private val main = ProductionSources.mainRoot()!!
     private val res = File(main.parentFile.parentFile.parentFile.parentFile, "res")
     private val repo = generateSequence(main) { it.parentFile }.first { File(it, "src/ios/Localizable.xcstrings").exists() }
 
-    /** Android resource → iOS catalog key. */
     private val keys = mapOf(
         "config_confirm_title_one" to "Confirm change",
         "config_confirm_title_many" to "Confirm %lld changes",

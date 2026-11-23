@@ -10,7 +10,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
-/** [T-sse-idle-timeout] Per-provider response idle timeout (port of iOS b15ac8aa3). */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class ResponseIdleTimeoutSettingTest {

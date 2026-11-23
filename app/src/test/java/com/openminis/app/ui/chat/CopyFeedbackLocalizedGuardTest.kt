@@ -4,22 +4,11 @@ import java.io.File
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-copy-toast-l10n] Tapping inline code in a reply copied it and
- * showed a hard-coded English "Copied: …" toast even in a Chinese UI, while
- * copying a selection showed the localized "已复制：…". Copy feedback - the
- * toast and the copy buttons' TalkBack labels - must come from string
- * resources.
- *
- * Source guard only: the unit tests run without app resources, so the
- * localized toast text itself is not checked here.
- */
 class CopyFeedbackLocalizedGuardTest {
 
     private val ui = File("src/main/java/com/openminis/app/ui")
     private val streaming = File(ui, "chat/StreamingMarkdownText.kt")
 
-    /** Code with comment lines removed, so a quoted example in a comment does not count. */
     private fun code(f: File): String =
         f.readLines().filterNot { it.trimStart().let { t -> t.startsWith("//") || t.startsWith("*") || t.startsWith("/*") } }
             .joinToString("\n")
@@ -48,8 +37,6 @@ class CopyFeedbackLocalizedGuardTest {
 
     @Test
     fun `no copy feedback in ui is a hard-coded English literal`() {
-        // Exact copy-feedback literals. SessionDuplicateTitle matches the
-        // English "Copy" suffix of old titles on purpose (logic, not UI text).
         val literal = Regex(""""(Copy|Copied|Copy code|Copied!)"|"Copied: |"Copied to """)
         val allowed = setOf("sessions/SessionDuplicateTitle.kt")
         val hits = ui.walkTopDown().filter { it.isFile && it.extension == "kt" }

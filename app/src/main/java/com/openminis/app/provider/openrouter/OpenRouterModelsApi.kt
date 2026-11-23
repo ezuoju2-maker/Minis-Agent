@@ -18,31 +18,14 @@ import org.json.JSONObject
 
 object OpenRouterModelsApi {
     private val client = OkHttpClient()
-    // [T-openrouter-voice-catalog] "-v2": entries saved before the speech /
-    // transcription catalogs were merged in hold no voice models and no
-    // voiceRole, and would otherwise be served for up to 7 more days — the
-    // fix would look like it did nothing.
     private val cache = ProviderModelsCache("openrouter-v2")
 
     private const val MODELS_URL = "https://openrouter.ai/api/v1/models"
 
-    /**
-     * Fetch OpenRouter's model catalog. OpenRouter returns rich metadata
-     * alongside each model (context window, max output, reasoning support,
-     * input/output modalities) — we parse it here instead of waiting for
-     * `ModelsDevApi.enrichModels` to match, matching iOS `OpenRouterModelsAPI`.
-     *
-     * @param context When provided, results are cached for 7 days at
-     *   `cacheDir/models-cache/openrouter-v2/<sha256(apiKey)>.json`. Pass null to
-     *   bypass the cache entirely (matches existing callers).
-     * @param forceRefresh Skip the cache read but still write-through on success.
-     */
     suspend fun fetchModels(
         apiKey: String,
         context: Context? = null,
         forceRefresh: Boolean = false,
-        // [FEAT-261021-16] The instance's Settings > Network tag (prov:<id>);
-        // null follows the default route.
         netTag: String? = null,
     ): List<LLMModel> = withContext(Dispatchers.IO) {
         val cacheKey = apiKey
@@ -50,10 +33,6 @@ object OpenRouterModelsApi {
             cache.load(context, cacheKey)?.let { return@withContext it }
         }
 
-        // [T-openrouter-voice-catalog] OpenMinis#280. The default list holds
-        // only chat models; speech and transcription models are listed solely
-        // by their output_modalities filters. Fetch all three at once and tag
-        // each model with the list it came from.
         val (defaultResult, speech, transcription) = coroutineScope {
             val d = async { fetchList(MODELS_URL, apiKey, netTag) }
             val tts = async { fetchList("$MODELS_URL?output_modalities=speech", apiKey, netTag) }
@@ -70,8 +49,6 @@ object OpenRouterModelsApi {
                 return@withContext emptyList()
             }
         }
-        // A failed filter endpoint only costs its voice models; the chat
-        // catalog still loads.
         val speechModels = (speech as? ListResult.Ok)?.models.orEmpty()
         val transcriptionModels = (transcription as? ListResult.Ok)?.models.orEmpty()
         if (speech is ListResult.Failed || transcription is ListResult.Failed) {
@@ -106,7 +83,6 @@ object OpenRouterModelsApi {
             .header("Authorization", "Bearer $apiKey")
             .header("HTTP-Referer", "https://github.com/OpenMinis/OpenMinis")
             .header("X-Title", "Minis App")
-            // [T-android-default-ua] brand outbound /api/v1/models request.
             .applyUserAgentOverride(null)
             .build()
         com.openminis.app.network.NetworkHttp.client(netTag, client).newCall(request).execute().use { response ->
@@ -122,20 +98,6 @@ object OpenRouterModelsApi {
         ListResult.Failed(-1)
     }
 
-    /**
-     * [T-openrouter-voice-catalog] Tag every model with the catalog it came
-     * from and give voice models their exact dedicated shape. The filtered
-     * lists declare `speech` / `transcription` rather than `audio`, so without
-     * the shape they would show no audio at all.
-     *
-     *   default list        → voiceRole "none", modalities as declared
-     *   speech filter       → voiceRole "tts",  text in → audio out
-     *   transcription filter → voiceRole "stt",  audio in → text out
-     *
-     * The filtered lists win on an id collision (none today), since the
-     * filter IS the authoritative "this is a voice model" signal. Order: chat
-     * catalog first, then TTS, then ASR, each in the order OpenRouter returned.
-     */
     internal fun mergeVoiceCatalogs(
         defaultModels: List<LLMModel>,
         speech: List<LLMModel>,
@@ -168,14 +130,7 @@ object OpenRouterModelsApi {
             if (id.isEmpty()) continue
             val name = obj.optString("name", "").ifBlank { LLMModel.modelDisplayName(id) }
 
-            // OpenRouter exposes `architecture.input_modalities` / `output_modalities`
-            // as arrays of short strings (e.g. "text", "image", "audio"). Fall back
-            // to `[text, text]` when absent — most text-only models omit these.
             val arch = obj.optJSONObject("architecture")
-            // OpenRouter returns modalities as `image_input` / `text_output` with suffixes;
-            // the rest of the codebase (models.dev, capability fragments,
-            // ModelEntryDetailScreen toggles) uses the bare form. Normalize at the parse
-            // boundary so persisted overrides round-trip correctly through the toggles.
             val inputModalities = arch?.optJSONArray("input_modalities")?.toStringList().normalizeModalities()
             val outputModalities = arch?.optJSONArray("output_modalities")?.toStringList().normalizeModalities()
 

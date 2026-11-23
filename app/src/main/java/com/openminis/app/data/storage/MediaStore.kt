@@ -38,16 +38,6 @@ class MediaStore(context: Context) {
         )
     }
 
-    /**
-     * Streaming variant: copy from [source] InputStream into the same
-     * dated path layout as [saveMedia], without loading the whole file
-     * into memory. Used by non-image attachments (APKs, archives, large
-     * binaries) where a `readBytes()` would OOM for anything over ~100MB
-     * on low-RAM devices.
-     *
-     * Returns null on I/O failure; the caller treats this as "skip this
-     * attachment" without aborting the send.
-     */
     fun saveMediaStreamed(
         source: InputStream,
         mimeType: String,

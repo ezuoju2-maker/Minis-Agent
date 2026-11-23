@@ -2,22 +2,6 @@ package com.openminis.app.speech
 
 import android.speech.SpeechRecognizer
 
-/**
- * [T-431-error-codes] One table for the `SpeechRecognizer.ERROR_*` codes, shared
- * by the chat voice input ([SystemSpeechRecognitionEngine]) and the
- * `android-speech` CLI.
- *
- * The codes from 10 up need API 31/33 constants, so they are written as
- * literals. The chat engine used to label them one slot off (11 as
- * LANGUAGE_NOT_SUPPORTED, 12 as LANGUAGE_UNAVAILABLE). The SDK
- * (`android/speech/SpeechRecognizer.java`, android-34) defines:
- *   10 ERROR_TOO_MANY_REQUESTS, 11 ERROR_SERVER_DISCONNECTED,
- *   12 ERROR_LANGUAGE_NOT_SUPPORTED, 13 ERROR_LANGUAGE_UNAVAILABLE,
- *   14 ERROR_CANNOT_CHECK_SUPPORT, 15 ERROR_CANNOT_LISTEN_TO_DOWNLOAD_EVENTS.
- * With the old labels 13 fell through to UNKNOWN, so the on-device fallback
- * never fired for it, and a dropped service (11) was reported as a language
- * problem.
- */
 object RecognizerErrorCodes {
     const val TOO_MANY_REQUESTS = 10
     const val SERVER_DISCONNECTED = 11
@@ -26,7 +10,6 @@ object RecognizerErrorCodes {
     const val CANNOT_CHECK_SUPPORT = 14
     const val CANNOT_LISTEN_TO_DOWNLOAD_EVENTS = 15
 
-    /** The SDK constant name, e.g. "ERROR_CLIENT". */
     fun name(code: Int): String = when (code) {
         SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "ERROR_NETWORK_TIMEOUT"
         SpeechRecognizer.ERROR_NETWORK -> "ERROR_NETWORK"
@@ -46,11 +29,9 @@ object RecognizerErrorCodes {
         else -> "ERROR_UNKNOWN_$code"
     }
 
-    /** True for the two language-pack codes (12, 13). */
     fun isLanguageError(code: Int): Boolean =
         code == LANGUAGE_NOT_SUPPORTED || code == LANGUAGE_UNAVAILABLE
 
-    /** Category the chat voice input acts on. */
     fun classify(code: Int): RecognitionError = when (code) {
         SpeechRecognizer.ERROR_NO_MATCH,
         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> RecognitionError.NO_MATCH
@@ -65,7 +46,6 @@ object RecognizerErrorCodes {
         else -> RecognitionError.UNKNOWN
     }
 
-    /** Short English description, shown by the chat panel and the CLI. */
     fun describe(code: Int): String = when (code) {
         SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
         SpeechRecognizer.ERROR_CLIENT -> "Client error: the system could not connect DeepSeek to a speech recognition service"

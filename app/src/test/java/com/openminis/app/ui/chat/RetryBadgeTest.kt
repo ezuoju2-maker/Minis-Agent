@@ -8,11 +8,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-android-retry-badge] An automatic retry shows a yellow "↻ n/3" badge in
- * front of "<name> is thinking…" instead of a red "<error> — retrying (n/3)…"
- * bar; tapping it lists this generation's retries, which live in memory only.
- */
 class RetryBadgeTest {
 
     private val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
@@ -72,8 +67,6 @@ class RetryBadgeTest {
 
     @Test
     fun `the retry rollback keeps the message awaiting, so the badge row stays up`() {
-        // [T-retry-badge-awaiting] With text already on screen the typing row
-        // (and its badge) shows only while isAwaitingModelResponse is set.
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
         val rollback = vm.substringAfter("// [T-retry-badge-awaiting]").take(900)
         assertTrue(rollback.contains("assistantId, accumulatedText + turnTextSb.toString(), true, allToolBlocks,\n                                    isAwaitingModelResponse = true,"))

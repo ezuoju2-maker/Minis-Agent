@@ -7,13 +7,6 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Which destination fields the form asks for, and which it insists on.
- *
- * The shape here is a product decision that came out of real failures, not a
- * mirror of rclone's config schema — see the comments in the catalog — so it
- * is pinned against accidental "let's just expose what rclone takes" drift.
- */
 class RcloneBackendCatalogFieldsTest {
 
     private fun fields(type: String) =
@@ -21,12 +14,6 @@ class RcloneBackendCatalogFieldsTest {
 
     private fun key(type: String, key: String) = fields(type).firstOrNull { it.key == key }
 
-    /**
-     * SMB is configured share-less: the share is the folder browser's first
-     * level. Asking for it as text put a flat network name in front of users
-     * whose NAS shows a disk path, and SMB reports a missing share as a LOGON
-     * error — so the app blamed perfectly good credentials.
-     */
     @Test
     fun `smb does not ask for a share`() {
         assertFalse(
@@ -49,10 +36,6 @@ class RcloneBackendCatalogFieldsTest {
         }
     }
 
-    /**
-     * The task's explicit boundary: these effectively always need credentials,
-     * so relaxing them would only produce configs that cannot connect.
-     */
     @Test
     fun `sftp and s3 keep their credentials required`() {
         assertFalse("sftp user stays required", key("sftp", "user")!!.isOptional)
@@ -70,7 +53,6 @@ class RcloneBackendCatalogFieldsTest {
         assertNotNull(key("ftp", "host"))
     }
 
-    /** The secret field the store looks up must exist and be marked secret. */
     @Test
     fun `each backend exposes exactly one secret field`() {
         for (type in listOf("smb", "webdav", "sftp", "s3", "ftp")) {

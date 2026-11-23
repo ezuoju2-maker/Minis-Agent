@@ -4,35 +4,6 @@ import java.io.File
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-inapp-theme-popups #187] Source guard: nothing under `ui/` may ask
- * Android whether the SYSTEM is in dark mode.
- *
- * Minis resolves its own theme from the `theme_mode` preference (0=System,
- * 1=Light, 2=Dark) in MainActivity and hands the answer to `MinisTheme`, which
- * publishes it as `ChatPalette.isDark` (read via [ChatColors.isDark]).
- * `isSystemInDarkTheme()` tracks only the OS setting, so the two DISAGREE
- * exactly when the user has overridden the theme in-app — system light + Minis
- * dark being the reported case. A component reading the system API then paints
- * light chrome inside a dark app (GH OpenMinis#187: pop-up menus followed the
- * system theme; the web-preview sheets and KaTeX formulas did the same).
- *
- * This is enforced mechanically because it has now happened twice. The April
- * fix (8154d9b05, "T126-fix") introduced `ChatPalette.isDark` and converted the
- * two call sites it was chasing, but left twelve others across six files; those
- * are what #187 reported four months later. A grep-able rule is what stops a
- * third round — a new component picking `isSystemInDarkTheme()` because it is
- * the obvious API now fails here instead of shipping.
- *
- * Two files are allowed to call it, and only they:
- *   • MainActivity — the "follow the system" branch of the theme_mode `when`.
- *     This is the one place the system value is the correct answer.
- *   • Theme.kt — the `darkTheme` default parameter, for previews/tests that
- *     invoke MinisTheme without an explicit value.
- *
- * If a new file legitimately needs the system value, add it here WITH the
- * reason; the point is that the exception becomes a deliberate, reviewed act.
- */
 class InAppThemeSourceGuardTest {
 
     private val allowed = setOf(
@@ -55,9 +26,6 @@ class InAppThemeSourceGuardTest {
             .filter { it.name !in allowed }
             .forEach { f ->
                 f.readLines().forEachIndexed { i, line ->
-                    // Skip comments: the correct pattern is documented by NAMING
-                    // the wrong one (see ChatToolDetailUI's T126-fix note), and
-                    // those references must not trip the guard.
                     val code = line.substringBefore("//").substringBefore("/*")
                     if (code.contains("isSystemInDarkTheme")) {
                         offenders += "${f.path}:${i + 1}: ${line.trim()}"

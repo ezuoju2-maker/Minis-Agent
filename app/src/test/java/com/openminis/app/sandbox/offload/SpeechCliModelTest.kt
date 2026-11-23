@@ -7,11 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-431] GH #431: `status` said `available: true` on a vivo phone where no
- * recognizer served Minis, `languages` printed an empty list (on every device -
- * confirmed on a Pixel 4a), and `transcribe` printed "Client error" with exit 0.
- */
 class SpeechCliModelTest {
 
     private val google = "com.google.android.tts/com.google.android.apps.speech.tts.googletts.service.GoogleTTSRecognitionService"
@@ -24,7 +19,6 @@ class SpeechCliModelTest {
         lastError: SpeechCli.LastError? = null,
     ) = SpeechCli.Environment(services, default, true, "zh-CN", mic, 33, lastError)
 
-    // ── envelope ─────────────────────────────────────────────────────────
 
     @Test
     fun `success envelope keeps the flat pre-431 fields`() {
@@ -33,7 +27,6 @@ class SpeechCliModelTest {
         assertEquals("android-speech", out.getString("tool"))
         assertEquals("status", out.getString("action"))
         assertTrue(out.getJSONObject("data").getBoolean("available"))
-        // Legacy readers of `.available` still find it at the top level.
         assertTrue(out.getBoolean("available"))
         assertTrue(out.has("timestamp"))
     }
@@ -49,7 +42,6 @@ class SpeechCliModelTest {
         assertEquals("msg", out.getString("message"))
     }
 
-    // ── status ───────────────────────────────────────────────────────────
 
     @Test
     fun `no service means not available`() {
@@ -86,7 +78,6 @@ class SpeechCliModelTest {
             lastError = SpeechCli.LastError(SpeechRecognizer.ERROR_CLIENT, 0L, "regular"),
         )
         val data = SpeechCli.status(e)
-        // `available` keeps its pre-431 meaning: a service is listed.
         assertTrue(data.getBoolean("available"))
         assertFalse(data.getBoolean("is_available"))
         assertTrue(data.getString("reason").contains("ERROR_CLIENT"))
@@ -114,7 +105,6 @@ class SpeechCliModelTest {
         assertTrue(data.getString("reason").contains("Microphone permission"))
     }
 
-    // ── languages ────────────────────────────────────────────────────────
 
     @Test
     fun `nothing reported is unavailable, never an empty list`() {
@@ -157,7 +147,6 @@ class SpeechCliModelTest {
         assertEquals(2, data.getInt("count"))
         assertEquals("en-US", data.getJSONArray("locales").getJSONObject(0).getString("locale"))
         assertEquals("voice_details", data.getJSONArray("sources").getString(0))
-        // Flat legacy fields.
         assertEquals(2, r.body.getInt("count"))
     }
 
@@ -182,9 +171,6 @@ class SpeechCliModelTest {
 
     @Test
     fun `a recognizer that did not answer leaves its flags out`() {
-        // Pixel 4a, Android 13: only the on-device recognizer answers
-        // checkRecognitionSupport. Printing online=false for every locale
-        // would claim "not supported online" when nothing was said.
         val r = SpeechCli.languages(
             SpeechCli.VoiceDetails(null, "no answer"),
             SpeechCli.Support(
@@ -208,7 +194,6 @@ class SpeechCliModelTest {
         assertEquals(2, r.body.getInt("count"))
     }
 
-    // ── transcribe errors ────────────────────────────────────────────────
 
     @Test
     fun `error codes are stable snake case`() {

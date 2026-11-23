@@ -9,17 +9,6 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.security.MessageDigest
 
-/**
- * Per-provider disk cache for `/v1/models`-style responses, keyed by a
- * SHA-256 hash of the credential so raw API keys / OAuth tokens never land
- * in cache file names. Mirrors iOS `ModelsCache` (7-day TTL, cacheDir-scoped)
- * but namespaces each provider under its own subdirectory so rotating one
- * credential can't poison another family's cache.
- *
- * Construct once per provider (e.g. `ProviderModelsCache("openrouter")`),
- * then call [load] / [save] / [invalidate] with a credential + optional
- * baseURL in the key.
- */
 internal class ProviderModelsCache(
     private val namespace: String,
     private val ttlMs: Long = DEFAULT_TTL_MS,

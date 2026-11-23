@@ -6,19 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [ISS-040b] Settings → AI providers: in a provider-type card the separators
- * sat one row too high — a line over the card's top edge and none before the
- * last row ("only the first and second provider have a divider").
- *
- * Cause: sh.calvin.reorderable 2.4.0's ReorderableColumn wraps every item in
- * Box(contentAlignment = TopStart), so a divider emitted next to the row's
- * Surface was stacked over the row's first pixel line instead of laid out
- * below it. Measured on a Pixel 4a before/after (see the commit).
- *
- * The project has no Compose UI test runner, so the rule is a pure function
- * and the layout shape is pinned by source guards.
- */
 class ProviderListDividerTest {
 
     private fun dividersFor(n: Int) = (0 until n).count { providerRowHasDividerAbove(it) }

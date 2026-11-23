@@ -96,15 +96,7 @@ fun ProviderDetailScreen(
     val config by providerRepository.config.collectAsState()
     val instance = config.instances.find { it.id == instanceId }
     var showDeleteDialog by remember { mutableStateOf(false) }
-    // T143: long-press → confirm delete on a single model entry.
-    // [T-android-hidden-models-group] Offered for every entry, as on iOS: an
-    // API-listed model may come back on a later refresh if the provider still
-    // lists it, and its confirmation says so.
     var entryToDelete by remember { mutableStateOf<com.openminis.app.data.model.ModelEntry?>(null) }
-    // [T-android-model-row-hide-action] Id of the entry whose long-press menu is
-    // open. Keyed by id rather than holding the ModelEntry so the menu re-reads
-    // the CURRENT entry after a hide toggle — holding a stale copy would leave
-    // the item labelled "Hide" right after hiding it.
     var menuEntryId by remember { mutableStateOf<String?>(null) }
     var deleted by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -115,37 +107,7 @@ fun ProviderDetailScreen(
     var label by remember { mutableStateOf(instance.label) }
     val labelChanged = label != instance.label
 
-    // [T-android-provider-apikey-save-stale] Hold the stored API key in Compose
-    // state, NOT as a plain val that re-reads EncryptedSharedPreferences on every
-    // recomposition. saveApiKey() writes with .apply() (async); a recomposition
-    // right after Save (isEditingKey=false) would re-read prefs before the write
-    // flushed and show the OLD key, making Save look like a no-op. Keeping it in
-    // remember + updating it synchronously in onSave reflects the just-saved
-    // value immediately, independent of the async flush.
-    // [T-android-copilot-not-connected] An OAuth credential does not have to
-    // live in the API-key store, so `loadApiKey` alone cannot answer for it.
-    //
-    // Every other OAuth provider here mirrors its token into that store on
-    // login (Kimi, Claude, OpenAI, xAI, OpenRouter all call `saveApiKey`), which
-    // is why reading it works for them. Copilot deliberately does not: its
-    // credential is the two-tier GitHub/session pair under its own keys, and the
-    // API-key path is excluded for it on purpose (T-android-copilot-oauth-only).
-    // The result was a sign-in that fully succeeded — device flow complete,
-    // session token minted, 28 models loaded — and a detail screen that still
-    // said "Not connected", because it was asking the one store the credential
-    // is never written to.
-    //
-    // Asked of the OAuth manager instead, which is what iOS does
-    // (`CopilotOAuthManager.shared.isAuthenticated(instanceId:)` in
-    // ProviderInstancesView). The placeholder below only has to be non-empty —
-    // it drives the connected dot and the Sign In/Sign Out branch; the masked
-    // display is meaningless for a credential the user never types, and showing
-    // a masked GitHub token here would leak it into a screenshot for no reason.
     val detailContext = androidx.compose.ui.platform.LocalContext.current
-    // Ask the same question the provider LIST already asks
-    // (`OAuthManager.isAuthenticated()`), so the two screens cannot disagree —
-    // and so a provider storing its credential elsewhere is handled by its own
-    // manager rather than by a special case here.
     val oauthConnected = instance.credentialType == com.openminis.app.data.model.ProviderCredential.oauth &&
         com.openminis.app.auth.OAuthManager.forInstance(detailContext, instance)
             ?.isAuthenticated() == true
@@ -162,25 +124,13 @@ fun ProviderDetailScreen(
     var isEnabled by remember { mutableStateOf(instance.isEnabled) }
     var customBaseURL by remember { mutableStateOf(instance.customBaseURL ?: "") }
     var appendV1Suffix by remember { mutableStateOf(instance.appendV1Suffix) }
-    // [T-provider-custom-user-agent] Per-provider UA override input. Only the
-    // OpenAI-/Anthropic-compat custom-base section surfaces it (see gate below).
     var customUserAgent by remember { mutableStateOf(instance.customUserAgent ?: "") }
 
     val entries = providerRepository.entriesFor(instanceId)
-    // [T-android-hidden-models-group] (#462 / #442) Hidden models used to sit
-    // in the main list, dimmed, so a provider with many hidden ones buried the
-    // models in use. They now live in a collapsible group at the bottom, the
-    // same split as iOS ProviderInstanceDetailView.
     val (visibleEntries, hiddenEntries) = entries.partition { !it.isHidden }
     var hiddenExpanded by remember(instanceId) { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
-    // [T-codex-dynamic-discovery GH#319] Set when the Codex discovery endpoint
-    // rejects the stored credential. Shown as a dialog rather than silently
-    // leaving the old list on screen, which would read as a successful refresh
-    // while the account is signed out.
     var refreshAuthError by remember { mutableStateOf(false) }
-    // [T-android-model-refresh-visible] What the last manual refresh did, shown
-    // under the Refresh row - a failed refresh used to look like "nothing happened".
     var refreshOutcome by remember { mutableStateOf<com.openminis.app.data.repository.ProviderRepository.ModelRefreshOutcome?>(null) }
 
     val exportContext = androidx.compose.ui.platform.LocalContext.current
@@ -197,7 +147,6 @@ fun ProviderDetailScreen(
             }
         },
     ) {
-        // ─── Label ──────────────────────────────────────────────────
         SettingsSection(header = stringResource(R.string.provider_detail_label)) {
             SettingsCardBlock {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -221,7 +170,6 @@ fun ProviderDetailScreen(
             }
         }
 
-        // ─── Credential / API Key ───────────────────────────────────
         val isOAuthProvider =
             instance.credentialType == com.openminis.app.data.model.ProviderCredential.oauth
         SettingsSection(
@@ -258,9 +206,6 @@ fun ProviderDetailScreen(
                         },
                         onSave = {
                             providerRepository.saveApiKey(instanceId, editKeyValue)
-                            // [T-android-provider-apikey-save-stale] Reflect the
-                            // just-saved value in UI state immediately rather than
-                            // re-reading the async-written prefs on recomposition.
                             storedKey = editKeyValue
                             AppLogger.info(TAG, "Saved API key for ${instance.id}")
                             isEditingKey = false
@@ -272,13 +217,6 @@ fun ProviderDetailScreen(
             }
         }
 
-        // Manual Bearer Token (OAuth providers only — proxy override)
-        //
-        // [T-android-copilot-oauth-only] …except Copilot, whose factory branch
-        // never looks this token up: it wires `oauthTokenProvider` straight to
-        // the session-token minter. A token pasted here was stored, shown as
-        // configured, and then ignored on every request — a dead end that looks
-        // like a feature. Mirrors iOS ProviderInstanceDetailView.
         if (isOAuthProvider && instance.providerType != ProviderType.githubCopilot) {
             SettingsSection(
                 header = stringResource(R.string.provider_detail_manual_bearer_token),
@@ -294,11 +232,8 @@ fun ProviderDetailScreen(
             }
         }
 
-        // ─── Custom Base URL ────────────────────────────────────────
         if (instance.providerType != ProviderType.openRouter) {
             SettingsSection(header = stringResource(R.string.provider_detail_custom_api_base)) {
-                // URL input row — tighter vertical padding to match T226's
-                // SectionTextField height shrink (~-20%).
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                     SectionTextField(
                         value = customBaseURL,
@@ -313,12 +248,6 @@ fun ProviderDetailScreen(
                     thickness = 0.5.dp,
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                 )
-                // Auto-append /v1 switch row — inline Row with heightIn=44dp
-                // so the row matches the URL-input row above and the save
-                // action below. SettingsSwitchRow's intrinsic 12dp padding
-                // around the 32dp Switch over-reported the height (~60dp),
-                // breaking the three-row rhythm in the Custom API base card
-                // (T231).
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -341,15 +270,6 @@ fun ProviderDetailScreen(
                     thickness = 0.5.dp,
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                 )
-                // [T-provider-custom-user-agent] Custom User-Agent input —
-                // only for OpenAI-/Anthropic-compat (relay) protocols. Some
-                // gateways reject Minis' default UA and only allow official
-                // clients (e.g. Claude Code). Blank → default UA. Official
-                // direct OpenAI/Anthropic instances still see the field because
-                // protocol == openAI/anthropic; it's harmless there (the value
-                // is only injected when this instance has a custom base, and on
-                // the official path customUserAgent stays at its default null
-                // unless the user typed one — applied verbatim if they do).
                 val showUserAgentField = instance.providerType == ProviderType.openAI ||
                     instance.providerType == ProviderType.anthropic
                 if (showUserAgentField) {
@@ -372,18 +292,12 @@ fun ProviderDetailScreen(
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                     )
                 }
-                // Save action — TextButton presentation so it reads as a list
-                // row rather than a floating filled button inside the card.
                 MinisSmallTextButton(
                     onClick = {
                         providerRepository.updateInstance(
                             instance.copy(
                                 customBaseURL = customBaseURL.ifBlank { null },
                                 appendV1Suffix = appendV1Suffix,
-                                // [T-provider-custom-user-agent] Blank → null →
-                                // default UA. Only the gated providers can edit
-                                // this; for others customUserAgent equals the
-                                // unchanged instance value, so the copy is inert.
                                 customUserAgent = customUserAgent.ifBlank { null },
                             )
                         )
@@ -401,12 +315,8 @@ fun ProviderDetailScreen(
             }
         }
 
-        // ─── Network route [FEAT-261021-09] Settings > Network ─────────
-        // iOS ProviderNetworkRouteSection: the same setting as this
-        // provider's row on Settings > Network > Network Routing.
         ProviderNetworkRouteSection(instance.id)
 
-        // ─── API Format (OpenAI API-key only) ───────────────────────
         if (instance.providerType == ProviderType.openAI &&
             instance.credentialType != com.openminis.app.data.model.ProviderCredential.oauth
         ) {
@@ -443,21 +353,12 @@ fun ProviderDetailScreen(
             }
         }
 
-        // ─── Response idle timeout ──────────────────────────────────
-        // [T-sse-idle-timeout] OpenAI-compatible API-key instances only (the
-        // Codex sign-in path keeps its own budgets). Per device, not synced:
-        // see ResponseIdleTimeoutSetting. Mirrors iOS b15ac8aa3.
         if (instance.providerType == ProviderType.openAI &&
             instance.credentialType != com.openminis.app.data.model.ProviderCredential.oauth
         ) {
             ResponseIdleTimeoutSection(instance.id)
         }
 
-        // ─── Azure OpenAI ───────────────────────────────────────────
-        // [T-android-azure-openai] Orthogonal to the API Format picker above —
-        // Azure changes only the auth header (api-key:) and URL style (the user
-        // pastes the full Azure endpoint, incl. ?api-version, into Custom API
-        // Base). OpenAI API-key instances only. Ports iOS azureModeSection.
         if (instance.supportsAzureMode) {
             SettingsSection(
                 header = stringResource(R.string.provider_detail_azure_openai),
@@ -476,11 +377,6 @@ fun ProviderDetailScreen(
         }
 
 
-        // ─── Image Generation Endpoint ──────────────────────────────
-        // [T-android-image-endpoint-mode] OpenAI-compatible providers only.
-        // Picks how minis-model-use routes image-output models:
-        // auto-probe / forced Images API / forced Chat Completions. Mirrors
-        // iOS ProviderInstanceDetailView.imageEndpointSection.
         if (instance.supportsImageEndpointSetting) {
             val mode = instance.imageEndpointMode
             SettingsSection(
@@ -523,7 +419,6 @@ fun ProviderDetailScreen(
                                     providerRepository.updateInstance(
                                         instance.copy(
                                             imageEndpointMode = com.openminis.app.data.model.ImageEndpointMode.imagesGenerations,
-                                            // User-forced mode supersedes any cached probe result.
                                             imageEndpointResolved = null,
                                         ),
                                     )
@@ -550,7 +445,6 @@ fun ProviderDetailScreen(
             }
         }
 
-        // ─── Status ─────────────────────────────────────────────────
         SettingsSection(header = stringResource(R.string.provider_detail_status)) {
             SettingsSwitchRow(
                 title = stringResource(R.string.provider_detail_enabled),
@@ -564,18 +458,8 @@ fun ProviderDetailScreen(
             )
         }
 
-        // ─── Quota [T-provider-quota] ───────────────────────────────
-        // The account's upstream balance / quota, right after Status (iOS:
-        // between Status and Thinking Rules). Hidden for a disabled instance or
-        // one without a credential.
         com.openminis.app.ui.quota.ProviderQuotaSection(instance = instance)
 
-        // ─── Voice Service (dual visibility) ────────────────────────
-        // [T-android-provider-voice] When this instance owns audio-modality
-        // models, link to its shadow Voice Service detail — the only path back
-        // to the "Show in Voice Services" toggle once the shadow row is hidden
-        // (mirrors iOS ProviderInstanceDetailView's Voice Service link with a
-        // "Hidden" badge).
         if (providerRepository.hasVoiceModels(instance.id)) {
             SettingsSection(header = null) {
                 SettingsRow(
@@ -597,23 +481,17 @@ fun ProviderDetailScreen(
             }
         }
 
-        // ─── Thinking Rules [T-android-thinking-rules-phase2 §3] ─────
         ThinkingRulesSection(instance = instance, providerRepository = providerRepository)
 
-        // ─── Models ─────────────────────────────────────────────────
         SettingsSection(
             header = stringResource(R.string.provider_detail_models_count_header, entries.size),
         ) {
-            // Refresh action sits as the first row, mirroring the iOS
-            // tap-to-refresh affordance in the section header area.
             SettingsRow(
                 title = stringResource(if (isRefreshing) R.string.provider_refreshing_models else R.string.provider_refresh_model_list),
                 subtitle = refreshOutcome?.let { o ->
                     val error = o.vendorError
                     when {
                         error == null -> stringResource(R.string.provider_refresh_result_ok, o.total, o.added)
-                        // [FIX-261025-18] Nothing from the provider, but the
-                        // built-in models it lacked were added.
                         o.source == com.openminis.app.data.repository.ProviderRepository.ModelRefreshSource.KEPT && o.added > 0 ->
                             stringResource(R.string.provider_refresh_result_builtin, error, o.added)
                         o.source == com.openminis.app.data.repository.ProviderRepository.ModelRefreshSource.KEPT ->
@@ -630,10 +508,6 @@ fun ProviderDetailScreen(
                         refreshOutcome = null
                         scope.launch {
                             try {
-                                // [T-codex-dynamic-discovery GH#319]
-                                // forceRefresh: this is the manual Refresh tap,
-                                // which must bypass the discovery cache — a
-                                // Refresh that returns a cached list is not one.
                                 refreshOutcome = providerRepository.refreshModels(instance, forceRefresh = true)
                                 AppLogger.info(TAG, "Refreshed models for ${instance.id}")
                             } catch (e: com.openminis.app.data.repository.CodexDiscoveryAuthException) {
@@ -656,75 +530,27 @@ fun ProviderDetailScreen(
                 showDivider = entries.isNotEmpty() || true,
             )
 
-            // One row for both lists, so a hidden row behaves exactly like a
-            // visible one apart from its dimming and menu label.
             val modelRow: @Composable (com.openminis.app.data.model.ModelEntry, Boolean) -> Unit = { entry, showRowDivider ->
-                // Drive both tap and long-press from a Box wrapper so we
-                // don't have to expand SettingsRow's signature.
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        // [T-android-hidden-model-visual-state] Dim hidden
-                        // entries so the list visually distinguishes them from
-                        // active models — the " • Hidden" subtitle suffix alone
-                        // wasn't enough for users to tell them apart. alpha is
-                        // visual-only, so the row stays tappable to re-show the
-                        // model from its detail screen.
                         .then(if (entry.isHidden) Modifier.alpha(0.45f) else Modifier)
                         .combinedClickable(
                             onClick = { onModelEntryClick(entry.id) },
-                            // [T-android-model-row-hide-action] Long-press now
-                            // opens a menu instead of going straight to delete.
-                            // Hiding was previously reachable ONLY by opening
-                            // the model's detail screen, flipping the
-                            // Visibility switch and pressing Save — five steps
-                            // for what iOS does with one tap on an eye button
-                            // in this very list (ProviderInstanceDetailView).
-                            //
-                            // A menu rather than a trailing icon button because
-                            // the row's trailing slot is a FIXED 72dp capability
-                            // -badge area, deliberately sized so the chevron
-                            // lands at the same x on every row; adding a button
-                            // there would reintroduce the ragged column that
-                            // sizing exists to prevent.
-                            //
-                            // It also fills a dead gesture: long-press used to
-                            // be null for built-in entries, so they had no
-                            // context action at all.
                             onLongClick = { menuEntryId = entry.id },
                         ),
                 ) {
-                    // [T-android-model-capability-output-tags]
-                    // The list previously read INPUT modalities only, so a
-                    // generator like gpt-image-2 (image_output) or an
-                    // audio_output model showed no capability badge at all.
-                    // Surface both directions — input badges are muted, output
-                    // badges use a tinted "generate"-style glyph so they read
-                    // distinctly. Mirrors iOS #669.
                     val inputModalities = entry.model.inputModalities.orEmpty()
                     val outputModalities = entry.model.outputModalities.orEmpty()
                     val hasBadge = inputModalities.any { it in modalityIconKeys } ||
                         outputModalities.any { it in modalityOutputIconKeys }
                     SettingsRow(
                         title = entry.model.displayName,
-                        // [T-android-hidden-models-group] No " • Hidden"
-                        // suffix: a hidden row now sits under the Hidden
-                        // models group, which already says so.
                         subtitle = entry.model.id,
-                        // onClick = null so SettingsRow doesn't add a second
-                        // clickable that would swallow the long-press. The
-                        // wrapping Box owns both gestures.
                         onClick = null,
                         showChevron = true,
                         showDivider = showRowDivider,
-                        // [T-android-settings-ui-md3] #8 two-line row (name + id)
-                        // uses the MD3 double-line height (72dp).
                         minHeight = 72.dp,
-                        // #9 The capability-icon area has a FIXED width so the
-                        // trailing chevron lands at the same x on every row,
-                        // regardless of how many badges (0–4) a model has —
-                        // previously the chevron slid left/right per row and the
-                        // column looked ragged. Icons right-align within the slot.
                         trailing = {
                             Box(
                                 modifier = Modifier.width(72.dp),
@@ -737,10 +563,6 @@ fun ProviderDetailScreen(
                         },
                     )
 
-                    // [T-android-model-row-hide-action] Row context menu. Anchored
-                    // inside the row's Box so it opens over the entry the user
-                    // pressed. [T-android-hidden-models-group] Delete is offered
-                    // for every entry, custom or API-listed, as on iOS.
                     DropdownMenu(
                         expanded = menuEntryId == entry.id,
                         onDismissRequest = { menuEntryId = null },
@@ -763,10 +585,6 @@ fun ProviderDetailScreen(
                             },
                             onClick = {
                                 menuEntryId = null
-                                // Write straight through — no Save step. This is
-                                // the whole point of the affordance, and it
-                                // mirrors iOS, whose eye button calls
-                                // store.updateEntry immediately.
                                 providerRepository.updateEntry(entry.copy(isHidden = !entry.isHidden))
                                 AppLogger.info(
                                     TAG,
@@ -802,8 +620,6 @@ fun ProviderDetailScreen(
                 key(entry.id) { modelRow(entry, idx != visibleEntries.lastIndex || hiddenEntries.isNotEmpty()) }
             }
 
-            // [T-android-hidden-models-group] Collapsed by default; Show Model
-            // in a row's menu moves it back up to the main list at once.
             if (hiddenEntries.isNotEmpty()) {
                 SettingsRow(
                     title = stringResource(R.string.provider_detail_hidden_models_group, hiddenEntries.size),
@@ -827,10 +643,6 @@ fun ProviderDetailScreen(
             }
         }
 
-        // Pure-action rows render as standalone buttons — no Section/Card wrap.
-        // Match iOS visual: button sits on the page background with horizontal
-        // gutter padding only. The 20dp top padding mirrors SettingsSection's
-        // top spacing so the rhythm against the cards above stays consistent.
         MinisOutlinedButton(
             onClick = onAddCustomModel,
             modifier = Modifier
@@ -841,11 +653,6 @@ fun ProviderDetailScreen(
             Text(stringResource(R.string.provider_detail_add_custom_model))
         }
 
-        // [T-android-delete-provider-button-height] The "Delete provider" button
-        // uses the same default 48dp MinisButtonHeight as "Add custom model"
-        // above it for visual consistency (no explicit .height override). The
-        // destructive intent is conveyed by the error container color, not by a
-        // taller button.
         MinisButton(
             onClick = { showDeleteDialog = true },
             modifier = Modifier
@@ -862,19 +669,11 @@ fun ProviderDetailScreen(
         Spacer(modifier = Modifier.height(32.dp))
     }
 
-    // [T-codex-dynamic-discovery GH#319] An expired / revoked Codex credential
-    // must be named as such. Without this the refresh would quietly fall back
-    // to the built-in list and look like it worked.
     if (refreshAuthError) {
         MinisAlertDialog(
             onDismissRequest = { refreshAuthError = false },
             title = stringResource(R.string.provider_refresh_auth_failed_title),
             text = stringResource(R.string.provider_refresh_auth_failed_body),
-            // Both buttons dismiss: this is an acknowledgement, not a choice.
-            // MinisAlertDialog always renders two, and rather than invent a
-            // second action that would only pretend to do something, the real
-            // next step ("sign in again") is stated in the body — the sign-in
-            // control is the Credential row on this same screen.
             confirmText = stringResource(R.string.ok),
             dismissText = stringResource(R.string.common_close),
             onConfirm = { refreshAuthError = false },
@@ -898,17 +697,10 @@ fun ProviderDetailScreen(
         )
     }
 
-    // T143: per-entry delete confirmation. removeEntry also strips the entry
-    // from any modelGroups it belongs to (see ProviderRepository L304-306),
-    // so the StateFlow update propagates the row removal everywhere.
     entryToDelete?.let { e ->
         MinisAlertDialog(
             onDismissRequest = { entryToDelete = null },
             title = stringResource(R.string.provider_detail_delete_model),
-            // [T-android-hidden-models-group] An API-listed model is only gone
-            // until the provider lists it again; say so rather than "cannot be
-            // undone". The 7-day absence grace is unchanged and does not apply
-            // here: that is for models the provider stopped listing.
             text = stringResource(
                 if (e.isCustom) R.string.provider_detail_delete_model_confirm
                 else R.string.provider_detail_delete_api_model_confirm,
@@ -925,13 +717,7 @@ fun ProviderDetailScreen(
     }
 }
 
-// ─── Credential blocks ─────────────────────────────────────────────────────────
 
-/**
- * [T-android-copilot-not-connected] Stands in for a credential that exists but
- * has no displayable form — Copilot's GitHub token, which the user never types
- * and which should not be rendered even masked. Only its non-emptiness is read.
- */
 private const val OAUTH_CONNECTED_PLACEHOLDER = "oauth"
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -944,25 +730,10 @@ private fun OAuthCredentialBlock(
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // [T-android-openai-oauth-signout-signin-stuck] Drive the Sign In / Sign Out
-    // toggle off LOCAL Compose state instead of the `storedKey` parameter, which
-    // is read once per parent composition (a plain val) and never updates after
-    // a sign-out/sign-in. Without this the screen kept showing "Sign Out" after a
-    // logout (UI never refreshed) AND the Sign In branch was never reached
-    // because its gate was the same stale `storedKey.isNotEmpty()` — so a failed
-    // sign-out left Sign In dead too. `displayedKey` mirrors the live credential
-    // so the masked token / connected dot refresh together. Mirrors iOS
-    // ProviderInstanceDetailView's `oauthRefreshTrigger.toggle()`.
     var displayedKey by remember(instance.id) { mutableStateOf(storedKey) }
     var isAuthenticating by remember(instance.id) { mutableStateOf(false) }
-    // [T-android-oauth-foreground-exchange] Sign-in progress and failure, made
-    // visible. Before, a pending sign-in looked identical to signed-out, and a
-    // failure was only written to the log — after authorizing Anthropic in the
-    // browser the user came back to an unchanged screen and no explanation.
     var authError by remember(instance.id) { mutableStateOf<String?>(null) }
     val oauthPhase by com.openminis.app.auth.OAuthForegroundGate.phase.collectAsState()
-    // [T-kimi-oauth] Device-code dialog state for Kimi re-auth (see
-    // AddProviderScreen.OAuthConfigSection for the rationale).
     var kimiDeviceAuth by remember(instance.id) {
         mutableStateOf<com.openminis.app.auth.KimiDeviceFlow.DeviceAuthorization?>(null)
     }
@@ -978,13 +749,10 @@ private fun OAuthCredentialBlock(
         )
     }
 
-    // [T-oauth-keep-credentials] Refresh rejected: the credential is kept (never
-    // auto-deleted) but unusable until the user signs in again.
     var needsReauth by remember(instance.id) {
         mutableStateOf(com.openminis.app.auth.OAuthManager.needsReauth(context, instance.id))
     }
 
-    // Shared by the Sign In button and, for a rejected refresh, Sign In Again.
     fun startSignIn() {
         if (isAuthenticating) return
         isAuthenticating = true
@@ -1016,25 +784,13 @@ private fun OAuthCredentialBlock(
                         )
                     else -> null
                 }
-                // login() persists the token via providerRepository.saveApiKey;
-                // reflect it locally so the UI flips to the connected state
-                // without needing the parent to recompose.
                 if (token != null) {
                     displayedKey = providerRepository.loadApiKey(instance.id) ?: token
                     needsReauth = false
                     AppLogger.info(TAG, "OAuth signed in for ${instance.id}")
-                    // [T-provider-refresh-outlives-screen] (GH#265) A fresh
-                    // sign-in (including Sign In Again after a rejected refresh)
-                    // is when the account's real catalog becomes reachable —
-                    // reconcile it now instead of waiting for a manual Refresh.
-                    // Forced, so a cached discovery result cannot stand in for
-                    // the new account's list. Repository scope: the user may
-                    // leave this screen straight after signing in.
                     providerRepository.triggerAsyncModelReconcile(instance.id, forceRefresh = true)
                 }
             } catch (e: Exception) {
-                // A cancelled sign-in (user backed out, screen left) is not
-                // an error to show.
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 AppLogger.warning(TAG, "OAuth sign-in failed for ${instance.id}: ${e.message}")
                 authError = if (e is com.openminis.app.auth.OAuthNetworkUnreachableException) {
@@ -1087,19 +843,9 @@ private fun OAuthCredentialBlock(
         }
     }
     Spacer(modifier = Modifier.height(8.dp))
-    // Sign Out, shared by the expired row below and the signed-in row.
     val signOutButton: @Composable () -> Unit = {
         MinisSmallButton(
             onClick = {
-                // [T-android-openai-oauth-signout-signin-stuck] A real sign-out
-                // must clear BOTH credential stores: (1) the persisted OAuth
-                // token blob (access + refresh_token + expire_at, plus any manual
-                // bearer / account_id) via OAuthManager.logout(), and (2) the
-                // apiKey mirror that ProviderFactory.loadApiKey() reads. Before
-                // this fix only deleteApiKey() ran, so the refresh_token survived
-                // and validAccessToken() silently re-minted an access token —
-                // the user stayed effectively logged in. Then flip local state so
-                // the UI swaps to the Sign In button immediately.
                 com.openminis.app.auth.OAuthManager.forInstance(context, instance)?.logout()
                 providerRepository.deleteApiKey(instance.id)
                 displayedKey = ""
@@ -1121,10 +867,6 @@ private fun OAuthCredentialBlock(
             style = MaterialTheme.typography.bodySmall,
         )
         Spacer(modifier = Modifier.height(8.dp))
-        // [T-oauth-reauth-buttons-one-row] Sign In Again and Sign Out side by
-        // side, as iOS ProviderInstanceDetailView lays them out (one HStack).
-        // They used to stack on two lines. FlowRow so a narrow screen or a long
-        // translation wraps the second button instead of squeezing it.
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1142,7 +884,6 @@ private fun OAuthCredentialBlock(
         signOutButton()
     } else {
         MinisSmallButton(
-            // Disabled while a sign-in runs, rather than silently ignoring taps.
             enabled = !isAuthenticating,
             onClick = { startSignIn() },
         ) {
@@ -1152,11 +893,6 @@ private fun OAuthCredentialBlock(
     }
 }
 
-/**
- * [T-android-oauth-foreground-exchange] What a sign-in is doing right now, or
- * why it failed. The waiting line is the point: without it, coming back from
- * the browser looked exactly like never having started.
- */
 @Composable
 private fun OAuthProgressLine(
     isAuthenticating: Boolean,
@@ -1228,10 +964,6 @@ private fun ApiKeyCredentialBlock(
             fieldModifier = Modifier.bringIntoViewOnFocus(),
         )
         Row(modifier = Modifier.padding(top = 8.dp)) {
-            // [T-android-settings-ui-md3] #4 + #12 Cancel is the SECONDARY action:
-            // a neutral outlined pill (onSurfaceVariant content/border), forming
-            // the standard MD3 outlined-vs-filled pair with the filled Save below.
-            // Previously a primary-teal text button — indistinguishable from Save.
             MinisSmallOutlinedButton(
                 onClick = onCancelEdit,
                 colors = ButtonDefaults.outlinedButtonColors(
@@ -1271,11 +1003,6 @@ private fun maskedKey(key: String): String {
     return key.take(6) + "..." + key.takeLast(4)
 }
 
-/**
- * Export the provider instance as JSON and hand it to the system share sheet
- * via FileProvider. Mirrors iOS `ProviderShareSheet` — writes a <label>.json
- * file to app-scoped cache and emits ACTION_SEND with a content:// URI.
- */
 private fun exportProviderInstance(
     context: android.content.Context,
     providerRepository: ProviderRepository,
@@ -1310,11 +1037,6 @@ private fun exportProviderInstance(
     context.startActivity(chooser)
 }
 
-/**
- * Manual Bearer Token section for OAuth providers. Mirrors iOS
- * `manualOAuthTokenSection` — when set, the static token bypasses the OAuth
- * refresh flow entirely and is sent verbatim as `Authorization: Bearer …`.
- */
 @Composable
 private fun ManualBearerTokenSection(
     instance: com.openminis.app.data.model.ProviderInstance,
@@ -1340,8 +1062,6 @@ private fun ManualBearerTokenSection(
             fieldModifier = Modifier.bringIntoViewOnFocus(),
         )
         Row(modifier = Modifier.padding(top = 8.dp)) {
-            // [T-android-settings-ui-md3] #4 + #12 neutral outlined Cancel (see
-            // the API-key edit pair above) paired with the filled Save.
             MinisSmallOutlinedButton(
                 onClick = {
                     isEditing = false
@@ -1420,19 +1140,10 @@ private fun ManualBearerTokenSection(
     }
 }
 
-/** Input modalities that get a (muted) capability badge in the model list. */
 private val modalityIconKeys = setOf("image", "pdf", "audio", "video")
 
-/** Output modalities that get a (tinted, generate-style) badge in the model list. */
 private val modalityOutputIconKeys = setOf("image", "audio", "video")
 
-/**
- * [T-android-model-capability-output-tags] Capability badges for one model row.
- * Input modalities render in the muted onSurfaceVariant tint; output modalities
- * render in the primary tint with "generate"-style glyphs so a generator (e.g.
- * gpt-image-2 image_output) is visibly distinct from a model that merely accepts
- * that modality as input. Mirrors iOS ProviderInstanceDetailView.modalityIcons.
- */
 @Composable
 private fun ModalityIconsRow(
     inputModalities: List<String>,
@@ -1445,19 +1156,16 @@ private fun ModalityIconsRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // Input badges (muted).
         if ("image" in inputModalities) Icon(Icons.Default.Image, contentDescription = stringResource(R.string.modeldetail_image_input), tint = inputTint, modifier = size)
         if ("pdf" in inputModalities) Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = stringResource(R.string.modeldetail_pdf_input), tint = inputTint, modifier = size)
         if ("audio" in inputModalities) Icon(Icons.Default.Mic, contentDescription = stringResource(R.string.modeldetail_audio_input), tint = inputTint, modifier = size)
         if ("video" in inputModalities) Icon(Icons.Default.Videocam, contentDescription = stringResource(R.string.modeldetail_video_input), tint = inputTint, modifier = size)
-        // Output badges (tinted, generate-style glyphs).
         if ("image" in outputModalities) Icon(Icons.Default.AddPhotoAlternate, contentDescription = stringResource(R.string.modeldetail_image_output), tint = outputTint, modifier = size)
         if ("audio" in outputModalities) Icon(Icons.Default.VolumeUp, contentDescription = stringResource(R.string.modeldetail_audio_output), tint = outputTint, modifier = size)
         if ("video" in outputModalities) Icon(Icons.Default.MovieCreation, contentDescription = stringResource(R.string.modeldetail_video_output), tint = outputTint, modifier = size)
     }
 }
 
-/** [T-sse-idle-timeout] Presets plus a custom value in seconds (30–3600). */
 @Composable
 private fun ResponseIdleTimeoutSection(instanceId: String) {
     val context = androidx.compose.ui.platform.LocalContext.current

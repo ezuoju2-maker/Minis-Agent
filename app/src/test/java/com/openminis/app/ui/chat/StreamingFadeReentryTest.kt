@@ -7,20 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-stream-fade-reentry] Text that was already on screen faded in
- * again from alpha 0 — on re-entering a chat whose reply was still streaming,
- * and while the session was still processing.
- *
- * Every such replay is the same event: the streaming text node was composed
- * from scratch (re-entry, the row leaving the viewport and coming back or
- * being handed to another row by LazyColumn's reuse pool, the fragment
- * switching between its frozen and live branches) and its new
- * [FadeController] was born with fade on. Born-with-fade meant "a new
- * paragraph", so all of its first text faded. [FadeShownText] now remembers
- * what each fragment has shown, outside composition, and [fadeBirthPlan]
- * decides from that.
- */
 class StreamingFadeReentryTest {
 
     @After
@@ -32,7 +18,6 @@ class StreamingFadeReentryTest {
         return out
     }
 
-    /** What MdText does with a fresh controller. */
     private fun birth(key: String, fadeFromBirth: Boolean, text: String): FadeController {
         val c = FadeController()
         when (val plan = fadeBirthPlan(fadeFromBirth, FadeShownText.get(key), text)) {
@@ -44,12 +29,10 @@ class StreamingFadeReentryTest {
         return c
     }
 
-    // ---- fadeBirthPlan ----------------------------------------------------
 
     @Test
     fun `a genuinely new paragraph still fades all of its first text`() {
         assertEquals(FadeBirth.FadeAll, fadeBirthPlan(true, emptyList(), "hello world"))
-        // An earlier paragraph of the same fragment is not a prefix of it.
         assertEquals(FadeBirth.FadeAll, fadeBirthPlan(true, listOf("First paragraph."), "Second"))
     }
 
@@ -84,7 +67,6 @@ class StreamingFadeReentryTest {
         assertEquals(FadeBirth.FadeAll, fadeBirthPlan(true, listOf(""), "text"))
     }
 
-    // ---- the replay, end to end through the real controller --------------
 
     @Test
     fun `a node rebuilt mid-stream does not re-fade what the user already read`() {
@@ -94,7 +76,6 @@ class StreamingFadeReentryTest {
         first.ingest("Compose skips unchanged")
         FadeShownText.put(key, "Compose skips unchanged")
 
-        // Row scrolled out and back / chat re-entered / branch rebuilt.
         val rebuilt = birth(key, fadeFromBirth = true, text = "Compose skips unchanged calls")
         val ranges = activeRanges(rebuilt)
         assertEquals("only the word that arrived meanwhile fades", 1, ranges.size)
@@ -112,15 +93,12 @@ class StreamingFadeReentryTest {
 
     @Test
     fun `a sibling paragraph in the same fragment still fades in`() {
-        // Several MdTexts of one fragment share its key: a list and the
-        // paragraph after it, say. The second one is new and must fade.
         val key = "m/mdblock:b:0"
         birth(key, fadeFromBirth = true, text = "- item one")
         val next = birth(key, fadeFromBirth = true, text = "Then a paragraph")
         assertTrue(next.hasActiveRanges)
     }
 
-    // ---- FadeShownText ----------------------------------------------------
 
     @Test
     fun `growing text replaces its own entry instead of piling up`() {
@@ -128,7 +106,6 @@ class StreamingFadeReentryTest {
         FadeShownText.put("k", "ab")
         FadeShownText.put("k", "abc")
         assertEquals(listOf("abc"), FadeShownText.get("k"))
-        // A stale shorter recomposition does not shrink it.
         FadeShownText.put("k", "ab")
         assertEquals(listOf("abc"), FadeShownText.get("k"))
     }
@@ -154,20 +131,15 @@ class StreamingFadeReentryTest {
         assertTrue(FadeShownText.get("k").isEmpty())
     }
 
-    // ---- wiring -----------------------------------------------------------
 
     @Test
     fun `MdText plans every fading birth and records what it shows under the fragment key`() {
         val src = ProductionSources.read("ui/chat/StreamingMarkdownText.kt")
         val body = src.substringAfter("val fadeFromBirth = remember { fadeEnabled }")
             .substringBefore("FadeFrameDriver(fadeController)")
-        // Keyed by the fragment's base shard id, NOT the per-node sub-indexed
-        // one: the sub-index is handed out in composition order and can change
-        // exactly when the node is rebuilt.
         assertTrue(body.contains("val fadeKey = baseShardId?.let"))
         assertTrue(body.contains("fadeBirthPlan(fadeFromBirth, fadeKey?.let { FadeShownText.get(it) }"))
         assertTrue(body.contains("FadeShownText.put(fadeKey, text.text)"))
-        // The only unplanned first ingest would be the replay itself.
         assertFalse(body.contains("if (!fadeFromBirth && !fadeController.hasSeenText)"))
     }
 }

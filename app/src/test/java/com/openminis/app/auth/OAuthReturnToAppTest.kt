@@ -7,13 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-oauth-return-to-app] Field log (Huawei, Android 12): Chrome requested
- * localhost:1455 (served 200 at 42.000), also handed the same URL to
- * OAuthRedirectActivity (42.001) and aborted the tab. The activity forwarded
- * into a closed port and finished; nothing brought Minis back, so the
- * exchange waited for the foreground and the user waited on a spinning page.
- */
 class OAuthReturnToAppTest {
 
     private fun d(listening: Boolean, servedAt: Long?, servedState: String? = "s1", redirectState: String? = "s1", now: Long = 1_000L) =
@@ -21,19 +14,15 @@ class OAuthReturnToAppTest {
 
     @Test
     fun `a redirect the server already answered is not forwarded`() {
-        // The field case: served a millisecond before the hand-off, server now closed.
         assertEquals(Forward.ALREADY_SERVED, d(listening = false, servedAt = 999L))
         assertEquals(Forward.ALREADY_SERVED, d(listening = true, servedAt = 999L))
-        // An error redirect is stored without a state: any redirect then matches.
         assertEquals(Forward.ALREADY_SERVED, d(listening = false, servedAt = 999L, servedState = null))
     }
 
     @Test
     fun `a redirect the server is still waiting for is forwarded, so the code is not lost`() {
         assertEquals(Forward.FORWARD, d(listening = true, servedAt = null))
-        // Answered a different callback (another state): still forward.
         assertEquals(Forward.FORWARD, d(listening = true, servedAt = 999L, servedState = "old", redirectState = "new"))
-        // Answered long ago: a new flow.
         assertEquals(Forward.FORWARD, d(listening = true, servedAt = 0L, now = OAuthCallbackServer.SERVED_WINDOW_MS + 1))
     }
 
@@ -52,7 +41,6 @@ class OAuthReturnToAppTest {
         assertTrue(page.contains("Return to Minis to finish signing in."))
         assertTrue("Content-Length is String.length", page.all { it.code < 128 })
         assertFalse("no auto-redirect", page.contains("location.href") || page.contains("http-equiv=\"refresh\""))
-        // The deep link lands on nothing: minis://oauth is not a route.
         assertFalse(ProductionSources.read("deeplink/DeepLinkHandler.kt").contains("\"oauth\" ->"))
     }
 
@@ -68,7 +56,6 @@ class OAuthReturnToAppTest {
         assertFalse("no data: handleDeepLink(null) is a no-op", body.substringBefore("} catch").contains("setData") || body.contains(".data ="))
         assertTrue(body.contains("Log.i(TAG, \"Redirect handed to the app - bringing MainActivity forward\")"))
         assertTrue(src.contains("Log.i(TAG, \"Server on :\$port already answered this callback - not forwarding\")"))
-        // An error redirect is forwarded too, so a denial ends the flow.
         assertTrue(src.contains("if (!hasCode && !hasError) {"))
     }
 
@@ -82,7 +69,6 @@ class OAuthReturnToAppTest {
         assertTrue(src.contains("served.remove(boundPort)"))
     }
 
-    // ── [T-oauth-diag-removal] What the diagnostics' removal must not take with it ──
 
     @Test
     fun `the tab opens in the caller's task, NEW_TASK only when asked, with no session bind`() {

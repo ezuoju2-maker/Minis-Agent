@@ -34,16 +34,6 @@ import com.openminis.app.ui.terminal.emulator.TextAttributes
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/**
- * Compose Canvas–based terminal renderer. Ports iOS TerminalCanvasView (the
- * rendering half — UITextView selection is not replicated). Emulator state is
- * read via its [TerminalEmulator.version] State so recomposition happens on
- * every feed() call.
- *
- * Cell dimensions are computed from a monospace Paint; the view reports
- * (cols, rows) back via [onResize] whenever its size changes so the emulator
- * and the PTY winsize stay in sync.
- */
 @Composable
 fun TerminalCanvasView(
     emulator: TerminalEmulator,
@@ -55,10 +45,6 @@ fun TerminalCanvasView(
     val density = LocalDensity.current
     val fontSizePx = with(density) { fontSizeSp.sp.toPx() }
 
-    // T138: bundle JetBrains Mono so glyph widths and baselines look the
-    // same on every device. `Typeface.MONOSPACE` aliases to whatever the
-    // OEM ships (Droid Sans Mono / Roboto Mono / vendor custom), and
-    // those each measure characters slightly differently.
     val terminalTypeface = com.openminis.app.ui.terminal.rememberJetBrainsMonoTypeface()
     val paint = remember(fontSizePx, terminalTypeface) {
         Paint().apply {
@@ -77,7 +63,6 @@ fun TerminalCanvasView(
     var cols by remember { mutableIntStateOf(emulator.cols) }
     var rows by remember { mutableIntStateOf(emulator.rows) }
 
-    // Cursor blink — flips every 500ms
     var cursorVisible by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -86,16 +71,8 @@ fun TerminalCanvasView(
         }
     }
 
-    // Redraw trigger: bump when emulator version changes
     val version by emulator.version
 
-    // Scroll state with built-in fling. Drag delta in px is accumulated into a
-    // float; whole rows are committed to emulator.scrollOffset. Drag down (+px)
-    // moves back through scrollback, drag up (-px) returns toward live tail.
-    // Return *consumed* delta (= delta minus residual at edge) so Compose's
-    // fling animation keeps running until we genuinely run out of scrollback.
-    // Apply pixel delta to emulator.scrollOffset, accumulating fractional rows.
-    // Returns true if any row was actually scrolled (false → hit edge).
     val scrollAccumPx = remember { mutableStateOf(0f) }
     val applyScroll: (Float) -> Boolean = { delta ->
         scrollAccumPx.value += delta
@@ -109,7 +86,7 @@ fun TerminalCanvasView(
             scrollAccumPx.value -= applied * cellHeight
             if (applied != rowDelta) {
                 scrollAccumPx.value = 0f
-                false  // hit edge
+                false
             } else true
         }
     }
@@ -119,9 +96,6 @@ fun TerminalCanvasView(
         modifier = modifier
             .fillMaxSize()
             .background(TerminalPalette.defaultBackground)
-            // Single pointerInput handles both: vertical drag → scroll w/ fling,
-            // tap → focus. Compose chains the two detectors inside one pointer
-            // session; tap fires only when no drag movement was detected.
             .pointerInput(cellHeight) {
                 val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
                 detectVerticalDragGestures(
@@ -148,7 +122,6 @@ fun TerminalCanvasView(
                 detectTapGestures(onTap = { onTap() })
             },
     ) {
-        // Recompute cols/rows from actual draw size.
         val newCols = maxOf(1, (size.width / cellWidth).toInt())
         val newRows = maxOf(1, (size.height / cellHeight).toInt())
         if (newCols != cols || newRows != rows) {
@@ -157,27 +130,22 @@ fun TerminalCanvasView(
             onResize(newCols, newRows)
         }
 
-        @Suppress("UNUSED_EXPRESSION") version  // read so Compose tracks it
+        @Suppress("UNUSED_EXPRESSION") version
 
         val lines = emulator.visibleLines()
         val defaultBg = TerminalPalette.defaultBackground
 
         drawIntoCanvas { canvas ->
             val nc = canvas.nativeCanvas
-            // Paint each cell row-by-row
             for (r in lines.indices) {
                 val row = lines[r]
                 val y = r * cellHeight
                 for (c in row.indices) {
                     val cell = row[c]
-                    if (cell.isWideTrailer) continue  // drawn together with leader
+                    if (cell.isWideTrailer) continue
                     drawCell(nc, paint, cell, c * cellWidth, y, cellWidth, cellHeight, baselineOffset)
                 }
             }
-            // T194: selection highlight (drawn between cells and cursor so it
-            // overlays the glyphs but doesn't obscure the blinking caret).
-            // Coordinates are viewport-relative cells; the gesture handler
-            // that sets the rect lives in the new TerminalView-style wrapper.
             val sel = emulator.selectionRect.value
             if (sel != null) {
                 val (sx, sy, ex, ey) = if (sel[1] < sel[3] || (sel[1] == sel[3] && sel[0] <= sel[2])) {
@@ -186,7 +154,6 @@ fun TerminalCanvasView(
                     intArrayOf(sel[2], sel[3], sel[0], sel[1])
                 }.let { listOf(it[0], it[1], it[2], it[3]) }
                 val selPaint = Paint().apply {
-                    // Translucent blue, matches Material text-selection tint.
                     color = android.graphics.Color.argb(0x66, 0x33, 0x99, 0xFF)
                     style = Paint.Style.FILL
                 }
@@ -203,10 +170,8 @@ fun TerminalCanvasView(
                 }
             }
 
-            // Cursor
             if (emulator.cursorVisible && cursorVisible) {
                 val (cc, cr) = emulator.cursorPos()
-                // Only draw cursor when viewing live (not scrolled back)
                 if (emulator.scrollOffset == 0 && cr in 0 until rows && cc in 0 until cols) {
                     val cx = cc * cellWidth
                     val cy = cr * cellHeight
@@ -217,7 +182,6 @@ fun TerminalCanvasView(
                     when (emulator.cursorShape) {
                         CursorShape.BLOCK -> {
                             nc.drawRect(cx, cy, cx + cellWidth, cy + cellHeight, cursorPaint)
-                            // Redraw glyph in bg color over cursor
                             val cell = lines.getOrNull(cr)?.getOrNull(cc)
                             if (cell != null && cell.char != ' '.code) {
                                 val textPaint = Paint(paint).apply {
@@ -269,7 +233,6 @@ private fun drawCell(
     )
     val cellW = if (cell.width == 2) w * 2 else w
 
-    // Background fill (skip default bg — Canvas is already black)
     if (bgColor != TerminalPalette.defaultBackground) {
         val bgPaint = Paint().apply {
             color = bgColor.toArgb()
@@ -278,7 +241,6 @@ private fun drawCell(
         canvas.drawRect(x, y, x + cellW, y + h, bgPaint)
     }
 
-    // Skip drawing printable glyph if blank + default style (faster path)
     val ch = cell.char
     if (ch == ' '.code && !attrs.has(TextAttributes.UNDERLINE) && !attrs.has(TextAttributes.STRIKETHROUGH)) {
         return
@@ -288,11 +250,6 @@ private fun drawCell(
         color = fgColor.toArgb()
         isFakeBoldText = bold
         val italic = attrs.has(TextAttributes.ITALIC)
-        // T138: derive italic/bold from the *base* typeface (JetBrains
-        // Mono) so we don't fall back to the OEM monospace for styled
-        // runs. Typeface.create(<jbmono>, BOLD/ITALIC) keeps the family
-        // and synthesizes the style — JetBrains Mono ships a real bold
-        // file too, but Typeface.create handles both cases transparently.
         val base = basePaint.typeface ?: Typeface.MONOSPACE
         typeface = when {
             bold && italic -> Typeface.create(base, Typeface.BOLD_ITALIC)
@@ -309,4 +266,3 @@ private fun drawCell(
     val s = String(intArrayOf(ch), 0, 1)
     canvas.drawText(s, x, y + baselineOffset, glyphPaint)
 }
-

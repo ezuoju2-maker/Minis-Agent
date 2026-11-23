@@ -4,20 +4,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-android-overlay-completion-survives-stop] Source guards for the two ways
- * the new keep-alive could regress into a pinned foreground service.
- *
- * Making a pending capsule keep the service alive means an un-tapped capsule
- * now costs a foreground service and its wake lock. Two things prevent that
- * from being unbounded, and both are easy to undo by accident:
- *
- *  1. the completion branch arms a timeout that clears the latch, and
- *  2. the `shouldShow` block cancels that timer ONLY when busy — the cancel
- *     used to be unconditional at the top of the block, which was harmless
- *     while the linger was unbounded but would now kill the timer on the very
- *     next emission and restore the pinning behaviour.
- */
 class OverlayLingerTimeoutGuardTest {
 
     private val source: String by lazy {
@@ -49,8 +35,6 @@ class OverlayLingerTimeoutGuardTest {
 
     @Test
     fun `the linger timer is only cancelled while busy`() {
-        // Pin the guard: inside `if (shouldShow) {`, the cancel must be nested
-        // in an isBusy check rather than running unconditionally.
         val block = source.substringAfter("if (shouldShow) {").take(900)
         val cancelIdx = block.indexOf("lingerJob?.cancel()")
         assertTrue("no lingerJob cancel found inside shouldShow", cancelIdx >= 0)
@@ -63,27 +47,10 @@ class OverlayLingerTimeoutGuardTest {
 
     @Test
     fun `every latch clear is mirrored to a keep-alive release`() {
-        // hasCompletionPending is the service's own field; the tracker flag is
-        // what keeps the process alive. They must move together, or the service
-        // outlives the capsule (leak) — or worse, the capsule outlives the
-        // service that draws it (the original bug).
-        //
-        // Counting occurrences is too blunt: the field DECLARATION initialises
-        // to false, and one site releases indirectly through
-        // `dismissOverlay()`. Check each assignment's surrounding region for a
-        // release instead.
-        //
-        // The window is deliberately generous and CODE-ONLY. An earlier version
-        // scanned a fixed +5 raw lines, which made the invariant hostage to
-        // comment length: a correct release documented by a paragraph
-        // explaining WHY it is conditional sat outside the window and read as a
-        // violation. Comments are stripped and the window widened so this test
-        // pins the behaviour rather than the formatting.
         val lines = source.lines()
         val offenders = mutableListOf<String>()
         lines.forEachIndexed { i, line ->
             if (!line.trim().startsWith("hasCompletionPending = false")) return@forEachIndexed
-            // Skip the declaration (`private var hasCompletionPending = false`).
             if (line.contains("var hasCompletionPending")) return@forEachIndexed
             val window = lines.subList(
                 maxOf(0, i - 6),
@@ -101,4 +68,3 @@ class OverlayLingerTimeoutGuardTest {
         )
     }
 }
-

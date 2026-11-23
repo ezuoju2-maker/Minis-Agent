@@ -7,12 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-subagent-detail-rich] The sub agent detail card's facts are read, never
- * estimated: tool calls / outcomes / durations from the child's blocks, the
- * task from the delegation's own arguments, the budget from the start record.
- * Mirrors iOS MinisTests/Standalone/SubAgentRunDigestTests.
- */
 class SubAgentRunDigestTest {
 
     private fun tool(id: String, name: String, status: ToolBlockStatus, title: String = "", args: String = "", ms: Long = 0) =
@@ -41,9 +35,9 @@ class SubAgentRunDigestTest {
         )
         val d = SubAgentRunDigest.from(msgs, turns = 3, tokensIn = 1234, tokensOut = 56)
         assertEquals(listOf("a", "b", "c", "d", "e"), d.calls.map { it.id })
-        assertEquals("ls -la", d.calls[0].title)                   // first line of the title
-        assertEquals("/tmp/x.go", d.calls[1].title)               // falls back to the path argument
-        assertEquals(SubAgentRunDigest.CallState.FAILED, d.calls[2].state) // timeout reads as failed
+        assertEquals("ls -la", d.calls[0].title)
+        assertEquals("/tmp/x.go", d.calls[1].title)
+        assertEquals(SubAgentRunDigest.CallState.FAILED, d.calls[2].state)
         assertEquals(SubAgentRunDigest.CallState.CANCELLED, d.calls[3].state)
         assertNull("a running call has no duration yet", d.calls[4].durationMs)
         assertNull("an unrecorded duration is left out, not 0s", d.calls[3].durationMs)
@@ -137,8 +131,6 @@ class SubAgentRunDigestTest {
 
     @Test
     fun `stat chips are compact - pinned line box, no font padding`() {
-        // User report 2026-10-06: Android chips ~30dp tall vs ~21pt on iOS. The
-        // height came from Compose's default line box, not the padding.
         val src = ProductionSources.read("ui/chat/SubAgentRunDetail.kt")
         val style = src.substring(src.indexOf("private fun chipTextStyle")).substringBefore("\n)")
         assertTrue(style.contains("includeFontPadding = false"))
@@ -159,11 +151,8 @@ class SubAgentRunDigestTest {
             "SubAgentStatChips(", "SubAgentTaskCard(", "SubAgentToolTimelineCard(",
             "SubAgentLatestOutputCard(", "SubAgentActionsCard(", "vm.loadSessionTokenStats()",
         )) assertTrue("HelperDetailContent uses $needle", body.contains(needle))
-        // While the child streams, its tool blocks are only in the side-channel:
-        // the digest must read the merged live view, not `messages` alone.
         assertTrue("digest reads the live overlay", body.contains("mergeStreamingOverlay(canonical, stream)"))
         assertFalse("not the canonical list alone", body.contains("val msgs = vm?.messages?.value.orEmpty()"))
-        // Cold process: the child's session loads asynchronously; read after it is in.
         assertTrue("waits for the child session to load", body.indexOf("vm?.awaitSessionLoaded()") in 0 until body.indexOf("val msgs = vm?.let"))
         val screen = ProductionSources.read("ui/chat/ChatScreen.kt")
         assertTrue(screen.contains("stopSubAgentByUser(context, it, \"user-stop-block\")"))

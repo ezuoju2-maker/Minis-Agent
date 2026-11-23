@@ -8,32 +8,12 @@ import com.openminis.app.ui.chat.InputAttachment
 import org.json.JSONObject
 import java.io.File
 
-/**
- * Mutation handlers for `chat.*` RPC methods — Phase 2.
- *
- * The `chat.prompt` / `chat.retry` paths drive the existing [ChatViewModel]
- * machinery via [HeadlessChatRunner]; `chat.session.cancel` calls
- * [ChatViewModel.cancelStream] on the cached VM; `chat.session.delete` writes
- * directly to the repo (no VM needed). This keeps the agent-loop / streaming
- * code single-sourced — the RPC is purely a transport.
- */
 internal object ChatMutationMethods {
 
     private fun app(context: Context): MinisApp =
         context.applicationContext as? MinisApp
             ?: throw RPCException(-32000, "MinisApp not initialized")
 
-    /**
-     * [T-android-ui-prompt-rpc] Send a prompt through the ON-SCREEN chat's own
-     * UI ChatViewModel (the one ChatScreen is composed with, cached in
-     * [com.openminis.app.ui.chat.ChatViewModelStore]) — unlike [prompt], which
-     * drives a separate headless VM whose streaming side-channel the visible
-     * ChatScreen never observes. This is the only way an e2e harness can
-     * exercise the LIVE streaming render pipeline (frozen/live flatten,
-     * StreamPerf, markdown caches, breaker degrade): the stream must originate
-     * from the VM the screen is collecting. Returns immediately; observe the
-     * turn via chat.session.status / [StreamPerf] log lines.
-     */
     suspend fun uiPrompt(context: Context, params: JSONObject): JSONObject {
         val text = params.optString("prompt", "").ifEmpty {
             throw RPCException(-32602, "Missing 'prompt' param")
@@ -73,14 +53,10 @@ internal object ChatMutationMethods {
         val isNew = existingId == null
         val sessionId = existingId ?: HeadlessChatRunner.ensureSession(context)
 
-        // Resolve model override (mutually exclusive with sessionId binding).
         val modelEntryId = if (params.has("modelEntryId") && !params.isNull("modelEntryId")) params.optString("modelEntryId").ifEmpty { null } else null
         val modelGroupId = if (params.has("modelGroupId") && !params.isNull("modelGroupId")) params.optString("modelGroupId").ifEmpty { null } else null
         val overrideName = HeadlessChatRunner.applyModelOverride(context, sessionId, modelEntryId, modelGroupId)
 
-        // Decode attachments — RPC carries base64; we materialize them as
-        // FileProvider-backed Uris so InputAttachment + the existing image
-        // pipeline can read them like any user pick.
         val attachments = parseAttachments(context, params)
 
         val wait = params.optBoolean("wait", false)
@@ -96,7 +72,6 @@ internal object ChatMutationMethods {
             timeoutMs = timeoutSec * 1000L,
         )
 
-        // Re-read DB to pick up the latest message metadata after the run.
         val msgs = app.chatRepository.dao.loadMessages(sessionId)
         val userMsg = msgs.lastOrNull { it.role == "user" }
         val displayedModelName = overrideName ?: app.chatRepository.dao.getSession(sessionId)?.let { resolveDisplay(context, it.modelId) }
@@ -121,10 +96,6 @@ internal object ChatMutationMethods {
             ?: throw RPCException(-32602, "Session not found")
         val messageId = if (params.has("messageId") && !params.isNull("messageId")) params.optString("messageId").ifEmpty { null } else null
 
-        // Apply model override (per-call only; iOS docs say session binding is
-        // untouched — but the existing ChatViewModel doesn't expose a per-call
-        // override, so we update + restore around the call. Acceptable for
-        // automation harnesses.)
         val modelEntryId = if (params.has("modelEntryId") && !params.isNull("modelEntryId")) params.optString("modelEntryId").ifEmpty { null } else null
         val modelGroupId = if (params.has("modelGroupId") && !params.isNull("modelGroupId")) params.optString("modelGroupId").ifEmpty { null } else null
         val overrideName = HeadlessChatRunner.applyModelOverride(context, sessionId, modelEntryId, modelGroupId)
@@ -151,11 +122,6 @@ internal object ChatMutationMethods {
         }
     }
 
-    /**
-     * [T-android-rerun-from-tool-block-position] Drive the block-boundary
-     * re-run headlessly (in-app trigger is a tool-bubble long-press). Needs
-     * the UI assistant bubble id + the tool block's id (== tool_use id).
-     */
     suspend fun rerunFromToolBlock(context: Context, params: JSONObject): JSONObject {
         val sessionId = params.optString("sessionId", "").ifEmpty {
             throw RPCException(-32602, "Missing 'sessionId' param")
@@ -201,7 +167,6 @@ internal object ChatMutationMethods {
             put("sessionId", sessionId)
             put("title", s.title ?: JSONObject.NULL)
             put("modelName", resolveDisplay(context, s.modelId))
-            // [T-scheduled-active-session-android] Processing; isStreaming = the loop alone.
             put("isRunning", com.openminis.app.service.SessionActivityTracker.isProcessing(sessionId))
             put("isStreaming", com.openminis.app.service.SessionActivityTracker.isActive(sessionId))
             put("messageCount", msgs.size)
@@ -222,14 +187,6 @@ internal object ChatMutationMethods {
         }
     }
 
-    /**
-     * [T-android-thinking-level-arch] Switch the live session's bound model —
-     * the same action as tapping a model in the in-app picker (calls
-     * ChatViewModel.selectEntry). Use this (not chat.prompt's modelEntryId) to
-     * test an in-session model switch: the thinking level is preserved, and the
-     * response echoes the resolved model + the current thinking level so a caller
-     * can assert cross-model transfer.
-     */
     suspend fun selectModel(context: Context, params: JSONObject): JSONObject {
         val sessionId = params.optString("sessionId", "").ifEmpty {
             throw RPCException(-32602, "Missing 'sessionId' param")
@@ -246,21 +203,6 @@ internal object ChatMutationMethods {
         }
     }
 
-    /**
-     * Mirrors iOS `chat.compact.before` ([DebugRPCChat.compactBefore]).
-     *
-     * iOS supports two modes:
-     *   - `includesBoundary=false` + `messageId` → fold history up to (but not
-     *     including) that message; the boundary message itself is kept.
-     *   - `includesBoundary=true` → compactAll semantics: fold the entire
-     *     active range up to the anchor (last persisted active message).
-     *
-     * Android ChatViewModel currently only exposes the compactAll path
-     * (`runCompactNow()`), so we accept `includesBoundary=true` and reject
-     * the per-message variant with a typed error until [ChatViewModel] grows
-     * a `compactBefore(messageId)` entrypoint. The wire format / return
-     * shape matches iOS so cross-platform automation can use one harness.
-     */
     suspend fun compactBefore(context: Context, params: JSONObject): JSONObject {
         val sessionId = params.optString("sessionId", "").ifEmpty {
             throw RPCException(-32602, "Missing 'sessionId' param")
@@ -271,9 +213,6 @@ internal object ChatMutationMethods {
         val includesBoundary = params.optBoolean("includesBoundary", false)
         val messageId = if (params.has("messageId") && !params.isNull("messageId"))
             params.optString("messageId").ifEmpty { null } else null
-        // includesBoundary=false requires an explicit boundary message id;
-        // includesBoundary=true (compactAll semantics) ignores it. Mirrors
-        // iOS chat.compact.before contract.
         if (!includesBoundary && messageId == null) {
             throw RPCException(-32602, "Missing 'messageId' param (required when includesBoundary=false)")
         }
@@ -312,11 +251,6 @@ internal object ChatMutationMethods {
         }
     }
 
-    /**
-     * Mirrors iOS `chat.compact.markers.list` ([DebugRPCChat.compactMarkersList]).
-     * Returns all markers oldest→newest with the fields a v2 marker actually
-     * uses (anchorMessageId, version, summaryLength + summaryPreview).
-     */
     suspend fun compactMarkersList(context: Context, params: JSONObject): JSONObject {
         val sessionId = params.optString("sessionId", "").ifEmpty {
             throw RPCException(-32602, "Missing 'sessionId' param")
@@ -348,13 +282,6 @@ internal object ChatMutationMethods {
         }
     }
 
-    /**
-     * Mirrors iOS `chat.compact.revert` ([DebugRPCChat.compactRevert]).
-     * Removes the latest compact marker on the session. Refuses while a
-     * stream or another compact is in flight (delegates to
-     * [ChatViewModel.revertCompact] which handles the gating + system-info
-     * notice).
-     */
     suspend fun compactRevert(context: Context, params: JSONObject): JSONObject {
         val sessionId = params.optString("sessionId", "").ifEmpty {
             throw RPCException(-32602, "Missing 'sessionId' param")
@@ -364,10 +291,6 @@ internal object ChatMutationMethods {
             ?: throw RPCException(-32602, "Session not found")
         val beforeMarkers = app.chatRepository.dao.listCompactMarkers(sessionId)
         val removed = beforeMarkers.maxByOrNull { it.createdAt }
-        // ChatViewModel.revertCompact() does its DB delete in viewModelScope
-        // .launch(IO) — fire-and-forget. We can't observe a completion flow
-        // (no isReverting flag), so after kicking it off we poll the marker
-        // list briefly until the count drops by one (or timeout).
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
             HeadlessChatRunner.revertCompact(context, sessionId)
         }
@@ -398,8 +321,6 @@ internal object ChatMutationMethods {
         val app = app(context)
         app.chatRepository.dao.getSession(sessionId)
             ?: throw RPCException(-32602, "Session not found")
-        // [T-android-child-session-delete-storage] The funnel cancels the
-        // stream, drops rows/files/VM/badges for the session and every child.
         val report = com.openminis.app.data.session.SessionDeleter.deleteTree(
             context, app.chatRepository, sessionId, "rpc",
         )
@@ -412,7 +333,6 @@ internal object ChatMutationMethods {
         }
     }
 
-    /** [T-agent-port-round3] Debug/e2e: run a scheduled agent-child task now. */
     suspend fun runScheduledAgentChild(context: Context, params: JSONObject): JSONObject {
         val sessionId = params.optString("sessionId", "").ifEmpty { throw RPCException(-32602, "Missing 'sessionId' param") }
         val prompt = params.optString("prompt", "").ifEmpty { throw RPCException(-32602, "Missing 'prompt' param") }
@@ -453,14 +373,10 @@ internal object ChatMutationMethods {
             } catch (_: Exception) { null } ?: continue
             val file = File(cacheDir, "${System.currentTimeMillis()}-$name")
             file.outputStream().use { it.write(bytes) }
-            // Use FileProvider so the URI is consumable by Android components
-            // (matches what the document/image pickers hand back to the app).
             val authority = context.packageName + ".fileprovider"
             val uri = try {
                 FileProvider.getUriForFile(context, authority, file)
             } catch (_: Exception) {
-                // Fall back to file:// (older code paths accept it; image
-                // pipeline uses ContentResolver which copes with both).
                 android.net.Uri.fromFile(file)
             }
             val kind = if (mime.startsWith("image/")) InputAttachment.Kind.IMAGE
@@ -470,12 +386,6 @@ internal object ChatMutationMethods {
         return out
     }
 
-    /**
-     * Map the RPC `thinkingLevel` string ("off"/"low"/"medium"/"high"/"xhigh")
-     * to the [ThinkingLevel] enum. Unknown values raise -32602 so callers
-     * notice typos rather than silently falling back to OFF. Returns null when
-     * the param was omitted, signaling "leave the VM's existing level alone".
-     */
     private fun parseThinkingLevel(params: JSONObject): ThinkingLevel? {
         if (!params.has("thinkingLevel") || params.isNull("thinkingLevel")) return null
         val raw = params.optString("thinkingLevel", "").trim().lowercase()
@@ -486,9 +396,6 @@ internal object ChatMutationMethods {
             "medium" -> ThinkingLevel.MEDIUM
             "high" -> ThinkingLevel.HIGH
             "xhigh" -> ThinkingLevel.XHIGH
-            // [T-android-thinking-level-arch] MAX/ULTRA are now distinct tiers.
-            // "max" previously aliased XHIGH (when XHIGH's label was "Max"); it
-            // now maps to the real MAX tier.
             "max" -> ThinkingLevel.MAX
             "ultra" -> ThinkingLevel.ULTRA
             else -> throw RPCException(-32602, "Invalid thinkingLevel: $raw (expected off/low/medium/high/xhigh/max/ultra)")

@@ -19,24 +19,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.lang.ref.WeakReference
 
-/**
- * Compose-Semantics + View hierarchy introspection for the debug RPC server.
- *
- * Mirrors the iOS DebugViewInspector contract (viewTree / search / inspect /
- * highlight) but takes an explicit shallow approach: Compose nodes come from
- * the public SemanticsNode API rather than a UIKit-style reflection walk.
- * That's enough for test harnesses to find buttons by text and verify
- * geometry, and means we don't need to mirror iOS's class-name strings.
- *
- * Addresses are System.identityHashCode hex strings stamped per snapshot —
- * inspect/highlight need a fresh viewTree (or search) call before they can
- * resolve a node, since hashes don't survive recomposition.
- */
 object DebugInspectorMethods {
 
-    // Snapshot of nodes by address, populated at viewTree/search time so
-    // subsequent inspect/highlight can resolve back to a live View or
-    // SemanticsNode without re-walking the tree. Cleared on each fresh walk.
     private val snapshot = mutableMapOf<String, NodeRef>()
 
     private sealed class NodeRef {
@@ -44,10 +28,6 @@ object DebugInspectorMethods {
         class S(val node: SemanticsNode) : NodeRef()
     }
 
-    /**
-     * Safe-read for SemanticsConfiguration: contains() + indexed get(),
-     * since `getOrNull` is not in the public API of this version.
-     */
     private fun <T> SemanticsConfiguration.readOrNull(key: SemanticsPropertyKey<T>): T? {
         return if (this.contains(key)) this[key] else null
     }
@@ -92,7 +72,6 @@ object DebugInspectorMethods {
             true
         }
 
-    // ── View walk ───────────────────────────────────────────────────────────
 
     private fun buildViewNode(view: View, depth: Int, maxDepth: Int): JSONObject {
         val node = JSONObject()
@@ -105,8 +84,6 @@ object DebugInspectorMethods {
         }
         view.contentDescription?.toString()?.takeIf { it.isNotEmpty() }?.let { node.put("description", it) }
         if (isComposeHost(view)) {
-            // Append the merged Compose semantics tree (one entry per logical
-            // a11y node, much fewer than the underlying View tree).
             semanticsRootOf(view)?.let { root ->
                 val sem = buildSemanticsNode(root, depth = depth + 1, maxDepth = maxDepth)
                 if (sem != null) {
@@ -184,7 +161,6 @@ object DebugInspectorMethods {
                 return false
             }
         }
-        // "all"
         if (view.javaClass.simpleName.lowercase().contains(kw)) return true
         if (view is android.widget.TextView && view.text?.toString()?.lowercase()?.contains(kw) == true) return true
         if (view.contentDescription?.toString()?.lowercase()?.contains(kw) == true) return true
@@ -241,7 +217,6 @@ object DebugInspectorMethods {
         obj.put("bounds", boundsJson(intArrayOf(r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())))
         if (deep) {
             val actions = JSONArray()
-            // Common actions surface as keys we can probe explicitly.
             if (node.config.contains(SemanticsActions.OnClick)) actions.put("onClick")
             if (node.config.contains(SemanticsActions.OnLongClick)) actions.put("onLongClick")
             if (node.config.contains(SemanticsActions.SetText)) actions.put("setText")
@@ -254,9 +229,7 @@ object DebugInspectorMethods {
         return obj
     }
 
-    // ── Compose Semantics access ────────────────────────────────────────────
 
-    /** True for AbstractComposeView / AndroidComposeView instances. */
     private fun isComposeHost(view: View): Boolean {
         var cls: Class<*>? = view.javaClass
         while (cls != null) {
@@ -268,26 +241,21 @@ object DebugInspectorMethods {
         return false
     }
 
-    /** Walk up to find the AndroidComposeView and reflect into its semanticsOwner. */
     private fun semanticsRootOf(host: View): SemanticsNode? {
-        // AbstractComposeView wraps AndroidComposeView as its only child.
         val owner = findAndroidComposeViewSemanticsOwner(host) ?: return null
         return runCatching {
-            // SemanticsOwner has unmergedRootSemanticsNode (kotlin property).
             val m = owner.javaClass.getMethod("getUnmergedRootSemanticsNode")
             m.invoke(owner) as? SemanticsNode
         }.getOrNull()
     }
 
     private fun findAndroidComposeViewSemanticsOwner(view: View): Any? {
-        // Direct AndroidComposeView
         if (view.javaClass.name == "androidx.compose.ui.platform.AndroidComposeView") {
             return runCatching {
                 val m = view.javaClass.getMethod("getSemanticsOwner")
                 m.invoke(view)
             }.getOrNull()
         }
-        // AbstractComposeView with a single AndroidComposeView child
         if (view is ViewGroup) {
             for (i in 0 until view.childCount) {
                 findAndroidComposeViewSemanticsOwner(view.getChildAt(i))?.let { return it }
@@ -296,7 +264,6 @@ object DebugInspectorMethods {
         return null
     }
 
-    // ── Address bookkeeping ─────────────────────────────────────────────────
 
     private fun stamp(view: View): String {
         val a = "0x" + Integer.toHexString(System.identityHashCode(view))
@@ -323,11 +290,9 @@ object DebugInspectorMethods {
             .put("width", rect[2] - rect[0]).put("height", rect[3] - rect[1])
     }
 
-    // ── Highlight overlay ───────────────────────────────────────────────────
 
     private fun showOverlay(activity: Activity, rect: IntArray, color: Int, durationMs: Long) {
         val root = activity.window.decorView as? ViewGroup ?: return
-        // Convert screen coords to decorView-relative.
         val decorPos = IntArray(2)
         root.getLocationOnScreen(decorPos)
         val left = (rect[0] - decorPos[0]).coerceAtLeast(0)

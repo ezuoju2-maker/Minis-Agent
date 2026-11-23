@@ -22,11 +22,6 @@ import com.openminis.app.data.model.RoutingStrategy
 import com.openminis.app.data.model.ThinkingLevel
 import com.openminis.app.data.repository.ProviderRepository
 
-/**
- * Exposes ModelGroup fields under `groups.<id>.…`. Mirrors iOS
- * `GroupsCollection`. Add/remove fully supported — users frequently
- * want to spin up named bundles for fallback.
- */
 class GroupsCollection(
     private val repo: ProviderRepository,
 ) : ConfigCollection {
@@ -60,8 +55,6 @@ class GroupsCollection(
             ?: throw ConfigError.InvalidValue("`name` required")
         if (name.isEmpty()) throw ConfigError.InvalidValue("`name` required")
 
-        // Accept either `entries` (matches the group's display field + the
-        // aggregate `groups` summary key) or the legacy `members` alias.
         val members = mutableListOf<String>()
         val entryArr = (obj["entries"] as? ConfigValue.Arr)?.value
             ?: (obj["members"] as? ConfigValue.Arr)?.value
@@ -78,13 +71,10 @@ class GroupsCollection(
             runCatching { FallbackStrategy.valueOf(it) }.getOrNull()
         } ?: FallbackStrategy.default
 
-        // Wire token is lowercase (`off`/`low`/…) to match iOS; empty / absent
-        // means "no override" (null). An unrecognised token is ignored (null).
         val defaultThinking = (obj["default_thinking_level"] as? ConfigValue.Str)?.value
             ?.takeIf { it.isNotEmpty() }
             ?.let { thinkingLevelFromToken(it) }
 
-        // 0 (or absent / non-positive) means "no limit" (null).
         val contextLimit = (obj["context_limit_tokens"] as? ConfigValue.Int)?.value
             ?.takeIf { it > 0 }
 
@@ -105,7 +95,6 @@ class GroupsCollection(
         repo.removeGroup(id)
     }
 
-    // -- [T-config-readable] Readable descriptions (mirrors iOS GroupsCollection) --
 
     override val readableSubjectFormat: String get() = "Group “%1\$@” – %2\$@"
 
@@ -133,20 +122,12 @@ class GroupsCollection(
         )
     }
 
-    // -- Field factories --
 
     private fun group(id: String): ModelGroup? =
         repo.config.value.modelGroups.firstOrNull { it.id == id }
 
     private fun mutate(id: String, apply: (ModelGroup) -> Unit) {
         val published = group(id) ?: throw ConfigError.UnknownPath("groups.$id")
-        // [T-android-provider-mutator-lock] Apply to a COPY, then hand that to
-        // updateGroup. `group(id)` returns the live object out of the published
-        // config, so mutating it in place — the `entries` field writer does
-        // memberEntryIds.clear()/addAll — races Compose readers iterating the
-        // same list, reachable from minis-config and the agent loop. The
-        // deep-copied memberEntryIds is what makes the structural edits safe;
-        // ProvidersCollection.mutate already uses this shape.
         val draft = published.copy(memberEntryIds = published.memberEntryIds.toMutableList())
         apply(draft)
         repo.updateGroup(draft)
@@ -224,7 +205,6 @@ class GroupsCollection(
             readable = ConfigReadable(ConfigValueFormatter.EnumLabels(ReadableThinkingLabels.withNotSet)),
             reader = {
                 val g = group(id) ?: return@ClosureField ConfigValue.Null
-                // Wire token is lowercase to match iOS; null → empty string.
                 ConfigValue.Str(g.defaultThinkingLevel?.let { thinkingLevelToToken(it) } ?: "")
             },
             writer = { v ->
@@ -256,19 +236,14 @@ class GroupsCollection(
 
     private val strategyLabels = mapOf("fallback" to "Fallback (in order)", "loadBalance" to "Load balance")
 
-    /** Android's `default` is iOS's `limited`: fall back only when the provider rejects. */
     private val fallbackLabels = mapOf("default" to "Only when the provider rejects", "always" to "Also on transient errors")
 
-    /** iOS uses lowercase tokens (`off`/`low`/…); Android `ThinkingLevel.name`
-     *  is uppercase. Round-trip identical strings to keep the CLI contract
-     *  cross-platform. */
     private fun thinkingLevelToToken(level: ThinkingLevel): String = when (level) {
         ThinkingLevel.OFF -> "off"
         ThinkingLevel.LOW -> "low"
         ThinkingLevel.MEDIUM -> "medium"
         ThinkingLevel.HIGH -> "high"
         ThinkingLevel.XHIGH -> "xhigh"
-        // [T-android-thinking-level-arch] GPT-5.6 higher tiers.
         ThinkingLevel.MAX -> "max"
         ThinkingLevel.ULTRA -> "ultra"
     }
@@ -284,12 +259,6 @@ class GroupsCollection(
         else -> null
     }
 
-    /**
-     * Entries live as a JSON array of model entry UUIDs. Writing
-     * replaces the whole list — the same path covers add / remove /
-     * reorder in one operation. Use `groups.<id>.entries.append`
-     * or `.remove` (handled by the bridge) for single-element ops.
-     */
     private fun entriesField(id: String): ConfigField =
         ClosureField(
             path = "groups.$id.entries",

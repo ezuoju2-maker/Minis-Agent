@@ -5,13 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-newchat-fab-shadow] The home New Chat FAB had no shadow: its `.shadow` came after
- * the `.clip(CircleShape)` that keeps the long-press ripple round, so the shadow (and
- * the FAB's own elevation shadow) was clipped away. The shadow must precede the clip,
- * the clip must still precede the long-press clickable, and both FABs must carry the
- * same shadow and elevation.
- */
 class SessionListFabShadowTest {
     private val src = ProductionSources.read("ui/sessions/SessionListScreen.kt")
     private val chatFab = src.substringAfter("val chatFab: @Composable () -> Unit = {").substringBefore("val searchFab:")
@@ -22,7 +15,7 @@ class SessionListFabShadowTest {
 
     @Test fun `new chat shadow is drawn before the clip, clip still before the long-press clickable`() {
         val s = chatFab.indexOf(shadow)
-        val clip = chatFab.indexOf(".clip(CircleShape)\n") // the modifier line, not a comment mentioning it
+        val clip = chatFab.indexOf(".clip(CircleShape)\n")
         val click = chatFab.indexOf(".combinedClickable(")
         assertTrue("shadow present", s >= 0)
         assertTrue("shadow before clip", s < clip)

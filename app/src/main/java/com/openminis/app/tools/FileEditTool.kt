@@ -41,10 +41,6 @@ object FileEditTool {
                 return ToolExecutionResult("Error: 'old_string' is required and cannot be empty", false, toolTitle = toolTitle)
             }
 
-            // [T-offload-placeholder-write-guard] (GH#374) See FileWriteTool.
-            // Only the REPLACEMENT text is checked: a placeholder in
-            // `old_string` is just a search that will not match, which the
-            // "old_string not found" path below already reports clearly.
             if (ContextOffload.isOffloadPlaceholder(newString)) {
                 AppLogger.warning(
                     "FileEdit",
@@ -56,7 +52,6 @@ object FileEditTool {
                 )
             }
 
-            // T219: read-only mount guard — see FileWriteTool for rationale.
             if (PRootKernel.isLinuxPathUnderReadOnlyMount(path)) {
                 return ToolExecutionResult(
                     "Error: $path is inside a read-only mounted folder and cannot be modified. " +
@@ -65,7 +60,6 @@ object FileEditTool {
                 )
             }
 
-            // T123: per-session resolver — see FileWriteTool for rationale.
             val file = PRootKernel.resolveSessionHostPath(sessionId, path, context)
                 ?: return ToolExecutionResult("Error: Cannot resolve path: $path", false, toolTitle = toolTitle)
 
@@ -73,9 +67,6 @@ object FileEditTool {
                 return ToolExecutionResult("Error: File not found: $path", false, toolTitle = toolTitle)
             }
 
-            // [T-port-filetool-size-guard] Read, replace and write back off
-            // the caller's thread with a timeout; an OutOfMemoryError becomes
-            // a tool error instead of killing the app.
             try {
                 FileToolIO.run("Editing $path", writes = true) {
                     edit(file, path, oldString, newString, replaceAll, toolTitle, includeDiff = true)
@@ -93,10 +84,6 @@ object FileEditTool {
         }
     }
 
-    /**
-     * Apply one file_edit to [file]. Pure apart from the file access, so tests
-     * can call it on a temp file.
-     */
     internal fun edit(
         file: java.io.File,
         path: String,
@@ -106,10 +93,6 @@ object FileEditTool {
         toolTitle: String,
         includeDiff: Boolean = false,
     ): ToolExecutionResult {
-        // [T-port-filetool-size-guard] Refuse large files before reading
-        // them (iOS FileToolIO.maxEditBytes, same message): readText() of a
-        // multi-hundred-MB file threw OutOfMemoryError, which no caller
-        // catches, and killed the app.
         val size = file.length()
         if (size > FileToolIO.MAX_EDIT_BYTES) {
             return ToolExecutionResult(
@@ -121,7 +104,6 @@ object FileEditTool {
 
         val content = file.readText()
 
-        // Count occurrences
         var count = 0
         var searchFrom = 0
         while (true) {
@@ -152,11 +134,6 @@ object FileEditTool {
         file.writeText(newContent)
         val replacements = if (replaceAll) count else 1
         val base = "Edited $path ($replacements replacement(s), ${newContent.length} bytes)"
-        // [code-ability / diff-preview] When enabled by the real execute() path,
-        // append a bounded change preview so the agent can self-verify the edit
-        // without a follow-up file_read (fewer turns, fewer tokens). Tests call
-        // edit() with the default includeDiff=false, so their exact-output
-        // assertions stay byte-identical.
         val output = if (includeDiff) {
             val preview = ChangePreview.render(content, newContent, maxChars = 700)
             if (preview.isBlank()) base else "$base\nChanges:\n$preview"

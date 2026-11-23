@@ -8,15 +8,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-minis-config-coverage] The settings added to minis-config in this round
- * bind to the store and key their Settings row uses, keep the iOS paths, and
- * leave the locked kinds of value (credentials, raw request overrides) out.
- *
- * Source-level, like ChatConfigPrefsBindingTest: the Prefs fields need a real
- * SharedPreferences, and the defect this guards against - a field that writes
- * a value nothing reads - is fully visible at the registration site.
- */
 class ConfigCoverageBindingTest {
 
     private fun source(relative: String): String {
@@ -27,7 +18,6 @@ class ConfigCoverageBindingTest {
 
     private val builtins by lazy { source("config/ConfigBuiltins.kt") }
 
-    /** The registration block of [path] in ConfigBuiltins. */
     private fun registration(path: String, text: String = builtins): String {
         val at = text.indexOf("path = \"$path\"")
         assertTrue("nothing registers $path", at >= 0)
@@ -48,7 +38,6 @@ class ConfigCoverageBindingTest {
             "key = spec.TIMEOUT_MINUTES_KEY", "minValue = 0", "maxValue = spec.MAX_TIMEOUT_MINUTES",
         )
         assertBinds("agentTools.userAsk.notifyInBackground", "key = spec.NOTIFY_IN_BACKGROUND_KEY")
-        // The store those three share is the one AgentToolSwitch reads.
         val fn = builtins.substringAfter("private fun registerAgentTools").substringBefore("private fun registerSpeech")
         assertTrue(fn.contains("AgentToolSwitch.PREFS"))
     }
@@ -82,7 +71,6 @@ class ConfigCoverageBindingTest {
         assertBinds("updates.channel", "store.setChannel(", "ConfigRisk.SENSITIVE")
         assertBinds("updates.autoCheck", "store.setAutoEnabled(")
         assertBinds("backup.deviceName", "identity.setCustomName(", "identity.customName(")
-        // A build without automatic checks keeps the path but refuses it.
         assertTrue(builtins.contains("UnavailableField(autoCheck"))
     }
 
@@ -100,7 +88,6 @@ class ConfigCoverageBindingTest {
         val models = source("config/collections/ModelsCollection.kt")
         assertTrue(models.contains("\"temperatureOverride\", \"Temperature\""))
         assertTrue(models.contains("\"topPOverride\", \"Top P\""))
-        // Headers can carry credentials and raw body JSON can rewrite a request.
         assertFalse(Regex("""path = "models\.[^"]*(customHeaders|extraBodyParams)""").containsMatchIn(models))
         assertFalse(models.contains("\"customHeaders\","))
         assertFalse(models.contains("\"extraBodyParams\","))
@@ -122,7 +109,6 @@ class ConfigCoverageBindingTest {
         }
     }
 
-    // -- Sub agents: same surface as iOS --
 
     private val subAgents by lazy { source("config/collections/SubAgentsCollection.kt") }
 

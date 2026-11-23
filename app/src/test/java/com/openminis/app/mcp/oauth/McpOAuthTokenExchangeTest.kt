@@ -4,12 +4,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-mcp-oauth] Phase 2 coverage: the token-exchange form body
- * (authorization_code grant). The browser round-trip + real HTTP exchange are
- * device/mock-server territory (need a Context-bound token store + Custom Tab)
- * and are exercised on-device, not here.
- */
 class McpOAuthTokenExchangeTest {
 
     @Test
@@ -23,7 +17,7 @@ class McpOAuthTokenExchangeTest {
             resource = null,
         )
         assertTrue(body.contains("grant_type=authorization_code"))
-        assertTrue(body.contains("code=the+code")) // form-encoded space
+        assertTrue(body.contains("code=the+code"))
         assertTrue(body.contains("client_id=client-1"))
         assertTrue(body.contains("code_verifier=verifier-xyz"))
         assertTrue(body.contains("redirect_uri=http%3A%2F%2Flocalhost%3A54546%2Fcallback"))

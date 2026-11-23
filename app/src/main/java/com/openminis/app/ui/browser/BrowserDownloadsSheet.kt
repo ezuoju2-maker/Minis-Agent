@@ -44,16 +44,6 @@ import com.openminis.app.R
 import com.openminis.app.ui.components.MinisTextButton
 import com.openminis.app.browser.BrowserTabPool
 
-/**
- * [T-android-browser-download-ux] Downloads panel — Android port of iOS
- * BrowserDownloadPanelSheet (T-browser-download-ux v2/v3): entries
- * newest-first; in-flight rows show live progress + a cancel button;
- * completed rows open the file via ACTION_VIEW (the Android "Show in Files"
- * equivalent — same FileProvider path FilePreviewScreen uses); failed rows
- * show the reason. "Clear" drops ALL finished records (completed AND failed,
- * v3 semantics); in-flight rows stay. Opening the panel marks terminal
- * entries seen, which zeroes the toolbar badge.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BrowserDownloadsSheet(
@@ -64,8 +54,6 @@ fun BrowserDownloadsSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val downloads by tabPool.downloads.collectAsState()
 
-    // Terminal entries stop counting toward the badge once the user has
-    // actually looked at the panel.
     LaunchedEffect(Unit) { tabPool.markDownloadsSeen() }
 
     ModalBottomSheet(
@@ -141,7 +129,6 @@ private fun DownloadRow(
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                // Middle truncation keeps the extension visible (iOS v3).
                 BrowserTabPool.middleTruncated(entry.filename, head = 24, tail = 12),
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
@@ -224,8 +211,6 @@ private fun DownloadRow(
     }
 }
 
-/** ACTION_VIEW via FileProvider — same pattern as FilePreviewScreen's
- *  openExternally; the `minis-sessions/` root is a declared provider path. */
 private fun openDownloadedFile(context: Context, entry: BrowserTabPool.DownloadEntry) {
     val file = entry.destination ?: return
     if (!file.exists()) return

@@ -7,10 +7,6 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/**
- * [advanced-recall] Hybrid recall: any-term matching, field weighting, and
- * temporal decay, all additive to the legacy search()/topFacts() API.
- */
 class MemoryRecallTest {
     @get:Rule val tmp = TemporaryFolder()
 
@@ -20,7 +16,6 @@ class MemoryRecallTest {
     fun `recall matches on any term not only all terms`() {
         val r = repo()
         r.upsert("user", "prefers editor", "vim")
-        // legacy search requires ALL terms; recall matches on any.
         val legacy = r.search("prefers nonexistent")
         val hybrid = r.recall("prefers nonexistent")
         assertEquals("No remembered facts matched.", legacy)
@@ -30,8 +25,6 @@ class MemoryRecallTest {
     @Test
     fun `recall ranks subject matches above value-only matches`() {
         val r = repo()
-        // Both facts contain "vim", so both match; the one whose SUBJECT is
-        // "vim" carries field weight and must outrank the value-only hit.
         r.upsert("user", "editor choice", "I use vim daily")
         r.upsert("vim", "is", "a text editor")
         val out = r.recall("vim")
@@ -49,7 +42,7 @@ class MemoryRecallTest {
     @Test
     fun `recallForPrompt falls back to topFacts for blank query`() {
         val r = repo()
-        repeat(3) { r.upsert("user", "editor", "vim") } // confidence 0.5 -> 0.8
+        repeat(3) { r.upsert("user", "editor", "vim") }
         val fallback = r.recallForPrompt("   ")
         assertTrue(fallback.contains("user: editor = vim"))
     }
@@ -69,6 +62,6 @@ class MemoryRecallTest {
         r.upsert("user", "editor", "vim")
         r.upsert("project", "db", "postgres")
         assertTrue(r.search("vim").contains("seen 1x"))
-        assertTrue(r.topFacts().isEmpty()) // 0.5 < 0.6 threshold, unchanged
+        assertTrue(r.topFacts().isEmpty())
     }
 }

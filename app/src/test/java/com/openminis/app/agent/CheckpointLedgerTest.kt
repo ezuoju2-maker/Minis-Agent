@@ -5,10 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [long-tasks] Checkpoint ledger: idempotent stages, resumable summary, and
- * JSON round-trip that survives a compact/restart.
- */
 class CheckpointLedgerTest {
 
     @Test
@@ -32,7 +28,7 @@ class CheckpointLedgerTest {
     @Test
     fun `isComplete only when all stages done`() {
         val l = CheckpointLedger()
-        assertFalse(l.isComplete) // empty
+        assertFalse(l.isComplete)
         l.record("a", "A", "done")
         l.record("b", "B", "pending")
         assertFalse(l.isComplete)
@@ -50,8 +46,8 @@ class CheckpointLedgerTest {
         assertTrue(s.contains("1/3 done"))
         assertTrue(s.contains("Download data — cached"))
         assertTrue(s.contains("needs schema"))
-        assertTrue(s.contains("Transform: needs schema")) // listed under Blocked
-        assertTrue(s.contains("Next: Publish")) // next actionable (pending), not the blocked one
+        assertTrue(s.contains("Transform: needs schema"))
+        assertTrue(s.contains("Next: Publish"))
     }
 
     @Test
@@ -83,8 +79,6 @@ class CheckpointLedgerTest {
     fun `malformed json keeps the existing ledger intact`() {
         val l = CheckpointLedger()
         l.record("a", "A", "done")
-        // [v2.0 FIX-03] load() is transactional: bad JSON must not wipe a
-        // ledger the caller already populated, and the failure is reported.
         assertFalse(l.load("{ broken"))
         assertEquals(1, l.all().size)
         assertEquals("done", l.get("a")?.status)

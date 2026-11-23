@@ -23,22 +23,6 @@ import com.openminis.app.ui.components.MinisButton
 import com.openminis.app.ui.components.MinisOutlinedButton
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * Dialog shown when an ASK_ONCE tool requests permission.
- *
- * T338: three session-scoped options. None of them ever upgrade the
- * stored PermissionLevel — to make a permanent change the user goes
- * to Settings → Permissions and picks Bypass / Not Allowed there.
- *
- *   • Allow in this session — grant for the remaining session, no
- *     more prompts for this tool until the session ends.
- *   • Allow once            — grant only this call; next call re-prompts.
- *   • Deny in this session  — refuse + remember, so the agent can't
- *     spam the same dialog after the user already said no.
- *
- * Dismissing via tap-outside or system back maps to DENY_SESSION too;
- * a silent dismiss should not invite the agent to keep retrying.
- */
 @Composable
 fun OffloadPermissionDialog() {
     val request by OffloadPermissionManager.pendingRequest.collectAsState()
@@ -87,21 +71,18 @@ fun OffloadPermissionDialog() {
                     .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Allow in this session — happy path goes first.
                 MinisButton(
                     onClick = { OffloadPermissionManager.respondToRequest(OffloadPermissionManager.Response.ALLOW_SESSION) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(stringResource(R.string.offload_perm_allow_session))
                 }
-                // Allow once — no caching; next call re-prompts.
                 MinisOutlinedButton(
                     onClick = { OffloadPermissionManager.respondToRequest(OffloadPermissionManager.Response.ALLOW_ONCE) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(stringResource(R.string.offload_perm_allow_once))
                 }
-                // Deny in this session — refuse + remember.
                 MinisTextButton(
                     onClick = { OffloadPermissionManager.respondToRequest(OffloadPermissionManager.Response.DENY_SESSION) },
                     modifier = Modifier.fillMaxWidth(),

@@ -20,10 +20,6 @@ import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [OpenMinis#470] A 400 about the thinking parameter is sent once more in the
- * other shape, and the shape that worked is remembered per (instance, model).
- */
 class GeminiThinkingRetryTest {
     private lateinit var server: MockWebServer
 
@@ -73,7 +69,6 @@ class GeminiThinkingRetryTest {
             GeminiThinkingFormat.BUDGET,
             GeminiThinkingRetry.formatFor("Thinking level is not supported for this model."),
         )
-        // MINIMAL is checked before the generic level text it also contains.
         assertEquals(
             GeminiThinkingFormat.LEVEL_NO_MINIMAL,
             GeminiThinkingRetry.formatFor("Thinking level MINIMAL is not supported for this model."),
@@ -99,12 +94,10 @@ class GeminiThinkingRetryTest {
         assertEquals("high", retried.getString("thinkingLevel"))
         assertFalse(retried.has("thinkingBudget"))
 
-        // The next request goes straight out as a level.
         send(p, ThinkingLevel.LOW)
         assertEquals("low", thinkingOf()!!.getString("thinkingLevel"))
         assertEquals(3, server.requestCount)
 
-        // Per instance: another instance with the same model starts from the budget.
         val other = provider("gemini-2.5-flash", tag = "prov:b")
         server.enqueue(MockResponse().setBody(ok))
         send(other, ThinkingLevel.LOW)
@@ -201,7 +194,6 @@ class GeminiThinkingRetryTest {
         assertEquals(2, server.requestCount)
     }
 
-    /** gemini-4-argon with no retry at all: the version rule already sends levels. */
     @Test
     fun `gemini-4-argon sends a level on the first request`() {
         val p = provider("gemini-4-argon")

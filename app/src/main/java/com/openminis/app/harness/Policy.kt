@@ -1,20 +1,5 @@
 package com.openminis.app.harness
 
-/**
- * v2.0 · Zero-trust policy layer.
- *
- * Integrates the best of the surveyed products as *contracts*, not code copies:
- *  - Cline Plan/Act modes and per-tool approval;
- *  - Copilot Studio's 「批准 / 批准本次会话 / 拒绝」 three-way approval;
- *  - Claude Cowork / ChatGPT Agent: R3 actions require strong confirmation,
- *    payment-grade actions are refused outright;
- *  - OPPO's "local-first + upload consent + deny list";
- *  - Perplexity Comet's lesson: text from a page/screenshot is DATA, never an
- *    instruction (InjectionGuard).
- *
- * Pure Kotlin stdlib. No Android biometric APIs here — the host maps
- * CONFIRM_STRONG to BiometricPrompt / device credential.
- */
 
 enum class AgentMode { PLAN, ACT, PRIVACY }
 
@@ -33,7 +18,6 @@ data class ToolDescriptor(
 enum class Decision { AUTO, CONFIRM_ONCE, CONFIRM_STRONG, BLOCK }
 
 object RiskPolicy {
-    /** Never delegable to the model, even with a session grant. */
     val DENY_LIST = setOf(
         "payment", "transfer", "purchase", "install_apk", "grant_permission",
         "delete_all", "factory_reset", "send_otp", "read_credentials",
@@ -46,10 +30,6 @@ object RiskPolicy {
             tool.category.lowercase() in DENY_LIST ||
             FINANCIAL_HINTS.any { tool.name.lowercase().contains(it) }
 
-    /**
-     * The single gate every tool call must pass. Risk is taken from the
-     * (host-owned) descriptor, NEVER from the model's self-reported risk.
-     */
     fun decide(
         tool: ToolDescriptor,
         mode: AgentMode,
@@ -58,19 +38,15 @@ object RiskPolicy {
     ): Decision {
         if (isDenied(tool)) return Decision.BLOCK
         if (mode == AgentMode.PRIVACY && (tool.requiresNetwork || !tool.privacyModeAllowed)) return Decision.BLOCK
-        // PLAN mode is read-only by construction (Cline).
         if (mode == AgentMode.PLAN && tool.risk >= Risk.R2) return Decision.BLOCK
-        // A page/screenshot that contains an instruction must not unlock writes.
         if (untrustedContext && tool.risk >= Risk.R2) return Decision.CONFIRM_STRONG
         return when (tool.risk) {
             Risk.R0, Risk.R1 -> Decision.AUTO
             Risk.R2 -> if (tool.name in sessionGranted) Decision.AUTO else Decision.CONFIRM_ONCE
-            // R3: strong confirmation,生物识别, 且禁止「本次会话内不再询问」.
             Risk.R3 -> Decision.CONFIRM_STRONG
         }
     }
 
-    /** Human-readable approval card: 意图 — 影响 — 范围 (three lines). */
     fun approvalCard(tool: ToolDescriptor, intent: String, argsJson: String): String = buildString {
         append("Agent 想做什么：").append(intent.ifEmpty { tool.description }).append('\n')
         append("会影响什么：").append(tool.name).append(" · 风险 ").append(tool.risk.name).append('\n')
@@ -79,7 +55,6 @@ object RiskPolicy {
     }
 }
 
-// ---------------------------------------------------------------- approval gate
 
 class ApprovalGate(private val clock: () -> Long = { 0L }) {
 
@@ -141,11 +116,6 @@ class ApprovalGate(private val clock: () -> Long = { 0L }) {
         return rec
     }
 
-    /**
-     * [P0] A process restart (or a resumed run) MUST re-confirm everything.
-     * Anthropic's red-team data (24/25 exfiltrations despite an approval flow)
-     * is why grants are never persisted across sessions.
-     */
     fun invalidateSessionGrants() {
         sessionGrants.clear()
         pending.values.forEach { it.decided = true }
@@ -153,7 +123,6 @@ class ApprovalGate(private val clock: () -> Long = { 0L }) {
     }
 }
 
-// ---------------------------------------------------------------- injection guard
 
 object InjectionGuard {
     private val INSTRUCTION_PATTERNS = listOf(
@@ -183,11 +152,6 @@ object InjectionGuard {
 
     fun isSafeForSystemPrompt(text: String): Boolean = scan(text).isEmpty()
 
-    /**
-     * Wrap untrusted content (DOM, OCR, file body, email, tool result) so it can
-     * be placed in a prompt as DATA. The model is told explicitly that the block
-     * carries no authority, and any instruction-looking span is highlighted.
-     */
     fun wrapUntrusted(source: String, text: String): String {
         val findings = scan(text)
         val flag = if (findings.isEmpty()) "" else
@@ -201,14 +165,12 @@ object InjectionGuard {
         }
     }
 
-    /** Local-first redaction: never let a raw secret reach a log or a cloud model. */
     fun redact(text: String): String {
         var out = text
         for (r in REDACTORS) out = r.replace(out, "***")
         return out
     }
 
-    /** OPPO-style deny list: sensitive surfaces the agent must never automate. */
     val DENY_APPS = setOf("银行", "支付", "钱包", "微信", "支付宝", "bank", "wallet", "payment", "otp", "验证码")
 
     fun isDeniedSurface(surface: String): Boolean {

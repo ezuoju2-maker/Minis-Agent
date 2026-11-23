@@ -78,10 +78,6 @@ import com.openminis.app.scheduled.ScheduledTaskManager
 import com.openminis.app.scheduled.ScheduledTaskMarker
 import kotlinx.coroutines.delay
 
-/**
- * [T-port-sched-pill] Pills hidden with "Hide this countdown", per chat: the
- * ids of the tasks live at the time. In memory only, like iOS.
- */
 internal object ScheduledPillDismissals {
     val hidden = mutableStateMapOf<String, Set<String>>()
 
@@ -89,7 +85,6 @@ internal object ScheduledPillDismissals {
         hidden[sessionId] = (hidden[sessionId] ?: emptySet()) + ids
     }
 
-    /** Forget tasks no longer live, so the entry empties once the hidden batch is over. */
     fun prune(live: Set<String>, sessionId: String) {
         val h = hidden[sessionId] ?: return
         val kept = h intersect live
@@ -97,24 +92,6 @@ internal object ScheduledPillDismissals {
     }
 }
 
-/**
- * [T-port-sched-pill] A small centred pill under the chat's top bar while the
- * chat has a scheduled task still to run - only tasks that keep this chat
- * active, by the same rule as busy / Stop (ScheduledSessionHold):
- * the glyph ringed by the elapsed wait, "+N" for further tasks, a short clock
- * ("00:48", then "1h 5m", then "1d 3h") or "Running" / "Waiting" one size
- * smaller, and the run counter ("2/30", "#7", nothing for a one-shot).
- *
- * - Tap opens the task page (the scheduled card's own sheet).
- * - Long-press (with a haptic) offers "Hide This Countdown" and "Cancel All
- *   Scheduled Tasks" (confirmed first, the Stop scope:
- *   ScheduledTaskManager.disableAllCreatedBy). The same two are TalkBack
- *   actions. iOS's "Skip next run" is not ported.
- * - Ticks once a second only while shown and the screen is resumed.
- * - Mounted in the Scaffold's top bar slot, so the list starts below it.
- * - [currentSessionId] supplies the chat's REAL id (ChatViewModel.currentSessionId),
- *   not ChatScreen's route id, which stays "__new__…" for a chat started fresh.
- */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ScheduledTaskPill(currentSessionId: () -> String) {
@@ -125,9 +102,6 @@ internal fun ScheduledTaskPill(currentSessionId: () -> String) {
     val running by ScheduledSessionHold.runningTaskIds.collectAsState()
     val agentJobs by AgentJobRegistry.jobs.collectAsState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    // [T-port-sched-pill-visible] Read on every composition: a draft chat
-    // gets its real id on the first message, before any task can name it,
-    // and the task-list change that follows recomposes this with the real id.
     val sessionId = currentSessionId()
 
     val jobs = ScheduledPillModel.jobs(sessionId, tasks, running.keys, now) {
@@ -168,10 +142,6 @@ internal fun ScheduledTaskPill(currentSessionId: () -> String) {
                 ScheduledPillDismissals.hide(liveIds, sessionId)
             },
             onCancelAll = { confirmCancelAll = true },
-            // [T-sched-run-now] The same state the pill draws (phase + the
-            // running set it collects), plus a start already in progress.
-            // Read when the menu composes and again on every change while it
-            // is open; the tap re-checks atomically in ScheduledRunNow.start.
             runNowOffered = {
                 com.openminis.app.scheduled.ScheduledRunNow.canOffer(
                     countdown = s.phase == ScheduledPillModel.Phase.COUNTDOWN,
@@ -181,7 +151,6 @@ internal fun ScheduledTaskPill(currentSessionId: () -> String) {
                 )
             },
             onRunNow = {
-                // The run this menu showed; the claim fails if it is no longer pending.
                 val shown = tasks.firstOrNull { it.id == s.job.id }
                     ?.let { com.openminis.app.scheduled.ScheduledTaskManager.pendingRunKey(it, now) }
                 val started = com.openminis.app.scheduled.ScheduledRunNow.start(
@@ -294,8 +263,6 @@ private fun PillCard(
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 8.dp)) {
-                    // The clock keeps the width of its format's widest value
-                    // (hidden template), so it does not twitch while ticking.
                     Box(contentAlignment = Alignment.CenterStart) {
                         val isStatus = state.phase != ScheduledPillModel.Phase.COUNTDOWN
                         Text(
@@ -330,8 +297,6 @@ private fun PillCard(
                 }
             }
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                // [T-sched-run-now] First item, only while the run has not
-                // started. A run that starts while the menu is open removes it.
                 if (offerRunNow) {
                     DropdownMenuItem(
                         text = { Text(runNowLabel) },
@@ -354,10 +319,8 @@ private fun PillCard(
     }
 }
 
-/** Digits of equal width, so the clock and counter do not jitter while ticking. */
 private val TabularDigits = TextStyle(fontFeatureSettings = "tnum")
 
-/** The glyph in its tinted circle, ringed by how much of the wait has passed. */
 @Composable
 private fun PillRing(fraction: Float, waiting: Boolean) {
     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(26.dp)) {
@@ -387,7 +350,6 @@ private fun PillRing(fraction: Float, waiting: Boolean) {
     }
 }
 
-/** "00:48" up to an hour, then "1h 5m" (minutes rounded up), then "1d 3h", system-localized. */
 @Composable
 private fun visibleCountdown(remainingMs: Long): String {
     ScheduledPillModel.countdown(remainingMs)?.let { return it }
@@ -410,7 +372,6 @@ private fun formatMeasures(locale: java.util.Locale, width: MeasureFormat.Format
         .getOrDefault("")
 }
 
-/** The pill for TalkBack, one sentence-like line (iOS accessibilityText). */
 @Composable
 private fun spokenText(state: ScheduledPillModel.State, remainingMs: Long?): String {
     val parts = mutableListOf(stringResource(R.string.sched_pill_a11y_title), state.job.title)

@@ -59,31 +59,11 @@ import androidx.core.view.WindowInsetsControllerCompat
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 
-/**
- * One image in an [ImageGalleryViewer]. [model] is anything Coil's
- * `AsyncImage` accepts (Uri, File, String URL, etc.); [caption] is the
- * filename/alt-text shown in the bottom capsule, hidden when blank.
- */
 data class ImageGalleryItem(
     val model: Any,
     val caption: String? = null,
 )
 
-/**
- * Fullscreen swipeable gallery — mirrors the iOS MessageImageGallery
- * (src/ios/Views/Chat/Media/MessageImageGallery.swift): HorizontalPager
- * over pinch-zoom/pan pages, immersive dialog chrome (system bars hidden,
- * tap toggles), bottom caption capsule, and Copy / Share / Save actions
- * bound to the currently visible page.
- *
- * Edge cases:
- *  - `items.size == 1` renders correctly (HorizontalPager with one page,
- *    no horizontal-swipe artefacts).
- *  - `startIndex` is coerced into bounds.
- *  - When a page is zoomed (`scale > 1f`), pan-pointer input consumes
- *    horizontal gestures, so the pager does not flip mid-zoom — matches
- *    iOS UIScrollView-blocks-TabView-swipe behavior.
- */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ImageGalleryViewer(
@@ -92,7 +72,6 @@ fun ImageGalleryViewer(
     onDismiss: () -> Unit,
 ) {
     if (items.isEmpty()) {
-        // Defensive: don't render an empty pager — just dismiss.
         DisposableEffect(Unit) {
             onDismiss()
             onDispose { }
@@ -104,19 +83,6 @@ fun ImageGalleryViewer(
     val view = LocalView.current
     val scope = rememberCoroutineScope()
 
-    // Hide system bars on entry, restore on exit. Same pattern as the
-    // single-image FullscreenImageViewer — see its comment block (T169)
-    // for why we don't touch decorFitsSystemWindows on the activity
-    // window.
-    //
-    // [T-android-preview-statusbar-leak] This captures the previous
-    // isAppearanceLight* values, which is safe HERE only because the effect is
-    // keyed on `Unit` and this viewer is never composed alongside another
-    // writer of those flags — it takes over the whole screen. The web preview
-    // pair (sheet ↔ fullscreen) could not make that assumption, overlapped, and
-    // leaked a stale value; both now restore from the theme instead. If this
-    // viewer ever gains a sibling that also writes these flags, do the same
-    // here rather than keeping the capture.
     DisposableEffect(Unit) {
         val window = (view.context as? android.app.Activity)?.window
         val controller = window?.let { WindowInsetsControllerCompat(it, view) }
@@ -157,7 +123,6 @@ fun ImageGalleryViewer(
             decorFitsSystemWindows = false,
         ),
     ) {
-        // Apply immersive flags to the dialog's own window too.
         val dialogContainer = LocalView.current.parent as? android.view.ViewGroup
         DisposableEffect(dialogContainer) {
             val win = dialogContainer?.let { findDialogWindowForGallery(it) }
@@ -189,15 +154,9 @@ fun ImageGalleryViewer(
                 .fillMaxSize()
                 .background(Color.Black),
         ) {
-            // Pager is the bottom-most surface so per-page pointer input
-            // (pinch / pan / double-tap) wins over the dialog's outer
-            // click-to-dismiss when applicable.
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
-                // Default behaviour: drag with at least 1 finger pages
-                // unless the page composable consumes the gesture first
-                // (we do that when zoomed, see below).
             ) { page ->
                 GalleryPage(
                     item = items[page],
@@ -205,7 +164,6 @@ fun ImageGalleryViewer(
                 )
             }
 
-            // ── Close button ────────────────────────────────────────
             AnimatedVisibility(
                 visible = showChrome,
                 enter = fadeIn(),
@@ -227,7 +185,6 @@ fun ImageGalleryViewer(
                 }
             }
 
-            // ── Bottom caption + actions ────────────────────────────
             val currentItem = items.getOrNull(pagerState.currentPage) ?: items[0]
             AnimatedVisibility(
                 visible = showChrome,
@@ -243,10 +200,6 @@ fun ImageGalleryViewer(
                     androidx.compose.foundation.layout.Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        // Caption capsule — matches iOS GalleryPage caption
-                        // (MessageImageGallery.swift L110-123). Hidden when
-                        // the item has no caption (e.g. raw markdown image
-                        // without alt text).
                         if (!currentItem.caption.isNullOrBlank()) {
                             Box(
                                 modifier = Modifier
@@ -309,7 +262,6 @@ fun ImageGalleryViewer(
                                 label = stringResource(R.string.image_action_save),
                                 onClick = {
                                     scope.launch {
-                                        // [T-image-save-original] The original file, not a decode.
                                         val saved = saveImageToGallery(context, currentItem.model)
                                         val msg = if (saved) savedToAlbumMsg else saveFailedMsg
                                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
@@ -324,11 +276,6 @@ fun ImageGalleryViewer(
     }
 }
 
-/**
- * One page inside [ImageGalleryViewer]. Owns its own zoom/pan state so the
- * pager remembers per-page transform independently — flipping to the next
- * page resets the previous page's zoom when its composition leaves.
- */
 @Composable
 private fun GalleryPage(
     item: ImageGalleryItem,
@@ -351,10 +298,6 @@ private fun GalleryPage(
                     translationX = offsetX,
                     translationY = offsetY,
                 )
-                // When zoomed, this pointerInput intercepts horizontal pan
-                // so the parent pager doesn't change pages while the user
-                // is panning around inside a magnified image. Mirrors iOS
-                // UIScrollView naturally blocking the parent TabView swipe.
                 .pointerInput(Unit) {
                     detectTransformGestures { _, pan, zoom, _ ->
                         scale = (scale * zoom).coerceIn(1f, 8f)
@@ -383,11 +326,6 @@ private fun GalleryPage(
     }
 }
 
-/**
- * Same shape as the FullscreenImageViewer.findDialogWindow walker —
- * duplicated here (private in the other file) to avoid making it a
- * public utility before we know which other components need it.
- */
 private fun findDialogWindowForGallery(root: android.view.ViewGroup): android.view.Window? {
     var p: android.view.ViewParent? = root.parent
     while (p != null) {

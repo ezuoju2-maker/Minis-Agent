@@ -9,18 +9,6 @@ import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-shell-stall-yes-head] Agent shells must start with SIGPIPE unblocked.
- *
- * ART blocks SIGPIPE in every app thread and ProcessBuilder's child keeps that
- * mask, so busybox `yes STRING | head -c N` spun on EPIPE forever and the
- * shell_execute call hung until its timeout (Pixel 4a, W2 run: 6+ minutes).
- * Reproduced off-device on Alpine 3.21 busybox 1.37.0: the same runner line
- * finishes in 0.03 s with the default mask and never finishes with SIGPIPE
- * blocked or ignored. The JNI half needs a device; these tests pin the
- * Kotlin half (order, restore, failure handling) and that every ProcessBuilder
- * spawn of an agent shell goes through it.
- */
 class SpawnSignalMaskTest {
 
     private val original = SpawnSignalMask.native
@@ -121,7 +109,6 @@ class SpawnSignalMaskTest {
         assertEquals(listOf("unblock", "block"), events)
     }
 
-    /** Every agent-shell spawn site goes through the wrapper; none calls start() itself. */
     @Test
     fun `agent shell spawns all go through SpawnSignalMask`() {
         val sites = listOf("FreshProcessShell.kt", "PersistentShell.kt", "ShellExecutor.kt")
@@ -137,7 +124,6 @@ class SpawnSignalMaskTest {
         }
     }
 
-    /** No other sandbox file spawns with a bare ProcessBuilder (a new path would regress). */
     @Test
     fun `no other sandbox file starts a ProcessBuilder directly`() {
         val offenders = File("src/main/java/com/openminis/app/sandbox").walkTopDown()
@@ -145,8 +131,6 @@ class SpawnSignalMaskTest {
             .filter { f ->
                 val code = f.readLines().filterNot { it.trimStart().startsWith("//") || it.trimStart().startsWith("*") }
                     .joinToString("\n")
-                // A builder held in a variable and started through it, or one
-                // started in the same expression it was created in.
                 val builders = Regex("""va[lr]\s+(\w+)\s*=\s*ProcessBuilder\(""").findAll(code).map { it.groupValues[1] }
                 builders.any { Regex("""\b$it\.start\(\)""").containsMatchIn(code) } ||
                     Regex("""ProcessBuilder\([^\n]*\)\.start\(\)""").containsMatchIn(code)
@@ -156,7 +140,6 @@ class SpawnSignalMaskTest {
         assertEquals(emptyList<String>(), offenders)
     }
 
-    /** The JNI symbols the wrapper relies on exist, with the names the JVM will look up. */
     @Test
     fun `native bridge exports the SIGPIPE helpers`() {
         val c = File("src/main/cpp/pty_bridge.c").readText()
@@ -166,9 +149,6 @@ class SpawnSignalMaskTest {
         val unblockBody = c.substringAfter("PtyBridge_unblockSigpipe(").substringBefore("\n}\n")
         assertFalse("SIGQUIT must stay blocked for ART's signal catcher", unblockBody.contains("SIGQUIT"))
         assertFalse("SIGUSR1 must stay blocked for ART's signal catcher", unblockBody.contains("SIGUSR1"))
-        // [T-sigpipe-pending-drain] A SIGPIPE left pending on this IO thread by an
-        // earlier broken-pipe write is drained while still blocked; unblocking it
-        // would kill the app with no log.
         val drain = unblockBody.indexOf("sigtimedwait(&set, NULL, &zero)")
         assertTrue("pending SIGPIPE is drained", drain >= 0)
         assertTrue(unblockBody.contains("sigpending(&pending) == 0 && sigismember(&pending, SIGPIPE) == 1"))

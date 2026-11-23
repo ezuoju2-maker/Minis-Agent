@@ -6,24 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * What the restore screen offers as a source, and where the Server row goes
- * when nothing is configured yet.
- *
- * Both rules below are decisions about a Compose tree, and the behaviour a
- * user sees is one `onClick` lambda and one absent row — there is no seam to
- * drive them through without an instrumentation host. Rather than skip the
- * coverage or stand up Robolectric for two facts, this asserts against the
- * source itself: the rows are declared literally, so their presence and the
- * branch in the Server row's onClick are readable and pin exactly the thing a
- * future edit would undo.
- *
- * The weakness is honest — this is a structural test, not a behavioural one.
- * It cannot catch a row that renders but is invisible. It CAN catch the two
- * regressions that actually happened here (a duplicate source entry coming
- * back, and the empty-state dialog returning as a dead end), which is what it
- * exists for.
- */
 class RestoreSourceEntriesTest {
 
     private val screen: String by lazy {
@@ -32,11 +14,9 @@ class RestoreSourceEntriesTest {
         f.readText()
     }
 
-    /** Body of `RestoreTab`, so Backup-tab rows cannot satisfy these checks. */
     private val restoreTab: String by lazy {
         val start = screen.indexOf("private fun RestoreTab(")
         assertTrue("RestoreTab not found", start >= 0)
-        // Up to the next top-level composable declaration.
         val end = screen.indexOf("\n@Composable", start + 1).let { if (it < 0) screen.length else it }
         screen.substring(start, end)
     }
@@ -55,9 +35,6 @@ class RestoreSourceEntriesTest {
 
     @Test
     fun `the shared-folders source entry is gone`() {
-        // The system document picker behind "Choose Backup File…" already
-        // reaches mounted shared folders, so a second narrower entry was pure
-        // redundancy. iOS never had it.
         assertFalse(
             "the Shared Folders restore source should not come back",
             screen.contains("backup_choose_shared"),
@@ -83,13 +60,6 @@ class RestoreSourceEntriesTest {
 
     @Test
     fun `the server row always opens the restore-server list, with no empty-case branch`() {
-        // The regression this guards, in BOTH directions:
-        //  - the old dead end: onClick opened a dialog whose entire content
-        //    was "no servers configured" over a lone Cancel;
-        //  - the interim fix: branching on `destinations.isEmpty()` to jump
-        //    straight into the Add form, which made the empty state a special
-        //    case again and skipped the list a configured user still needs.
-        // One unconditional destination is the property worth pinning.
         val rowStart = restoreTab.indexOf("R.string.backup_choose_server")
         assertTrue("server row not found in RestoreTab", rowStart >= 0)
         val rowEnd = restoreTab.indexOf("showDivider", rowStart)
@@ -123,9 +93,6 @@ class RestoreSourceEntriesTest {
         val list = File(
             "src/main/java/com/openminis/app/ui/settings/backup/RestoreServersScreen.kt",
         ).readText()
-        // The Add row is declared OUTSIDE the remotes loop, so it renders
-        // whether or not any server exists — that is what stops "none
-        // configured" from being a dead end.
         val loopEnd = list.indexOf("remotes.forEach")
         assertTrue("the servers loop should exist", loopEnd >= 0)
         val addIdx = list.indexOf("R.string.backup_dest_add_server")
@@ -141,10 +108,7 @@ class RestoreSourceEntriesTest {
         val list = File(
             "src/main/java/com/openminis/app/ui/settings/backup/RestoreServersScreen.kt",
         ).readText()
-        // Hosting the shared composable is fine; declaring a second one is not.
         assertTrue(
-            // Matched on the call, not a one-line spelling of it: the argument
-            // list has grown (pickFolder / onSaved) and will grow again.
             "the list should host the shared AddServerForm",
             list.contains("AddServerForm("),
         )

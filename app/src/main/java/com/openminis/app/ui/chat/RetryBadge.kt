@@ -38,32 +38,18 @@ import androidx.compose.ui.unit.sp
 import com.openminis.app.R
 import com.openminis.app.ui.theme.ChatColors
 
-/**
- * [T-android-retry-badge] One automatic retry of a request in the current
- * generation. Kept in memory only, for the badge's detail sheet, and dropped
- * when the generation ends; the retry itself is also logged.
- */
 data class RetryRecord(
-    /** 1-based retry number within its ladder. */
     val attempt: Int,
     val maxAttempts: Int,
-    /** Wall-clock time the failure was seen and the retry scheduled. */
     val atMs: Long,
-    /** Why the request failed. */
     val error: String,
-    /** The model the failed request went to. */
     val model: String,
-    /** The provider instance (endpoint) it went through, when known. */
     val endpoint: String?,
-    /** Seconds waited before the retry. */
     val delaySec: Int,
-    /** The model differs from the previous retry's in this generation. */
     val switchedModel: Boolean,
 )
 
-/** [T-android-retry-badge] Pure bookkeeping for the per-generation retry log. */
 internal object RetryLog {
-    /** Append a retry, marking whether the model changed since the previous one. */
     fun append(
         log: List<RetryRecord>,
         attempt: Int,
@@ -79,19 +65,13 @@ internal object RetryLog {
         return log + RetryRecord(attempt, maxAttempts, atMs, error, model, endpoint, delaySec, switched)
     }
 
-    /** "1/3": the badge's text, or null when no retry is in progress. */
     fun badgeText(attempt: Int, maxAttempts: Int): String? =
         if (attempt <= 0) null else "$attempt/$maxAttempts"
 }
 
-/** Yellow, as iOS's retry badge; dark text keeps it readable on both themes. */
 private val RetryBadgeFill = Color(0xFFFFCC00)
 private val RetryBadgeText = Color(0xFF5C4400)
 
-/**
- * [T-android-retry-badge] The "↻ 1/3" capsule in front of "<name> is
- * thinking…" while an automatic retry is in progress. Tap opens the retry log.
- */
 @Composable
 internal fun RetryBadge(attempt: Int, maxAttempts: Int, onClick: () -> Unit) {
     val text = RetryLog.badgeText(attempt, maxAttempts) ?: return
@@ -115,10 +95,6 @@ internal fun RetryBadge(attempt: Int, maxAttempts: Int, onClick: () -> Unit) {
     }
 }
 
-/**
- * [T-android-retry-badge] The retries of this task so far: number, time,
- * error, model / endpoint, delay, and whether the model changed.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun RetryLogSheet(records: List<RetryRecord>, onDismiss: () -> Unit) {

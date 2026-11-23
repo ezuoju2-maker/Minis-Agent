@@ -20,38 +20,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/** One row of the storage list: a ROOT session with its hidden children folded in. */
 internal data class SessionStorageInfo(
     val id: String,
     val title: String?,
     val minisSize: Long,
     val mediaSize: Long,
-    /** Hidden helper (child) sessions folded into this row. */
     val childCount: Int = 0,
 ) {
     val totalSize: Long get() = minisSize + mediaSize
 }
 
-/**
- * [T-android-storage-usage-cache] Pure bookkeeping for the cached session
- * list, kept apart from the ViewModel so the incremental rules are testable
- * without a device.
- *
- * The invariant every operation keeps: the list is sorted by total size,
- * largest first, and holds each root session at most once.
- */
 internal object SessionStorageRows {
 
-    /** Largest first; ties keep a stable order by id so rows do not jitter. */
     fun sorted(rows: Collection<SessionStorageInfo>): List<SessionStorageInfo> =
         rows.sortedWith(compareByDescending<SessionStorageInfo> { it.totalSize }.thenBy { it.id })
 
-    /**
-     * Apply fresh measurements for [measured] root ids. A value of null means
-     * the session no longer exists (deleted), so its row goes; any other value
-     * replaces the row. Rows not mentioned are left exactly as they were —
-     * that is the whole point: nothing else is re-measured.
-     */
     fun applyMeasurements(
         rows: List<SessionStorageInfo>,
         measured: Map<String, SessionStorageInfo?>,
@@ -67,15 +50,6 @@ internal object SessionStorageRows {
 
     fun total(rows: List<SessionStorageInfo>): Long = rows.sumOf { it.totalSize }
 
-    /**
-     * Measure only [rootIds]: each one's own files plus its hidden children's,
-     * the same folding [aggregateSessionStorage] does for the full scan, so an
-     * incremental value always equals what a full rescan would show.
-     *
-     * A root that is not in [sessions] (deleted) maps to null. A child id
-     * passed by mistake is measured as the root it folds into, because the
-     * list only ever shows roots.
-     */
     fun measureRoots(
         rootIds: Collection<String>,
         sessions: List<ChatSessionEntity>,
@@ -88,7 +62,6 @@ internal object SessionStorageRows {
         val membersByRoot = roots.associateWith { root ->
             if (root in byId) SessionTree.membersOf(root, parentOf).ifEmpty { listOf(root) } else emptyList()
         }
-        // One walk of the media tree for every root measured here together.
         val media = storage.mediaSizesBySession(membersByRoot.values.flatten().toSet())
         return roots.associateWith { root ->
             val session = byId[root] ?: return@associateWith null
@@ -104,27 +77,6 @@ internal object SessionStorageRows {
     }
 }
 
-/**
- * [T-android-storage-usage-cache] Settings › Storage, measured once per visit.
- *
- * The screen used to keep its numbers in `remember` state and measure in
- * `LaunchedEffect(Unit)`. Navigation Compose disposes a destination's
- * composition when another screen is pushed on top, so every return from a
- * session's detail page re-ran the whole scan: the Ubuntu 24.04 rootfs walk, the
- * database, logs, and every session's workspace plus the media tree. Clearing
- * logs re-ran it too.
- *
- * This ViewModel is scoped to the Storage back-stack entry, so it lives while
- * the user moves between the list and a detail page and is dropped when they
- * leave Storage. It measures everything once, then only ever re-measures what
- * an action changed:
- *  - a detail page reports the sizes it measured for its own session
- *    ([onSessionMeasured]) — no extra disk work at all;
- *  - batch clear / delete re-measure only the sessions they touched;
- *  - clearing logs re-measures only logs & caches;
- *  - opening the rootfs screen marks the shell size stale, re-measured when
- *    the list is shown again (a reset there changes it).
- */
 internal class StorageUsageViewModel(
     context: Context,
     private val repo: ChatRepository,
@@ -140,7 +92,6 @@ internal class StorageUsageViewModel(
         val logsCachesSize: Long = 0L,
         val rows: List<SessionStorageInfo> = emptyList(),
         val isClearingLogs: Boolean = false,
-        /** [T-storage-orphan-cleanup] Bytes in session folders no conversation owns. */
         val orphanBytes: Long = 0L,
         val isCleaningOrphans: Boolean = false,
         val selecting: Boolean = false,
@@ -151,7 +102,6 @@ internal class StorageUsageViewModel(
         val selectedSize: Long get() = rows.filter { it.id in selectedIds }.sumOf { it.totalSize }
     }
 
-    /** Outcome of a batch action, shown once as a toast. */
     sealed interface BatchResult {
         data class Cleared(val sessions: Int, val freed: Long, val failedPaths: List<String>) : BatchResult
         data class Deleted(val sessions: Int, val freed: Long) : BatchResult
@@ -162,7 +112,6 @@ internal class StorageUsageViewModel(
 
     private val orphans = OrphanedSessionFiles(storage)
 
-    /** [T-storage-orphan-cleanup] Outcome of a clean-up, shown once as a dialog. */
     private val _orphanResult = MutableStateFlow<OrphanedSessionFiles.Result?>(null)
     val orphanResult: StateFlow<OrphanedSessionFiles.Result?> = _orphanResult.asStateFlow()
 
@@ -175,13 +124,10 @@ internal class StorageUsageViewModel(
         scanAll()
     }
 
-    /** The one full measurement of a visit. */
     private fun scanAll() {
         viewModelScope.launch {
             val started = System.currentTimeMillis()
             val scanned = withContext(Dispatchers.IO) {
-                // [T-storage-orphan-cleanup] Folders first, ids after: a session
-                // created in between is then in the id set.
                 val listedFolders = orphans.listFolders()
                 val allSessions = repo.dao.listSessions()
                 val orphanScan = orphans.scan(
@@ -214,7 +160,6 @@ internal class StorageUsageViewModel(
         }
     }
 
-    /** Called each time the list is shown; cheap unless something is stale. */
     fun onListShown() {
         if (!shellStale) return
         shellStale = false
@@ -230,11 +175,6 @@ internal class StorageUsageViewModel(
         shellStale = true
     }
 
-    /**
-     * A detail page measured [sessionId] (on open, after returning from its
-     * file browser, after a clear). Those are exactly the numbers the list
-     * row needs, so take them as they are instead of measuring again.
-     */
     fun onSessionMeasured(sessionId: String, minisSize: Long, mediaSize: Long) {
         _state.update { st ->
             val row = st.rows.firstOrNull { it.id == sessionId } ?: return@update st
@@ -249,24 +189,17 @@ internal class StorageUsageViewModel(
         }
     }
 
-    /** Sessions the app is using right now, row or no row: never cleaned. */
     private fun sessionsInUse(): Set<String> {
         val t = com.openminis.app.service.SessionActivityTracker
         return t.activeSessions.value + t.presentSessions.value + t.scheduledSessions.value + t.processingSessions.value
     }
 
-    /** A fresh scan of what would be cleaned now. Deletes nothing. */
     private suspend fun scanOrphans(): OrphanedSessionFiles.Scan = withContext(Dispatchers.IO) {
         val listed = orphans.listFolders()
         val ids = repo.dao.listSessions().mapTo(HashSet()) { it.id }
         orphans.scan(listed, ids, sessionsInUse(), System.currentTimeMillis())
     }
 
-    /**
-     * [T-storage-orphan-cleanup] The button looks first, so the confirmation
-     * names what will really be deleted (part of the row may be waiting out
-     * the hour). [onResult] gets the scan; nothing is deleted here.
-     */
     fun previewOrphanCleanup(onResult: (OrphanedSessionFiles.Scan) -> Unit) {
         viewModelScope.launch {
             val scan = scanOrphans()
@@ -275,7 +208,6 @@ internal class StorageUsageViewModel(
         }
     }
 
-    /** Scan again (never trust the preview), delete only that scan's removable folders. */
     fun cleanOrphans() {
         if (_state.value.isCleaningOrphans) return
         _state.update { it.copy(isCleaningOrphans = true) }
@@ -309,7 +241,6 @@ internal class StorageUsageViewModel(
         }
     }
 
-    // ─── Multi-select ──────────────────────────────────────────────────────
 
     fun startSelecting(initial: String? = null) {
         _state.update { it.copy(selecting = true, selectedIds = setOfNotNull(initial)) }
@@ -332,7 +263,6 @@ internal class StorageUsageViewModel(
         }
     }
 
-    /** Clear the selected sessions' files (their hidden children's too); rows stay. */
     fun clearSelectedFiles() {
         val ids = _state.value.selectedIds.toList()
         if (ids.isEmpty() || _state.value.batchBusy) return
@@ -342,8 +272,6 @@ internal class StorageUsageViewModel(
             val (failed, measured) = withContext(Dispatchers.IO) {
                 val sessions = repo.dao.listSessions()
                 val parentOf = sessions.associate { it.id to it.parentSessionId }
-                // Same cascade as the detail page's single clear: the root's
-                // files and every hidden child's.
                 val failed = ids.flatMap { root ->
                     SessionTree.membersOf(root, parentOf).ifEmpty { listOf(root) }
                         .flatMap { storage.deleteFilesDetailed(it).failedPaths }
@@ -364,7 +292,6 @@ internal class StorageUsageViewModel(
         }
     }
 
-    /** Delete the selected sessions through the one delete funnel; rows go. */
     fun deleteSelected() {
         val ids = _state.value.selectedIds.toList()
         if (ids.isEmpty() || _state.value.batchBusy) return
@@ -373,8 +300,6 @@ internal class StorageUsageViewModel(
             val before = _state.value.rows.filter { it.id in ids }.sumOf { it.totalSize }
             val (measured, db) = withContext(Dispatchers.IO) {
                 ids.forEach { SessionDeleter.deleteTree(appContext, repo, it, "storage-multi") }
-                // Re-measure the touched ids: deleted ones come back null and
-                // drop out. The database shrank too; its size is two stat calls.
                 SessionStorageRows.measureRoots(ids, repo.dao.listSessions(), storage) to databaseSize(appContext)
             }
             val remaining = measured.values.sumOf { it?.totalSize ?: 0L }

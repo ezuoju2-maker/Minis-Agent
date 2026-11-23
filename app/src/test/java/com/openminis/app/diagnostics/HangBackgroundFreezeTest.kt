@@ -7,13 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-hang-background-freeze] Field log (Android 12 tablet): while an OAuth
- * sign-in had the browser on top, the cached-apps freezer stopped the whole
- * process for 39 s, watchdog thread included. On the thaw the watchdog saw a
- * 39 089 ms gap, counted it as a main-thread hang and tripped the launch
- * breaker. Time spent in the background is not a hang the user saw.
- */
 class HangBackgroundFreezeTest {
 
     private fun reason(since: Long, bg: Boolean, visible: Boolean, idle: Boolean = false) =
@@ -34,8 +27,6 @@ class HangBackgroundFreezeTest {
 
     @Test
     fun `a hang that began in the background and is on screen now is counted`() {
-        // ON_START is dispatched on the hung main thread, so the lifecycle
-        // flag still says background while the user is looking at the app.
         assertNull(reason(8_000L, bg = true, visible = true))
     }
 
@@ -48,17 +39,12 @@ class HangBackgroundFreezeTest {
 
     @Test
     fun `time the watchdog itself was frozen is not judged, unless an episode is running`() {
-        // Field case: frozen 39 s, thawed as the user came back (visible).
-        // Measured from the resume, the gap is ~0 - nothing to count.
         val heartbeat = 1_000L
         val resumed = 40_100L
         assertEquals(400L, HangDetector.judgedGapMs(now = 40_500L, lastHeartbeat = heartbeat, resumedAt = resumed, hangActive = false))
-        // Still stuck 4 s after the thaw: that stall is real and gets counted.
         assertEquals(4_000L, HangDetector.judgedGapMs(now = 44_100L, lastHeartbeat = heartbeat, resumedAt = resumed, hangActive = false))
         assertNull(reason(4_000L, bg = true, visible = true))
-        // A freeze inside a running episode neither ends it nor splits it.
         assertEquals(39_500L, HangDetector.judgedGapMs(now = 40_500L, lastHeartbeat = heartbeat, resumedAt = resumed, hangActive = true))
-        // No suspension: the plain heartbeat gap.
         assertEquals(3_500L, HangDetector.judgedGapMs(now = 4_500L, lastHeartbeat = heartbeat, resumedAt = 0L, hangActive = false))
         assertEquals(5_000L, HangDetector.WATCHDOG_SUSPENDED_MS)
     }

@@ -75,15 +75,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
-/**
- * Source of HTML bytes for the "Add to Home Screen" sheet. T-pwa-2 only
- * supported chat-attachment URIs; T-pwa-3 adds [HostFile] for FileBrowser
- * rows where we already know an absolute Linux path under
- * `/var/minis/shared/...` or `/var/minis/mounts/<name>/...` and don't
- * need to copy bytes — the shortcut links to the live file in place.
- */
 sealed class WebAppSource {
-    /** Chat attachment chip → copy bytes into per-session attachments dir. */
     data class ChatAttachment(
         val uri: Uri,
         val fileName: String,
@@ -91,12 +83,6 @@ sealed class WebAppSource {
         val sessionTitle: String?,
     ) : WebAppSource()
 
-    /**
-     * FileBrowser row → host file already on disk, link in place.
-     * [linuxPath] is the absolute `/var/minis/...` path the shortcut
-     * persists; [pathScope] is `shared` or `mount`; [scopeContext] is
-     * null for shared, the mount name for mount.
-     */
     data class HostFile(
         val file: File,
         val fileName: String,
@@ -107,13 +93,6 @@ sealed class WebAppSource {
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-/**
- * Bottom-sheet for "Add to Home Screen". T-pwa-2 launched it from the
- * chat-attachment chip's long-press menu; T-pwa-3 also launches it from
- * the FileBrowser row long-press menu via [WebAppSource.HostFile]. The sheet
- * lets the user pick a title + icon, then calls
- * [WebAppShortcutRepository.create] + [ShortcutPinner.pin].
- */
 @Composable
 fun AddToHomeSheet(
     source: WebAppSource,
@@ -123,10 +102,6 @@ fun AddToHomeSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
 
-    // shortcutId is decided up-front so the copied attachment lives at
-    // <attachmentsDir>/<shortcutId>/<fileName> — stable for the life of
-    // the shortcut even if the user later removes the chip. (Only used
-    // by the ChatAttachment branch; the HostFile branch links in place.)
     val shortcutId = remember { UUID.randomUUID().toString() }
 
     val fileName: String = when (source) {
@@ -134,9 +109,6 @@ fun AddToHomeSheet(
         is WebAppSource.HostFile -> source.fileName
     }
 
-    // For ChatAttachment we copy the source URI into a stable host path
-    // before the user commits; for HostFile the file already exists so
-    // we just point [copiedFile] at it.
     var copiedFile by remember { mutableStateOf<File?>(null) }
     var copyFailed by remember { mutableStateOf(false) }
     var parsedTitle by remember { mutableStateOf<String?>(null) }
@@ -188,7 +160,6 @@ fun AddToHomeSheet(
 
     var selectedIcon by remember { mutableStateOf<IconChoice>(IconChoice.Preset(IconPreset.Globe)) }
 
-    // Auto-promote to webpage icon once we discover one.
     LaunchedEffect(webpageIconPath) {
         if (webpageIconPath != null && selectedIcon is IconChoice.Preset) {
             selectedIcon = IconChoice.Webpage(webpageIconPath!!)
@@ -219,7 +190,6 @@ fun AddToHomeSheet(
                 fontWeight = FontWeight.SemiBold,
             )
 
-            // Title input.
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     text = stringResource(R.string.webapp_sheet_title_label),
@@ -233,9 +203,6 @@ fun AddToHomeSheet(
                 )
             }
 
-            // Source label (read-only). For chat attachments we show the
-            // linked session id/title; for FileBrowser host files we show
-            // the absolute Linux path so the user knows what's being linked.
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     text = stringResource(R.string.webapp_sheet_session_label),
@@ -253,7 +220,6 @@ fun AddToHomeSheet(
                 )
             }
 
-            // Icon selector.
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = stringResource(R.string.webapp_sheet_icon_label),
@@ -261,7 +227,6 @@ fun AddToHomeSheet(
                 )
 
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // Webpage icon (only if extractor found one).
                     webpageIconPath?.let { path ->
                         item {
                             IconOption(
@@ -285,7 +250,6 @@ fun AddToHomeSheet(
                         }
                     }
 
-                    // 8 presets.
                     items(IconPreset.values().toList()) { preset ->
                         IconOption(
                             selected = (selectedIcon as? IconChoice.Preset)?.preset == preset,
@@ -297,7 +261,6 @@ fun AddToHomeSheet(
                     }
                 }
 
-                // Gallery picker entry.
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -344,7 +307,6 @@ fun AddToHomeSheet(
                 )
             }
 
-            // Buttons row.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -375,10 +337,6 @@ fun AddToHomeSheet(
                             val app = context.applicationContext as MinisApp
                             val entity = when (source) {
                                 is WebAppSource.ChatAttachment -> {
-                                    // htmlPath stays relative under the
-                                    // session attachments dir — WebAppPathResolver's
-                                    // "relative path" branch resolves it back to
-                                    // <filesDir>/sessions/<sid>/attachments/<htmlPath>.
                                     val htmlPath = "$shortcutId/${target.name}"
                                     app.webAppShortcutRepository.create(
                                         htmlPath = htmlPath,
@@ -391,9 +349,6 @@ fun AddToHomeSheet(
                                     )
                                 }
                                 is WebAppSource.HostFile -> {
-                                    // T-pwa-3: link in place — htmlPath is the
-                                    // /var/minis/... linux path; WebAppPathResolver
-                                    // routes through PRootKernel.resolveHostPath.
                                     app.webAppShortcutRepository.create(
                                         htmlPath = source.linuxPath,
                                         pathScope = source.pathScope,
@@ -468,7 +423,6 @@ private sealed class IconChoice {
     data class Gallery(val uri: Uri) : IconChoice()
 }
 
-// ── helpers ─────────────────────────────────────────────────────────────────
 
 private val TITLE_RE = Regex("<title[^>]*>(.*?)</title>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
 
@@ -488,11 +442,6 @@ private fun loadBitmapFromUri(context: Context, uri: Uri): Bitmap? = runCatching
     context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
 }.getOrNull()
 
-/**
- * Render a 192x192 adaptive-ready bitmap for the launcher pin. Adaptive
- * icons need 108dp safe-zone inside a 108dp shape; we go with 192x192px
- * which most launchers accept and crop down as needed.
- */
 private fun renderIconBitmap(context: Context, choice: IconChoice, title: String): Bitmap {
     val size = 192
     val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)

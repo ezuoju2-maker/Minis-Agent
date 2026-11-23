@@ -1,4 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Minis</string>
     <string name="new_chat">Nuevo chat</string>
@@ -1931,7 +1930,6 @@
     <string name="chat_share_n_selected">%1$d seleccionados</string>
     <string name="chat_share_select_all">Seleccionar todo</string>
     <string name="chat_share_deselect_all">Deseleccionar todo</string>
-    <!-- [T-port-user-ask] user_ask card and settings; text from the iOS string catalog. -->
     <string name="user_ask_needs_answer">Necesita tu respuesta</string>
     <string name="user_ask_needs_approval">Necesita tu aprobación</string>
     <string name="user_ask_high_risk">Acción de alto riesgo</string>
@@ -1974,17 +1972,14 @@
     <string name="user_ask_setting_indefinitely">Sin límite</string>
     <string name="user_ask_setting_minutes">%1$d min</string>
     <string name="user_ask_setting_footer">Permite que el asistente te pida elegir entre opciones, o confirmar una acción arriesgada antes de hacerla, con una tarjeta en el chat. Solo en chats en los que estás, nunca para subagentes, Atajos ni tareas programadas. Desactivado, el asistente decide por sí mismo y no hace acciones arriesgadas sin tu permiso.</string>
-    <!-- [T-android-user-ask-notify] user_ask background notification. -->
     <string name="user_ask_setting_notify">Avisar en segundo plano</string>
     <string name="user_ask_notif_high_risk">Necesita aprobación · Alto riesgo</string>
     <string name="user_ask_notif_open_app">Abrir la app</string>
     <string name="user_ask_notif_hidden_body">Hay una pregunta esperando tu respuesta</string>
     <string name="user_ask_notif_channel_name">Preguntas para ti</string>
     <string name="user_ask_notif_channel_description">Preguntas del asistente mientras Minis está en segundo plano; puedes responderlas desde la notificación</string>
-    <!-- [T-tool-preview-longpress-close] Long-press the tool status bar preview -->
     <string name="tool_preview_close_menu">Cerrar ventana de vista previa</string>
     <string name="tool_preview_closed_toast">Ventana de vista previa cerrada. Puedes volver a activarla en Ajustes &gt; Apariencia.</string>
-    <!-- [T-mcp-oauth-signin-android] MCP browser sign-in (iOS #432) -->
     <string name="mcp_form_auth_mode">Autorización</string>
     <string name="mcp_form_auth_none">Ninguno</string>
     <string name="mcp_signin_not_signed_in">Sesión no iniciada</string>

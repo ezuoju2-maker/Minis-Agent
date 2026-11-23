@@ -46,18 +46,6 @@ import com.openminis.app.ui.components.modelEntryPickerItems
 import com.openminis.app.ui.components.MinisButton
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * T185 — full-screen picker for adding model entries to the agent-loop
- * usable set. Replaces the T182 ModalBottomSheet with the same
- * Scaffold + sectioned multi-select shape `AddModelsToGroupScreen` uses,
- * via the shared [modelEntryPickerItems] in `ui/components/`. Mirrors
- * iOS `AddAgentLoopModelsSheet` (which is a NavigationStack-wrapped
- * sheet content — same sectioned-list visual we land here).
- *
- * Multi-select with a confirm button in the top bar (vs the pre-T185
- * tap-and-add-immediately bottom sheet) so a user adding 5 models from
- * the same provider doesn't bounce in and out of the picker.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddAgentLoopModelsScreen(
@@ -67,9 +55,6 @@ fun AddAgentLoopModelsScreen(
     val config by providerRepository.config.collectAsState()
 
     val pinnedEntries = config.agentLoopModelEntryIds.toSet()
-    // Skip entries already reachable through a pinned group — adding a
-    // direct pin on top of group membership would be a no-op for the
-    // resolved usable set and just clutters the section UI.
     val groupBackedEntries: Set<String> = config.agentLoopGroupIds
         .mapNotNull { gid -> config.modelGroups.find { it.id == gid } }
         .flatMap { it.memberEntryIds }
@@ -105,9 +90,6 @@ fun AddAgentLoopModelsScreen(
                     MinisTextButton(onClick = onBack) { Text(stringResource(R.string.common_cancel)) }
                     MinisButton(
                         onClick = {
-                            // Add in stable order so the section renders
-                            // pinned items in the order the user saw them
-                            // in the picker, not insertion-set order.
                             val orderedToAdd = availableEntries
                                 .map { it.id }
                                 .filter { it in selectedIds }
@@ -129,7 +111,6 @@ fun AddAgentLoopModelsScreen(
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        // [T-picker-search-debounce] Ranked, capped, debounced search.
         val searchSections = com.openminis.app.ui.components.rememberModelEntryPickerSections(
             instances = config.instances,
             availableEntries = availableEntries,
@@ -159,14 +140,6 @@ fun AddAgentLoopModelsScreen(
     }
 }
 
-/**
- * T185 — full-screen picker for adding model groups to the agent-loop
- * usable set. Groups don't have a per-provider grouping dimension, so
- * this screen is structurally simpler than the entries picker: a flat
- * card-style multi-select list of all groups not already pinned.
- * Visuals (selection circle, surfaceContainer card, divider treatment)
- * mirror the entries picker so both feel like one family.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddAgentLoopGroupsScreen(
@@ -201,9 +174,6 @@ fun AddAgentLoopGroupsScreen(
                     MinisTextButton(onClick = onBack) { Text(stringResource(R.string.common_cancel)) }
                     MinisButton(
                         onClick = {
-                            // Same stable-order add policy as the entries
-                            // picker so the section ordering matches the
-                            // user's mental model.
                             val orderedToAdd = available
                                 .map { it.id }
                                 .filter { it in selectedIds }
@@ -262,10 +232,6 @@ fun AddAgentLoopGroupsScreen(
                                 index == available.size - 1 -> RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
                                 else -> RoundedCornerShape(0.dp)
                             }
-                            // Compose a short member-name preview so the
-                            // user remembers what the group contains
-                            // without tapping into detail. Mirrors iOS
-                            // AddAgentLoopGroupsSheet preview row.
                             val memberNames = group.memberEntryIds
                                 .mapNotNull { mid ->
                                     config.modelEntries.find { it.id == mid }?.model?.displayName

@@ -4,13 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-voice-correction] Mirrors iOS MinisTests/VoiceCorrectionTests
- * (L166-220). The rank provider is injected so no asset is needed.
- */
 class VocabularyFilterTest {
 
-    /** Only these count as "ordinary"; everything else is rare. */
     private val fakeRank: (String) -> Int? = { term ->
         if (term in setOf("今天", "可以", "我们", "hello")) 1 else null
     }
@@ -29,7 +24,6 @@ class VocabularyFilterTest {
         return d as VocabularyFilter.Decision.Accepted
     }
 
-    // -- absolute rejects --
 
     @Test
     fun `chinese stopwords are rejected`() {
@@ -57,25 +51,19 @@ class VocabularyFilterTest {
         assertRejected("12345")
     }
 
-    // -- ⚠️ the CJK-numeral traps (real on-device bugs on iOS) --
 
     @Test
     fun `chinese term does not falsely score as containing latin`() {
-        // Character.isLetter() is true for Han — without the ASCII guard every
-        // Chinese term would collect the hasLatinOrDigit point.
         val a = accepted("张三", posTag = "nr")
         assertEquals(0, a.breakdown.hasLatinOrDigit)
     }
 
     @Test
     fun `cjk numerals are not treated as digits`() {
-        // Character.isDigit() is true for 一二三 — unguarded, "三星" would be
-        // rejected as no_lexical_content and 张三 would get a phantom point.
         val a = accepted("三星")
         assertEquals(0, a.breakdown.hasLatinOrDigit)
     }
 
-    // -- positive scoring --
 
     @Test
     fun `proper noun tags earn the pos point`() {
@@ -97,10 +85,8 @@ class VocabularyFilterTest {
 
     @Test
     fun `a term in the background list loses the rare bonus`() {
-        // "今天" is ranked, and is also a stopword — use a ranked non-stopword.
         val ranked: (String) -> Int? = { if (it == "阿里巴巴") 1 else null }
         val d = VocabularyFilter.evaluate("阿里巴巴", null, ranked)
-        // rank suppresses +2; length 4 gives +1 -> total 1 < 2 -> rejected.
         assertTrue("expected rejection, got $d", d is VocabularyFilter.Decision.Rejected)
     }
 
@@ -115,19 +101,17 @@ class VocabularyFilterTest {
     @Test
     fun `length bonus applies only within 2 to 6`() {
         assertEquals(1, accepted("闪退").breakdown.lengthOk)
-        // 7 chars: rare +2 only, still accepted, but no length point.
         val long = accepted("超长词语测试用")
         assertEquals(0, long.breakdown.lengthOk)
     }
 
-    // -- candidates() --
 
     @Test
     fun `candidates uses pos tags when available`() {
         val tagged = listOf("杭州" to "ns", "创办" to "v", "杭州" to "ns")
         val out = VocabularyFilter.candidates("x", { tagged }, { emptyList() })
         val hangzhou = out.first { it.first == "杭州" }
-        assertEquals(2, hangzhou.second)      // counted twice
+        assertEquals(2, hangzhou.second)
         assertEquals("ns", hangzhou.third)
     }
 
@@ -139,7 +123,6 @@ class VocabularyFilterTest {
         assertEquals(2, out.first { it.first == "alpha" }.second)
     }
 
-    // -- background list parsing --
 
     @Test
     fun `word frequency parser skips comments and malformed lines`() {

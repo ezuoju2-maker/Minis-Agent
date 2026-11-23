@@ -5,12 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-table-column-align] Chat tables follow the GFM separator row's
- * column alignment, like iOS (SelectableMarkdownView: `.center` / `.right`,
- * anything else left). The separator used to be skipped outright, so every
- * column rendered at start whatever the markdown asked for.
- */
 class TableColumnAlignTest {
 
     @Test

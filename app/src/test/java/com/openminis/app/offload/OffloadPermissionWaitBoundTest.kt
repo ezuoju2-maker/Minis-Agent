@@ -22,20 +22,9 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 
-/**
- * [GH #453] The in-app permission dialogs' waits are bounded and a second
- * request no longer orphans the first.
- *
- * Callers are often offload worker threads blocked in runBlocking; the offload
- * protocol has no cancel message, so an unanswered or orphaned wait held its
- * thread for the life of the process. Before the fix: the concurrent cases
- * below never completed (the first continuation was overwritten), and the
- * unanswered cases never returned.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class OffloadPermissionWaitBoundTest {
-    // OffloadPermissionManager.DECISION_TIMEOUT_MS, as a literal so this file also compiles against the old code.
     private val timeout = 5 * 60_000L
     private val session = "gh453-test"
 
@@ -88,7 +77,6 @@ class OffloadPermissionWaitBoundTest {
         assertTrue(call.isCompleted)
         assertFalse(call.await())
         assertNull("the dialog is withdrawn", OffloadPermissionManager.pendingRequest.value)
-        // Not remembered as "deny in this session": the next call asks again.
         val again = async { OffloadPermissionManager.checkPermission("contacts", "Contacts", session) }
         runCurrent()
         assertNotNull(OffloadPermissionManager.pendingRequest.value)
@@ -123,9 +111,6 @@ class OffloadPermissionWaitBoundTest {
     }
 
     @Test fun `a dialog that outlived its request answers nothing - not even the next gate`() = runTest {
-        // [T-settings-gate-stale-dialog] The first gate times out while its
-        // dialog is still up; a second gate takes the slot. Tapping the stale
-        // dialog must not answer the second one.
         val first = async { OffloadPermissionManager.requestSettingsGate(gate("a")) { false } }
         runCurrent()
         val staleRequest = OffloadPermissionManager.pendingSettingsGate.value!!

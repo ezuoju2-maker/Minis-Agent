@@ -6,16 +6,6 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-subagent-card-resume] An interrupted sub agent's card offers a
- * Resume button (iOS HelperBlockView: `isInterrupted` → arrow.clockwise, same
- * slot as Stop), wired to the restart the model's `resume` call uses.
- *
- * "Interrupted" is not a status anything writes: it is a persisted `running`
- * payload whose block is no longer live, i.e. the app stopped mid-run. These
- * pin which cards get the button, and that the button goes through the same
- * slot/queue decision as the model rather than starting past the cap.
- */
 class HelperCardResumeTest {
 
     private fun block(status: String, toolStatus: ToolBlockStatus) = AssistantBlock(
@@ -27,7 +17,6 @@ class HelperCardResumeTest {
         toolStatus = toolStatus,
     )
 
-    /** The card's condition for the Resume button, from HelperToolBlock. */
     private fun offersResume(b: AssistantBlock) = parseHelperBlock(b).finished?.status == "interrupted"
 
     @Test
@@ -52,7 +41,6 @@ class HelperCardResumeTest {
         }
     }
 
-    // ── Wiring ────────────────────────────────────────────────────────────
 
     private fun src(path: String): String {
         val f = File(path)

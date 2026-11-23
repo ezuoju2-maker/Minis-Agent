@@ -10,33 +10,11 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 
-/**
- * Antigravity OAuth manager — mirrors iOS `AntigravityOAuthManager`.
- *
- * Antigravity is Google's experimental "Cloud Code Assist" proxy that routes
- * Claude / Gemini / GPT models through a Gemini-format request envelope. It
- * reuses Google's OAuth endpoints but with its own client_id + client_secret
- * and two extra scopes (`cclog`, `experimentsandconfigs`), and runs a local
- * HTTP callback on port 8086 (distinct from Gemini's 8085 so the two can
- * coexist).
- *
- * **Scaffolding only** — this file captures the OAuth constants and project
- * discovery flow so the provider layer can consume them. Actual request
- * dispatch (the `AntigravityProvider` + `AntigravityAgentProvider` pair from
- * iOS) is not wired yet; when it lands it will reuse
- * [activeBaseURL] + [gcpProjectId] persisted here.
- */
 class AntigravityOAuthManager(context: Context, instanceId: String) : OAuthManager(context, instanceId) {
     companion object {
         private const val TAG = "AntigravityOAuth"
         private const val USER_AGENT = "antigravity/1.107.0 android/aarch64"
 
-        /**
-         * Candidate Cloud Code Assist base URLs, probed in order on login.
-         * `daily-cloudcode-pa` is the preview / daily release channel; the
-         * public `cloudcode-pa` is the fallback. Matches iOS
-         * `AntigravityOAuthManager.cloudCodeBaseURLs`.
-         */
         val cloudCodeBaseURLs = listOf(
             "https://daily-cloudcode-pa.sandbox.googleapis.com",
             "https://cloudcode-pa.googleapis.com",
@@ -46,9 +24,6 @@ class AntigravityOAuthManager(context: Context, instanceId: String) : OAuthManag
     override val authURL = "https://accounts.google.com/o/oauth2/v2/auth"
     override val tokenURL = "https://oauth2.googleapis.com/token"
     override val clientId = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
-    // Placeholder. Google OAuth requires a client secret alongside the
-    // client id; supply your own from Google Cloud Console to use this
-    // sign-in. API-key providers are unaffected.
     override val clientSecret = "GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxxxxx"
     override val callbackPort = 8086
     override val redirectPath = "/oauth2callback"
@@ -76,21 +51,14 @@ class AntigravityOAuthManager(context: Context, instanceId: String) : OAuthManag
         ).joinToString("&")
     }
 
-    /** Cached user email from Google userinfo. */
     var email: String?
         get() = loadOAuthString("email")
         private set(value) { value?.let { saveOAuthString("email", it) } }
 
-    /** GCP project ID discovered via Cloud Code Assist loadCodeAssist. */
     var gcpProjectId: String?
         get() = loadOAuthString("gcp_project")
         private set(value) { value?.let { saveOAuthString("gcp_project", it) } }
 
-    /**
-     * Cloud Code Assist base URL that successfully returned the project on
-     * login. Subsequent requests pin to this URL so the provider doesn't
-     * re-probe the daily/fallback pair on every call.
-     */
     var activeBaseURL: String?
         get() = loadOAuthString("base_url")
         private set(value) { value?.let { saveOAuthString("base_url", it) } }
@@ -103,7 +71,6 @@ class AntigravityOAuthManager(context: Context, instanceId: String) : OAuthManag
     private suspend fun fetchUserEmail() = withContext(Dispatchers.IO) {
         val token = validAccessToken() ?: return@withContext
         try {
-            // [FEAT-261021-16] Routed by the instance's tag; unrouted it is the same HttpURLConnection request.
             com.openminis.app.network.NetworkUrlRequest.open(netTag, "https://www.googleapis.com/oauth2/v1/userinfo",
                 headers = mapOf("Authorization" to "Bearer $token")).use { r ->
                 if (r.code == 200) email = JSONObject(r.text()).optString("email")
@@ -113,11 +80,6 @@ class AntigravityOAuthManager(context: Context, instanceId: String) : OAuthManag
         }
     }
 
-    /**
-     * Probe each candidate Cloud Code Assist base URL in [cloudCodeBaseURLs]
-     * until one returns a project ID. Persists the winning URL in
-     * [activeBaseURL] so the provider avoids re-probing.
-     */
     suspend fun discoverProjectIfNeeded(): Boolean = withContext(Dispatchers.IO) {
         if (!gcpProjectId.isNullOrEmpty() && !activeBaseURL.isNullOrEmpty()) return@withContext true
         val token = validAccessToken() ?: return@withContext false

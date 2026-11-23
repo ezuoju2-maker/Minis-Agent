@@ -1,10 +1,5 @@
 package com.openminis.app.config
 
-/**
- * Type tag + per-type constraints for a [ConfigField]. Drives the
- * pre-write validation in the bridge and `--help` rendering. Mirrors
- * iOS `ConfigValueSchema` (Shared/Config/ConfigField.swift).
- */
 sealed class ConfigSchema {
     object Bool : ConfigSchema()
     data class Int(val min: kotlin.Int? = null, val max: kotlin.Int? = null) : ConfigSchema()
@@ -14,10 +9,8 @@ sealed class ConfigSchema {
     object Path : ConfigSchema()
     data class Optional(val inner: ConfigSchema) : ConfigSchema()
     data class Array(val inner: ConfigSchema) : ConfigSchema()
-    /** Free-form: validation is the writer's responsibility. */
     object Json : ConfigSchema()
 
-    /** Human-readable schema description for `topic-help` output. */
     val helpDescription: String
         get() = when (this) {
             Bool -> "bool"
@@ -35,7 +28,6 @@ sealed class ConfigSchema {
             Json -> "json"
         }
 
-    /** Pure validation. Throws [ConfigError] on failure; never mutates. */
     fun validate(value: ConfigValue) {
         when (this) {
             Bool -> {
@@ -93,5 +85,4 @@ sealed class ConfigSchema {
 
 enum class ConfigAccess { HIDDEN, READONLY, READWRITE }
 
-/** Risk classification surfaced in the confirm dialog. */
 enum class ConfigRisk { NORMAL, SENSITIVE, DESTRUCTIVE }

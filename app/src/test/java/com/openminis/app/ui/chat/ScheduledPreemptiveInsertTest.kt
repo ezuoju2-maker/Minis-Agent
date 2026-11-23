@@ -10,12 +10,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-scheduled-preemptive-insert] A scheduled fire landing in a busy session is
- * slipped in at the next tool boundary — alone, as an inserted envelope, with
- * its prefilled command run as the following turn — instead of waiting for the
- * whole run to end and being merged with everything else that queued up.
- */
 class ScheduledPreemptiveInsertTest {
 
     private val vm by lazy { ProductionSources.read("ui/chat/ChatViewModel.kt") }
@@ -32,7 +26,6 @@ class ScheduledPreemptiveInsertTest {
 
     private fun ids(batch: List<QueuedPrompt>) = batch.map { it.id }
 
-    // ── which prompts go in at a tool boundary ──────────────────────────────
 
     @Test
     fun `a scheduled fire goes in at the tool boundary, on its own`() {
@@ -47,8 +40,6 @@ class ScheduledPreemptiveInsertTest {
 
     @Test
     fun `a user follow-up keeps its old batch, minus any scheduled fire`() {
-        // Before: everything queued was merged into the injected message. The
-        // held callbacks still ride along; scheduled fires never do.
         val q = listOf(callback("1"), user("2"), fire("3"), user("4"))
         assertEquals(listOf("1", "2", "4"), ids(QueuedPromptBatching.nextInsertBatch(q)))
     }
@@ -67,7 +58,6 @@ class ScheduledPreemptiveInsertTest {
         assertEquals(listOf("a", "b", "c"), order)
     }
 
-    // ── the drain after the loop ends ───────────────────────────────────────
 
     @Test
     fun `the drain never merges a scheduled fire with anything`() {
@@ -81,8 +71,6 @@ class ScheduledPreemptiveInsertTest {
 
     @Test
     fun `a boundary and the drain never deliver the same prompt twice`() {
-        // Each path dequeues exactly its batch by id; what one took, the other
-        // cannot see.
         val q = listOf(fire("1"), user("2"))
         val inserted = QueuedPromptBatching.nextInsertBatch(q)
         val left = q.filterNot { it.id in ids(inserted) }
@@ -90,7 +78,6 @@ class ScheduledPreemptiveInsertTest {
         assertTrue(ids(inserted).intersect(ids(drained).toSet()).isEmpty())
     }
 
-    // ── repeated fires ──────────────────────────────────────────────────────
 
     @Test
     fun `a newer fire of the same task replaces the undelivered older one`() {
@@ -99,7 +86,6 @@ class ScheduledPreemptiveInsertTest {
         assertTrue(QueuedPromptBatching.supersededBy(q, "C").isEmpty())
     }
 
-    // ── the inserted envelope ───────────────────────────────────────────────
 
     @Test
     fun `an inserted envelope says it was slipped in and to resume the prior task`() {
@@ -118,11 +104,8 @@ class ScheduledPreemptiveInsertTest {
                 "not a user request. Handle briefly, then resume your unfinished prior task.</system-reminder>",
             ScheduledTaskMarker.insertionReminder("  ", null),
         )
-        // Inside the envelope, never at the head of the message: a user row
-        // that STARTS with <system-reminder> is treated as a hidden synthetic row.
         assertTrue(xml.startsWith("<scheduled_task "))
         assertTrue(xml.contains(">\n$reminder\nSummarise the usage\n</scheduled_task>"))
-        // The card still shows only the prompt.
         val back = ScheduledTaskMarker.parse(xml)!!
         assertEquals(m, back)
         assertEquals("Summarise the usage", back.prompt)
@@ -152,22 +135,17 @@ class ScheduledPreemptiveInsertTest {
 
     @Test
     fun `a fire delivered when the loop is idle keeps the plain envelope`() {
-        // Only the tool-boundary path re-wraps; the drain and an idle send
-        // deliver the envelope exactly as ScheduledAgentRunner built it.
         assertFalse(ScheduledTaskMarker("T1", "L", 5L, "p").xml.contains("inserted"))
     }
 
-    // ── the bridge ──────────────────────────────────────────────────────────
 
     @Test
     fun `old bridge wordings are still kept out of the chat UI`() {
-        // [T-bridge-to-reminder] No longer written, still recognised.
         val bridge = ChatMessage.SCHEDULED_INSERT_BRIDGE_TEXT
         assertTrue(ChatMessage(id = "b", role = "assistant", content = bridge).isInternalBridge)
         assertTrue(ChatMessage.INTERNAL_BRIDGE_TEXT.startsWith("(Interrupted mid-task by a new user message."))
     }
 
-    // ── the reply reported for the fire ─────────────────────────────────────
 
     private fun text(t: String) = """[{"type":"text","value":${org.json.JSONObject.quote(t)}}]"""
 
@@ -199,31 +177,23 @@ class ScheduledPreemptiveInsertTest {
         assertEquals("b", HeadlessChatRunner.responseTextFor("hi", rows, fromIndex = -1))
     }
 
-    // ── wiring ──────────────────────────────────────────────────────────────
 
     @Test
     fun `the tool boundary and the drain use the batching rules`() {
         assertTrue(vm.contains("val insertBatch = QueuedPromptBatching.nextInsertBatch(_promptQueue.value)"))
         assertTrue(vm.contains("batch = insertBatch,"))
         assertTrue(vm.contains("val queued = QueuedPromptBatching.nextDrainBatch(_promptQueue.value)"))
-        // The injection works on its batch, never on the whole queue.
         val inject = vm.substringAfter("private suspend fun injectQueuedPromptsAsNewTurn(")
             .substringBefore("\n    private suspend fun drainQueuedPrompts(")
         assertTrue(inject.contains("val queued = batch"))
         assertFalse(inject.contains("val queued = _promptQueue.value"))
-        // A single scheduled fire is re-wrapped as an insertion.
         assertTrue(inject.contains("val scheduledInsert = queued.size == 1 && queued[0].isScheduledFire"))
         assertTrue(inject.contains("if (scheduledInsert) insertedScheduledEnvelope(prompt.text) else prompt.text"))
-        // [T-bridge-to-reminder] No assistant bridge any more; a user
-        // follow-up ends with the interrupt note, a scheduled fire relies on
-        // its envelope's reminder.
         assertFalse(inject.contains("ChatMessage.SCHEDULED_INSERT_BRIDGE_TEXT"))
         assertFalse(inject.contains("ChatMessage.INTERNAL_BRIDGE_TEXT"))
         assertFalse(inject.contains("role = LLMMessage.Role.ASSISTANT"))
-        // [T-ctx-builder] The note is appended by ChatAttachmentIngest.queuedHistoryMessage.
         assertTrue(inject.contains("interruptReminder = if (scheduledInsert) null else ChatMessage.QUEUED_INTERRUPT_REMINDER_TEXT,"))
         assertTrue(vm.contains("contentParts = if (interruptReminder == null) body else body + AgentContentPart.Text(interruptReminder),"))
-        // Its prefill still re-arms the scripted turn after the injection.
         assertTrue(vm.contains("scriptedTurnFor(handled.prefill)?.let { pendingScriptedTurn = it }"))
     }
 
@@ -240,9 +210,6 @@ class ScheduledPreemptiveInsertTest {
 
     @Test
     fun `the subagent background switch still answers only a user follow-up`() {
-        // A scheduled fire must not turn a synchronous subagent_task into a
-        // background job — that is a reaction to the USER wanting an answer.
-        // [T-stop-choice] ...or the user's "Stop Current Tool Only".
         assertTrue(vm.contains("val userFollowUp = _promptQueue.value.any { it.origin == QueuedPromptOrigin.USER }\n" +
             "                if (userFollowUp || delegateDetach.value != detachSeen) {"))
     }

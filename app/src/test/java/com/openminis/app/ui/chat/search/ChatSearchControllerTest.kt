@@ -19,12 +19,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-in-chat-search] ChatSearchController's flow (iOS ChatSearchController):
- * 250 ms typing debounce, newest match on a new query, wrapping with a notice,
- * a 300 ms throttled re-search on new rows that keeps the current match and
- * does not scroll, and Done clearing everything.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChatSearchControllerTest {
 
@@ -109,7 +103,7 @@ class ChatSearchControllerTest {
         c.activate("foo")
         advanceUntilIdle()
         c.previous()
-        runCurrent() // let the collector take previous()'s own navigation
+        runCurrent()
         val kept = c.currentMatch
         assertEquals(ChatSearchUnitKey("user:u1", "body"), kept?.key)
         val navsBefore = navs.size

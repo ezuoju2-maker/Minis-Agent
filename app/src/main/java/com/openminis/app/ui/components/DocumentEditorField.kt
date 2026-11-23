@@ -40,27 +40,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/**
- * [T-android-editor-keyboard-overlap] Geometry of "keep the caret above the
- * keyboard", kept pure so it can be unit-tested.
- */
 internal object EditorCaret {
 
-    /**
-     * How much of an editor the keyboard covers, in px: the part of the
-     * editor's box below the keyboard's top edge.
-     *
-     * Measured from where the editor really is in its window instead of
-     * taking the whole IME inset (`imePadding()`), because an editor is not
-     * always flush with the bottom of the window: a footer, the navigation
-     * bar padding of a Scaffold, a sheet or a split window sit below it, and
-     * padding by the full inset would then shrink it twice.
-     *
-     * Never more than leaves [minVisible] of the editor: if a device reports
-     * an inset larger than the keyboard it shows (seen with Gboard in pan
-     * mode), a few lines stay usable instead of the editor collapsing to
-     * nothing.
-     */
     fun imeOverlap(editorBottomInWindow: Float, windowHeight: Int, imeBottom: Int, editorHeight: Int, minVisible: Int): Int {
         if (imeBottom <= 0 || windowHeight <= 0 || editorHeight <= 0) return 0
         val keyboardTop = windowHeight - imeBottom
@@ -68,44 +49,13 @@ internal object EditorCaret {
         return covered.coerceIn(0, (editorHeight - minVisible).coerceAtLeast(0))
     }
 
-    /**
-     * The area to keep on screen for a caret at [cursor] (text coordinates):
-     * its line plus [margin] above and below, so the line being typed is not
-     * glued to the keyboard or to the top bar.
-     */
     fun revealRect(cursor: Rect, margin: Float): Rect =
         Rect(cursor.left, (cursor.top - margin).coerceAtLeast(0f), cursor.right, cursor.bottom + margin)
 
-    /** [selection] clamped to a text of [length] characters. */
     fun clamp(selection: TextRange, length: Int): TextRange =
         TextRange(selection.start.coerceIn(0, length), selection.end.coerceIn(0, length))
 }
 
-/**
- * [T-android-editor-keyboard-overlap] A multi-line editor for a whole
- * document (a memory file, a persona, a SKILL.md) whose caret stays visible
- * above the keyboard.
- *
- * Why the plain fields did not manage it: the app draws edge to edge, so the
- * window is not resized when the keyboard opens. A text field that filled the
- * screen kept its full height, with its lower part under the keyboard; it
- * scrolled the caret into ITS OWN bounds, which included the covered part.
- * And inside a scrolling page, the scroll container keeps the focused FIELD
- * in view, not the caret: for a field taller than what is left above the
- * keyboard that says nothing about where the caret is.
- *
- * What this does instead:
- *  - the field is as tall as its text and scrolls in a container
- *    ([ownScroll]) that ends at the keyboard's top edge
- *    ([EditorCaret.imeOverlap]); or, with [ownScroll] = false, it sits in a
- *    page that already scrolls and pads for the keyboard;
- *  - whenever the caret moves, the keyboard moves, the text re-wraps or the
- *    visible area changes while the field has focus, the caret's line is
- *    brought into view (BringIntoViewRequester, so whichever container
- *    scrolls the field does the scrolling).
- *
- * [outlined] draws the outlined-field border around the editor.
- */
 @Composable
 fun DocumentEditorField(
     value: String,
@@ -118,8 +68,6 @@ fun DocumentEditorField(
     ownScroll: Boolean = true,
     minHeight: Dp = 0.dp,
 ) {
-    // The caret position has to be known here, so the field is driven by a
-    // TextFieldValue; callers keep their plain String.
     var held by remember { mutableStateOf(TextFieldValue(value)) }
     val field = if (held.text == value) held else held.copy(text = value, selection = EditorCaret.clamp(held.selection, value.length))
 
@@ -167,8 +115,6 @@ fun DocumentEditorField(
             },
     ) {
         val scroller = if (ownScroll) {
-            // The border is drawn around what is visible, so its bottom
-            // edge sits on top of the keyboard instead of under it.
             Modifier
                 .fillMaxSize()
                 .padding(bottom = with(density) { overlap.toDp() })
@@ -178,8 +124,6 @@ fun DocumentEditorField(
             Modifier.fillMaxWidth().then(border)
         }
         Box(modifier = scroller) {
-            // With its own scroll the field fills at least the visible area,
-            // so a tap below the last line still lands in it.
             val least = if (ownScroll) with(density) { viewport.coerceAtLeast(0).toDp() } else minHeight
             BasicTextField(
                 value = field,
@@ -191,7 +135,6 @@ fun DocumentEditorField(
                     .fillMaxWidth()
                     .heightIn(min = least)
                     .padding(contentPadding)
-                    // Inside the padding, so the requester's coordinates are the text's.
                     .bringIntoViewRequester(requester)
                     .onFocusChanged { focused = it.isFocused },
                 textStyle = mergedStyle.copy(color = textColor),
@@ -212,8 +155,6 @@ fun DocumentEditorField(
 
 private fun androidx.compose.ui.graphics.Color.isSpecified(): Boolean = this != androidx.compose.ui.graphics.Color.Unspecified
 
-/** Space kept above and below the caret's line. */
 private val CARET_MARGIN = 24.dp
 
-/** The least of an editor that stays visible whatever inset the keyboard reports. */
 private val MIN_VISIBLE = 96.dp

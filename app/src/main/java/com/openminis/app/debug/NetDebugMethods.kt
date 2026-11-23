@@ -15,14 +15,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-/**
- * [T-net-android-phase0] Debug drivers for the embedded Tailscale node, the
- * same `debug.net.ts*` set as iOS `DebugRPCTailscale.swift`. Every call goes
- * through [TailscaleNode], so the RPC exercises exactly what Settings does.
- *
- * The auth key is never echoed or logged; the status returns the login URL
- * (the caller needs it to sign in) but logs only ever see it redacted.
- */
 internal object NetDebugMethods {
 
     val names: Set<String> = setOf(
@@ -61,13 +53,11 @@ internal object NetDebugMethods {
                     JSONObject().put("address", address).put("ms", ms)
                 }
                 "debug.net.tsInterfaces" -> JSONObject().put("interfaces", TailscalePathMonitor.interfacesJson())
-                // rclone shares the Go runtime with the node: confirms it still answers.
                 "debug.net.rcloneInfo" -> {
                     RcloneBridge.initializeIfNeeded()
                     JSONObject().put("version", RcloneBridge.smokeTest())
                         .put("backends", org.json.JSONArray(RcloneBridge.supportedBackends()))
                 }
-                // [T-net-android-phase2] Settings > Network through NetworkHub, as the UI does.
                 "debug.net.settings" -> settings(context, params)
                 "debug.net.probe" -> TailscaleNode.probe(
                     params.optString("tag").ifEmpty { "default" },
@@ -78,17 +68,12 @@ internal object NetDebugMethods {
                     params.optString("tag").ifEmpty { "default" },
                     params.optString("host").ifEmpty { throw RPCException(-32602, "host is required") },
                 )
-                // [FEAT-261021-11] Shell transparent forwarding: the routes file
-                // proot reads (no secret in it) and the Go listener's counters.
                 "debug.net.xparent" -> JSONObject().apply {
-                    // Fault injection: the listener dies behind the app's back
-                    // while the routes file stays (proot must go direct).
                     if (params.optBoolean("stopListener")) TailscaleNode.xparentStop()
                     com.openminis.app.network.ShellTransparentNet.awaitIdle()
                     val path = com.openminis.app.network.ShellTransparentNet.routesPath
                     val f = path?.let { java.io.File(it) }
                     put("routesPath", path ?: JSONObject.NULL)
-                    // [FEAT-261021-23] The file carries the entry password (stage 2): never echoed.
                     put("routes", if (f?.exists() == true) f.readText().replace(Regex("(?m)^pass .*$"), "pass <redacted>") else JSONObject.NULL)
                     put("listener", if (TailscaleNode.entryTouched) TailscaleNode.xparentStatus() else JSONObject().put("port4", 0))
                 }
@@ -101,12 +86,9 @@ internal object NetDebugMethods {
                         }
                     })
                 }
-                // engine=go: the Go checks iOS's diagnose screen shows (same JSON as MinisNetDiagnose).
                 "debug.net.diagnose" -> if (params.optString("engine") == "go") TailscaleNode.goDiagnose(params.optInt("timeoutMs", 8000))
                 else NetworkDiagnostics.run(context).toJson()
                 "debug.net.httpGet" -> httpGet(params)
-                // Opens url in a new agent browser tab (the browser tool's own
-                // new_tab path), then reports the page title / URL it reached.
                 "debug.net.browserOpen" -> {
                     val url = params.optString("url").ifEmpty { throw RPCException(-32602, "url is required") }
                     val app = context.applicationContext as? com.openminis.app.MinisApp ?: throw RPCException(-32000, "MinisApp not initialized")
@@ -121,13 +103,8 @@ internal object NetDebugMethods {
                         .put("title", tab?.manager?.pageTitle?.value ?: JSONObject.NULL)
                         .put("browserEndpoint", NetworkRuntime.endpoint(NetworkScope.BROWSER.tag)?.httpPort?.let { "127.0.0.1:$it" } ?: JSONObject.NULL)
                 }
-                // Fault injection: stop the Go entry behind the hub's back, as if
-                // it had died. Clients still hold the old port until they notice.
                 "debug.net.killEntry" -> { TailscaleNode.stopEntry(); JSONObject().put("killed", true).put("runtime", NetworkRuntime.snapshot.toString()) }
-                // One rclone HTTP request (on-the-fly webdav remote, no config
-                // written) to see where the Backup route sends it.
                 "debug.net.rcloneProbe" -> {
-                    // [FEAT-261021-19] or `fs`: any on-the-fly remote (":sftp,host=…:") for SFTP / FTP.
                     val fs = params.optString("fs").ifEmpty {
                         val url = params.optString("url").ifEmpty { throw RPCException(-32602, "url or fs is required") }
                         ":webdav,url='$url':"
@@ -141,10 +118,6 @@ internal object NetDebugMethods {
                         .put("names", org.json.JSONArray((0 until (r.getOrNull()?.optJSONArray("list")?.length() ?: 0)).map { r.getOrNull()!!.optJSONArray("list")!!.optJSONObject(it)?.optString("Name") }))
                         .put("backupEndpoint", NetworkRuntime.endpoint(NetworkScope.BACKUP.tag)?.let { "127.0.0.1:${it.port}" } ?: JSONObject.NULL)
                 }
-                // [FEAT-261021-18] G5: what the Tailscale sign-in does once the
-                // node is Running - bring MainActivity back over the Custom Tab -
-                // called from this process after a delay, while the app is in
-                // the background. Whether Android allows it is the question.
                 "debug.net.bringForward" -> {
                     val delayMs = params.optLong("delayMs", 5000).coerceIn(0, 60_000)
                     kotlinx.coroutines.delay(delayMs)
@@ -167,7 +140,6 @@ internal object NetDebugMethods {
             .build()
     }
 
-    /** One OkHttp GET through NetworkHttp.client(tag, …), exactly as a routed client sends it. */
     private fun httpGet(params: JSONObject): JSONObject {
         val tag = params.optString("tag").ifEmpty { "default" }
         val url = params.optString("url").ifEmpty { throw RPCException(-32602, "url is required") }
@@ -195,10 +167,6 @@ internal object NetDebugMethods {
         put("runtime", NetworkRuntime.snapshot.toString())
     }
 
-    /**
-     * No params = read. `settings` (partial NetworkSettings JSON) = merge and
-     * apply. `proxyId` + `proxyPassword` = store a password (never echoed).
-     */
     private suspend fun settings(context: Context, params: JSONObject): JSONObject {
         val id = params.optString("proxyId")
         if (id.isNotEmpty() && params.has("proxyPassword")) {

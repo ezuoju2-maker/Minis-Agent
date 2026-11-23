@@ -13,46 +13,17 @@ import java.net.NetworkInterface
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-/**
- * [FEAT-261021-11] Transparent forwarding of the sandbox shell's TCP
- * connections - the Android side of iOS's ShellTransparentNet (iSH xnet,
- * FEAT-261020-07).
- *
- * Programs that ignore proxy variables (ssh, nc, database clients, static
- * binaries) connect directly. proot's xnet extension (deps/proot
- * src/extension/xnet, `--xnet=<routes file>`) hands their connect() to Go's
- * transparent listener (nethub/xmap.go) when the destination is in the
- * routes file's hook prefixes; Go routes it for the "shell" tag with the
- * same Decide as everything else.
- *
- * This object keeps the routes file in step with Settings > Network:
- *  - the prefixes come from Go (NetHookRoutes, the same state Decide reads):
- *    the tailnet's prefixes while Tailscale is usable, for every route;
- *    0/0 for an exit node or an upstream proxy route; the device's current
- *    networks and a proxy's address bypass list exempt;
- *  - while forwarding has nothing to do - Restore Direct Connections, no
- *    entry, a direct shell route with no usable tailnet, nothing hooked -
- *    the file is DELETED and the listener stopped, so proot touches nothing
- *    and every connection is direct exactly as before;
- *  - proot itself falls back to direct when the listener does not answer.
- *
- * Synced on every runtime publish, after every apply, on a network change
- * and with the 30 s health check; a sync only writes when the text changed.
- * Nothing runs for an app that never turned the Network module on.
- */
 object ShellTransparentNet {
 
     private const val TAG = "Network"
     const val SHELL_TAG = "shell"
 
-    /** The routes file proot reads (`--xnet=`), set by [init]; null before. */
     @Volatile
     var routesPath: String? = null
         private set
 
     private lateinit var routesFile: File
     private lateinit var mapDir: File
-    /** The sandbox's /etc/resolv.conf (RootfsManager.rootfsDir): the shell's nameservers. */
     private lateinit var guestResolvConf: File
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "xnet-sync").apply { isDaemon = true } }
 
@@ -63,7 +34,6 @@ object ShellTransparentNet {
     @Volatile
     private var lastOffReason: String? = null
 
-    /** [FEAT-261021-23] The stage 2 part of the routes file now, null while forwarding is off. */
     @Volatile
     private var stage2Now: Stage2? = null
 
@@ -71,7 +41,6 @@ object ShellTransparentNet {
 
     fun offReason(): String? = lastOffReason
 
-    /** Called from NetworkHub.init: removes what an earlier process left behind. */
     fun init(context: Context) {
         if (routesPath != null) return
         val dir = File(context.filesDir, "net").apply { mkdirs() }
@@ -79,7 +48,6 @@ object ShellTransparentNet {
         mapDir = File(dir, "xnet-map")
         guestResolvConf = File(context.filesDir, "ubuntu-rootfs/etc/resolv.conf")
         routesPath = routesFile.absolutePath
-        // A file from an earlier process names a listener that is gone.
         if (routesFile.delete()) AppLogger.info(TAG, "[Net][Xparent] removed the routes file of an earlier process")
         mapDir.listFiles()?.forEach { it.delete() }
         NetworkRuntime.addListener { sync("runtime gen=${it.generation}") }
@@ -92,13 +60,11 @@ object ShellTransparentNet {
         }
     }
 
-    /** Recompute the routes file (on a background thread; callers just call it). */
     fun sync(reason: String) {
         if (routesPath == null) return
         worker.execute { runCatching { syncNow(reason) }.onFailure { off("sync failed: ${it.message}") } }
     }
 
-    /** Tests and the debug RPC: wait for queued syncs. */
     fun awaitIdle(timeoutMs: Long = 5000) {
         if (routesPath == null) return
         val f = worker.submit { }
@@ -113,10 +79,6 @@ object ShellTransparentNet {
             off(decision)
             return
         }
-        // [FEAT-261021-23] The shell's nameservers go with the snapshot: their
-        // port 53 is DNS - answered by the app while the node is up (MagicDNS
-        // names resolve), never sent through an exit node as an ordinary
-        // destination (that resolver only exists here).
         val resolvers = guestResolvers()
         val hook = TailscaleNode.hookRoutes2(SHELL_TAG, localPrefixes(), resolvers)
         fun list(key: String) = hook.optJSONArray(key)?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
@@ -129,8 +91,6 @@ object ShellTransparentNet {
         mapDir.mkdirs()
         val ports = TailscaleNode.xparentStart(mapDir.absolutePath, SHELL_TAG)
         listening = true
-        // Q3 (iOS): fail closed only where going out directly would bypass an
-        // exit node, and only when the user asked for it.
         val failClosed = settings.exitNodeFailClosed && hook.optString("route") == "tailscale" && hook.optBoolean("everything")
         val stage2 = if (ports.udpPort > 0 && snap.port != null && snap.password.isNotEmpty()) Stage2(
             udpPort = ports.udpPort, socksPort = snap.port, user = SHELL_TAG, password = snap.password,
@@ -155,10 +115,6 @@ object ShellTransparentNet {
                 "dns=${if (it.dns) "intercept" else "direct"} failClosed=${it.failClosed}" } ?: " udp=off") + " ($reason)")
     }
 
-    /**
-     * Why forwarding must be off, or null when Go should be asked for the
-     * prefixes. Pure, for the unit test.
-     */
     internal fun wanted(forceDirect: Boolean, entryUp: Boolean, shellRoute: NetworkRoute, tailnetUsable: Boolean): String? = when {
         forceDirect -> "Restore Direct Connections"
         !entryUp -> "no local entry"
@@ -166,7 +122,6 @@ object ShellTransparentNet {
         else -> null
     }
 
-    /** Delete the file first (proot stops at once), then stop the listener. */
     private fun off(reason: String) {
         val removed = routesFile.exists() && routesFile.delete()
         lastText = null
@@ -181,11 +136,6 @@ object ShellTransparentNet {
         }
     }
 
-    /**
-     * [FEAT-261021-23] Stage 2 of the routes file: UDP and DNS. The password
-     * is the entry's own (the shell gets it in its proxy variables anyway);
-     * the file is in the app's private storage, outside the guest's rootfs.
-     */
     data class Stage2(
         val udpPort: Int,
         val socksPort: Int,
@@ -197,7 +147,6 @@ object ShellTransparentNet {
         val failClosed: Boolean,
     )
 
-    /** The routes file proot's xnet extension reads. Pure, for the unit test. */
     internal fun routesText(
         port4: Int, port6: Int, mapDir: String, hook: List<String>, exempt: List<String>, stage2: Stage2? = null,
     ): String =
@@ -220,10 +169,6 @@ object ShellTransparentNet {
             }
         }
 
-    /**
-     * The nameservers of the sandbox's /etc/resolv.conf (ContainerDns' auto
-     * or custom list; never changed here). Pure parsing in [parseResolvers].
-     */
     private fun guestResolvers(): List<String> =
         runCatching { parseResolvers(guestResolvConf.readText()) }.getOrDefault(emptyList())
 
@@ -234,7 +179,6 @@ object ShellTransparentNet {
         .distinct()
         .toList()
 
-    /** The device's current networks as masked CIDRs (loopback and point-to-point links left out). */
     private fun localPrefixes(): List<String> {
         val all = runCatching { NetworkInterface.getNetworkInterfaces()?.toList() }.getOrNull().orEmpty()
         val out = LinkedHashSet<String>()
@@ -249,7 +193,6 @@ object ShellTransparentNet {
         return out.toList()
     }
 
-    /** "10.1.1.0/24" for 10.1.1.37 with length 24. Pure, for the unit test. */
     internal fun maskedPrefix(a: InetAddress, length: Int): String? {
         val bytes = a.address
         val max = bytes.size * 8
@@ -265,16 +208,6 @@ object ShellTransparentNet {
         return "$host/$length"
     }
 
-    /**
-     * The proot option for every shell builder (agent fresh / pooled shells,
-     * the terminal, PRootKernel): `--xnet=<routes file>` only while the
-     * routes file exists - forwarding is on - and the binary knows the
-     * option. Otherwise nothing, so with forwarding off a shell's proot
-     * command is exactly what it was before this feature (no syscall is
-     * even watched). A terminal or pooled shell started while forwarding was
-     * off keeps going direct until it is restarted; agent commands spawn a
-     * process each and always follow.
-     */
     fun prootArgs(proot: File): List<String> {
         val routes = routesPath ?: return emptyList()
         if (!File(routes).exists()) return emptyList()
@@ -284,10 +217,6 @@ object ShellTransparentNet {
     @Volatile
     private var prootSupport: Boolean? = null
 
-    /**
-     * Whether the proot binary knows `--xnet` (a build with an older proot
-     * would reject the option and every shell command with it). Asked once.
-     */
     fun prootSupportsXnet(proot: File): Boolean {
         prootSupport?.let { return it }
         val ok = runCatching {

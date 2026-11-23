@@ -9,12 +9,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/**
- * [T-android-tool-text-line-cap] Lays out what the preview tile hands to its
- * `Text` with a real StaticLayout (Robolectric native graphics), with and
- * without [ToolTextTail]. JVM timings are not device timings; the assertion is
- * only that the capped input costs a small, size-independent amount.
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)

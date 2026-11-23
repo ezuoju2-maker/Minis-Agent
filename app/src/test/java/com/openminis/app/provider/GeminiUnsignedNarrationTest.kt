@@ -16,15 +16,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-gemini-unsigned-narration] Port of iOS 1a33fc85f.
- *
- * Gemini 3.x needs a thoughtSignature on every historical functionCall, so a
- * call without one (another model's, before a switch) is sent as history text.
- * That text used to be `[Called shell_execute with: {...}]` /
- * `[Result of shell_execute: ...]`, a bracketed marker Gemini imitates: it
- * started writing `[Called ...]` as its answer instead of calling the tool.
- */
 class GeminiUnsignedNarrationTest {
 
     private lateinit var server: MockWebServer
@@ -38,7 +29,6 @@ class GeminiUnsignedNarrationTest {
         basePath = server.url("/").toString().trimEnd('/'),
     )
 
-    /** The request body Gemini receives for [history]. */
     private fun body(history: List<LLMMessage>): JSONObject {
         server.enqueue(
             MockResponse().setHeader("Content-Type", "application/json")
@@ -53,7 +43,6 @@ class GeminiUnsignedNarrationTest {
 
     private val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte()) + ByteArray(32)
 
-    /** A DeepSeek-style turn: the call carries no Gemini signature. */
     private fun history(result: AgentContentPart.ToolResult) = listOf(
         LLMMessage(LLMMessage.Role.USER, "list the files"),
         LLMMessage(
@@ -103,7 +92,6 @@ class GeminiUnsignedNarrationTest {
         assertEquals("It failed:\nno such file", parts(b, 2).getJSONObject(0).getString("text"))
     }
 
-    // ── the builders ──────────────────────────────────────────────────────
 
     @Test
     fun `long results keep 2000 characters and say so in words`() {

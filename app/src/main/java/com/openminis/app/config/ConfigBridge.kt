@@ -21,17 +21,6 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 
-/**
- * Bridge between the offload handler (Kotlin / shell args / JSON
- * stdout) and the rest of the Config module (registry, gate, audit
- * log). Mirrors iOS `ConfigOffloadBridge.swift`.
- *
- * Returns plain [JSONObject] envelopes so the handler just wraps them
- * in [com.openminis.app.sandbox.NativeOffloadResult]. The handler
- * thread is on a background pool, so write paths block via runBlocking
- * on the gate suspend — matching the iOS semaphore-on-detached-Task
- * pattern.
- */
 object ConfigBridge {
     private const val TAG = "ConfigBridge"
     private const val DEFAULT_PAGE_SIZE = 20
@@ -41,16 +30,8 @@ object ConfigBridge {
         timeZone = TimeZone.getTimeZone("UTC")
     }
 
-    /** First-line gate — returns true when the master switch is on. */
     fun isEnabled(): Boolean = MinisConfigPermissionStore.isEnabled
 
-    /**
-     * [T-android-config-feature-unavailable] Envelope for a field whose feature
-     * does not exist on this device / OS version. Deliberately a DISTINCT code
-     * from `permission_denied` so the agent knows this isn't something the user
-     * can grant or the agent can retry into — the hardware/OS simply lacks it.
-     * Mirrors iOS `unavailableErrorEnvelope` (dba46d42).
-     */
     fun unavailableErrorEnvelope(path: String, reason: String): JSONObject = JSONObject().apply {
         put("ok", false)
         put("error", "feature_unavailable")
@@ -58,7 +39,6 @@ object ConfigBridge {
         put("user_message", "The setting '$path' isn't available on this device: $reason")
     }
 
-    /** Standardised "minis-config disabled" envelope. Includes user_message. */
     fun disabledErrorEnvelope(): JSONObject = JSONObject().apply {
         put("ok", false)
         put("error", "permission_denied")
@@ -71,14 +51,7 @@ object ConfigBridge {
         )
     }
 
-    // -- list-topics / topic-help --
 
-    /**
-     * [T-config-path-dotted-id] OpenMinis#390. For a collection topic, how to
-     * write a child path — surfaced by `topic-help` next to the field list,
-     * whose example paths now carry raw ids. Null for flat topics. Same text
-     * as iOS `ConfigOffloadBridge.pathNoteForTopic` (cef38f13b).
-     */
     fun pathNoteForTopic(topic: String): String? {
         if (ConfigRegistry.get().collection(topic) == null) return null
         return "Child paths are $topic.<entry_id>.<field>. Use entry_id exactly as `minis-config get $topic` prints it — dots and slashes need no escaping."
@@ -102,13 +75,7 @@ object ConfigBridge {
             }
         }
 
-    // -- read --
 
-    /**
-     * Read a single field with optional filter + pagination. Both
-     * filter and pagination only apply to JSON arrays; scalar values
-     * pass through unchanged. Mirrors the iOS bridge contract exactly.
-     */
     fun readField(
         path: String,
         filter: String? = null,
@@ -135,7 +102,6 @@ object ConfigBridge {
         }
 
         val out = JSONObject()
-        // Copy base.
         val keys = base.keys()
         while (keys.hasNext()) {
             val k = keys.next()
@@ -191,7 +157,6 @@ object ConfigBridge {
                 out.put("value", ConfigValue.Arr(postFilter).jsonString())
             }
         } else if (terms.isNotEmpty()) {
-            // Scalar value with filter — pass-or-null.
             val kept: ConfigValue = if (matches(parsed)) parsed else ConfigValue.Null
             out.put("value", kept.jsonString())
             out.put("filtered", true)
@@ -208,7 +173,6 @@ object ConfigBridge {
         val field = ConfigRegistry.get().resolveField(path) ?: return JSONObject().apply {
             put("ok", false)
             put("error", "unknown_path")
-            // [T-config-path-dotted-id] Says which part was wrong.
             put("reason", ConfigRegistry.get().explainUnknownPath(path))
         }
         if (field.access == ConfigAccess.HIDDEN) return JSONObject().apply {
@@ -216,9 +180,6 @@ object ConfigBridge {
             put("error", "permission_denied")
             put("reason", "'$path' is intentionally not exposed to minis-config.")
         }
-        // [T-android-config-feature-unavailable] The device/OS lacks the
-        // feature entirely — answer precisely instead of reporting a value the
-        // user can't act on.
         field.unavailableReason?.let { return unavailableErrorEnvelope(path, it) }
         return try {
             val v = field.read()
@@ -229,11 +190,6 @@ object ConfigBridge {
                 put("display_name", field.displayName)
             }
         } catch (e: ConfigError.PermissionDenied) {
-            // [T-minis-config-provider-add] Forward PermissionDenied verbatim
-            // — used by fields that are editable but unreadable (notably
-            // providers.<id>.apiKey: writes accepted, reads guarded). Without
-            // this branch the previous generic catch reported "read_failed"
-            // which is misleading and would confuse the agent's retry logic.
             JSONObject().apply {
                 put("ok", false)
                 put("error", "permission_denied")
@@ -281,14 +237,7 @@ object ConfigBridge {
         return "Showing page $page of $totalPages ($pageCount of $total items). This is the last page."
     }
 
-    // -- write (single or batch) --
 
-    /**
-     * Write one or more fields. Each item is a JSON object
-     * `{ "path": ..., "value_json": ... }`. Returns the standard
-     * envelope including `applied[]`, `audit_ids[]`, `audit_url`,
-     * and `user_message`.
-     */
     fun writeFields(
         items: JSONArray,
         caption: String?,
@@ -296,8 +245,6 @@ object ConfigBridge {
         sessionId: String?,
     ): JSONObject {
         if (!MinisConfigPermissionStore.isEnabled) return disabledErrorEnvelope()
-        // Bridge runs on the offload worker thread; the gate itself
-        // does its own context switch to Main for the dialog.
         return runBlocking {
             performWriteBatch(
                 items = items,
@@ -309,12 +256,6 @@ object ConfigBridge {
         }
     }
 
-    /**
-     * Internal write path — used by both [writeFields] and the audit-
-     * revert flow. `skipConfirmation` is for user-initiated reverts
-     * from the in-app Logs UI: the user already confirmed via a local
-     * dialog, so the gate would be redundant.
-     */
     suspend fun performWriteBatch(
         items: JSONArray,
         caption: String?,
@@ -322,15 +263,8 @@ object ConfigBridge {
         sessionId: String?,
         skipConfirmation: Boolean,
     ): JSONObject {
-        // 1. Resolve every path; reject the entire batch on any unknown
-        //    or hidden path before bothering the user.
         val resolved = ArrayList<Resolved>(items.length())
         val resolvedItems = ArrayList<PendingConfigChangeItem>(items.length())
-        // [T-config-readable] One user-facing description per resolved item,
-        // index-aligned with `resolved`. Rendered HERE, before the dialog and
-        // before any write, so a record about to be removed is still named.
-        // Goes to the dialog row and the audit row ONLY — never into the CLI
-        // response (applied[], errors, user_message stay as they were).
         val readables = ArrayList<ReadableSummary>(items.length())
         for (i in 0 until items.length()) {
             val raw = items.optJSONObject(i) ?: continue
@@ -345,10 +279,6 @@ object ConfigBridge {
                 else -> rawPath
             }
 
-            // Collection-level append/remove: when `<base>.append` or
-            // `<base>.remove` addresses a registered ConfigCollection
-            // (not a field), route to collection.add() / remove(). The
-            // collection owns dedup, validation, and is_custom enforcement.
             if ((isAppend || isRemove) && ConfigRegistry.get().collection(resolvePath) != null) {
                 val coll = ConfigRegistry.get().collection(resolvePath)!!
                 val parsedValue = ConfigValue.decode(valueJSON) ?: return JSONObject().apply {
@@ -370,14 +300,6 @@ object ConfigBridge {
                         put("reason", "Collection '${coll.basePath}' does not allow .remove.")
                     }
                 }
-                // [T-minis-config-provider-add] Redact credential values
-                // (apiKey / oauthToken / manualOAuthToken) BEFORE they reach
-                // the confirmation sheet or the audit log. The collection's
-                // add() still receives the un-redacted `parsedValue` so it
-                // can persist the real secret to the encrypted store; only
-                // the displayed / audit-logged copy is masked. A `$$ENV`
-                // reference passes through (it's a pointer, not the
-                // secret). Mirrors iOS ConfigOffloadBridge:435-441.
                 val redactedNewValue = if (isAppend) parsedValue.redactingSecrets() else parsedValue
                 resolved.add(
                     Resolved(
@@ -388,8 +310,6 @@ object ConfigBridge {
                         scope = coll.basePath,
                         oldValue = ConfigValue.Null,
                         newValue = parsedValue,
-                        // Audit / display copy is always the redacted form;
-                        // the executor still applies `newValue` un-redacted.
                         auditNewValue = redactedNewValue,
                     )
                 )
@@ -420,15 +340,9 @@ object ConfigBridge {
                 ?: return JSONObject().apply {
                     put("ok", false)
                     put("error", "unknown_path")
-                    // [T-config-path-dotted-id] Says which part was wrong.
                     put("reason", ConfigRegistry.get().explainUnknownPath(resolvePath))
                 }
 
-            // [T-android-config-feature-unavailable] Feature-unavailable gate
-            // runs BEFORE the access check, before validation, and before the
-            // confirmation dialog — never ask the user to approve a change that
-            // cannot possibly apply on this device (e.g. the Android 16 Live
-            // Updates surface on hardware without it).
             field.unavailableReason?.let { return unavailableErrorEnvelope(rawPath, it) }
 
             if (field.access != ConfigAccess.READWRITE) {
@@ -510,8 +424,6 @@ object ConfigBridge {
                     displayNew = ""
                 }
                 else -> {
-                    // [FEAT-261021-03] normalize -> schema -> field checks,
-                    // all before the confirmation dialog.
                     val normalized = try {
                         field.normalize(parsedValue).also {
                             field.valueSchema.validate(it)
@@ -532,13 +444,6 @@ object ConfigBridge {
                 }
             }
 
-            // [T-minis-config-provider-add] Mask credential writes the
-            // same way collection-add does: detect by the path's last
-            // segment matching ConfigValue.SECRET_KEYS (apiKey /
-            // oauthToken / manualOAuthToken). Field still gets the un-
-            // redacted newValue (so the writer can persist the real
-            // secret); only audit / display copies are masked. `$$ENV`
-            // references are preserved by redactingSecrets.
             val isSecretField = field.path.substringAfterLast('.') in ConfigValue.SECRET_KEYS
             val redactedNewValue = if (isSecretField) maskScalarSecret(newValue) else newValue
             resolved.add(
@@ -553,9 +458,6 @@ object ConfigBridge {
                     auditNewValue = if (isSecretField) redactedNewValue else null,
                 )
             )
-            // [T-config-readable] Both sides go through RedactedConfigValue —
-            // the same masking as the audit copy — so no secret can reach the
-            // rendered text.
             val fieldLeaf = field.path.substringAfterLast('.')
             val readable = ConfigReadableRenderer.forFieldWrite(
                 field,
@@ -576,9 +478,6 @@ object ConfigBridge {
             )
         }
 
-        // 2. Enqueue confirmation. Suspends until user acts or timeout —
-        //    or skipped when the caller already collected user consent
-        //    (see [skipConfirmation] doc).
         val outcome: ConfirmOutcome = if (skipConfirmation) {
             ConfirmOutcome.Approved(resolvedItems)
         } else {
@@ -586,7 +485,6 @@ object ConfigBridge {
             ConfigConfirmationGate.requestConfirmation(pending)
         }
 
-        // 3. Map outcome → audit + user_message.
         val actor = ConfigAuditActor.fromRaw(actorRaw)
         val audit = ConfigAuditLog.get()
         return when (outcome) {
@@ -640,11 +538,6 @@ object ConfigBridge {
                 val now = System.currentTimeMillis()
                 val applied = JSONArray()
                 val auditIds = JSONArray()
-                // Per-row error envelope captured for any collection.add
-                // that surfaces a structural error (already_exists,
-                // permission_denied) — we abort the batch and surface
-                // that as the call's primary error so the agent's
-                // contract holds even when the user pre-approved.
                 var earlyError: JSONObject? = null
                 for ((idx, row) in outcome.items.withIndex()) {
                     if (idx >= resolved.size) continue
@@ -666,7 +559,6 @@ object ConfigBridge {
                         continue
                     }
                     try {
-                        // Two op kinds: field write vs collection add/remove.
                         var effectiveOldJSON = r.oldValue.jsonString()
                         var effectiveNewJSON = r.newValue.jsonString()
                         var effectiveOldDisplay = r.oldValue.displayString
@@ -676,12 +568,6 @@ object ConfigBridge {
                         if (r.collection != null && r.collectionVerb != null) {
                             when (r.collectionVerb) {
                                 CollectionVerb.APPEND -> {
-                                    // newValue is the un-redacted payload —
-                                    // the collection persists the real
-                                    // credential. Audit / display rows pull
-                                    // from auditNewValue (redacted copy)
-                                    // when supplied so the secret never
-                                    // lands in the audit DB.
                                     val newId = r.collection.add(r.newValue)
                                     val auditPayload = r.auditNewValue ?: r.newValue
                                     val withId = augmentWithEntryId(auditPayload, newId)
@@ -693,8 +579,6 @@ object ConfigBridge {
                                         ?: throw ConfigError.InvalidValue(
                                             "${r.collection.basePath}.remove expects a string entry id."
                                         )
-                                    // Snapshot the entry pre-removal so
-                                    // revert can re-add it verbatim.
                                     val snapshot = snapshotCollectionChild(r.collection, entryId)
                                     r.collection.remove(entryId)
                                     effectiveOldJSON = snapshot.jsonString()
@@ -709,10 +593,6 @@ object ConfigBridge {
                             r.field.write(r.newValue)
                             displayName = r.field.displayName
                             displayPath = r.field.path
-                            // [T-minis-config-provider-add] If this is a
-                            // credential field, audit/display rows pull
-                            // from the redacted copy so the secret never
-                            // reaches the audit DB or the user's screen.
                             if (r.auditNewValue != null) {
                                 effectiveNewJSON = r.auditNewValue.jsonString()
                                 effectiveNewDisplay = r.auditNewValue.displayString
@@ -789,21 +669,12 @@ object ConfigBridge {
                     }
                 }
             }.let { (response, warnings) ->
-                // [T-envvar-disable] Non-fatal notes raised during the writes.
                 if (warnings.isNotEmpty()) response.put("warnings", JSONArray(warnings))
                 response
             }
         }
     }
 
-    /**
-     * One resolved entry in a write batch. Either a field op (when
-     * [field] is non-null) or a collection-level add/remove (when
-     * [collection] + [collectionVerb] are set). Collection ops carry
-     * their own [rawPath] (e.g. "models.append") and [scope] (the
-     * collection basePath, e.g. "models") because there is no
-     * ConfigField to source them from.
-     */
     private data class Resolved(
         val field: ConfigField?,
         val collection: ConfigCollection?,
@@ -812,26 +683,11 @@ object ConfigBridge {
         val scope: String,
         val oldValue: ConfigValue,
         val newValue: ConfigValue,
-        // [T-minis-config-provider-add] When non-null, audit / display
-        // logging uses this instead of `newValue` — the executor still
-        // applies `newValue` un-redacted so the credential reaches the
-        // collection's add(). null = no redaction needed (use newValue
-        // for both surfaces).
         val auditNewValue: ConfigValue? = null,
     )
 
     private enum class CollectionVerb { APPEND, REMOVE }
 
-    /**
-     * Mask a scalar credential write. Mirrors the per-key logic in
-     * [ConfigValue.redactingSecrets] but for the case where the secret
-     * IS the whole value (e.g. `providers.<id>.apiKey = "sk-…"`),
-     * which the object-walking redactor wouldn't touch. `$$ENV`
-     * references pass through (they're a pointer, not the secret);
-     * empty strings pass through (used to clear the credential).
-     * Non-string values are returned untouched (shouldn't happen for
-     * credential fields, but defensive).
-     */
     private fun maskScalarSecret(v: ConfigValue): ConfigValue {
         if (v !is ConfigValue.Str) return v
         if (v.value.startsWith("\$\$")) return v
@@ -839,11 +695,6 @@ object ConfigBridge {
         return ConfigValue.Str("••• (hidden)")
     }
 
-    /**
-     * Splice the just-created entry id into the audit payload so the
-     * revert path can locate the new row without re-reading repository
-     * state (which may have churned by the time the user reverts).
-     */
     private fun augmentWithEntryId(payload: ConfigValue, entryId: String): ConfigValue {
         val baseMap = (payload as? ConfigValue.Obj)?.value?.toMutableMap()
             ?: LinkedHashMap()
@@ -851,14 +702,6 @@ object ConfigBridge {
         return ConfigValue.Obj(baseMap)
     }
 
-    /**
-     * Build a JSON snapshot of a collection child by walking its
-     * exposed fields. Used by the .remove path so audit-revert can
-     * reconstruct the original entry. Only includes scalar / array
-     * fields the collection actually surfaces — derived fields go
-     * along for the ride but the collection.add() input contract
-     * decides what's honored on replay.
-     */
     private fun snapshotCollectionChild(coll: ConfigCollection, childId: String): ConfigValue {
         val out = LinkedHashMap<String, ConfigValue>()
         out["entry_id"] = ConfigValue.Str(childId)
@@ -870,7 +713,6 @@ object ConfigBridge {
         return ConfigValue.Obj(out)
     }
 
-    // -- audit --
 
     fun auditList(limit: Int, scope: String?): JSONObject {
         if (!MinisConfigPermissionStore.isEnabled) return disabledErrorEnvelope()
@@ -898,15 +740,6 @@ object ConfigBridge {
         }
     }
 
-    /**
-     * The CLI / agent view of an audit row — an explicit allow-list.
-     *
-     * [T-config-readable] `e.readable` (the human-readable description) is
-     * deliberately NOT emitted: it is for the user only (confirmation dialog
-     * + Logs → Config Changes) and must never reach the model. Keep this a
-     * field-by-field list; never serialize the whole entry. Guarded by
-     * ConfigReadableLeakTest.
-     */
     private fun auditEntryDict(e: ConfigAuditEntry): JSONObject = JSONObject().apply {
         put("id", e.id)
         put("at", isoFormatter.format(Date(e.at)))
@@ -922,16 +755,6 @@ object ConfigBridge {
         if (!e.caption.isNullOrEmpty()) put("caption", e.caption)
     }
 
-    /**
-     * Revert a previous applied entry. Builds a synthetic write
-     * operation that flips old↔new and routes through the same
-     * confirmation path so the user sees what's about to roll back.
-     *
-     * `skipConfirmation` is for user-initiated reverts from the
-     * in-app Logs UI — the user already confirmed via a local dialog,
-     * and stacking a second dialog over the Logs sheet would queue
-     * silently behind it.
-     */
     fun auditRevert(
         id: String,
         actorRaw: String,
@@ -950,10 +773,6 @@ object ConfigBridge {
             put("reason", "Entry is ${entry.status.raw}; only applied entries can be reverted.")
         }
 
-        // Collection ops: rebuild the inverse write. .append → .remove
-        // by the recorded entry_id; .remove → .append with the saved
-        // snapshot payload (sans entry_id, which the collection will
-        // mint fresh — chats hooked to the old id will not auto-rebind).
         val items: JSONArray = if (entry.key.endsWith(".append") || entry.key.endsWith(".remove")) {
             val basePath = entry.key.substringBeforeLast('.')
             val coll = ConfigRegistry.get().collection(basePath)
@@ -963,8 +782,6 @@ object ConfigBridge {
                     put("reason", "Collection '$basePath' no longer registered.")
                 }
             if (entry.key.endsWith(".append")) {
-                // Inverse of append = remove. Pull entry_id out of the
-                // recorded new value.
                 val newVal = ConfigValue.decode(entry.newValueJSON) as? ConfigValue.Obj
                 val entryId = (newVal?.value?.get("entry_id") as? ConfigValue.Str)?.value
                     ?: return JSONObject().apply {
@@ -977,18 +794,12 @@ object ConfigBridge {
                     put("value_json", ConfigValue.Str(entryId).jsonString())
                 })
             } else {
-                // Inverse of remove = append. Replay the snapshot we
-                // captured at delete time, but strip volatile keys the
-                // collection.add() schema may reject (entry_id, etc.).
                 val oldVal = (ConfigValue.decode(entry.oldValueJSON) as? ConfigValue.Obj)?.value
                     ?: return JSONObject().apply {
                         put("ok", false)
                         put("error", "not_revertable")
                         put("reason", "Audit entry missing old-value snapshot; cannot reverse the remove.")
                     }
-                // Translate the snapshot's leaf field names back into
-                // collection.add() payload keys. For ModelsCollection
-                // we need provider_id + model_id + display_name.
                 val replay = LinkedHashMap<String, ConfigValue>()
                 oldVal["providerInstanceId"]?.let { replay["instance_id"] = it }
                 oldVal["modelId"]?.let { replay["model_id"] = it }

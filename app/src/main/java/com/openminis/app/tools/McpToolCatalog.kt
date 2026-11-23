@@ -2,24 +2,6 @@ package com.openminis.app.tools
 
 import org.json.JSONObject
 
-/**
- * [plugin-ecosystem / MCP] Pure logic for consuming `minis-mcp-cli tools`
- * output. MCP servers are the app's plugin mechanism: a user installs a server
- * and its tools become callable. This catalog:
- *
- *  - parses both the compact CLI envelope
- *    `{"ok":true,"result":{"server":"x","tools":[...],"count":n}}`
- *    and a bare `{"tools":[...]}` / `[...]` array;
- *  - detects tool-name collisions ACROSS servers (two servers both exposing
- *    "search" must be namespaced or the agent calls the wrong one);
- *  - produces a compact, token-cheap capability manifest for the system prompt
- *    (name + one-line description, no full JSON schema — the agent re-fetches
- *    the schema with `minis-mcp-cli tools <server>` when it needs to call);
- *  - resolves a qualified reference `server.tool` / `server/tool` back to a
- *    call plan, rejecting unknown or ambiguous references.
- *
- * No external dependency; runs on the JVM unit-test classpath.
- */
 object McpToolCatalog {
 
     data class Tool(
@@ -31,7 +13,6 @@ object McpToolCatalog {
         val qualified: String get() = "$server.$name"
     }
 
-    /** Parse the CLI `tools` JSON into a flat tool list. Empty on malformed input. */
     fun parse(json: String, serverHint: String = ""): List<Tool> {
         val trimmed = json.trim()
         if (trimmed.isEmpty()) return emptyList()
@@ -61,16 +42,10 @@ object McpToolCatalog {
             Tool(server, name, desc, inputNames)
         }
 
-    /** Tool names exposed by more than one server — callers must qualify them. */
     fun collisions(tools: List<Tool>): Map<String, List<String>> =
         tools.groupBy { it.name }.filter { it.value.map { t -> t.server }.distinct().size > 1 }
             .mapValues { (_, list) -> list.map { it.server }.distinct().sorted() }
 
-    /**
-     * Compact manifest for injection. One line per tool, prefixed by server
-     * only when its (server, name) is involved in a collision or [alwaysQualify].
-     * Capped by [maxChars] and [maxTools] to stay token-cheap.
-     */
     fun manifest(tools: List<Tool>, maxTools: Int = 40, maxChars: Int = 4_000, alwaysQualify: Boolean = false): String {
         if (tools.isEmpty()) return ""
         val dupNames = collisions(tools).keys
@@ -88,10 +63,6 @@ object McpToolCatalog {
         return sb.toString().trimEnd()
     }
 
-    /**
-     * Resolve a user/agent reference to exactly one tool, or an error string.
-     * Accepts `server.tool`, `server/tool`, or a bare name when unambiguous.
-     */
     fun resolve(ref: String, tools: List<Tool>): ResolveResult {
         val r = ref.trim()
         if (r.isEmpty()) return ResolveResult.Error("empty tool reference")
@@ -116,7 +87,6 @@ object McpToolCatalog {
         data class Error(val message: String) : ResolveResult()
     }
 
-    /** Build the exact CLI call string for a resolved tool with JSON args. */
     fun callCommand(tool: Tool, argsJson: String = "{}"): String =
         "minis-mcp-cli call ${tool.server} ${tool.name} '$argsJson'"
 }

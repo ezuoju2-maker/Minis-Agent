@@ -19,21 +19,6 @@ import androidx.compose.ui.unit.dp
 import com.openminis.app.R
 import com.openminis.app.data.db.DatabaseVersionGuard
 
-/**
- * [T-android-downgrade-compat] Shown when the chat database on disk was
- * written by a newer build than the one now running.
- *
- * The point of this screen is that the previous behaviour — Room throwing at
- * first database access, so the app simply never opened — was indistinguishable
- * from data loss even though nothing was lost. The database has NOT been
- * touched: the version was read through a read-only handle and Room was never
- * constructed, so no migration and no `dropAllTables` could have run.
- *
- * Deliberately offers no "clear data and continue" button. That is the one
- * action that would actually destroy the user's history, and offering it to
- * someone who is confused and just wants the app to open is how data gets
- * lost. Reinstalling the newer build restores everything.
- */
 @Composable
 fun NewerDatabaseGuidanceScreen(onExit: () -> Unit) {
     MaterialTheme {
@@ -59,8 +44,6 @@ fun NewerDatabaseGuidanceScreen(onExit: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                     )
-                    // Concrete numbers, because "a newer version" alone leaves
-                    // the user with nothing to check or report.
                     Text(
                         text = stringResource(
                             R.string.newer_db_versions,

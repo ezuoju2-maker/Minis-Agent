@@ -9,19 +9,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-ctx-reopen-compacted-glow] Alice Q3: after a compaction the composer
- * showed "Context 49% used", but reopening the session turned the glow amber
- * again until one reply came back. loadSession() measured the context
- * (publishMeasuredContextUsage) before it restored the compact marker, so it
- * measured the whole uncompacted history. Reproduced on a Pixel 4a with a
- * 64000 window: 48554 (76%, amber) before compaction, 31047 (49%) after,
- * amber again on reopen.
- *
- * ChatViewModel needs an Application and a database, so the order is locked
- * with a source guard, and the size difference with the same
- * RequestContextBuilder.compacted() the measurement uses.
- */
 class ContextUsageReopenCompactedTest {
 
     private val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
@@ -35,7 +22,6 @@ class ContextUsageReopenCompactedTest {
     @Test fun `loadSession restores the marker before it measures the context`() {
         val restoreMarker = loadBody.indexOf("_cachedLatestMarker = marker")
         val restoreSummary = loadBody.indexOf("_compactSummary.value = marker?.summary")
-        // The call, not a comment that mentions it.
         val measure = loadBody.indexOf("runCatching { publishMeasuredContextUsage() }")
         assertTrue("marker restore not found", restoreMarker >= 0)
         assertTrue("summary restore not found", restoreSummary >= 0)
@@ -66,7 +52,6 @@ class ContextUsageReopenCompactedTest {
     private fun user(t: String, id: String) = LLMMessage(LLMMessage.Role.USER, t, contentParts = listOf(AgentContentPart.Text(t)), dbMessageId = id)
     private fun assistant(t: String, id: String) = LLMMessage(LLMMessage.Role.ASSISTANT, t, dbMessageId = id)
 
-    /** 15 turns of 3000 chars each way, like the device repro's seeded session. */
     private val history: List<LLMMessage> = (0 until 15).flatMap { i ->
         listOf(user("question $i " + "q".repeat(3_000), "u$i"), assistant("answer $i " + "a".repeat(3_000), "a$i"))
     }
@@ -82,9 +67,6 @@ class ContextUsageReopenCompactedTest {
             RequestContextBuilder.compacted(history, RequestContextBuilder.Compaction(summary = "summary " + "s".repeat(2_000), marker = marker), 3),
         )
         assertTrue("compacted=$compacted full=$full", compacted < full / 2)
-        // A window between the two puts the full history in the warning band
-        // and the compacted one below it: the glow on reopen must follow the
-        // compacted figure.
         val window = full * 100 / 75
         assertEquals(ContextUsage.Tier.WARNING, ContextUsage.from(full, window)!!.tier)
         assertEquals(ContextUsage.Tier.NORMAL, ContextUsage.from(compacted, window)!!.tier)

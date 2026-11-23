@@ -26,35 +26,6 @@ import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-/**
- * [T-android-session-multi-export] Exports several sessions into ONE file, the
- * way the session list's multi-select "Export" does on iOS
- * (ContentView.exportSessions / streamExportAsJSON / streamExportAsPlainText).
- *
- * Same output as iOS, so an export reads the same whichever device made it:
- *  - JSON: an array of sessions, each `{id, modelId, createdAt, updatedAt,
- *    title?, category?, messages: [...]}` with ISO-8601 dates; a message is
- *    `{role, parts, createdAt, tokenUsage?, reasoning?}` and its parts are
- *    cleaned (`text`, `tool_use{name, description?, input?}`,
- *    `tool_result{tool, success, output?}` with output capped at 2000 chars,
- *    `media` as a note).
- *  - Plain text: per session a `# title / Model / Created` header, then
- *    `[User]|[Minis] HH:mm` blocks separated by `---`; sessions separated by a
- *    line of 60 `=`.
- *  - Both start each session at its first user message, skip rows that are
- *    only tool results, and skip a session with no user message at all.
- *  - The payload is zipped (a single entry); if zipping fails the raw
- *    payload is shared instead, as iOS falls back.
- *  - File name: the session title (60 chars, `/` and `:` replaced) for one
- *    session, `minis-sessions-<n>` for several.
- *
- * Not ported: iOS writes a tool result's `snapshot` text/duration; Android's
- * ToolResult has no snapshot.
- *
- * Messages are read in pages of [BATCH_SIZE] and written as they arrive, so
- * memory stays bounded however long the sessions are (the T-export-optimize
- * contract of [ChatExporter]).
- */
 object SessionExporter {
 
     const val BATCH_SIZE = 50
@@ -63,7 +34,6 @@ object SessionExporter {
 
     enum class Format(val ext: String) { JSON("json"), PLAIN_TEXT("txt") }
 
-    /** iOS ExportSummary, plus the image/video split Android's summary strings show. */
     data class Summary(
         val totalMessages: Int = 0,
         val images: Int = 0,
@@ -84,12 +54,10 @@ object SessionExporter {
         val fileName: String,
     )
 
-    /** One page of a session's rows, oldest first; empty when exhausted. */
     fun interface PageLoader {
         suspend fun load(sessionId: String, offset: Int, limit: Int): List<MessageEntity>
     }
 
-    /** iOS: the session title for one session, `minis-sessions-<n>` for several. */
     fun baseName(sessions: List<ChatSessionEntity>): String {
         val single = sessions.singleOrNull()
         if (single != null) {
@@ -117,8 +85,6 @@ object SessionExporter {
             val payloadName = "$base.${format.ext}"
             val payload = File(payloadDir, payloadName)
             val loader = PageLoader { sid, offset, limit -> repository.loadMessagePageRaw(sid, offset, limit) }
-            // Total up front (a count query per session), so progress reads
-            // "n / total" rather than growing with every page as on iOS.
             val total = sessions.sumOf { repository.messageCount(it.id) }
             onProgress(0, total)
             val summary = BufferedWriter(OutputStreamWriter(FileOutputStream(payload), Charsets.UTF_8)).use { w ->
@@ -128,7 +94,6 @@ object SessionExporter {
                 }
             }
 
-            // Hand out from cacheDir/shared (declared in file_provider_paths).
             val sharedDir = File(context.cacheDir, "shared").apply { mkdirs() }
             val zip = File(sharedDir, "$base.zip")
             val out = try {
@@ -140,7 +105,6 @@ object SessionExporter {
                 }
                 zip
             } catch (t: Throwable) {
-                // iOS falls back to the raw payload when zipping fails.
                 AppLogger.warning(LOG_CATEGORY, "zip failed, sharing the raw payload: ${t.message}")
                 runCatching { zip.delete() }
                 File(sharedDir, payloadName).also { raw ->
@@ -159,9 +123,7 @@ object SessionExporter {
         }
     }
 
-    // ── Writers (pure: a loader in, text out; unit-tested) ───────────────────
 
-    /** Rows of [sessionId] from its first user message on, page by page. */
     private suspend fun forEachRowFromFirstUser(
         sessionId: String,
         loader: PageLoader,
@@ -182,7 +144,6 @@ object SessionExporter {
         }
     }
 
-    /** Whether a session has a user message at all (iOS skips it otherwise). */
     private suspend fun hasUserMessage(sessionId: String, loader: PageLoader): Boolean {
         var offset = 0
         while (true) {
@@ -216,7 +177,6 @@ object SessionExporter {
                 session.title?.let { put("title", it) }
                 session.category?.let { put("category", it) }
             }
-            // Open the session object, then stream its messages array.
             out.write(header.toString(2).trimEnd().removeSuffix("}"))
             out.write(",\n  \"messages\": [\n")
             var firstMsg = true
@@ -311,7 +271,6 @@ object SessionExporter {
                         "toolUse" -> lines.add(
                             "[Tool: ${v?.optString("description")?.takeIf { it.isNotEmpty() } ?: v?.optString("name").orEmpty()}]",
                         )
-                        // Android keeps no result snapshot, so this is iOS's no-snapshot branch.
                         "toolResult" -> lines.add("[Result: ${if (v?.optBoolean("success", true) != false) "ok" else "failed"}]")
                         "mediaRef" -> {
                             lines.add("[Attachment]")
@@ -340,12 +299,9 @@ object SessionExporter {
         val arr = JSONArray(partsJson)
         (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
     } catch (_: Exception) {
-        // A row that is not a parts array is treated as plain text, as the
-        // rest of the app does.
         listOf(JSONObject().put("type", "text").put("value", partsJson))
     }
 
-    /** iOS `isToolResultOnly`: every part is a tool result. */
     private fun isToolResultOnly(parts: List<JSONObject>): Boolean =
         parts.isNotEmpty() && parts.all { it.optString("type") == "toolResult" }
 

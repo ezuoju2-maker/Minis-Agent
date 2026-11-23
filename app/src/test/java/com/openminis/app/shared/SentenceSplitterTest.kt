@@ -4,10 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-voice-correction] Mirrors the iOS SentenceSplitter test cases
- * (MinisTests/VoiceCorrectionTests.swift L15-27).
- */
 class SentenceSplitterTest {
 
     @Test
@@ -17,8 +13,6 @@ class SentenceSplitterTest {
 
     @Test
     fun `text without a terminator returns one sentence not an empty list`() {
-        // Load-bearing: callers diff whatever comes back, so an empty list here
-        // would silently discard the user's entire edit.
         assertEquals(listOf("没有标点的一句话"), SentenceSplitter.split("没有标点的一句话"))
     }
 
@@ -46,7 +40,6 @@ class SentenceSplitterTest {
 
     @Test
     fun `terminator set is distinct from the TTS chunking set`() {
-        // Guard against someone "unifying" the two: newline must NOT split here.
         assertTrue('\n' !in SentenceSplitter.TERMINATORS)
         assertTrue('；' in SentenceSplitter.TERMINATORS)
         assertEquals(listOf("甲\n乙"), SentenceSplitter.split("甲\n乙"))

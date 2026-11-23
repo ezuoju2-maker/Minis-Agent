@@ -6,10 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-jankdiag] The diagnostics must not cause the jank they measure: no
- * log line per frame or per token, no /proc read or log write on the main thread.
- */
 class JankDiagGuardTest {
     private val src = ProductionSources.read("diagnostics/JankDiag.kt")
 
@@ -49,14 +45,11 @@ class JankDiagGuardTest {
     @Test fun `frame metrics arrive on the background handler and are never logged per frame`() {
         assertTrue(src.contains("w.addOnFrameMetricsAvailableListener(listener, bg)"))
         val onFrame = body("private fun onFrame(")
-        // The only line onFrame can write is the one-off Stop measurement.
         assertEquals(1, Regex("AppLogger\\.").findAll(onFrame).count())
         assertTrue(onFrame.indexOf("pendingCancel?.let") in 0 until onFrame.indexOf("AppLogger."))
     }
 
     @Test fun `proc is read only through ResourceWatermark, from the background summary`() {
-        // [GH #453] The /proc reads moved to ResourceWatermark; JankDiag calls it
-        // from summarize() (the bg handler's tick) and nowhere else.
         assertEquals(0, Regex("/proc/").findAll(src).count())
         assertEquals(1, Regex("ResourceWatermark\\.sample\\(").findAll(src).count())
         assertTrue(body("private fun resources(").contains("ResourceWatermark.sample()"))
@@ -65,8 +58,6 @@ class JankDiagGuardTest {
     }
 
     @Test fun `resources are sampled in the background too, not only while an Activity is resumed`() {
-        // GH #453's process grew for 13 h with nothing on screen; the old heartbeat
-        // was gated on resumed > 0 and printed nothing then.
         val summarize = body("private fun summarize(")
         assertTrue(summarize.indexOf("val res = resources()") < summarize.indexOf("if (resumed.get() > 0) heartbeat(log, res)"))
         assertTrue(summarize.contains("[JankDiag] res background"))

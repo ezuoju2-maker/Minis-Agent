@@ -6,17 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-ctx-usage-after-compact] After a manual or automatic compaction, the
- * composer placeholder kept showing the pre-compaction "Context NN% used"
- * line. The composer holds the last presented line until typing and ignores
- * a null hint, so only a NEW generation replaces it, and compaction never
- * issued one. The glow was already fine: [publishMeasuredContextUsage] sets
- * `_lastTurnContextTokens`, from which `contextUsage` is derived.
- *
- * Source guards on the wiring, plus the tier/percent the new line reports.
- * Mirrors iOS ContextUsageAfterCompactTests.
- */
 class ContextUsageAfterCompactTest {
 
     private val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
@@ -46,8 +35,6 @@ class ContextUsageAfterCompactTest {
 
     @Test
     fun `it is shown at any tier, unlike the turn-end line`() {
-        // publishContextUsage returns early at NORMAL; the post-compaction line
-        // must not, or a drop to 20% would leave the stale 85% line on screen.
         assertFalse(announceBody.contains("Tier.NORMAL) return"))
     }
 

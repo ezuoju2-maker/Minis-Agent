@@ -12,11 +12,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.StringWriter
 
-/**
- * [T-android-session-multi-export] The session list's multi-select Export
- * writes the same file iOS does (ContentView.streamExportAsJSON /
- * streamExportAsPlainText).
- */
 class SessionExporterTest {
 
     private fun session(id: String, title: String?) =
@@ -35,7 +30,6 @@ class SessionExporterTest {
         """{"type":"mediaRef","value":{"id":"f","relativePath":"a","mimeType":"$mime"}}"""
     private fun parts(vararg p: String) = "[" + p.joinToString(",") + "]"
 
-    /** s1: a greeting before the first user turn, a tool round trip, an image. s2: no user message at all. */
     private val rows: Map<String, List<MessageEntity>> by lazy {
         mapOf(
             "s1" to listOf(
@@ -67,7 +61,6 @@ class SessionExporterTest {
         assertTrue("ISO-8601 dates", s.getString("createdAt").matches(Regex("""\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ""")))
 
         val msgs = s.getJSONArray("messages")
-        // greeting before the first user turn and the tool-result-only row are skipped
         assertEquals(3, msgs.length())
         assertEquals("user", msgs.getJSONObject(0).getString("role"))
         val first = msgs.getJSONObject(0).getJSONArray("parts")
@@ -104,8 +97,6 @@ class SessionExporterTest {
         assertTrue(txt.contains("Running\n[Tool: List files]\n---\n"))
         assertTrue(txt.contains("Done\n[Result: failed]\n---\n"))
         assertFalse("a tool-result-only row is skipped", txt.contains("[Result: ok]"))
-        // Sessions are separated by 60 '='; a session with no user message
-        // still gets its header, as on iOS.
         assertTrue(txt.contains("\n\n" + "=".repeat(60) + "\n\n# Untitled\n"))
         assertFalse(txt.contains("orphan greeting"))
     }

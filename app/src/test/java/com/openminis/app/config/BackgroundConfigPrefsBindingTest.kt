@@ -4,14 +4,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-android-config-prefs-mismatch] `background.*` builtins bind to the keys
- * Settings -> Background and the foreground service read, by the repository's
- * own constants. `background.notifications` wrote a key nothing read, so
- * `minis-config set` was a silent no-op (found on a Pixel 4a, FIX-261021-02).
- * Source-level, like ChatConfigPrefsBindingTest: Prefs fields need a real
- * SharedPreferences.
- */
 class BackgroundConfigPrefsBindingTest {
 
     private val builtins = File("src/main/java/com/openminis/app/config/ConfigBuiltins.kt").readText()

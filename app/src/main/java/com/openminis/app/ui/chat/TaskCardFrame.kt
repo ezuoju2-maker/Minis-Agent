@@ -44,19 +44,6 @@ import androidx.compose.ui.unit.sp
 import com.openminis.app.ui.theme.ChatColors
 import com.openminis.app.ui.util.expandToggleClickable
 
-/**
- * [T-sched-card-metrics] The one set of measurements every task card in the
- * chat flow uses — the sub-agent card ([HelperToolBlock]) and the scheduled
- * task card ([ScheduledTaskCard]).
- *
- * The two cards used to carry their own copies, and they drifted: the
- * scheduled card set no line heights (so its three texts inherited the
- * theme's 24sp body line height), padded 10 instead of 12, and ended in a
- * Material TextButton whose 40dp minimum height set the card's height by
- * itself. Next to a sub-agent card it read as a different, much taller
- * component. Both now render through [TaskCardFrame], so they cannot drift
- * apart again.
- */
 internal object TaskCardMetrics {
     val corner = 12.dp
     val outerVertical = 4.dp
@@ -65,7 +52,6 @@ internal object TaskCardMetrics {
     val iconDisc = 34.dp
     val iconGlyph = 13.dp
     val iconGap = 12.dp
-    /** Head row to an expanded card's extra rows (iOS VStack spacing 10). */
     val belowGap = 10.dp
     val rowSpacing = 5.dp
     val chipGap = 6.dp
@@ -76,33 +62,17 @@ internal object TaskCardMetrics {
     val chipSize = 10.sp
     val chipLineHeight = 11.sp
 
-    /** The trailing action disc (Stop / Start / Resume / Cancel task). */
     val actionDisc = 24.dp
     val actionGlyph = 14.dp
     val chevron = 16.dp
 }
 
-/**
- * The card skeleton: tinted rounded box, 34dp icon disc, a text column
- * ([content]: title row + one status line), an optional 24dp action disc and
- * the chevron. Height is set by the fixed metrics, never by a control.
- *
- * [below] is an expanded card's extra rows. They go UNDER the head row,
- * indented to the text column (iOS: `.padding(.leading, 46)`), so the icon and
- * chevron stay centred on the title and status lines, not on the whole card
- * (T-user-ask-resolved-expand).
- */
 @Composable
 internal fun TaskCardFrame(
     accent: Color,
     onClick: () -> Unit,
     onClickLabel: String?,
     modifier: Modifier = Modifier,
-    /**
-     * [ISS-017] True when a tap opens / shuts the card in place (the resolved
-     * question card) rather than navigating: that tap gets no ripple, see
-     * expandToggleClickable. Cards that open a detail sheet keep it.
-     */
     expandsInPlace: Boolean = false,
     icon: @Composable () -> Unit,
     action: (@Composable () -> Unit)? = null,
@@ -136,7 +106,6 @@ internal fun TaskCardFrame(
     }
 }
 
-/** Icon, text column, action and chevron, centred on each other. */
 @Composable
 private fun TaskCardHeadRow(
     accent: Color,
@@ -172,15 +141,6 @@ private fun TaskCardHeadRow(
     }
 }
 
-/**
- * The height a line of this style really takes with CJK in it, on this device
- * and font. Measured on a Pixel 4a: with the same fontSize and lineHeight, a
- * line holding CJK (a fallback font) came out taller than a Latin one, so the
- * sub-agent card ("完成 …") was 6 px taller than a scheduled card titled
- * "t2-sub". Using this as each row's MINIMUM height makes the card height the
- * same whatever the text, without clipping anything (a fixed height clipped
- * the top of CJK glyphs).
- */
 @Composable
 private fun cjkLineHeight(fontSize: TextUnit, lineHeight: TextUnit, weight: FontWeight): Dp {
     val measurer = rememberTextMeasurer()
@@ -192,7 +152,6 @@ private fun cjkLineHeight(fontSize: TextUnit, lineHeight: TextUnit, weight: Font
     }
 }
 
-/** The title row (chip + title), never shorter than a CJK title line. */
 @Composable
 internal fun TaskCardTitleRow(content: @Composable RowScope.() -> Unit) {
     val title = cjkLineHeight(TaskCardMetrics.titleSize, TaskCardMetrics.titleLineHeight, FontWeight.Medium)
@@ -205,7 +164,6 @@ internal fun TaskCardTitleRow(content: @Composable RowScope.() -> Unit) {
     )
 }
 
-/** The status line, never shorter than a CJK status line (see [TaskCardTitleRow]). */
 @Composable
 internal fun TaskCardStatusRow(content: @Composable RowScope.() -> Unit) {
     val h = taskCardStatusLineHeight()
@@ -216,17 +174,10 @@ internal fun TaskCardStatusRow(content: @Composable RowScope.() -> Unit) {
     )
 }
 
-/**
- * [T-scheduled-card-subline] The status row's height. A status text whose
- * content is arbitrary (the scheduled card's prompt fallback) pins itself to
- * it, so a glyph taller than CJK - a colour emoji - cannot make that card
- * taller than the sub-agent card beside it.
- */
 @Composable
 internal fun taskCardStatusLineHeight(): Dp =
     cjkLineHeight(TaskCardMetrics.subtitleSize, TaskCardMetrics.subtitleLineHeight, FontWeight.SemiBold)
 
-/** The label pill before a task card's title ("Agent" / "Scheduled task"). */
 @Composable
 internal fun TaskCardChip(text: String, accent: Color) {
     Text(
@@ -243,7 +194,6 @@ internal fun TaskCardChip(text: String, accent: Color) {
     )
 }
 
-/** A task card's title: one line, ellipsized. */
 @Composable
 internal fun TaskCardTitle(text: String) {
     Text(
@@ -257,10 +207,6 @@ internal fun TaskCardTitle(text: String) {
     )
 }
 
-/**
- * A 24dp action disc in the card's action slot, labelled for TalkBack.
- * [enabled] false dims it and ignores taps.
- */
 @Composable
 internal fun TaskCardActionDisc(
     label: String,
@@ -277,7 +223,6 @@ internal fun TaskCardActionDisc(
     ) { glyph() }
 }
 
-/** Helper for a white glyph inside [TaskCardActionDisc]. */
 @Composable
 internal fun TaskCardActionGlyph(icon: ImageVector, tint: Color = Color.White) {
     Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(TaskCardMetrics.actionGlyph))

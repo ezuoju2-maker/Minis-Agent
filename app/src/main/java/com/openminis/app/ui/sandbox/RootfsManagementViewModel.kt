@@ -21,7 +21,6 @@ data class RootfsManagementUiState(
     val rootfsSize: Long = 0L,
     val rootfsPath: String = "",
     val hasBackup: Boolean = false,
-    /** Current install phase + 0..1 progress (null when not installing). */
     val installProgress: Float? = null,
 )
 
@@ -33,11 +32,6 @@ class RootfsManagementViewModel : ViewModel() {
     private var backupDir: File? = null
     private var progressJob: Job? = null
 
-    /**
-     * Subscribe to the manager's installState and mirror progress + status
-     * text into [_uiState]. Cancelled on completion so we don't leak a job
-     * across multiple install() calls.
-     */
     private fun observeInstallProgress(manager: RootfsManager) {
         progressJob?.cancel()
         progressJob = viewModelScope.launch {

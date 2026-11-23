@@ -5,14 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-model-use-no-media-fails] A generation that had to produce media
- * and produced none exits non-zero and writes nothing — so the agent cannot
- * read "success" and reference an image that does not exist.
- *
- * The handler's runtime path needs a live provider, so this pins the
- * decisions in source.
- */
 class ModelUseNoMediaFailsTest {
 
     private val src = File("src/main/java/com/openminis/app/sandbox/offload/ModelUseOffloadHandler.kt").readText()

@@ -36,46 +36,12 @@ import com.openminis.app.ui.components.MinisTextButton
 import com.openminis.app.logging.AppLogger
 import java.io.File
 
-/**
- * T-android-gc-storm-issue17 — render-side safe mode.
- *
- * Wraps a message-body renderer (typically [StreamingMarkdownText] or
- * [MarkdownBlock]) with a content-length guard. Frozen messages whose raw text
- * exceeds [LARGE_MESSAGE_THRESHOLD_CHARS] are NOT fed to the markdown parser by
- * default — instead a CollapsedBadge is shown with size + Expand / Export
- * actions. This prevents the GC storm + UI hang observed when re-opening legacy
- * sessions with 200KB+ tool_result rows (Issue #17 follow-up to commit 86c55a8,
- * which fixed DB load but not render).
- *
- * Streaming messages are never collapsed — collapsing mid-stream would flicker
- * as the buffer grows past the threshold. The guard only kicks in for frozen
- * content.
- *
- * Expand state is per-message (keyed by [stableKey]) and survives recomposition
- * via rememberSaveable, but resets on session reopen (no persistence). This is
- * intentional: the cost of rendering 200KB markdown is incurred once per
- * explicit user opt-in per session view.
- */
 
 internal const val LARGE_MESSAGE_THRESHOLD_CHARS = 32_000
 internal const val LARGE_MESSAGE_PREVIEW_CHARS = 8_000
 
-/**
- * [T-android-streaming-regex-hang] Above this live-buffer size, an actively
- * streaming message degrades to a bounded plain-text tail (no per-tick markdown
- * regex) until the turn finishes. Well below LARGE_MESSAGE_THRESHOLD_CHARS
- * because the streaming cost is O(buffer) PER TICK, not once — a 32K frozen
- * render is fine, but re-parsing 32K on every throttle tick is what hangs the
- * main thread. Matches the per-fragment LIVE_FRAGMENT_DEGRADE_CHARS heuristic in
- * StreamingMarkdownText so both live paths degrade at the same point.
- */
 internal const val STREAM_DEGRADE_CHARS = 8_000
 
-/**
- * Returns true when [content] should be rendered through the collapse path.
- * Streaming content always renders inline (guard is bypassed) to avoid the
- * threshold flicker described above.
- */
 internal fun shouldCollapse(content: String, isStreaming: Boolean): Boolean =
     !isStreaming && content.length > LARGE_MESSAGE_THRESHOLD_CHARS
 
@@ -104,7 +70,6 @@ internal fun LargeContentBadge(
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // Preview lines — plain Text, not markdown. Capped at LARGE_MESSAGE_PREVIEW_CHARS.
         val preview = remember(content) {
             content.take(LARGE_MESSAGE_PREVIEW_CHARS) + if (content.length > LARGE_MESSAGE_PREVIEW_CHARS) "…" else ""
         }
@@ -178,16 +143,6 @@ internal fun LargeContentBadge(
     }
 }
 
-/**
- * Wraps a body renderer. When the content is frozen and over-size, renders the
- * CollapsedBadge instead; user tap toggles to inline render.
- *
- * @param stableKey   Used to scope the expand-state to a particular block. The
- *                    caller supplies messageId+blockId so two large messages
- *                    don't share expand-state across recompositions.
- * @param renderer    The actual body composable; called when content is small
- *                    or after user explicitly expands.
- */
 @Composable
 internal fun LargeContentGuard(
     content: String,
@@ -195,38 +150,10 @@ internal fun LargeContentGuard(
     stableKey: String,
     renderer: @Composable () -> Unit,
 ) {
-    // [T-android-streaming-regex-hang] Proactive streaming degrade. While a
-    // message is actively streaming, its live tail block re-runs the full
-    // inline/math regex scan (Matcher alloc + GC churn) on the WHOLE accumulated
-    // text every throttle tick. On a long turn this stacks into a main-thread
-    // hang that escalates to 30s+ and an ANR restart loop
-    // (minis-2026-07-09-longctx-hang.log: every JankDiag stack in
-    // java.util.regex.Matcher/Pattern). Once the streaming buffer crosses
-    // STREAM_DEGRADE_CHARS we stop feeding it to the markdown renderer and show a
-    // bounded plain-text tail instead — no regex, no AnnotatedString, one cheap
-    // Text layout per publish. The full markdown render happens exactly ONCE when
-    // the turn finishes (isStreaming flips false → this branch is skipped and the
-    // real renderer runs), so the user sees a single smooth swap at stream-end
-    // rather than a mid-stream flicker.
-    //
-    // [T-android-hang-false-positive] The HangDetector render breaker that used
-    // to degrade here "regardless of size" is gone. It keyed on the global hang
-    // count, so ANY 3 s main-thread gap on any screen (a lock wait on the home
-    // list, a phone waking from sleep) degraded every later streaming reply,
-    // simple ones included, until a quiet session entry reset it. Every stall
-    // recorded on the reporting device was outside the streaming renderer.
-    // Size is the only trigger now: it is about the block being drawn, and it
-    // ends with the stream.
-    // [T-android-content-perf-diag] Track whether this block spent its streaming
-    // life degraded, so we can log the one-time full-markdown swap (+ its parse
-    // cost) when the turn ends.
     val wasDegraded = remember(stableKey) { mutableStateOf(false) }
     if (isStreaming) {
         if (content.length > STREAM_DEGRADE_CHARS) {
             wasDegraded.value = true
-            // [T-android-content-perf-diag] Log the degrade with a structural
-            // fingerprint (once per ~2K growth) so a hang report shows exactly
-            // what shape the tail had. Only summarize the tail window we scan.
             remember(content.length / 2000) {
                 val s = com.openminis.app.diagnostics.ContentDiag.summarize(content)
                 AppLogger.info(
@@ -241,12 +168,6 @@ internal fun LargeContentGuard(
         }
     }
     if (!shouldCollapse(content, isStreaming)) {
-        // [T-android-content-perf-diag] Stream-end swap: a block that streamed
-        // degraded now renders full markdown ONCE. Log its shape so we know what
-        // the deferred render is about to parse (the thing the degrade was
-        // protecting against). The actual off-main markdown parse cost is logged
-        // separately by MarkdownParseCaches ([Perf][ColdParse] / [JankDiag] slow
-        // markdown parse). Fires once via the wasDegraded latch.
         if (!isStreaming && wasDegraded.value) {
             wasDegraded.value = false
             remember(stableKey, content.length) {
@@ -258,11 +179,6 @@ internal fun LargeContentGuard(
                 Unit
             }
         }
-        // [T-android-content-perf-diag] Register this body as the currently-
-        // rendering large message so a HangDetector JankDiag sample taken while
-        // its markdown parse is on the main thread can name it + its structure.
-        // Only for large bodies — small ones never hang and the churn isn't worth
-        // it. messageId is the first segment of stableKey after its type prefix.
         if (content.length >= com.openminis.app.diagnostics.CONTENT_DIAG_MIN_CHARS) {
             val msgId = remember(stableKey) { stableKey.substringAfter(':').substringBefore(':') }
             androidx.compose.runtime.DisposableEffect(stableKey, content.length) {
@@ -280,7 +196,6 @@ internal fun LargeContentGuard(
 
     var expanded by rememberSaveable(stableKey) { mutableStateOf(false) }
 
-    // Diagnostic — emitted on first composition per large block.
     remember(stableKey) {
         AppLogger.info(
             "LargeContentGuard",
@@ -300,17 +215,6 @@ internal fun LargeContentGuard(
     }
 }
 
-/**
- * [T-android-streaming-regex-hang] Bounded plain-text rendering for a LIVE
- * block over [STREAM_DEGRADE_CHARS]: the tail of the content (the part the
- * user is watching grow). No markdown parse, no regex, no AnnotatedString
- * construction — a single Text layout of at most [DEGRADED_TAIL_CHARS]
- * characters per publish.
- *
- * [T-silence-auto-notices] The "Performance protection: simplified rendering"
- * line above it is gone: an internal rendering strategy the user can neither
- * act on nor needs to know about. Logged once when a block enters this mode.
- */
 private const val DEGRADED_TAIL_CHARS = 4_000
 
 @Composable
@@ -334,11 +238,6 @@ private fun DegradedStreamingTail(content: String) {
     }
 }
 
-/**
- * Format a byte count as a short human-readable string (e.g. "32 KB", "1.2 MB").
- * Inputs here are character counts; we treat each char as 1 byte for display,
- * which is approximate but accurate enough for the "this thing is big" hint.
- */
 private fun formatByteSize(chars: Int): String {
     val bytes = chars.toLong()
     return when {
@@ -348,10 +247,6 @@ private fun formatByteSize(chars: Int): String {
     }
 }
 
-/**
- * Dump the content to a temp file under cacheDir/large-messages and fire an
- * ACTION_SEND chooser. Returns true if the chooser was launched.
- */
 private fun exportLargeContentToFile(
     context: android.content.Context,
     content: String,

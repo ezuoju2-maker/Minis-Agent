@@ -13,19 +13,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [OpenMinis#360] Claude OAuth token exchange and refresh were answered with a
- * Cloudflare challenge instead of JSON: the endpoint was the retired
- * `console.anthropic.com` host, and the auth requests carried none of the
- * Claude CLI fingerprint that the chat path has always sent.
- *
- * Two things are pinned here, because each failed silently on its own. The
- * fingerprint is verified on a real request over MockWebServer — the header
- * list being correct is worthless if the builder chain never applies it. The
- * endpoint and the two call sites are verified against the production source,
- * since reaching them through `ClaudeOAuthManager` would need a `Context`, an
- * OAuth callback server and a live authorization code.
- */
 class ClaudeCliMimicryHeadersTest {
 
     private lateinit var server: MockWebServer
@@ -41,7 +28,6 @@ class ClaudeCliMimicryHeadersTest {
         server.shutdown()
     }
 
-    /** Header name → value exactly as the chat path sends them. */
     private val expected = mapOf(
         "User-Agent" to "claude-cli/2.1.280 (external, cli)",
         "X-Stainless-Lang" to "js",
@@ -76,8 +62,6 @@ class ClaudeCliMimicryHeadersTest {
 
     @Test
     fun `anthropic-beta is not sent on the auth path`() {
-        // The beta header advertises message-API capabilities and is
-        // meaningless on a token request; the real CLI omits it here too.
         server.enqueue(MockResponse().setBody("{}"))
 
         val request = okhttp3.Request.Builder()
@@ -130,9 +114,6 @@ class ClaudeCliMimicryHeadersTest {
     @Test
     fun `both token exchange and refresh apply the fingerprint`() {
         val src = ProductionSources.read("auth/ClaudeOAuthManager.kt")
-        // One call site is the code exchange, the other the silent refresh.
-        // Refresh is the one a user hits repeatedly, so a fingerprint on only
-        // the login path would look fixed and fail days later.
         assertEquals(
             "both OAuth request builders must apply the fingerprint",
             2,
@@ -147,9 +128,6 @@ class ClaudeCliMimicryHeadersTest {
 
     @Test
     fun `fingerprint matches the chat path in AnthropicProvider`() {
-        // The values are one registered client identity. A fingerprint that
-        // matches on chat but not on auth is the exact shape of OpenMinis#360,
-        // so this fails if either side is bumped alone.
         val chat = ProductionSources.read("provider/anthropic/AnthropicProvider.kt")
         for ((name, value) in ClaudeCliMimicryHeaders.ALL) {
             assertTrue(

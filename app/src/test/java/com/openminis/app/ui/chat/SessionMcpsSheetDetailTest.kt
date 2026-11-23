@@ -7,11 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-session-mcp-detail] The chat's MCPs sheet gets the search and
- * Enable All / Disable All of iOS SessionMCPsView and of the Skills sheet, and
- * a row opens a read-only detail page that never shows header or env values.
- */
 class SessionMcpsSheetDetailTest {
 
     private val sheet = ProductionSources.read("ui/chat/SessionMcpsSheet.kt")
@@ -20,7 +15,6 @@ class SessionMcpsSheetDetailTest {
     private val github = MCPServerConfig(id = "github", note = null, command = "npx", args = listOf("-y", "gh"))
     private val search = MCPServerConfig(id = "Brave", note = "Web SEARCH")
 
-    // -- search --
 
     @Test
     fun `search matches name or note, trimmed and case-insensitive, like iOS`() {
@@ -44,7 +38,6 @@ class SessionMcpsSheetDetailTest {
         assertTrue(sheet.contains("stringResource(R.string.mcps_search_no_match, searchQuery)"))
     }
 
-    // -- detail --
 
     @Test
     fun `secret names are listed sorted, and only the names`() {
@@ -101,7 +94,6 @@ class SessionMcpsSheetDetailTest {
         }
     }
 
-    // -- strings --
 
     private val res = java.io.File(ProductionSources.mainRoot()!!.parentFile.parentFile.parentFile.parentFile, "res")
     private val keys = listOf(

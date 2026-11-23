@@ -5,16 +5,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-config-feature-unavailable] Covers the wrapper that marks a
- * registered config path as unsupported on this device, and the envelope the
- * bridge answers with. The wiring into ConfigBridge's read/write paths is
- * exercised on-device via minis-config (the bridge needs a live registry +
- * Context), so these lock the pure pieces.
- */
 class UnavailableFieldTest {
 
-    /** Minimal stand-in for a real registered field. */
     private class FakeField(
         override val path: String = "background.dynamicIsland",
         override val access: ConfigAccess = ConfigAccess.READWRITE,
@@ -45,9 +37,6 @@ class UnavailableFieldTest {
 
     @Test
     fun `the wrapper keeps the delegate's metadata so help stays honest`() {
-        // The whole point of wrapping rather than dropping the registration:
-        // the agent gets a precise answer, not a confusing unknown_path, and
-        // --help still describes the setting correctly.
         val real = FakeField()
         val wrapped = UnavailableField(real, "unsupported")
         assertEquals(real.path, wrapped.path)
@@ -61,8 +50,6 @@ class UnavailableFieldTest {
 
     @Test
     fun `the unavailable envelope uses its own error code, not permission_denied`() {
-        // Distinct code matters: permission_denied invites the agent to ask the
-        // user to grant something; feature_unavailable tells it retrying is futile.
         val env = ConfigBridge.unavailableErrorEnvelope("background.dynamicIsland", "needs Android 16")
         assertEquals(false, env.getBoolean("ok"))
         assertEquals("feature_unavailable", env.getString("error"))

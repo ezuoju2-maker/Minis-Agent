@@ -6,13 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-image-path-metadata] Only the REACTIVE half survives: the
- * blocking `check()`/`Verdict` was removed along with the send-time gate, so
- * the tests that pinned it went with it. What is left never blocks a send —
- * it recognises a 400 that an image likely caused, so the user gets an
- * actionable hint instead of the bare upstream string.
- */
 class ImageInputPreflightTest {
 
     private fun model(provider: String, inputs: List<String>?) =

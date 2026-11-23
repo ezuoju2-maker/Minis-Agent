@@ -8,14 +8,6 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 
-/**
- * The restore-side file writer.
- *
- * Two of these tests cover defences whose absence is silent rather than loud:
- * a package can direct writes outside its category root via index CONTENT (the
- * ZIP guard does not see that), and a naive delete-then-copy destroys the
- * user's existing file if the process dies mid-copy.
- */
 class BackupRestoreFilesTest {
 
     private lateinit var tmp: File
@@ -34,7 +26,6 @@ class BackupRestoreFilesTest {
         tmp.deleteRecursively()
     }
 
-    /** Put content into the package's blob store and return its digest. */
     private fun blob(content: ByteArray): String {
         val sha = java.security.MessageDigest.getInstance("SHA-256")
             .digest(content).joinToString("") { "%02x".format(it) }
@@ -59,12 +50,6 @@ class BackupRestoreFilesTest {
         assertEquals("hello", File(dest, "notes/a.md").readText())
     }
 
-    /**
-     * Path traversal via index content. The archive's own entry names are all
-     * benign (`blobs/<xx>/<sha>`); the hostile path lives in files.index, which
-     * is attacker-controlled whenever a user restores a package someone sent
-     * them.
-     */
     @Test
     fun `refuses an index path that escapes the category root`() {
         val sha = blob("pwned".toByteArray())
@@ -89,11 +74,6 @@ class BackupRestoreFilesTest {
         assertFalse(File(tmp, "evil.txt").exists())
     }
 
-    /**
-     * S7: the index says the file is in the package but its blob is not. This
-     * must be counted and surfaced — as a silent skip, the file simply never
-     * appears and the restore still reports success.
-     */
     @Test
     fun `a missing blob is counted, not silently skipped`() {
         val r = restore(listOf(
@@ -107,7 +87,6 @@ class BackupRestoreFilesTest {
         assertEquals(1, r.missingBlobs)
     }
 
-    /** §3.4 tombstones carry no content by design and are reported separately. */
     @Test
     fun `tombstones are counted by kind and never written`() {
         val r = restore(listOf(
@@ -129,12 +108,6 @@ class BackupRestoreFilesTest {
         assertTrue(File(dest, "empty").isDirectory)
     }
 
-    /**
-     * Overwriting must go through a staged swap. Delete-then-copy leaves the
-     * user's file non-existent for the whole copy, so a kill in that window
-     * destroys it permanently — and merge idempotency cannot help a file that
-     * was deleted and never rewritten.
-     */
     @Test
     fun `overwrites an existing file and leaves no scratch behind`() {
         File(dest, "notes").mkdirs()
@@ -146,12 +119,10 @@ class BackupRestoreFilesTest {
         ))
         assertEquals(1, r.written)
         assertEquals("new content", existing.readText())
-        // The staged temp file must never survive a successful write.
         val leftovers = File(dest, "notes").list()!!.filter { it.startsWith(".restore-") }
         assertTrue("scratch files must be cleaned up, found: $leftovers", leftovers.isEmpty())
     }
 
-    /** Entries belonging to another category must be left entirely alone. */
     @Test
     fun `ignores entries from other categories`() {
         val sha = blob("chat file".toByteArray())
@@ -162,7 +133,6 @@ class BackupRestoreFilesTest {
         assertEquals(0, r.rejectedPaths)
     }
 
-    /** A destination mapper returning null means "not mine" — not an error. */
     @Test
     fun `skips entries the mapper does not claim`() {
         val sha = blob("x".toByteArray())

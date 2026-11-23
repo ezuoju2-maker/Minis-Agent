@@ -7,12 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-port-composer-hint-carousel] The composer's context and quota figures are
- * two one-line pages that take turns every 5 s for 3 rounds and then settle on
- * the context page (iOS b76030535, 81488a84d, ffa76773a), instead of one
- * joined line whose quota half a narrow screen cut off.
- */
 class ComposerHintCarouselTest {
 
     private fun hint(gen: Int, quota: String? = "Quota 5h 14% / 7d 32% used") = ContextUsageHint(
@@ -42,7 +36,6 @@ class ComposerHintCarouselTest {
         assertEquals(listOf(0, 1, 0, 1, 0, 1, 0), seen)
         assertTrue(c.finished)
         assertEquals(0, c.page)
-        // Finished: further turns change nothing.
         assertEquals(0, c.turn(2))
     }
 
@@ -69,7 +62,7 @@ class ComposerHintCarouselTest {
         val c = ComposerHintCarousel()
         c.adopt(3)
         c.turn(2); c.turn(2); c.turn(2)
-        c.adopt(3) // same figures back on screen
+        c.adopt(3)
         assertEquals(3, c.turns)
         assertEquals(1, c.page)
         c.turn(2); c.turn(2); c.turn(2)
@@ -82,7 +75,6 @@ class ComposerHintCarouselTest {
         assertEquals(0, c.page)
     }
 
-    // --- Focus-rotation pool --------------------------------------------------
 
     @Test
     fun `usage pages join the rotation pool after the text entries`() {
@@ -94,7 +86,6 @@ class ComposerHintCarouselTest {
         assertNull(ComposerPlaceholderPool.usagePage(text - 1, hint(1)))
         assertEquals(UsageHintPage.CONTEXT, ComposerPlaceholderPool.usagePage(text, hint(1)))
         assertEquals(UsageHintPage.QUOTA, ComposerPlaceholderPool.usagePage(text + 1, hint(1)))
-        // Figures gone, or fewer pages than when picked: back to the default entry.
         assertNull(ComposerPlaceholderPool.usagePage(text + 1, hint(1, quota = null)))
         assertNull(ComposerPlaceholderPool.usagePage(text, null))
         assertEquals(ComposerPlaceholderRotation.DEFAULT_INDEX, ComposerPlaceholderPool.textIndex(text + 1))
@@ -110,13 +101,10 @@ class ComposerHintCarouselTest {
             }.toSet()
             assertEquals((0 until size).toSet() - current, reached)
         }
-        // Pinned under TalkBack, as before.
         assertEquals(7, ComposerPlaceholderRotation.nextIndex(7, true, true, true, { 0 }, poolSize = size))
-        // A stale usage index (figures gone) excludes nothing.
         assertEquals(2, ComposerPlaceholderRotation.nextIndex(7, true, true, false, { 2 }))
     }
 
-    // --- Wiring ---------------------------------------------------------------
 
     @Test
     fun `the composer draws pages, not the joined line, and rotates over the whole pool`() {
@@ -130,7 +118,6 @@ class ComposerHintCarouselTest {
         assertTrue("a hidden composer does not use up its rounds", ui.contains("repeatOnLifecycle(Lifecycle.State.RESUMED)"))
         assertTrue(ui.contains("delay(ComposerHintCarousel.INTERVAL_MS)"))
         assertTrue("each page fits one line by shrinking, floor 0.75", ui.contains("private const val MIN_FIT_SCALE = 0.75f"))
-        // The voice panel keeps the joined line, as on iOS.
         assertTrue(ProductionSources.read("ui/chat/voice/InlineVoiceInputPanel.kt").contains("contextUsageAnnotatedText(usageLine)"))
     }
 }

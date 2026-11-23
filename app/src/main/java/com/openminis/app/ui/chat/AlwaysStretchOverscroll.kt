@@ -11,19 +11,6 @@ import androidx.compose.foundation.rememberOverscrollEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
-/**
- * LazyColumn stops running its drag handler once canScrollForward/Backward
- * are both false, so the platform stretch overscroll never fires when the
- * list content fits the viewport. Wrap the list in this box to restore it:
- * the outer scrollable always accepts gestures, consumes 0, and pipes the
- * delta into a shared stretch effect. The inner LazyColumn, given the same
- * effect, forwards its own overflow too.
- *
- * Usage:
- *   AlwaysStretchOverscrollBox { effect ->
- *     LazyColumn(overscrollEffect = effect, ...) { ... }
- *   }
- */
 @Composable
 fun AlwaysStretchOverscrollBox(
     modifier: Modifier = Modifier,

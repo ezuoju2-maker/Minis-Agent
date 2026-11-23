@@ -7,15 +7,6 @@ import com.openminis.app.data.repository.SkillRepository
 import org.json.JSONObject
 import java.io.File
 
-/**
- * [OPT-skill-load] Loads a skill's full SKILL.md instructions by NAME instead
- * of making the model guess a filesystem path. The system prompt lists each
- * skill's name + path, and previously the model had to reconstruct
- * `/var/minis/skills/<id>/SKILL.md` (it often hallucinated the id, since the
- * prompt shows the display name, not the storage id). This tool resolves by
- * display name, id, or fuzzy name match and returns the real file contents,
- * recording usage like a normal file_read of SKILL.md does.
- */
 object SkillLoadTool {
 
     const val NAME = "skill_load"
@@ -47,7 +38,6 @@ object SkillLoadTool {
 
         val all = repo.skills.value
         val q = query.lowercase()
-        // Exact name → exact id → name starts-with → contains → id contains.
         val skill = all.firstOrNull { it.name.equals(query, ignoreCase = true) }
             ?: all.firstOrNull { it.id.equals(query, ignoreCase = true) }
             ?: all.firstOrNull { it.name.lowercase().startsWith(q) }
@@ -63,8 +53,6 @@ object SkillLoadTool {
             )
         }
 
-        // Read the on-disk SKILL.md (the full source, including any files the
-        // model may need), falling back to the DB-parsed body.
         val mdFile = File(context.filesDir, "minis-global/skills/${skill.id}/SKILL.md")
         val content = try {
             if (mdFile.exists()) mdFile.readText() else skill.body

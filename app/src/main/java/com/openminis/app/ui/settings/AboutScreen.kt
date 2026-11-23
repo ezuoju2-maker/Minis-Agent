@@ -50,8 +50,6 @@ fun AboutScreen(onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             val iconPainter = remember(context) {
-                // painterResource() can't load adaptive-icon XML drawables (mipmap-anydpi-v26),
-                // so fetch the launcher icon as a Drawable and convert to a Bitmap.
                 val drawable = context.packageManager.getApplicationIcon(context.packageName)
                 BitmapPainter(drawable.toBitmap(width = 192, height = 192).asImageBitmap())
             }
@@ -89,8 +87,6 @@ fun AboutScreen(onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            // [T-android-about-build-date] Selectable so it can be copied
-            // into a bug report.
             val buildDate = remember(context) { AppBuildInfo.buildDate(context) }
             SelectionContainer {
                 Text(
@@ -113,20 +109,12 @@ fun AboutScreen(onBack: () -> Unit) {
                 icon = Icons.Outlined.Code,
                 iconColor = tileBlue,
                 title = stringResource(R.string.about_github_repository),
-                // Settings → ABOUT siblings (Privacy Policy / Submit GitHub
-                // Issues) all use openExternalUrl directly. The
-                // LocalInAppBrowserLauncher ambient defaults to a no-op when
-                // no InAppBrowserHost is in the tree above this screen — and
-                // nothing wraps Settings, so the row used to be a dead tap.
                 onClick = { openExternalUrl(context, "https://github.com/OpenMinis/OpenMinis") },
                 trailing = { ExternalLinkIcon() },
                 showDivider = false,
             )
         }
 
-        // T122: surface the existing UpdateChecker entry on the About screen.
-        // The composable was already implemented but never wired anywhere, so
-        // users had no way to trigger a check.
         CheckUpdateSection()
 
         Spacer(Modifier.height(24.dp))
@@ -142,11 +130,6 @@ private fun ExternalLinkIcon() {
     )
 }
 
-/**
- * Back-compat shim for legacy call sites that still call [openUrl] with a
- * Context. Dispatches as a system Intent — the in-app preview path is the new
- * `LocalInAppBrowserLauncher` ambient; prefer that at the call site.
- */
 internal fun openUrl(context: android.content.Context, url: String) {
     openExternalUrl(context, url)
 }

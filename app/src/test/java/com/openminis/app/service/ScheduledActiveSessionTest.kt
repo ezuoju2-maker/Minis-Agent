@@ -7,12 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-scheduled-active-session-android] A chat whose own scheduled task is still
- * due stays "processing" (port of iOS f2891c01b): one set in the tracker,
- * which keep-alive, Stop, the list spinner and the notification follow - while
- * activeSessions keeps meaning "its loop is running now".
- */
 class ScheduledActiveSessionTest {
 
     @After fun reset() {
@@ -37,13 +31,12 @@ class ScheduledActiveSessionTest {
         SessionActivityTracker.setActive("A")
         SessionActivityTracker.setActive("S")
         assertEquals(setOf("A", "S"), SessionActivityTracker.processingSessions.value)
-        SessionActivityTracker.setInactive("S")   // the fire's turn ends
+        SessionActivityTracker.setInactive("S")
         SessionActivityTracker.setInactive("A")
         assertEquals("the gap between fires stays processing", setOf("S"), SessionActivityTracker.processingSessions.value)
         assertTrue(SessionActivityTracker.activeSessions.value.isEmpty())
     }
 
-    // ── Source guards ────────────────────────────────────────────────────
 
     private val tracker = ProductionSources.read("service/SessionActivityTracker.kt")
     private val service = ProductionSources.read("service/AgentForegroundService.kt")
@@ -60,13 +53,10 @@ class ScheduledActiveSessionTest {
     @Test fun `loop-only consumers still read activeSessions`() {
         val main = ProductionSources.read("MainActivity.kt")
         assertTrue("keep screen awake", main.contains("SessionActivityTracker.activeSessions.collect { active ->\n                applyKeepScreenAwakeFlag(active.isNotEmpty())"))
-        // [T-port-sched-wait-notification] "Completed" also excludes a
-        // scheduled wait now (the WAITING phase), but still reads the loop set.
         assertTrue("live notification completion",
             service.contains("finishedAtMs != null && SessionActivityTracker.activeSessions.value.isEmpty()"))
         assertTrue(service.contains("val hasActiveSessions = SessionActivityTracker.activeSessions.value.isNotEmpty()"))
         assertTrue("resume detection", vm.contains("val trackerActive = SessionActivityTracker.isActive(activeSessionId)"))
-        // Never fold the scheduled chats into the loop set.
         assertFalse(tracker.contains("_activeSessions.value = _activeSessions.value + _scheduledSessions"))
     }
 
@@ -76,7 +66,6 @@ class ScheduledActiveSessionTest {
             cancel.contains("ScheduledTaskManager") || cancel.contains("disableAllCreatedBy"))
         val stopByUser = vm.substringAfter("    fun stopByUser() {").substringBefore("\n    }\n")
         assertTrue(stopByUser.contains("disableAllCreatedBy(id, \"user stopped the conversation\")"))
-        // stopByUser is called from the composer's Stop and nowhere else.
         val mainRoot = ProductionSources.mainRoot()!!
         val callers = mainRoot.walkTopDown().filter { it.isFile && it.extension == "kt" }
             .filter { it.readText().contains(".stopByUser()") }.map { it.name }.toList()
@@ -98,7 +87,6 @@ class ScheduledActiveSessionTest {
     @Test fun `the hold is fed, held through each fire, and released on delete`() {
         assertTrue(ProductionSources.read("MinisApp.kt").contains("ScheduledSessionHold.observe(this@MinisApp).collect { held ->"))
         val receiver = ProductionSources.read("scheduled/ScheduledTaskAlarmReceiver.kt")
-        // rescheduleNext 现在带 slot 参数；锚点跟随签名演进，语义不变：hold 在重排下一次触发前 begin。
         assertTrue(receiver.indexOf("ScheduledSessionHold.beginRun(taskId)") in 0 until receiver.indexOf("manager.rescheduleNext(taskId,"))
         assertTrue(receiver.contains("ScheduledSessionHold.endRun(taskId)"))
         val runner = ProductionSources.read("scheduled/ScheduledAgentRunner.kt")

@@ -12,11 +12,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-431] The handler's envelope and exit codes, driven through a fake system.
- * Pre-#431, `transcribe` failures printed `{"error": "Client error"}` with
- * exit 0, so an agent could not tell a failure from a transcript.
- */
 class SpeechOffloadHandlerTest {
 
     internal open class FakeSpeechSystem : SpeechSystem {
@@ -115,7 +110,7 @@ class SpeechOffloadHandlerTest {
     @Test
     fun `a client error fails with exit 1 and is remembered`() {
         val sys = FakeSpeechSystem().apply {
-            onDeviceAvailable = false // one attempt; fallback is tested below
+            onDeviceAvailable = false
             outcomes += RecognizeOutcome.Failure(SpeechRecognizer.ERROR_CLIENT, Recognizers.REGULAR)
         }
         val r = run(sys, "transcribe", "--duration", "3")
@@ -217,7 +212,6 @@ class SpeechOffloadHandlerTest {
         assertNull(out.opt("ok"))
     }
 
-    // ── [T-431-fallback] recognizer order and fallback ───────────────────
 
     @Test
     fun `the regular recognizer is the default`() {
@@ -345,7 +339,6 @@ class SpeechOffloadHandlerTest {
         release.countDown()
         first.join(5_000)
         assertEquals("busy", json(second).getJSONObject("error").getString("code"))
-        // The lock is released afterwards.
         val third = FakeSpeechSystem().apply { outcomes += RecognizeOutcome.Success(listOf("y"), null, Recognizers.REGULAR) }
         assertEquals(0, run(third, "transcribe").exitCode)
     }
@@ -357,7 +350,6 @@ class SpeechOffloadHandlerTest {
         assertEquals("on_device", data.getJSONArray("recognizer_order_on_device").getString(0))
     }
 
-    // ── [T-431-engine] --engine system|provider|auto, --source files ─────
 
     private val mock = SpeechEngines.VoiceModel("i431-mock", "whisper-1", "127.0.0.1")
 
@@ -572,7 +564,6 @@ class SpeechOffloadHandlerTest {
         assertEquals(null, sys.recordedSeconds)
     }
 
-    // ── [T-431-cancel] a caller that exits stops capture and upload ──────
 
     @Test
     fun `a caller killed during a provider capture uploads nothing`() {

@@ -16,12 +16,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-port-user-ask-recovery] A question survives a process kill: the record is
- * written before the card, comes back answerable on the next load, and its
- * answer resumes the run - delivered exactly once, with no Resume banner while
- * it waits.
- */
 class UserAskRecoveryTest {
 
     private val t0 = 1_000_000_000L
@@ -29,7 +23,6 @@ class UserAskRecoveryTest {
         options = listOf(UserAskOption("SQLite"), UserAskOption("Postgres")), defaultIndex = 1)
     private val conf = UserAskQuestion(UserAskQuestionType.CONFIRM, "rm -rf build/", impact = "deletes output", risk = UserAskRisk.HIGH)
 
-    /** The assistant row of a batch with user_ask + a shell call, as persistAssistantTurn writes it. */
     private val snapshot = JSONArray()
         .put(JSONObject().put("type", "text").put("value", "Let me ask."))
         .put(JSONObject().put("type", "toolUse").put("value", JSONObject().put("toolUseId", "tc1").put("name", "user_ask").put("input", "{}")))
@@ -38,7 +31,6 @@ class UserAskRecoveryTest {
 
     private fun ask(minutes: Int = 5) = PendingAsk.create("req1", "s1", "tc1", listOf(opt, conf), t0, minutes)
 
-    // ── Fakes ──────────────────────────────────────────────────────────────
 
     private class MemRecords : UserAskRecords {
         val map = LinkedHashMap<String, UserAskRecord>()
@@ -48,7 +40,7 @@ class UserAskRecoveryTest {
     }
 
     private class MemTranscript : UserAskTranscript {
-        val rows = mutableListOf<Pair<String, String>>()   // role, partsJson
+        val rows = mutableListOf<Pair<String, String>>()
         override suspend fun sessionExists(sessionId: String) = true
         override suspend fun partsJsonRows(sessionId: String) = synchronized(rows) { rows.map { it.second } }
         override suspend fun append(sessionId: String, role: String, partsJson: String) { synchronized(rows) { rows += role to partsJson } }
@@ -66,7 +58,6 @@ class UserAskRecoveryTest {
         delivered.clear()
         UserAskRecoveryCoordinator.install(records, transcript, { sid, resume -> synchronized(delivered) { delivered += sid to resume } }, scanOthers = false)
         UserAskCenter.onChanged = { records.onAskChanged(it) }
-        // Deliveries are driven explicitly below (in the app this hook launches one).
         UserAskCenter.onResolvedWithoutWaiter = null
     }
 
@@ -75,7 +66,6 @@ class UserAskRecoveryTest {
         UserAskRecoveryCoordinator.resetForTest()
     }
 
-    // ── Pure rules (iOS vectors) ───────────────────────────────────────────
 
     @Test fun `the recovery decision`() {
         val rec = UserAskRecord(ask(), snapshot, listOf("tc2"))
@@ -139,9 +129,7 @@ class UserAskRecoveryTest {
         assertFalse(InterruptedTailDetector.awaitsUserAnswer(LLMMessage(LLMMessage.Role.USER, "x"), setOf("tc1")))
     }
 
-    // ── The kill / restore / answer cycle ──────────────────────────────────
 
-    /** Simulate a kill mid-wait: the record is on disk, nothing in memory, the transcript has the user row only. */
     private fun killedWhileWaiting(minutes: Int = 5) {
         records.save(UserAskRecord(ask(minutes), snapshot, listOf("tc2")))
         transcript.rows += "user" to """[{"type":"text","value":"set up the db"}]"""
@@ -156,21 +144,18 @@ class UserAskRecoveryTest {
         assertEquals(UserAskState.PENDING, live.state)
         assertFalse("restored asks belong to no tool call", UserAskCenter.isInProcess(live.requestId))
         assertEquals(setOf("tc1"), UserAskRecoveryCoordinator.pendingToolCallIds("s1"))
-        // Restoring twice adds nothing.
         UserAskRecoveryCoordinator.restoreForSession("s1", nowMs = t0 + 61_000)
         assertEquals(2, transcript.rows.size)
 
-        // The user answers both questions on the restored card.
         UserAskCenter.submitQuestion(live.requestId, 0)
         UserAskCenter.confirm(live.requestId, 1, UserAskConfirmChoice.APPROVE)
-        UserAskRecoveryCoordinator.deliverRecovered(live.requestId)   // what onResolvedWithoutWaiter launches
+        UserAskRecoveryCoordinator.deliverRecovered(live.requestId)
         val resultRow = transcript.rows.last()
         assertEquals("user", resultRow.first)
         assertTrue(resultRow.second.contains("\\\"status\\\":\\\"approved\\\"") || resultRow.second.contains("approved"))
         assertTrue(resultRow.second.contains("\"toolUseId\":\"tc2\""))
         assertEquals(listOf("s1" to true), delivered)
         assertTrue("record dropped once delivered", records.all().isEmpty())
-        // Exactly once: a second delivery finds the result in the transcript.
         UserAskRecoveryCoordinator.deliverRecovered(live.requestId)
         assertEquals(3, transcript.rows.size)
     }
@@ -231,7 +216,6 @@ class UserAskRecoveryTest {
         assertTrue(transcript.rows.last().second.contains("Recovered after the app restarted"))
     }
 
-    // ── Source guards ──────────────────────────────────────────────────────
 
     @Test fun `the view model persists before showing, delivers once, restores before reading`() {
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")

@@ -6,11 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-send-longpress-return-mode] Long-pressing the composer Send button opens a
- * "Return key" chooser that writes the same `returnKeyBehavior` pref the
- * Appearance setting owns, and must work on the grey (nothing-to-send) button.
- */
 class SendReturnModeMenuTest {
 
     @Test
@@ -19,7 +14,6 @@ class SendReturnModeMenuTest {
         assertEquals(0, SendReturnMode.prefFromSends(false))
         assertTrue(SendReturnMode.sendsFromPref(1))
         assertFalse(SendReturnMode.sendsFromPref(0))
-        // Same rule as returnKeySendsMessage(): only exactly 1 means Send.
         assertFalse(SendReturnMode.sendsFromPref(2))
         assertFalse(SendReturnMode.sendsFromPref(-1))
         for (b in listOf(true, false)) {
@@ -53,7 +47,6 @@ class SendReturnModeMenuTest {
 
     @Test
     fun placementPrefersAboveRightAligned() {
-        // 1080x2000 window, 38px button at the bottom-right, 400x200 popup.
         val (x, y) = SendReturnMode.placement(
             anchorLeft = 1000, anchorTop = 1800, anchorRight = 1038, anchorBottom = 1838,
             windowWidth = 1080, windowHeight = 2000,
@@ -75,10 +68,7 @@ class SendReturnModeMenuTest {
 
     @Test
     fun pivotSitsOnAnchorCentre() {
-        // Popup 638..1038 wide; button centre 1019 → near the right edge.
         assertEquals((1019 - 638) / 400f, SendReturnMode.pivotFraction(1019, 638, 400), 1e-6f)
-        // Popup above the button: pivot y is below the popup (> 1) so the
-        // scale grows out of the button, not the popup's own edge.
         assertTrue(SendReturnMode.pivotFraction(1819, 1580, 200) > 1f)
         assertEquals(0.5f, SendReturnMode.pivotFraction(10, 0, 0), 0f)
     }
@@ -90,7 +80,6 @@ class SendReturnModeMenuTest {
     fun chatScreenUsesSendButtonWithLongPress() {
         assertTrue(chatScreen.contains("ComposerSendButton("))
         assertTrue(menuSrc.contains("onLongClick = { menuVisible = true }"))
-        // Must not regress to a disabled clickable that swallows long-press.
         assertFalse(menuSrc.contains("clickable(enabled = canActivate)"))
         assertTrue(menuSrc.contains("CustomAccessibilityAction("))
     }
@@ -105,8 +94,6 @@ class SendReturnModeMenuTest {
 
     @Test
     fun stopButtonLongPressPicksStopMode() {
-        // [T-stop-mode-longpress] The stop button now has its own chooser
-        // (Stop Immediately / Confirm Before Stopping), never the Return-key one.
         val stopBlock = chatScreen.substringAfter("if (showStop) {").substringBefore("if (confirmStop) {")
         assertTrue(stopBlock.contains("ComposerStopButton("))
         assertFalse(stopBlock.contains("ComposerSendButton"))

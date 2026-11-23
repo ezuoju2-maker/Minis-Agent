@@ -16,17 +16,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
-/**
- * [B01 cross-platform read] What Android accepts in a `provider_config.json`
- * from another build or the other platform (shared rule table in the B01
- * cross-platform spec): a MISSING field takes its default -
- * `instances[].isEnabled` true, `appendV1Suffix` true (iOS's own default too),
- * `modelEntries[].isHidden` / `isCustom` false, `modelGroups[].strategy`
- * fallback, `fallbackStrategy` default, absent top-level arrays empty; iOS's
- * fallbackStrategy `limited` IS Android's `default`; thinking levels in any
- * case. A field that is present with the wrong type is still rejected as
- * before.
- */
 class BackupProviderDecodeToleranceTest {
 
     private val sharedDir: File by lazy {
@@ -39,7 +28,6 @@ class BackupProviderDecodeToleranceTest {
 
     @Test
     fun `an iOS package decodes with its groups, members, thinking levels and strategies`() {
-        // B01X part of a real iOS 1.16 (1) export, unchanged.
         val parsed = parse(File(sharedDir, "b01x_ios_v116_provider_config.json").readText())
         val c = parsed.config
         assertEquals(0, parsed.droppedInstances)
@@ -55,7 +43,7 @@ class BackupProviderDecodeToleranceTest {
         assertEquals(listOf("b01x-m1", "b01x-m2"), codex.memberEntryIds.map { it.substringAfterLast('/') })
         assertEquals(ThinkingLevel.HIGH, codex.defaultThinkingLevel)
         assertEquals(RoutingStrategy.fallback, codex.strategy)
-        assertEquals(FallbackStrategy.default, codex.fallbackStrategy) // iOS "limited"
+        assertEquals(FallbackStrategy.default, codex.fallbackStrategy)
         val same = groups.getValue("B01X-G-SAME")
         assertEquals(FallbackStrategy.always, same.fallbackStrategy)
         assertEquals(ThinkingLevel.MEDIUM, same.defaultThinkingLevel)
@@ -65,15 +53,12 @@ class BackupProviderDecodeToleranceTest {
 
     @Test
     fun `iOS's limited is Android's default without relying on coerceInputValues`() {
-        // A decoder that does not coerce unknown enum values: "limited" must be
-        // a name of `default`, not an accident of coercion.
         val strict = Json { ignoreUnknownKeys = true }
         val group = strict.decodeFromString(
             ModelGroup.serializer(),
             """{"id":"g","name":"B01X-G","memberEntryIds":[],"strategy":"fallback","fallbackStrategy":"limited"}""",
         )
         assertEquals(FallbackStrategy.default, group.fallbackStrategy)
-        // Android still writes its own name for the device's config.
         assertEquals(
             "\"default\"",
             Json.encodeToString(FallbackStrategy.serializer(), FallbackStrategy.default),
@@ -122,10 +107,6 @@ class BackupProviderDecodeToleranceTest {
         assertEquals(listOf("ok"), parsed.config.instances.map { it.id })
     }
 
-    // -- the real packages of the B01 cross-device test, when present --------
-    // They hold real provider names and addresses (no keys), so they are read
-    // from /tmp at test time only and never copied into the repository; only
-    // counts and B01X test data are asserted.
 
     private fun providerConfigIn(pkg: File): String =
         ZipFile(pkg).use { zip ->

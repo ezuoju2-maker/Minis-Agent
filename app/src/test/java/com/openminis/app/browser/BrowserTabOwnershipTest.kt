@@ -6,47 +6,27 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-browser-tab-ownership] The admission rules, as pure logic.
- *
- * BrowserTabPool needs a Context and real WebViews, so these mirror its
- * decision functions against the same data shapes rather than driving the pool
- * itself. What is under test is the part that decides WHO may touch WHAT — the
- * half that was missing entirely, and the half that a device test would only
- * exercise by luck.
- *
- * The incident these encode: three research sub agents ping-ponged on tab 0,
- * one agent's get_readable returned another's page, and "Maximum of 3 tabs"
- * made them close each other's work (iOS 4487da4b1, 2026-09-04).
- */
 class BrowserTabOwnershipTest {
 
     private val chat = "chat-session"
     private val agentA = "child-a"
     private val agentB = "child-b"
 
-    /** Mirrors BrowserTabPool.isPrivileged. */
     private fun isPrivileged(owner: String?, sessionId: String? = chat) =
         owner == null || owner == sessionId
 
-    /** Mirrors BrowserTabPool.mayUse. */
     private fun mayUse(tabOwner: Map<Int, String>, tabId: Int, owner: String?) =
         if (isPrivileged(owner)) true else tabOwner[tabId] == owner
 
-    /** Mirrors BrowserTabPool.effectiveMaxTabs. */
     private fun effectiveMax(tabOwner: Map<Int, String>, requesting: String?): Int {
         val owners = (tabOwner.values.toSet() - setOfNotNull(chat)).toMutableSet()
         if (requesting != null && !isPrivileged(requesting)) owners.add(requesting)
         return if (owners.isEmpty()) 3 else minOf(3 + 2 * owners.size, 6)
     }
 
-    // ── Privilege ───────────────────────────────────────────────────────────
 
     @Test
     fun `a human and the owning chat may use any tab`() {
-        // owner == null is the UI and every human path; owner == sessionId is
-        // the chat driving its own pool. Both keep full access, which is what
-        // lets the constraint ship without touching a single UI call site.
         val owned = mapOf(0 to agentA, 1 to agentB)
         for (id in listOf(0, 1)) {
             assertTrue("human may use tab $id", mayUse(owned, id, null))
@@ -64,15 +44,11 @@ class BrowserTabOwnershipTest {
 
     @Test
     fun `an unowned tab belongs to the chat, not to whoever asks first`() {
-        // A tab with no entry was opened by the chat or the human. An agent
-        // must not inherit it just because nobody claimed it.
         assertFalse(mayUse(emptyMap(), 0, agentA))
         assertTrue(mayUse(emptyMap(), 0, null))
     }
 
-    // ── Implicit target order ───────────────────────────────────────────────
 
-    /** Mirrors the pool's implicit-target resolution for an agent. */
     private fun implicitTarget(
         tabOwner: Map<Int, String>,
         lastByOwner: Map<String, Int>,
@@ -103,7 +79,7 @@ class BrowserTabOwnershipTest {
     fun `it falls to another tab it owns when the last one is gone`() {
         val target = implicitTarget(
             tabOwner = mapOf(0 to chat, 1 to agentA),
-            lastByOwner = mapOf(agentA to 9),   // closed
+            lastByOwner = mapOf(agentA to 9),
             inUse = emptySet(),
             existing = setOf(0, 1),
             owner = agentA,
@@ -113,9 +89,6 @@ class BrowserTabOwnershipTest {
 
     @Test
     fun `it never falls through to the chat's tab`() {
-        // THE incident. With no tab of its own, the answer must be "none, open
-        // one", never the chat's selected tab — three agents resolving to the
-        // same tab is exactly how one agent read another's page.
         val target = implicitTarget(
             tabOwner = mapOf(0 to chat, 1 to agentB),
             lastByOwner = emptyMap(),
@@ -138,11 +111,9 @@ class BrowserTabOwnershipTest {
         assertEquals(2, target)
     }
 
-    // ── Quota and ceiling ───────────────────────────────────────────────────
 
     @Test
     fun `the pool keeps its old ceiling when no agent is running`() {
-        // The single-user case must not change: 3, exactly as before.
         assertEquals(3, effectiveMax(emptyMap(), null))
         assertEquals(3, effectiveMax(mapOf(0 to chat), chat))
     }
@@ -155,20 +126,15 @@ class BrowserTabOwnershipTest {
 
     @Test
     fun `the ceiling is hard-capped regardless of agent count`() {
-        // WebView memory is the real constraint; the cap is what keeps a wide
-        // fan-out from turning into a reclaim storm.
         val many = (0..9).associateWith { "child-$it" }
         assertEquals(6, effectiveMax(many, "child-0"))
     }
 
     @Test
     fun `a requesting agent counts even before it owns anything`() {
-        // Otherwise its very first new_tab would be judged against the
-        // no-agents ceiling of 3 and refused while the chat held three tabs.
         assertEquals(5, effectiveMax(emptyMap(), agentA))
     }
 
-    // ── Release ─────────────────────────────────────────────────────────────
 
     @Test
     fun `releasing an agent returns its tabs and leaves the others alone`() {
@@ -177,7 +143,6 @@ class BrowserTabOwnershipTest {
         assertEquals(listOf(1, 2), mine.sorted())
         mine.forEach { owned.remove(it) }
         assertEquals(mapOf(0 to chat, 3 to agentB), owned)
-        // And the ceiling drops back as the slots return.
         assertEquals(5, effectiveMax(owned, null))
     }
 

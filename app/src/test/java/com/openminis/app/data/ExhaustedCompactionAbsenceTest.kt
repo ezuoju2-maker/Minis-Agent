@@ -9,20 +9,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T14] Rollback guard: "every fallback candidate failed" must never again
- * force a compaction (c1e5664a7, 9ad0c84b4; iOS twins df0b71ed7, e52014156;
- * issue #133).
- *
- * The withdrawn layer (T-android-compact-last-resort + its
- * CompactNegativeGuard narrowing) rewrote the user's history behind a dead
- * proxy six times in one morning: a ConnectException exhausts a group exactly
- * like an oversized context, and the signal cannot tell the two apart. Product
- * decision: an automatic, irreversible edit of the conversation must not hang
- * off it. This test reads `src/main` (never `build/`, which can hold stale
- * generated copies) and asserts the symbols stay gone and the exhausted branch
- * only composes the error trail.
- */
 class ExhaustedCompactionAbsenceTest {
 
     private val removedSymbols = listOf(
@@ -42,8 +28,6 @@ class ExhaustedCompactionAbsenceTest {
             val text = f.readText()
             for (sym in removedSymbols) {
                 if (text.contains(sym)) {
-                    // The revert leaves a historical mention in a comment tag;
-                    // only a CODE reference (declaration, call, type) counts.
                     val codeLines = text.lines().filter { it.contains(sym) && !it.trimStart().startsWith("//") && !it.trimStart().startsWith("*") }
                     if (codeLines.isNotEmpty()) hits.add("${f.name}: $sym -> ${codeLines.first().trim()}")
                 }
@@ -57,7 +41,7 @@ class ExhaustedCompactionAbsenceTest {
     @Test
     fun `the notice strings did not come back in any locale`() {
         val root = ProductionSources.mainRoot()!!
-        val res = File(root.parentFile.parentFile.parentFile.parentFile, "res") // src/main/res
+        val res = File(root.parentFile.parentFile.parentFile.parentFile, "res")
         assertTrue("res dir not found at ${res.absolutePath}", res.isDirectory)
         val offenders = res.walkTopDown()
             .filter { it.isFile && it.name == "strings.xml" && it.readText().contains("compact_last_resort") }
@@ -65,10 +49,6 @@ class ExhaustedCompactionAbsenceTest {
         assertTrue("compact_last_resort strings present in: $offenders", offenders.isEmpty())
     }
 
-    /**
-     * Port of the exhausted branch (ChatViewModel runAgentLoop, "All
-     * fallbacks exhausted"): compose the trail and throw. No history mutation.
-     */
     private fun groupExhaustedError(
         fallbackReasons: List<String>,
         skipped: List<String>,
@@ -105,7 +85,6 @@ class ExhaustedCompactionAbsenceTest {
         assertEquals("history length unchanged", snapshot.size, history.size)
         assertEquals("history content unchanged", snapshot, history)
 
-        // Single-entry session (no fallback): the original error is rethrown as-is.
         assertTrue(groupExhaustedError(emptyList(), emptyList(), final, shouldFallback = false) === final)
     }
 

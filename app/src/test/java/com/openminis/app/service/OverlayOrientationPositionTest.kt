@@ -16,26 +16,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
-/**
- * [T-overlay-orientation-position] Alice Q2, reproduced on a Pixel 4a: the
- * capsule dragged to y=1796 in portrait was clamped to 946 in landscape, that
- * clamp was SAVED over the one stored position, and back in portrait it stayed
- * at 946. In landscape it also sat on the home gesture bar.
- *
- * Now each orientation keeps its own position, a configuration change only
- * clamps what is shown, only a drag writes (to the current orientation), the
- * single position earlier builds stored is read as the portrait one, and in
- * landscape the capsule stays clear of the navigation bar / gesture inset.
- *
- * [T-overlay-no-top-hide] In both orientations the shown capsule is fully
- * below the top inset (status bar / cutout), and never above the top edge.
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class OverlayOrientationPositionTest {
 
-    // Pixel 4a, the repro's numbers: capsule 538 x 127 in portrait, 660 wide
-    // in landscape.
     private val portraitW = 1080
     private val portraitH = 2340
     private val landW = 2340
@@ -101,14 +85,10 @@ class OverlayOrientationPositionTest {
         val shown = shownLand(store)
         assertEquals("fully above the inset", landH - gestureBar - ch, shown.y)
         assertEquals("the saved drag is untouched", Point(800, 5000), store.saved[Orientation.LANDSCAPE])
-        // A side navigation bar (three-button nav in landscape) is avoided too.
         assertEquals(landW - 130 - cwLand, OverlayPosition.clamp(5000, 300, landW, landH, cwLand, ch, Avoid(right = 130)).x)
         assertEquals(130, OverlayPosition.clamp(-5000, 300, landW, landH, cwLand, ch, Avoid(left = 130)).x)
     }
 
-    // [T-overlay-no-top-hide] Was "the top edge still lets half the capsule
-    // hide, as de5b07a53 decided" (expected y = -ch / 2). The owner withdrew
-    // that: the top keeps the capsule fully on screen, in both orientations.
     @Test fun `the top edge keeps the whole capsule on screen`() {
         assertEquals(0, OverlayPosition.clamp(300, -5000, landW, landH, cwLand, ch, Avoid(bottom = gestureBar)).y)
         assertEquals(0, OverlayPosition.clamp(300, -5000, portraitW, portraitH, cwPortrait, ch).y)
@@ -116,8 +96,6 @@ class OverlayOrientationPositionTest {
         assertEquals("0 itself is allowed", 0, OverlayPosition.clamp(300, 0, portraitW, portraitH, cwPortrait, ch).y)
     }
 
-    // [T-overlay-no-top-hide] Was "...at every edge"; the top is now fully on
-    // screen (y = 0, was -63). Left, right and bottom are unchanged.
     @Test fun `portrait keeps the old half-on-screen rule left, right and bottom`() {
         assertEquals(Point(-269, portraitH - 64), OverlayPosition.clamp(-5000, 5000, portraitW, portraitH, cwPortrait, ch))
         assertEquals(Point(portraitW - 269, 0), OverlayPosition.clamp(5000, -5000, portraitW, portraitH, cwPortrait, ch))
@@ -128,9 +106,7 @@ class OverlayOrientationPositionTest {
         assertEquals(Avoid(left = 0, right = 130, bottom = 63), OverlayPosition.avoidFor(Orientation.LANDSCAPE, left = 0, right = 130, bottom = 63))
     }
 
-    // ── Top edge [T-overlay-no-top-hide] ────────────────────────────────────
 
-    // Pixel 4a status bar height; any positive inset behaves the same.
     private val statusBar = 135
 
     @Test fun `with a top inset the capsule stays fully below it`() {
@@ -159,7 +135,6 @@ class OverlayOrientationPositionTest {
         val avoid = OverlayPosition.avoidFor(Orientation.PORTRAIT, 0, 0, 0, top = statusBar)
         val shown = OverlayPosition.displayed(store, defaultFor(portraitW, portraitH), portraitW, portraitH, cwPortrait, ch, avoid)
         assertEquals(Point(512, statusBar), shown)
-        // With no inset known (0) the top edge itself is the limit.
         assertEquals(Point(512, 0), shownPortrait(store))
     }
 
@@ -207,7 +182,6 @@ class OverlayOrientationPositionTest {
             .substringBefore("MotionEvent.ACTION_UP").contains("OverlayPosition.clamp("))
     }
 
-    // ── Storage ─────────────────────────────────────────────────────────────
 
     @Test fun `the single position earlier builds stored is read as the portrait one`() {
         val ctx = RuntimeEnvironment.getApplication()
@@ -225,13 +199,11 @@ class OverlayOrientationPositionTest {
         repo.setOverlayPosition(1500, -40, landscape = true)
         assertEquals(512 to 1796, repo.getOverlayPosition(landscape = false))
         assertEquals(1500 to -40, repo.getOverlayPosition(landscape = true))
-        // An older build reading the same file still finds its position.
         val prefs = ctx.getSharedPreferences("background_settings", Context.MODE_PRIVATE)
         assertEquals(512, prefs.getInt("backgroundOverlayX", 0))
         assertEquals(1796, prefs.getInt("backgroundOverlayY", 0))
     }
 
-    // ── Wiring ──────────────────────────────────────────────────────────────
 
     @Test fun `a configuration change never writes the saved position`() {
         val src = ProductionSources.read("service/ToolOverlayController.kt")

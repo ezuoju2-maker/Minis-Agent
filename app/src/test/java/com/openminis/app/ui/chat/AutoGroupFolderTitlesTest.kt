@@ -17,12 +17,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/**
- * [T-autogroup-folder-titles] The auto-grouping offer in the title prompt
- * carries up to three recent chat titles per group (iOS 72350576a). Vectors
- * 1-4 are iOS AutoGroupFolderTitlesTests as ported to Windows
- * (minis-agent title.rs `folder_lines_carry_recent_titles_as_on_ios`).
- */
 @RunWith(RobolectricTestRunner::class)
 class AutoGroupFolderTitlesTest {
 
@@ -57,7 +51,6 @@ class AutoGroupFolderTitlesTest {
     fun `no titles anywhere - the old lines byte for byte`() {
         val plain = listOf("\"Work\" — Office", "\"Home\"", "\"Misc\"")
         assertEquals(plain to 0, FolderOfferFormat.lines(listOf("a", "b", "c"), plain, emptyMap()))
-        // Titles that clean to nothing do not count either.
         assertEquals(plain to 0, FolderOfferFormat.lines(listOf("a", "b", "c"), plain, mapOf("a" to r(1, " ", "\n"))))
     }
 
@@ -83,9 +76,7 @@ class AutoGroupFolderTitlesTest {
         assertEquals("x y", FolderOfferFormat.clean("x{\\}y"))
         assertEquals("bidi", FolderOfferFormat.clean("bi‮di"))
         assertEquals("a b", FolderOfferFormat.clean("a  b"))
-        // CJK brackets are ordinary title text here: they cannot close an ASCII quote.
         assertEquals("「草稿」", FolderOfferFormat.clean("「草稿」"))
-        // The cut counts code points, so an emoji is never split.
         val emoji = "😀".repeat(45)
         val c = FolderOfferFormat.clean(emoji)
         assertEquals(40, c.codePointCount(0, c.length))
@@ -103,7 +94,6 @@ class AutoGroupFolderTitlesTest {
         assertEquals(Recent(5, listOf("B1")), g["b"])
     }
 
-    // ── the query, on a real Room database ─────────────────────────────────
 
     private lateinit var db: AppDatabase
     private lateinit var repo: ChatRepository
@@ -129,10 +119,10 @@ class AutoGroupFolderTitlesTest {
         val dao = db.chatDao()
         dao.insertSession(session("s1", "f1", "Old", 1))
         dao.insertSession(session("s2", "f1", "New", 3))
-        dao.insertSession(session("s3", "f1", "  ", 4)) // blank
-        dao.insertSession(session("s4", "f1", null, 5)) // untitled
-        dao.insertSession(session("s5", "f1", "Child", 6, parent = "s2")) // sub agent
-        dao.insertSession(session("s6", null, "Loose", 7)) // not filed
+        dao.insertSession(session("s3", "f1", "  ", 4))
+        dao.insertSession(session("s4", "f1", null, 5))
+        dao.insertSession(session("s5", "f1", "Child", 6, parent = "s2"))
+        dao.insertSession(session("s6", null, "Loose", 7))
         dao.insertSession(session("s7", "f2", "Other", 2))
         val recent = repo.recentSessionTitlesByFolder()
         assertEquals(Recent(3, listOf("New", "Old")), recent["f1"])
@@ -144,14 +134,11 @@ class AutoGroupFolderTitlesTest {
     fun `production wiring`() {
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
         val gen = vm.substringAfter("val autoGroupOn = com.openminis.app.ui.settings").substringBefore("Conversation:\\n")
-        // One query, and only when there is a group to offer (none when the toggle is off).
         assertEquals(1, gen.split("chatRepository.recentSessionTitlesByFolder()").size - 1)
         assertTrue(gen.indexOf("if (!autoGroupOn) emptyList() else {") < gen.indexOf("recentSessionTitlesByFolder()"))
         assertTrue(gen.contains("if (offered.isEmpty()) plainLines else {"))
         assertTrue(gen.contains("FolderOfferFormat.lines(offered.map { it.first.id }, plainLines, recent)"))
-        // The note only when some group has titles; without it the sentence is unchanged.
         assertTrue(gen.contains("append(\"]. \")\n                        if (groupTitleExamples) append(FolderOfferFormat.EXAMPLES_NOTE)\n                        append(\"If this conversation clearly belongs to one of these groups, \")"))
-        // The log carries counts only.
         val log = gen.substringAfter("[TitleGen] Folder offer:").substringBefore("\n")
         assertTrue(log.contains("folders=\${offered.size} withTitles=\$withTitles"))
         assertFalse(log.contains("recent") || log.contains("lines"))

@@ -8,16 +8,6 @@ import org.junit.Test
 import java.math.BigDecimal
 import java.util.Locale
 
-/**
- * [ISS-035] Port of the iOS QuotaHeadlineCurrencyTests: the one-line quota
- * choice for multi-currency prepaid balances.
- *
- * A DeepSeek account holding CN¥7.62 and US$0.00 showed "Balance US$0.00" in
- * red on the picker header (and the Model Group pill / composer line), because
- * both one-line choices took the worst status first. An emptied money balance
- * no longer headlines while another currency still has funds; every other pool
- * kind keeps "worst first".
- */
 class QuotaHeadlineCurrencyTest {
 
     private val now = 1_800_000_000_000L
@@ -47,7 +37,6 @@ class QuotaHeadlineCurrencyTest {
 
     private val usdLow = QuotaThresholds(lowBalance = mapOf(sub to mapOf("USD" to dec("1"))))
 
-    /** The headline's pool qualifier ("USD" / "CNY" / family) and status. */
     private fun head(pools: List<QuotaPool>, thresholds: QuotaThresholds = QuotaThresholds()): Pair<String, QuotaStatus>? =
         QuotaHeadline.pick(pools, now, thresholds = thresholds)?.let {
             it.first.id.rawValue.substringAfterLast(':') to it.second.status

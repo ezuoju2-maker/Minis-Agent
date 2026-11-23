@@ -14,12 +14,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-net-ts-login-browser] One tap opens the sign-in page even when tsnet has
- * not produced the URL yet (the old "tap twice" bug); Running brings the app
- * back; leaving the browser without signing in is a quiet return to the
- * not-signed-in state.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class TailscaleLoginFlowTest {
 
@@ -34,7 +28,6 @@ class TailscaleLoginFlowTest {
         val published = mutableListOf<TailscaleStatus>()
         val opened = mutableListOf<String>()
         var restarts = 0
-        /** What the node reports after a restart (a fresh sign-in URL by default). */
         var afterRestart: () -> TailscaleStatus = {
             TailscaleStatus(running = true, backendState = "NeedsLogin", authURL = "https://login.tailscale.com/a/fresh$restarts")
         }
@@ -62,7 +55,7 @@ class TailscaleLoginFlowTest {
         assertEquals(State.OpeningPage, h.flow.state.value)
         assertTrue("no page before the URL exists", h.opened.isEmpty())
         advanceTimeBy(1_000)
-        h.current = withUrl // tsnet's control round trip finished
+        h.current = withUrl
         advanceTimeBy(500)
         assertEquals(listOf(withUrl.authURL), h.opened)
         assertEquals(State.InBrowser, h.flow.state.value)
@@ -96,7 +89,7 @@ class TailscaleLoginFlowTest {
         h.current = withUrl
         h.flow.begin()
         runCurrent()
-        h.flow.appHidden() // the Custom Tab covers the app
+        h.flow.appHidden()
         advanceTimeBy(5_000)
         assertEquals(0, h.returns)
         h.current = running
@@ -104,7 +97,6 @@ class TailscaleLoginFlowTest {
         assertEquals(1, h.returns)
         assertEquals(State.Idle, h.flow.state.value)
         assertEquals(running, h.published.last())
-        // Back in front after the automatic return: nothing more happens.
         h.flow.appShown()
         advanceTimeBy(10_000)
         assertEquals(1, h.returns)
@@ -137,7 +129,7 @@ class TailscaleLoginFlowTest {
         h.current = withUrl
         h.flow.begin()
         runCurrent()
-        h.flow.appShown() // ON_START without a preceding ON_STOP
+        h.flow.appShown()
         assertEquals(State.InBrowser, h.flow.state.value)
     }
 
@@ -149,7 +141,6 @@ class TailscaleLoginFlowTest {
         advanceTimeBy(21_000)
         assertEquals(State.Failed(Reason.NO_SIGN_IN_PAGE), h.flow.state.value)
         assertTrue(h.opened.isEmpty())
-        // A new tap tries again.
         h.current = withUrl
         h.flow.begin()
         runCurrent()
@@ -189,9 +180,6 @@ class TailscaleLoginFlowTest {
         for (l in logLines) assertFalse(l, "\$url" in l || "authURL" in l || "\$uri" in l)
     }
 
-    // [FIX-261021-11] Pixel 6: the browser said the sign-in succeeded, the
-    // node got "register request: http 410: auth path not found" and kept
-    // offering that dead URL, and every new tap reopened it.
 
     @Test
     fun `after a 410 the dead URL is not reopened - the node restarts and the new URL opens`() = runTest {
@@ -214,7 +202,7 @@ class TailscaleLoginFlowTest {
         h.flow.begin()
         runCurrent()
         h.flow.appHidden()
-        h.flow.appShown() // back without completing; tsnet still offers the same URL
+        h.flow.appShown()
         runCurrent()
         h.flow.begin()
         runCurrent()

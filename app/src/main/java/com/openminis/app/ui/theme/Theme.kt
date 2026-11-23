@@ -16,23 +16,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// Accent: iOS blue, desaturated. [T-android-accent-blue-parity]
-//
-// Was a teal (#2E8B8B / #4DD9D9) that predated iOS settling on blue. The hue
-// now comes from iOS Assets.xcassets/AccentColor.colorset (sRGB components
-// r0.212 g0.525 b0.933 -> #3686EE light, r0.329 g0.565 b0.894 -> #5490E4 dark),
-// but iOS's saturation (84% / 73%) read as glaring on Android's darker
-// surfaces, so SATURATION is dialled back ~30% with hue and lightness kept:
-//   light  #3686EE  S84% L57%  ->  #528AD2  S59% L57%
-//   dark   #5490E4  S73% L61%  ->  #6A94CE  S51% L61%
-//
-// Lightness is deliberately NOT raised, which is the other way to "lighten".
-// It would have softened dark mode further but pushed light-mode contrast on
-// white from 3.62 to 2.62 — below WCAG AA's 4.5 for text. Desaturating keeps
-// dark mode at 5.93 (passing) and leaves light mode where it was.
-//
-// Names keep the `Teal` prefix only to avoid churning 90+ call sites; the
-// value is the contract, not the name.
 private val TealPrimary = Color(0xFF528AD2)
 private val TealOnPrimary = Color(0xFFFFFFFF)
 private val TealPrimaryContainer = Color(0xFFB2DFDB)
@@ -69,11 +52,6 @@ private val TealDarkSurfaceVariant = Color(0xFF3F4947)
 private val TealDarkOnSurfaceVariant = Color(0xFFBEC9C6)
 private val TealDarkOutline = Color(0xFF899390)
 
-// Neutral grouped-card surfaces (iOS-style system-grouped background).
-// Override Material3's tonal `surfaceContainer*` so cards don't pick up the
-// teal primary tint.
-// Light: page = #F2F2F7 gray, card = white
-// Dark:  page = #000, card = #1C1C1E
 private val NeutralGroupedBg = Color(0xFFF2F2F7)
 private val NeutralGroupedCard = Color(0xFFFFFFFF)
 private val NeutralGroupedCardElevated = Color(0xFFF7F7FA)
@@ -136,20 +114,15 @@ private val DarkColorScheme = darkColorScheme(
     outlineVariant = NeutralDarkOutline,
 )
 
-// App-wide FAB accent color (warm beige, matching iOS New Chat button).
-// Reads from ChatPalette so it follows the in-app theme override (theme_mode pref),
-// not android.isSystemInDarkTheme(), which only tracks the system setting.
 @Composable
 fun minisFabColor(): Color = LocalChatPalette.current.fabAccent
 
-// App-wide shape system — larger corners for a modern, friendly feel
-// DropdownMenu uses extraSmall, Dialog uses extraLarge, BottomSheet uses extraLarge
 private val MinisShapes = Shapes(
-    extraSmall = RoundedCornerShape(12.dp),   // DropdownMenu, Tooltip, OutlinedTextField default
-    small = RoundedCornerShape(12.dp),        // Chip, TextField
-    medium = RoundedCornerShape(20.dp),       // Card, Snackbar
-    large = RoundedCornerShape(24.dp),        // NavigationDrawer
-    extraLarge = RoundedCornerShape(28.dp),   // Dialog, BottomSheet
+    extraSmall = RoundedCornerShape(12.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(20.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(28.dp),
 )
 
 @Composable
@@ -171,12 +144,6 @@ fun MinisTheme(
     }
 }
 
-/**
- * [T-multi-select-share] Re-themes a subtree light or dark regardless of the app's
- * own appearance, keeping the app's typography (font scale) and shapes. The chat
- * export uses it so a dark app can share a light page and the other way round:
- * every chat row reads its colours from MaterialTheme / LocalChatPalette.
- */
 @Composable
 fun MinisAppearance(darkTheme: Boolean, content: @Composable () -> Unit) {
     MaterialTheme(
@@ -194,18 +161,6 @@ fun MinisAppearance(darkTheme: Boolean, content: @Composable () -> Unit) {
 private fun TextStyle.scale(factor: Float): TextStyle =
     if (factor == 1f) this else copy(fontSize = fontSize * factor)
 
-/**
- * [T-fa-locale] Each paragraph takes its direction from its own text, but
- * stays left-aligned.
- *
- * The app keeps a left-to-right layout in every language (LocaleWrap.forceLtr),
- * and under an LTR layout Compose otherwise lays every paragraph out LTR too.
- * Persian text that mixes in Latin words ("کلیدهای API و ورود با OAuth") then
- * comes out in left-to-right word order, which a Persian reader reads
- * scrambled. Content direction fixes the word order; Left (not Start, which
- * would follow an RTL paragraph to the right edge) keeps every label where it
- * sits today. For left-to-right text both are what it already had.
- */
 private fun TextStyle.bidi(): TextStyle =
     copy(textDirection = TextDirection.Content, textAlign = TextAlign.Left)
 

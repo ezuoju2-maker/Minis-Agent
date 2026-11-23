@@ -9,10 +9,6 @@ import org.junit.Test
 import java.math.BigDecimal
 import java.net.URI
 
-/**
- * [T-quota-relay-probe] Port of the iOS ProviderQuotaTests "Relay probe"
- * block plus the Android wiring (store hint / capability record / UI).
- */
 class QuotaRelayTest {
 
     private val now = 1_800_000_000_000L

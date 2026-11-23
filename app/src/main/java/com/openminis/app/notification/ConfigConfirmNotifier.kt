@@ -15,21 +15,6 @@ import com.openminis.app.config.confirm.PendingConfigChange
 import com.openminis.app.data.repository.BackgroundSettingsRepository
 import com.openminis.app.logging.AppLogger
 
-/**
- * [T-android-config-confirm-timeout] Posts a local notification when a
- * minis-config change is waiting for user approval AND the app is backgrounded,
- * so the user knows to return before the (now 120s) timeout. Android port of
- * iOS `ConfigConfirmationGate.notifyIfBackgrounded` (T-config-confirm-timeout-bg).
- *
- * The confirm dialog is mounted at app root (ConfigConfirmDialogHost, bound to
- * ConfigConfirmationGate.pending), so tapping the notification only needs to
- * FOREGROUND the app — the still-pending dialog is then simply visible again.
- *
- * Gated by the same "Task Notifications" background setting the task-completion
- * notifier uses ([BackgroundSettingsRepository.taskNotificationsEnabled]) and
- * suppressed while the app is in foreground (the user can already see the
- * dialog). The gate itself guards against sending twice per change id.
- */
 class ConfigConfirmNotifier(
     private val context: Context,
     private val backgroundSettings: BackgroundSettingsRepository,
@@ -40,13 +25,6 @@ class ConfigConfirmNotifier(
         ensureChannel()
     }
 
-    /**
-     * Post the "awaiting approval" notification for [change] if — and only if —
-     * the app is currently backgrounded and notifications are enabled. Safe to
-     * call from any thread; a no-op when the guards fail. Returns true when a
-     * notification was actually posted (so the caller's once-per-id bookkeeping
-     * only marks ids we really notified).
-     */
     fun notifyIfBackgrounded(change: PendingConfigChange): Boolean {
         if (isAppForeground()) return false
         if (!backgroundSettings.taskNotificationsEnabled.value) {
@@ -59,9 +37,6 @@ class ConfigConfirmNotifier(
             return false
         }
 
-        // Show the caption (e.g. "Update multi-model writing workflow: …") so
-        // the user gets the gist without opening the app; fall back to a
-        // row-count summary when there's no caption. Mirrors iOS.
         val caption = change.caption?.trim().orEmpty()
         val body = when {
             caption.isNotEmpty() -> caption
@@ -70,9 +45,6 @@ class ConfigConfirmNotifier(
             else -> context.getString(R.string.notif_config_confirm_body_single)
         }
 
-        // Tapping just needs to bring MainActivity forward; the root-mounted
-        // confirm dialog is still bound to the pending change. singleTask +
-        // CLEAR_TOP reuses the existing instance rather than spawning a copy.
         val launchIntent = Intent(context, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
@@ -104,8 +76,6 @@ class ConfigConfirmNotifier(
         }
     }
 
-    /** Cancel a pending-approval notification once its change resolves, so a
-     *  stale "awaiting approval" entry never lingers after approve/reject/timeout. */
     fun cancel(changeId: String) {
         NotificationManagerCompat.from(context).cancel(NOTIFICATION_TAG, changeId.hashCode())
     }

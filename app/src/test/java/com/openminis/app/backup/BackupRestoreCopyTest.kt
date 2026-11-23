@@ -6,15 +6,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-backup-restore-semantics / B01] The restore page's copy promised the old
- * semantics ("only replaced when the backup's copy is newer", "existing keys
- * on this device were kept"). It now says the backup wins, keys included, and
- * that nothing only on this device is deleted.
- */
 class BackupRestoreCopyTest {
 
-    // ── copy ─────────────────────────────────────────────────────────────
 
     @Test
     fun `the restore page says the backup wins, keys included, and nothing local is deleted`() {
@@ -22,7 +15,6 @@ class BackupRestoreCopyTest {
         assertTrue(screen.contains("R.string.backup_restore_merge_footer"))
         assertTrue(screen.contains("R.string.backup_restore_creds_restored"))
         assertTrue(screen.contains("R.string.backup_restore_creds_kept"))
-        // The old copy promised "only replaced when newer" / "existing keys kept".
         assertFalse(screen.contains("R.string.backup_restore_footer)"))
         assertFalse(screen.contains("R.string.backup_creds_restored"))
         assertFalse(screen.contains("R.string.backup_creds_kept"))

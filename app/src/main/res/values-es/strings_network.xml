@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Settings > Network. Translations shared with iOS come from its Localizable.xcstrings; locales without one fall back to English. -->
 <resources>
     <string name="network_title">Red</string>
     <string name="network_default_route">Ruta predeterminada</string>
@@ -51,6 +49,5 @@
     <string name="network_log_in">Iniciar sesión</string>
     <string name="network_provider_route">Red</string>
     <string name="network_provider_route_footer">Cómo se conectan las solicitudes de este proveedor. Configura Tailscale y los proxies en Ajustes &gt; Red.</string>
-    <!-- [FEAT-261021-04] Settings > Network section -->
     <string name="network_routing_title">Enrutamiento de red</string>
 </resources>

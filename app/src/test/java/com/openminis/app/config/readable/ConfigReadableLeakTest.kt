@@ -6,13 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-config-readable] The readable text is for the user only (confirmation
- * dialog + Logs → Config Changes) and must never reach the model. Source
- * guards on ConfigBridge, port of iOS ConfigReadableTests [3]: the CLI's audit
- * serialization is an unchanged allow-list, no response carries the text, and
- * the description is rendered before the dialog and before any removal.
- */
 class ConfigReadableLeakTest {
 
     private val bridge = ProductionSources.read("config/ConfigBridge.kt")

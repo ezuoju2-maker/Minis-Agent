@@ -7,24 +7,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-subagent-turn-countdown] A sub-agent used to learn its tool budget was
- * spent only on the wrap-up turn — the round where tools are already withdrawn.
- * A child that had spent its rounds investigating could then no longer write
- * the file it was delegated to produce, which is the reported failure.
- *
- * These pin the warning that now lands a few rounds earlier, while tools still
- * work.
- */
 class SubAgentTurnCountdownTest {
 
     @Test
     fun `warning states the remaining count and is singular at one`() {
         assertTrue(HelperRunner.turnBudgetWarning(3).contains("3 tool rounds left"))
         assertTrue(HelperRunner.turnBudgetWarning(2).contains("2 tool rounds left"))
-        // Singular, because "1 tool rounds left" is exactly the sort of seam
-        // that makes a generated instruction read as boilerplate and get
-        // skimmed — this is the most urgent one to be read.
         assertTrue(HelperRunner.turnBudgetWarning(1).contains("1 tool round left"))
         assertFalse(HelperRunner.turnBudgetWarning(1).contains("1 tool rounds"))
     }
@@ -32,9 +20,6 @@ class SubAgentTurnCountdownTest {
     @Test
     fun `warning tells the child to finish, not to stop`() {
         val w = HelperRunner.turnBudgetWarning(2)
-        // Tools still work at this point, so it must push toward using them to
-        // land the artifact — the opposite of the wrap-up prompt, which tells
-        // the child to write text because tools are gone.
         assertTrue("must redirect effort to finishing", w.contains("Stop investigating"))
         assertTrue("must name the write-the-artifact action", w.contains("write a file"))
         assertFalse(
@@ -50,11 +35,6 @@ class SubAgentTurnCountdownTest {
         assertTrue(HelperRunner.TURN_WARNING_LEAD < HelperRunner.MAX_TURNS)
     }
 
-    /**
-     * The injection lives in ChatViewModel's agent loop, which needs an Android
-     * runtime to execute. Pin its two load-bearing properties as source facts
-     * so a refactor cannot quietly drop them.
-     */
     @Test
     fun `loop injects the warning before the wrap-up and only once`() {
         val src = File("src/main/java/com/openminis/app/ui/chat/ChatViewModel.kt").readText()
@@ -73,18 +53,8 @@ class SubAgentTurnCountdownTest {
 
     @Test
     fun `the cap matches the main chat's own ceiling`() {
-        // [T-subagent-turn-parity] Raised 25 -> 200 to match the parent
-        // conversation, then 200 -> 500 with it (FEAT-261021-01). The point
-        // of pinning it is unchanged: the number is a deliberate choice, so it should move only when someone means it —
-        // never as a side effect of editing the countdown around it.
-        //
-        // Asserting the literal rather than comparing the constants keeps
-        // this a real check: a test that compared a constant to itself would
-        // pass no matter what the value became.
         assertEquals(500, AgentLoopLimits.MAX_AGENT_TURNS)
         assertEquals(500, HelperRunner.MAX_TURNS)
-        // The main chat takes its cap from the same constant (ChatViewModel
-        // needs an Android runtime, so pin it as a source fact).
         val src = File("src/main/java/com/openminis/app/ui/chat/ChatViewModel.kt").readText()
         assertTrue(
             src.contains("private const val MAX_AGENT_TURNS = com.openminis.app.agent.AgentLoopLimits.MAX_AGENT_TURNS"),

@@ -8,10 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-skill-copy-source-url] Long-press on the Skills screens copies
- * the URL a skill was installed from - and is offered only when there is one.
- */
 class SkillSourceUrlTest {
 
     private fun skill(source: ImportSource, url: String?) =
@@ -33,15 +29,12 @@ class SkillSourceUrlTest {
 
     @Test
     fun `file, bundled and session skills offer nothing, even with a leftover URL`() {
-        // importFromContent keeps the old source_url when a URL skill is
-        // re-imported from a file; that skill no longer comes from the URL.
         for (source in listOf(ImportSource.FILE, ImportSource.BUNDLED, ImportSource.SESSION)) {
             assertNull("$source", SkillSourceUrl.copyable(skill(source, null)))
             assertNull("$source", SkillSourceUrl.copyable(skill(source, "https://example.com/SKILL.md")))
         }
     }
 
-    // -- wiring --
 
     private val screen = ProductionSources.read("ui/settings/SkillsManagementScreen.kt")
     private val components = ProductionSources.read("ui/settings/SettingsComponents.kt")
@@ -68,7 +61,6 @@ class SkillSourceUrlTest {
         assertTrue(components.contains("onClick != null -> Modifier.clickable(onClick = onClick)"))
     }
 
-    // -- strings --
 
     private val res = java.io.File(ProductionSources.mainRoot()!!.parentFile.parentFile.parentFile.parentFile, "res")
     private val keys = listOf("skill_copy_source_url", "skill_source_url_copied")

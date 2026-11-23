@@ -5,17 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-hang-false-positive] Simple streaming replies showed
- * "Performance protection: simplified rendering while streaming". The notice
- * came from a render breaker keyed on the GLOBAL hang count, and on the
- * reporting Pixel 6 that count was fed by:
- *  - false positives: wall-clock gaps from deep sleep ("41509s") and a
- *    post-boot clock correction ("16521299s", main thread idle);
- *  - real stalls OUTSIDE the renderer: 21 s of the launch resolver waiting on
- *    ProviderRepository.configLock behind a saveConfig.
- * None of the 33 recorded samples were in streaming rendering.
- */
 class HangFalsePositiveTest {
 
     private fun frame(cls: String, method: String) = StackTraceElement(cls, method, "F.kt", 1)
@@ -62,7 +51,6 @@ class HangFalsePositiveTest {
     fun `an implausible gap or an idle main thread is rejected before it is counted`() {
         val watch = src("src/main/java/com/openminis/app/diagnostics/HangDetector.kt")
             .substringAfter("private fun watchLoop()").substringBefore("private fun writeStallSample(")
-        // [T-hang-background-freeze] The checks live in notAHangReason now.
         val guard = watch.indexOf("notAHangReason(since, bg, ::visibleNow) { isIdleMainStack(mainThreadStack()) }")
         val count = watch.indexOf("recordHang(durationMs = since)")
         assertTrue(guard in 0 until count)

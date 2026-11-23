@@ -10,13 +10,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-userask-edge-bounce] The pending user_ask card's body, dragged
- * past its own edge, moved the chat list by a raw nested delta; follow-bottom
- * did not see a user scroll and snapped the list back every frame (Pixel 4a
- * repro 2026-10-09: card top 252 -> 375 -> 334 -> 359 -> 356 -> 359 px, log
- * `scroll src=LAYOUT-DRIFT-SNAP`).
- */
 class ChatNestedScrollFollowTest {
 
     @Test
@@ -36,7 +29,6 @@ class ChatNestedScrollFollowTest {
 
     @Test
     fun `a question waiting with nobody touching the list still follows the bottom`() {
-        // The card growing (Show more, a note field) must keep the list pinned.
         val idle = ChatNestedScrollFollow.childScrollActive(gestureOpen = false, msSinceLastDelta = Long.MAX_VALUE)
         assertFalse(idle)
         assertTrue(ChatNestedScrollFollow.followMaySnap(false, false, idle))

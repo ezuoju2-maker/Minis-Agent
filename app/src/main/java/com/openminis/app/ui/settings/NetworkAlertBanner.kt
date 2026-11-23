@@ -45,17 +45,9 @@ import com.openminis.app.network.NetworkHub
 import com.openminis.app.ui.navigation.Routes
 import com.openminis.app.ui.navigation.safeNavigate
 
-/**
- * [FEAT-261021-05, iOS e720112cf] The floating banner at the top of the app
- * while a proxy or Tailscale keeps failing ([NetworkAlertCenter]). A tap
- * opens that setting - the proxy's editor, or the Tailscale page - where the
- * user decides whether to keep using it; the close button snoozes it for
- * this subject.
- */
 @Composable
 fun NetworkAlertBannerHost(navController: NavController) {
     val banner by NetworkAlertCenter.banner.collectAsState()
-    // Keeps the last event while the exit animation runs.
     val shown = remember { mutableStateOf<NetworkAlertEvent?>(null) }
     banner?.let { shown.value = it }
     Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.TopCenter) {
@@ -126,7 +118,6 @@ private fun NetworkAlertBanner(event: NetworkAlertEvent, onOpen: () -> Unit, onD
     }
 }
 
-/** Short, user-facing reason for a nethub failure class (iOS NetworkAlertCenter.reason). */
 @Composable
 internal fun failureReason(failureClass: String): String = stringResource(
     when (failureClass) {
@@ -141,7 +132,6 @@ internal fun failureReason(failureClass: String): String = stringResource(
     },
 )
 
-/** Shown on the Tailscale page and in a proxy's editor while it keeps failing. */
 @Composable
 internal fun NetworkFailureNote(event: NetworkAlertEvent, modifier: Modifier = Modifier) {
     Column(modifier) {

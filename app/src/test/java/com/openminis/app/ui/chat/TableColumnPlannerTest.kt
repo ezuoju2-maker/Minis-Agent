@@ -12,12 +12,6 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
 
-/**
- * [T-android-table-width-by-content] Port of iOS TableColumnPlannerTests
- * (b3ec29cee). `table_planner_golden_ios.txt` is the output of the SHIPPING
- * iOS planner (compiled out of SelectableMarkdownView.swift) for the iOS
- * test's tables and widths; Android must produce the same widths and mode.
- */
 class TableColumnPlannerTest {
 
     private fun cols(vararg c: Pair<Int, Int>) = c.map { Column(it.first.toFloat(), it.second.toFloat()) }
@@ -121,8 +115,6 @@ class TableColumnPlannerTest {
     }
 
     @Test fun `android hardMin raises a formula column's hard minimum`() {
-        // The inline-formula slot (290) cannot wrap; without hardMin the
-        // wrapped plan would give this column less than its formula.
         val cols = listOf(Column(90f, 0f), Column(300f, 0f, hardMin = 290f), Column(1000f, 0f))
         val p = TableColumnPlanner.plan(cols, 381f)
         assertTrue(p.widths.toList().toString(), p.widths[1] >= 290f)

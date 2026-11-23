@@ -8,16 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-group-running-ring] A collapsed group reports whether any member
- * is running, so the card can show the spinning ring.
- *
- * The bug this pins: a task started inside a group showed its ring on the
- * session row, but collapsing the group hid the row — and the group card had
- * no ring of its own, so the only signal that work was in flight disappeared.
- * iOS has carried `SidebarGroup.anyActive` for this since ContentView:4771;
- * Android aggregated `anyPaused` but never the running state.
- */
 class GroupRunningRingTest {
 
     private fun folder(id: String) =
@@ -55,22 +45,17 @@ class GroupRunningRingTest {
 
     @Test
     fun `a running id belonging to no group marks nothing`() {
-        // An ungrouped session's ring is its own row's business.
         blocksFor(active = setOf("orphan")).forEach { assertFalse(it.anyActive) }
     }
 
     @Test
     fun `activity is reported regardless of collapse state`() {
-        // The flag is pure data; the collapsed-only rule is a RENDER decision,
-        // so an expanded group still reports it. Keeping the two separate means
-        // expanding a group can't drop the state.
         val expanded = blocksFor(active = setOf("s1"), expanded = "a")
         assertTrue(expanded.first { it.folder.id == "a" }.anyActive)
     }
 
     @Test
     fun `anyActive is independent of anyPaused`() {
-        // Distinct signals: a group can be running without any paused member.
         val blocks = blocksFor(active = setOf("s1"))
         val a = blocks.first { it.folder.id == "a" }
         assertTrue(a.anyActive)
@@ -79,8 +64,6 @@ class GroupRunningRingTest {
 
     @Test
     fun `default has no active groups`() {
-        // Callers that don't pass the set (tests, non-list surfaces) must not
-        // light up every card.
         val blocks = partitionByFolder(
             sessions = listOf(session("s1", "a")),
             folders = listOf(folder("a")),
@@ -89,7 +72,6 @@ class GroupRunningRingTest {
         assertFalse(blocks.single().anyActive)
     }
 
-    // --- [UI-261023-03] The comet's colour --------------------------------
 
     private fun member(id: String, updatedAt: Long, category: String, parent: String? = null) =
         ChatSessionEntity(

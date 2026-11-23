@@ -9,22 +9,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
 
-/**
- * [T-android-stream-fade-lost-wake] Text appended while the fade ticker is
- * finishing must still fade in, never stay masked.
- *
- * Reported on a Pixel 4a: a streamed reply showed only its first character
- * above a running tool call, and stayed that way. The whole paragraph was laid
- * out (the accessibility tree had all 27 characters) but everything after the
- * first character sat under a fully opaque fade mask.
- *
- * A frame runs animation callbacks — the fade tick — before recomposition.
- * The old driver's loop exited as soon as a tick finished the last range; if
- * the same frame's recomposition then ingested more text, nothing restarted
- * it, and ranges that are never ticked draw at alpha 0. These tests drive
- * [FadeController.runTicks] with a fake frame source that ingests at exactly
- * that point.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class StreamingFadeLostWakeTest {
 
@@ -43,10 +27,8 @@ class StreamingFadeLostWakeTest {
         val ticker = launch {
             c.runTicks { onFrame ->
                 yield()
-                clock += 100_000_000L // 100 ms per frame
+                clock += 100_000_000L
                 val stillActive = onFrame(clock)
-                // The reported race: the tick just emptied the ranges, and this
-                // frame's recomposition delivers the rest of the paragraph.
                 if (!stillActive && pendingAppend) {
                     pendingAppend = false
                     c.ingest("Pika~ let me search the map for outdoor spots nearby Pika!")
@@ -82,7 +64,6 @@ class StreamingFadeLostWakeTest {
 
     @Test
     fun `seeded text never creates a mask`() = runTest {
-        // Guard the existing seed contract alongside the new wake path.
         val c = FadeController()
         c.seed("already visible text")
         assertFalse(c.hasActiveRanges)

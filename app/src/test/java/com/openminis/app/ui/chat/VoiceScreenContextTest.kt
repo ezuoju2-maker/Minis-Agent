@@ -6,11 +6,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/**
- * [T-android-voice-viewport-context] The chat side of the on-screen correction
- * context: what each rendered row contributes, and which reply counts as the
- * latest one.
- */
 class VoiceScreenContextTest {
 
     private fun block(id: String, kind: String, content: String = "", toolName: String = "", toolTitle: String = "") =
@@ -50,7 +45,6 @@ class VoiceScreenContextTest {
                 toolBlocks = listOf(block("t", "text", content = "新回复正文"), block("x", "tool_use", toolName = "shell_execute")),
             ),
             ChatMessage(id = "u3", role = "user", content = "用户后来又说了一句"),
-            // A tool-only turn in progress has no text yet: it is not the reply.
             ChatMessage(id = "a4", role = "assistant", content = "", toolBlocks = listOf(block("y", "tool_use", toolName = "file_read"))),
         )
         val latest = VoiceCorrection.latestReply(messages)!!

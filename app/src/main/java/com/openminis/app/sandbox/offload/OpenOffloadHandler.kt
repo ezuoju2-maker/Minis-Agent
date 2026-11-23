@@ -10,20 +10,6 @@ import com.openminis.app.sandbox.NativeOffloadRequest
 import com.openminis.app.sandbox.NativeOffloadResult
 import org.json.JSONObject
 
-/**
- * Host-side implementation of `android-open <url>` — launches any URL or
- * URI the Android system knows how to resolve (https, tel, mailto, geo,
- * market, intent, etc.).
- *
- * Includes a few OEM-aware fallbacks:
- *   • `market:` URIs on Huawei / no-GMS devices → redirect to AppGallery.
- *   • Any `ActivityNotFoundException` → structured error naming the
- *     missing handler instead of crashing.
- *
- * Usage:
- *   android-open <url>
- *   android-open --help
- */
 class OpenOffloadHandler(private val context: Context) : NativeOffloadHandler {
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
         val args = OffloadArgs(request.argv.drop(1))
@@ -39,19 +25,9 @@ class OpenOffloadHandler(private val context: Context) : NativeOffloadHandler {
 
     private fun tryOpen(url: String, args: OffloadArgs): NativeOffloadResult {
         return try {
-            // T259: intent: / android-app: URIs encode action + categories +
-            // extras + flags inline (e.g. ACTION_SET_ALARM with HOUR/MINUTES
-            // extras). Wrapping them in ACTION_VIEW threw all of that away,
-            // so resolveActivity returned null and the call fell through to
-            // the no_handler error branch. Use Intent.parseUri to honor the
-            // full URI semantics; ACTION_VIEW path stays for plain http/tel
-            // /mailto/geo/market URLs.
             val intent: Intent = if (url.startsWith("intent:") || url.startsWith("android-app:")) {
                 Intent.parseUri(url, Intent.URI_INTENT_SCHEME).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    // Browsers inject a selector to bind the URI to a
-                    // specific package; we already trust the model-supplied
-                    // intent, so let the system-wide chooser apply.
                     selector = null
                 }
             } else {
@@ -72,9 +48,6 @@ class OpenOffloadHandler(private val context: Context) : NativeOffloadHandler {
                 .toString()
             NativeOffloadResult(1, OffloadOutput.formatBody(body, args) + "\n")
         } catch (e: java.net.URISyntaxException) {
-            // T259: parseUri rejected a malformed intent: URI before any
-            // resolveActivity call — surface as bad input, not no_handler,
-            // so the model knows to fix the URI shape.
             Log.w(TAG, "parseUri failed for '$url': ${e.message}")
             val body = JSONObject().put("error", "bad_intent_uri")
                 .put("message", "Malformed intent: URI: ${e.message}")
@@ -91,12 +64,7 @@ class OpenOffloadHandler(private val context: Context) : NativeOffloadHandler {
         }
     }
 
-    /**
-     * Fallback rules for URLs that couldn't be resolved. Returns a friendly
-     * error message with a hint the model can relay to the user.
-     */
     private fun maybeFallback(url: String, original: ActivityNotFoundException, args: OffloadArgs): NativeOffloadResult {
-        // market: → Huawei AppGallery on HMS-only devices
         if (url.startsWith("market://") && OsCompat.isHuawei) {
             val pkg = Uri.parse(url).getQueryParameter("id")
                 ?: url.substringAfter("details?id=").substringBefore('&')

@@ -6,13 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-android-backup-log-fold] The detail screen composed every log line in a
- * non-lazy Column: 16,827 lines froze the main thread for 32–70 s (KILO
- * repro). It now composes the newest [LOG_COLLAPSED_COUNT] and offers the rest
- * behind "Show all". Source guard: a Compose test would need the whole
- * SettingsScaffold harness for what is one line of selection logic.
- */
 class BackupHistoryDetailLogFoldTest {
 
     private val src = File("src/main/java/com/openminis/app/ui/settings/backup/BackupHistoryDetailScreen.kt").readText()
@@ -34,7 +27,6 @@ class BackupHistoryDetailLogFoldTest {
     fun `the rest is behind an explicit show all with the total`() {
         assertTrue(logSection.contains("R.string.backup_history_log_show_all, entries.size"))
         assertTrue(logSection.contains("showAllLog = true"))
-        // Folded per record: opening another record starts folded again.
         assertTrue(src.contains("var showAllLog by remember(record.id)"))
     }
 

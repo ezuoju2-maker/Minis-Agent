@@ -77,9 +77,6 @@ fun MinisSkillsBrowserScreen(
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     val scope = rememberCoroutineScope()
 
-    // System back / gesture: walk WebView history first, leave the screen
-    // only when the WebView has nothing left to pop. The TopAppBar back
-    // button uses the same handler so both entry points behave identically.
     val handleBack = {
         val wv = webViewRef
         if (wv != null && wv.canGoBack()) {
@@ -92,11 +89,6 @@ fun MinisSkillsBrowserScreen(
 
     Scaffold(
         topBar = {
-            // Manual Scaffold (not SettingsScaffold) because the body is a
-            // fullscreen WebView and SettingsScaffold's verticalScroll Column
-            // would fight the WebView measure pass. Match the SettingsScaffold
-            // bar styling (background colour + SemiBold title) so the visual
-            // signature stays consistent with the rest of the settings stack.
             TopAppBar(
                 title = { Text(stringResource(R.string.skills_browser_title), fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
@@ -136,7 +128,6 @@ fun MinisSkillsBrowserScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            // WebView
             AndroidView(
                 factory = { context ->
                     WebView(context).apply {
@@ -145,15 +136,11 @@ fun MinisSkillsBrowserScreen(
                         settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36"
 
                         webViewClient = object : WebViewClient() {
-                            // [T-net-android-phase3] Settings > Network: answer the local entry's
-                            // proxy challenge (WebViewNetworkProxy); any other auth request as before.
                             override fun onReceivedHttpAuthRequest(view: android.webkit.WebView?, handler: android.webkit.HttpAuthHandler?, host: String?, realm: String?) {
                                 if (handler != null && com.openminis.app.network.WebViewNetworkProxy.answerAuth(handler, host, realm, view?.url)) return
                                 super.onReceivedHttpAuthRequest(view, handler, host, realm)
                             }
 
-                            // [T-android-webview-render-process-gone] (GH#341)
-                            // AndroidView factory rebuilds on recomposition.
                             override fun onRenderProcessGone(
                                 view: WebView?,
                                 detail: android.webkit.RenderProcessGoneDetail?,
@@ -164,7 +151,6 @@ fun MinisSkillsBrowserScreen(
                                 url?.let { currentUrl = it }
                             }
 
-                            // GitHub SPA uses pushState — capture URL changes here too
                             override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
                                 url?.let { currentUrl = it }
                             }
@@ -172,20 +158,12 @@ fun MinisSkillsBrowserScreen(
                             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                                 val ctx = view?.context ?: return false
                                 val urlStr = request?.url?.toString()
-                                // T234: Google permanently disallows WebView
-                                // for sign-in / OAuth. Hand auth-domain nav
-                                // to Chrome Custom Tab.
                                 if (com.openminis.app.browser.GoogleAuthRouter.shouldRouteExternally(urlStr)) {
                                     if (urlStr != null) {
                                         com.openminis.app.browser.GoogleAuthRouter.openInCustomTab(ctx, urlStr)
                                     }
                                     return true
                                 }
-                                // T134: hand off intent:// / market:// /
-                                // tel: / mailto: links to the system so the
-                                // user doesn't see ERR_UNKNOWN_URL_SCHEME.
-                                // [T-android-user-initiated-scheme-dispatch]
-                                // Visible skills browser; user-tapped link.
                                 return com.openminis.app.ui.browser
                                     .BrowserExternalSchemeHandler
                                     .handle(
@@ -206,7 +184,6 @@ fun MinisSkillsBrowserScreen(
                 modifier = Modifier.fillMaxSize(),
             )
 
-            // HUD overlay at bottom
             AnimatedVisibility(
                 visible = hudState != HudState.HIDDEN,
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
@@ -263,7 +240,6 @@ private suspend fun importSkillFromCurrentUrl(
     skillRepository: SkillRepository,
     onStateChange: (HudState, String) -> Unit,
 ) {
-    // Check if URL points to a specific skill directory (not repo root)
     if (!isSkillDirectoryUrl(url)) {
         onStateChange(HudState.HINT, context.getString(R.string.skills_browser_error_not_folder))
         delay(3000)
@@ -274,13 +250,6 @@ private suspend fun importSkillFromCurrentUrl(
     onStateChange(HudState.IMPORTING, "")
 
     try {
-        // Hand the GitHub directory URL to the repository's full-fat
-        // importer. importFromGitHub fetches SKILL.md, imports it, then
-        // recurses through the GitHub Contents API to pull every sibling
-        // file (scripts/, references/, sub-directories) into the skill's
-        // local directory. The previous flow only fetched SKILL.md via
-        // toRawGitHubUrl + importFromContent, which left bundled
-        // scripts on the server and the skill non-runnable on first use.
         val skill = skillRepository.importFromGitHub(url)
         if (skill != null) {
             onStateChange(HudState.SUCCESS, context.getString(R.string.skills_browser_success_imported, skill.name))
@@ -289,12 +258,8 @@ private suspend fun importSkillFromCurrentUrl(
             return
         }
 
-        // importFromGitHub returned null — the SKILL.md was either
-        // missing or duplicate. Fall back to the prior "fetch + try
-        // updating existing" path so users can refresh in place.
         val rawUrl = toRawGitHubUrl(url)
         val content = withContext(Dispatchers.IO) {
-            // [FEAT-261021-16] Follows the default route in Settings > Network.
             com.openminis.app.network.NetworkUrlRequest.open(com.openminis.app.network.NetworkHttp.DEFAULT_TAG, rawUrl, connectTimeoutMs = 15_000, readTimeoutMs = 15_000).use { r ->
                 if (r.code == 200) r.text() else null
             }
@@ -334,22 +299,13 @@ private suspend fun importSkillFromCurrentUrl(
     }
 }
 
-/**
- * Check if the URL points to a specific skill directory (not repo root or non-skill pages).
- * e.g. github.com/OpenMinis/MinisSkills/tree/main/exa-search → true
- *      github.com/OpenMinis/MinisSkills → false
- *      github.com/OpenMinis/MinisSkills/issues → false
- */
 private fun isSkillDirectoryUrl(url: String): Boolean {
-    if (!url.contains("github.com")) return true // Non-GitHub URL, let it try
+    if (!url.contains("github.com")) return true
     if (url.endsWith("SKILL.md")) return true
 
-    // Must contain /tree/ or /blob/ with a path after the branch name
-    // e.g. /tree/main/skill-name or /blob/main/skill-name/SKILL.md
     val treePattern = Regex("github\\.com/[^/]+/[^/]+/(tree|blob)/[^/]+/.+")
     if (treePattern.containsMatchIn(url)) return true
 
-    // Reject known non-skill pages
     val nonSkillPages = listOf("/issues", "/pulls", "/pull/", "/actions", "/settings", "/wiki")
     if (nonSkillPages.any { url.contains(it) }) return false
 
@@ -357,14 +313,12 @@ private fun isSkillDirectoryUrl(url: String): Boolean {
 }
 
 private fun toRawGitHubUrl(url: String): String {
-    // Handle github.com/user/repo/tree/branch/path → find SKILL.md
     if (url.contains("github.com") && url.contains("/blob/")) {
         return url.replace("github.com", "raw.githubusercontent.com")
             .replace("/blob/", "/")
     }
     if (url.contains("github.com") && !url.contains("raw.githubusercontent.com")) {
         val withFile = if (!url.endsWith("SKILL.md")) {
-            // Try tree → add SKILL.md
             val cleaned = url.replace("/tree/", "/").trimEnd('/')
             "$cleaned/SKILL.md"
         } else {

@@ -6,28 +6,17 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-voice-mixed-term-restore] Port of the iOS 8622ea275 tests
- * (CorrectionLanguageProfileTests, the three digest cases and the ratio case in
- * VoiceCorrectionTests, and the prompt wiring of VoiceMixedTermRestoreTests).
- *
- * The on-device report: "接下来再看看下一个 Issue" was recognised as "…下一个遗穴",
- * and the correction answered "…下一个议题" although "Issue" was on screen ten
- * times — nothing told the model the user mixes English into Chinese speech.
- */
 class VoiceMixedTermRestoreTest {
 
     private val fakeRank: (String) -> Int? = { term ->
         if (term in setOf("今天", "可以", "我们", "hello")) 1 else null
     }
-    /** Space / punctuation split: the fixtures are pre-segmented like iOS's. */
     private val words: (String) -> List<String> = { s -> s.split(Regex("[\\s。，、]+")).filter { it.isNotBlank() } }
 
     private fun digest(vararg msgs: Pair<CorrectionSourceMessage.Role, String>): String =
         CorrectionContextBuilder.build(msgs.map { CorrectionSourceMessage(it.first, it.second) }, words, fakeRank)
             .rareTermsDigest.orEmpty()
 
-    // ── Language profile ─────────────────────────────────────────────────
 
     private fun profile(locale: String, t: String) = CorrectionLanguageProfile.resolve(locale, t)
 
@@ -43,7 +32,6 @@ class VoiceMixedTermRestoreTest {
 
     @Test fun `Japanese and Korean`() {
         assertEquals(CorrectionLanguageProfile.JAPANESE, profile("ja-JP", "次のイシューを見て"))
-        // Kanji only: the script alone reads as Chinese, the locale says Japanese.
         assertEquals(CorrectionLanguageProfile.JAPANESE, profile("ja-JP", "機能確認"))
         assertEquals(CorrectionLanguageProfile.KOREAN, profile("ko-KR", "다음 이슈 보자"))
     }
@@ -64,7 +52,6 @@ class VoiceMixedTermRestoreTest {
         assertTrue(CorrectionLanguageProfile.KOREAN.failureModes.contains("Hangul"))
     }
 
-    // ── Prompt ───────────────────────────────────────────────────────────
 
     @Test fun `the system prompt carries the setting, the language's failure modes and the no-translate rule`() {
         val p = LlmCorrectionStrategy.systemPrompt(CorrectionLanguageProfile.CHINESE)
@@ -91,7 +78,6 @@ class VoiceMixedTermRestoreTest {
         assertTrue(engine.contains("CorrectionLanguageProfile.resolve(locale, transcript)"))
     }
 
-    // ── Rare-term digest ─────────────────────────────────────────────────
 
     @Test fun `a recurring plain Latin word reaches the digest ahead of a common-char word`() {
         val d = digest(
@@ -124,7 +110,6 @@ class VoiceMixedTermRestoreTest {
         assertFalse("function words never promote: $d", d.contains("and"))
     }
 
-    // ── Change ratio ─────────────────────────────────────────────────────
 
     @Test fun `restoring a transliterated English term is one unit, not a rewrite`() {
         assertTrue(VoiceCorrectionDiff.charChangeRatio("看看遗穴", "看看Issue") <= VoiceCorrectionConfig.MAX_CHAR_CHANGE_RATIO)

@@ -9,11 +9,6 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-stop-late-write] After Stop, a shell line that arrives late must
- * not bring a RUNNING pill back, a stuck pill must heal, and a tool's own Stop
- * must never stop a different, live reply (field report 2026-10-02).
- */
 class StopLateWriteTest {
 
     private fun tool(id: String, s: ToolBlockStatus?, name: String = "shell_execute") =
@@ -22,7 +17,6 @@ class StopLateWriteTest {
     private fun reply(id: String, vararg blocks: AssistantBlock) =
         ChatMessage(id = id, role = "assistant", content = "", toolBlocks = blocks.toList())
 
-    // ── The turn token ───────────────────────────────────────────────────
 
     @Test fun `a line after cancel is not the live turn's, and creates no overlay entry`() {
         val g = LiveTurnGuard()
@@ -32,12 +26,10 @@ class StopLateWriteTest {
         assertTrue(g.acceptsStreamingWrite("a1"))
 
         assertEquals("a1", g.cancel())
-        // What the lineCallback and updateAssistantMessage ask, in that order.
         assertFalse("the reader drops the line", g.isLive(gen))
         assertFalse("the overlay refuses the write", g.acceptsStreamingWrite("a1"))
         assertNull(g.liveAssistantId())
 
-        // Simulate the overlay exactly as updateAssistantMessage gates it.
         val overlay = mutableMapOf<String, StreamingDelta>()
         fun write(id: String, blocks: List<AssistantBlock>) {
             if (!g.acceptsStreamingWrite(id)) return
@@ -52,7 +44,7 @@ class StopLateWriteTest {
         val old = g.begin(); g.markAssistant(old, "a1")
         g.cancel()
         val next = g.begin(); g.markAssistant(next, "a2")
-        g.end(old)   // the cancelled loop unwinds after the resume started
+        g.end(old)
         assertTrue(g.isLive(next))
         assertTrue(g.acceptsStreamingWrite("a2"))
         assertFalse("the old bubble stays closed", g.acceptsStreamingWrite("a1"))
@@ -66,11 +58,10 @@ class StopLateWriteTest {
         g.markAssistant(gen, "a2")
         assertFalse(g.acceptsStreamingWrite("a1"))
         assertTrue(g.acceptsStreamingWrite("a2"))
-        g.markAssistant(gen + 1, "zz")   // a stale loop cannot claim the bubble
+        g.markAssistant(gen + 1, "zz")
         assertTrue(g.acceptsStreamingWrite("a2"))
     }
 
-    // ── Overlay folding never undoes a finished status ──────────────────
 
     @Test fun `a flush keeps a finished canonical status over a stale RUNNING`() {
         val canonical = listOf(tool("t1", ToolBlockStatus.CANCELLED), tool("t2", ToolBlockStatus.SUCCESS))
@@ -79,12 +70,10 @@ class StopLateWriteTest {
         assertEquals(ToolBlockStatus.CANCELLED, merged[0].toolStatus)
         assertEquals(ToolBlockStatus.SUCCESS, merged[1].toolStatus)
         assertEquals("a block only the overlay knows is passed through", ToolBlockStatus.RUNNING, merged[2].toolStatus)
-        // A live turn's canonical bubble holds no finished copy: unchanged.
         val live = listOf(tool("t9", ToolBlockStatus.RUNNING))
         assertSame(live, InFlightToolHeal.mergeOverlayBlocks(emptyList(), live))
     }
 
-    // ── Healing ──────────────────────────────────────────────────────────
 
     @Test fun `the cancel cleanup heals a RUNNING block in a message that is not the last`() {
         val stuck = reply("a1", tool("t1", ToolBlockStatus.RUNNING), tool("t0", ToolBlockStatus.SUCCESS))
@@ -118,13 +107,11 @@ class StopLateWriteTest {
         assertEquals(setOf("t1"), InFlightToolHeal.appendableCancelResults(listOf(later, use), listOf("t1")))
         assertTrue("already answered", InFlightToolHeal.appendableCancelResults(listOf(use, res), listOf("t1")).isEmpty())
         assertTrue("later rows follow the call", InFlightToolHeal.appendableCancelResults(listOf(use, later), listOf("t1")).isEmpty())
-        // Responses-style combined ids pair on the call half.
         val combinedUse = """[{"type":"toolUse","value":{"toolUseId":"c1|fc1","name":"x"}}]"""
         val combinedRes = """[{"type":"toolResult","value":{"toolUseId":"c1","output":"x","success":true}}]"""
         assertTrue(InFlightToolHeal.appendableCancelResults(listOf(combinedUse, combinedRes), listOf("c1|fc1")).isEmpty())
     }
 
-    // ── Per-tool Stop ────────────────────────────────────────────────────
 
     @Test fun `stop on a stale pill while another turn streams cancels only that pill`() {
         val live = listOf(tool("new", ToolBlockStatus.RUNNING))
@@ -147,7 +134,6 @@ class StopLateWriteTest {
             InFlightToolHeal.stopAction("t1", isStreaming = false, liveBlocks = emptyList(), blockStatus = ToolBlockStatus.CANCELLED))
     }
 
-    // ── Source guards ────────────────────────────────────────────────────
 
     private val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
 
@@ -157,7 +143,6 @@ class StopLateWriteTest {
         assertTrue(check >= 0)
         assertTrue("before the snapshot is rewritten", check < cb.indexOf("toolBlocks[idx] = toolBlocks[idx].copy(content = trimmed)"))
         assertTrue(cb.contains("noteStopLateLine(toolId, cleanedLine, \"reader\")"))
-        // ...and again on Main, where the write happens.
         val main = cb.substringAfter("viewModelScope.launch(Dispatchers.Main) {")
         assertTrue(main.indexOf("liveTurn.isLive(turnGen)") in 0 until main.indexOf("updateAssistantMessage("))
         assertTrue(vm.contains("val turnGen = liveTurn.liveGeneration()"))
@@ -193,7 +178,6 @@ class StopLateWriteTest {
         val kill = cancel.indexOf("ExecutionCoordinator.stopCurrentCommand(activeSessionId)")
         val drain = cancel.indexOf("[StopLate] cancelStream: draining")
         assertTrue(drain > kill && drain < cancel.indexOf("handleUserCancelledCleanup()"))
-        // Kept from T-scheduled-active-session-android.
         assertFalse(cancel.contains("ScheduledTaskManager") || cancel.contains("disableAllCreatedBy"))
     }
 
@@ -215,7 +199,6 @@ class StopLateWriteTest {
     @Test fun `a stale pill's stop never touches the running turn`() {
         val stop = vm.substringAfter("    fun stopTool(blockId: String) {").substringBefore("\n    }\n")
         assertTrue(stop.contains("InFlightToolHeal.StopAction.STOP_TURN -> if (foregroundTools.isRunning(blockId)) {"))
-        // [T-stop-choice] A pill stops its own tool, never the sub agents.
         assertFalse(stop.contains("cancelStream()"))
         assertTrue(stop.contains("InFlightToolHeal.StopAction.CANCEL_STALE_BLOCK -> cancelStaleBlock(blockId)"))
         val stale = vm.substringAfter("    private fun cancelStaleBlock(blockId: String) {").substringBefore("\n    }\n")

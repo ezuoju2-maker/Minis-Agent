@@ -8,24 +8,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import com.openminis.app.data.repository.SessionSearch
 
-/**
- * Build an [AnnotatedString] that highlights every case-insensitive
- * occurrence of every keyword of [query] inside [text] with the theme's
- * tertiaryContainer background. Blank query returns the plain string with no
- * spans.
- *
- * Used by the home session-list search results to point the user at the
- * exact spans that matched their query, in both the session title and the
- * extracted message snippet.
- *
- * [T-search-multi-keyword] (iOS b09df3824) The query is split into keywords
- * exactly as the search splits it ([SessionSearch.searchTerms]), so "apple
- * banana" marks both words wherever they are; overlapping or touching hits
- * are one span ([SessionSearch.hitRanges]), so "gpt" and "gpt-5" do not fight
- * over "GPT-5". Splitting on whitespace also keeps the earlier fix
- * ([T-android-search-visible-only]): a query with a leading space, " GPT",
- * marks every "GPT", not only those after a space.
- */
 @Composable
 fun highlightedAnnotatedString(text: String, query: String): AnnotatedString {
     if (query.isBlank() || text.isEmpty()) return AnnotatedString(text)
@@ -46,11 +28,6 @@ fun highlightedAnnotatedString(text: String, query: String): AnnotatedString {
     }
 }
 
-/**
- * Locate the first case-insensitive occurrence of [query] in [text] and
- * return a ~[radius]-char window centred on the hit. Newlines collapse to
- * spaces; ellipses prefix/suffix when truncated. Returns null if no hit.
- */
 fun snippetAround(text: String, query: String, radius: Int = 50): String? {
     if (query.isBlank() || text.isEmpty()) return null
     val lower = text.lowercase()

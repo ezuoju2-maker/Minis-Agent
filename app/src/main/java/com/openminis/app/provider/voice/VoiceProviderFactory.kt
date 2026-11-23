@@ -4,26 +4,10 @@ import android.util.Log
 import com.openminis.app.data.model.ProviderInstance
 import com.openminis.app.data.model.ProviderType
 
-/**
- * [T-android-provider-voice] Maps a configured ProviderInstance to a concrete
- * VoiceProvider — Android port of iOS VoiceProviderFactory.swift.
- *
- * Minis has no dedicated "voice provider type": vendors riding on an
- * OpenAI/Anthropic-compatible instance (Groq, MiniMax, Doubao, Xunfei, Alibaba,
- * MiMo …) are detected from the instance's custom base URL. Returns null when
- * the instance cannot serve voice.
- *
- * Doubao / iFlytek need more than one credential. Rather than extend the
- * credential store, the user enters them as a ";"-joined compound string in the
- * single API-key field ("appId;apiKey;apiSecret" for iFlytek); [splitCompound]
- * unpacks it. The caller supplies the API key (loaded from the repository's
- * encrypted store) so the factory stays free of storage dependencies.
- */
 object VoiceProviderFactory {
 
     private const val TAG = "VoiceFactory"
 
-    /** [T-android-provider-entry-rules] Every voice provider carries the instance's User-Agent. */
     fun make(instance: ProviderInstance, apiKey: String?): VoiceProvider? =
         makeVendor(instance, apiKey)?.also { it.customUserAgent = instance.customUserAgent }
 
@@ -32,16 +16,8 @@ object VoiceProviderFactory {
         val normalizedBase = (custom ?: "").lowercase()
 
         return when (instance.providerType) {
-            // OpenAI-compatible families -------------------------------------
-            // [T-android-provider-type-parity] openAIResponses shares the
-            // OpenAI voice endpoints (/v1/audio/*) — only the text
-            // completion path differs, which voice never uses.
             ProviderType.openAI, ProviderType.openRouter, ProviderType.openAIResponses -> {
                 if (instance.providerType == ProviderType.openRouter) {
-                    // OpenRouter. Routed per model by catalog voice role:
-                    // speech models → /v1/audio/speech, transcription models →
-                    // /v1/audio/transcriptions, gpt-audio → chat.completions.
-                    // [T-openrouter-voice-catalog]
                     return OpenRouterVoiceProvider(
                         instance.id,
                         custom ?: "https://openrouter.ai/api",
@@ -53,19 +29,14 @@ object VoiceProviderFactory {
                         GroqVoiceProvider(instance.id, custom ?: "https://api.groq.com/openai", apiKey)
                     normalizedBase.contains("dashscope") ->
                         AlibabaVoiceProvider(instance.id, custom ?: "https://dashscope.aliyuncs.com/compatible-mode", apiKey)
-                    // [T-android-zhipu-tts] Zhipu serves voice under
-                    // /api/paas/v4/audio/*, not {base}/v1/audio/* — the generic
-                    // provider built …/api/paas/v4/v1/audio/speech and 404'd.
                     ZhipuVoiceProvider.matches(normalizedBase) ->
                         ZhipuVoiceProvider(instance.id, custom ?: ZhipuVoiceProvider.DEFAULT_ORIGIN, apiKey)
                     normalizedBase.contains("minimax") ->
                         MiniMaxVoiceProvider(instance.id, custom ?: "https://api.minimax.io", apiKey)
-                    // Doubao / Volcano v3: single API Key (new console).
                     normalizedBase.contains("openspeech.bytedance") || normalizedBase.contains("volcano") -> {
                         Log.i(TAG, "Doubao voice provider: base=$normalizedBase keyLen=${apiKey?.length ?: -1}")
                         DoubaoVoiceProvider(instance.id, apiKey)
                     }
-                    // iFlytek / Xunfei: the API-key field carries "appId;apiKey;apiSecret".
                     normalizedBase.contains("xfyun") -> {
                         val p = splitCompound(apiKey)
                         if (p.size >= 3) XunfeiVoiceProvider(instance.id, p[0], p[1], p[2]) else null
@@ -75,8 +46,6 @@ object VoiceProviderFactory {
                     normalizedBase.contains("elevenlabs") ->
                         ElevenLabsVoiceProvider(instance.id, custom ?: "https://api.elevenlabs.io", apiKey)
                     normalizedBase.contains("tts.speech.microsoft.com") -> {
-                        // Strip /cognitiveservices if the user included it — the
-                        // provider appends it in the endpoint path.
                         var azureBase = custom ?: "https://eastasia.tts.speech.microsoft.com"
                         if (azureBase.endsWith("/cognitiveservices")) {
                             azureBase = azureBase.removeSuffix("/cognitiveservices")
@@ -90,11 +59,9 @@ object VoiceProviderFactory {
                 }
             }
 
-            // xAI Grok ---------------------------------------------------------
             ProviderType.xAI ->
                 XAIVoiceProvider(instance.id, custom ?: "https://api.x.ai", apiKey)
 
-            // Anthropic — only MiniMax-behind-Anthropic-base serves voice ------
             ProviderType.anthropic ->
                 if (normalizedBase.contains("minimax")) {
                     MiniMaxVoiceProvider(instance.id, custom ?: "https://api.minimax.io", apiKey)
@@ -102,7 +69,6 @@ object VoiceProviderFactory {
                     null
                 }
 
-            // Native Gemini TTS (generateContent + AUDIO modality, ?key= auth).
             ProviderType.gemini ->
                 GeminiVoiceProvider(
                     instance.id,
@@ -110,29 +76,16 @@ object VoiceProviderFactory {
                     apiKey,
                 )
 
-            // [T-kimi-oauth] Kimi Coding Plan serves no voice models.
             ProviderType.kimiCode -> null
-            // [T-copilot-provider] Copilot is chat-only — no TTS/STT endpoints.
             ProviderType.githubCopilot -> null
-            // [T-android-provider-type-parity] No voice support for types this
-            // build cannot drive.
             ProviderType.antigravity, ProviderType.unsupported, ProviderType.workBuddy,
             ProviderType.qoder, ProviderType.minimaxCode -> null
         }
     }
 
-    /**
-     * True when [make] would return a provider for [instance] with [apiKey] —
-     * the shadow-voice candidate gate. Pass the real stored key: Xunfei's
-     * compound-credential check ("appId;apiKey;apiSecret") depends on it.
-     */
     fun supports(instance: ProviderInstance, apiKey: String?): Boolean =
         make(instance, apiKey) != null
 
-    /**
-     * Split a compound credential ("appId;key" / "appId;key;secret") stored as
-     * one string. Tolerates whitespace; drops empty segments.
-     */
     fun splitCompound(value: String?): List<String> {
         if (value.isNullOrEmpty()) return emptyList()
         return value.split(';').map { it.trim() }.filter { it.isNotEmpty() }

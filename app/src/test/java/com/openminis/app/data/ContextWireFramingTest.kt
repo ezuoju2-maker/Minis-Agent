@@ -11,17 +11,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
 
-/**
- * [T-ctx-count-wire-framing] The estimate counts what frames a message on the
- * wire, not only its text (port of iOS e48d29ee9, ContextWireFramingTests).
- *
- * Measured with the estimator over Android's own Chat Completions body
- * (OpenAIProvider.buildRequestBody, DeepSeek echoing reasoning_content) before
- * this change: 120 small tool rounds read 2.02x the structured estimate, a
- * trimmed history 1.91x, large messages 1.08x - the calibration ratio jumped
- * at every trim. It left out call ids, the second escaping of arguments and
- * the keys around every message and call.
- */
 class ContextWireFramingTest {
 
     private val M = ContextSizeMeter
@@ -33,7 +22,6 @@ class ContextWireFramingTest {
 
     private fun provider() = OpenAIProvider(apiKey = "k", model = deepseek, basePath = "https://api.deepseek.com/v1")
 
-    /** The estimator over the Chat Completions `messages` this history becomes. */
     private fun wireTokens(history: List<LLMMessage>): Int {
         val body = provider().buildRequestBody(
             messages = history, systemPrompt = null, maxTokens = 1024, stream = false,
@@ -67,7 +55,6 @@ class ContextWireFramingTest {
     private fun ratio(h: List<LLMMessage>): Double =
         wireTokens(h).toDouble() / M.estimateTokens(h, includeReasoning = true)
 
-    // ── Pieces ─────────────────────────────────────────────────────────────
 
     @Test fun `a call id is counted on the call and on the result`() {
         val longId = "call_00_6JtVL9iU05cirHCa5lT25476"
@@ -85,7 +72,7 @@ class ContextWireFramingTest {
     @Test fun `escaping is counted for quotes, backslashes and newlines`() {
         assertEquals(0, M.wireEscapeTokens("plain text 123"))
         assertEquals(7, M.wireEscapeTokens("\"".repeat(20)))
-        assertEquals(2, M.wireEscapeTokens("a\nb\nc\\d\te")) // 4 escaped characters x 0.35, rounded up
+        assertEquals(2, M.wireEscapeTokens("a\nb\nc\\d\te"))
         assertEquals(0, M.estimateWireTokens(""))
         val json = """{"a":"b","c":"d"}"""
         assertEquals(M.estimateTokens(json) + M.wireEscapeTokens(json), M.estimateWireTokens(json))
@@ -94,7 +81,6 @@ class ContextWireFramingTest {
     @Test fun `arguments are counted as a string inside the body`() {
         val quoted = "say \"hi\" ".repeat(200)
         val part = AgentContentPart.ToolUse("c", "shell_execute", JSONObject().put("command", quoted))
-        // Escaped once by input.toString() (\"), then again as a string value (\\\").
         assertTrue(M.estimateTokens(part) > M.estimateTokens(quoted) + 300)
     }
 
@@ -135,13 +121,7 @@ class ContextWireFramingTest {
             M.estimateTokens(listOf(LLMMessage(LLMMessage.Role.USER, text))))
     }
 
-    // ── Against the real request body ──────────────────────────────────────
 
-    /**
-     * Many small tool rounds - the shape a trimmed history has, where framing
-     * is the largest share. The structured estimate must stay close to the
-     * estimator run over the body the provider is actually sent (2.02x before).
-     */
     @Test fun `many small rounds measure like the body that is sent`() {
         val h = history(120, { "grep -n \"total\" lib/sum_$it.sh | head -3" }, "12: total=\$((total + 1))\n[exit 0]")
         val r = ratio(h)

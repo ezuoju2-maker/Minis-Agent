@@ -9,18 +9,8 @@ import org.junit.Test
 import java.sql.Connection
 import java.sql.DriverManager
 
-/**
- * [T-config-readable] The audit table's `readable` column on real SQLite
- * (sqlite-jdbc): rows from before the column keep working with NULL, adding
- * the column twice is a no-op, and an older build's explicit SELECT / INSERT
- * still run on the new table (downgrade). The schema follows the project's
- * rules for this standalone database: nullable column with no DEFAULT, no
- * version bump (the old build's default onDowngrade throws), and a no-op
- * onDowngrade from now on.
- */
 class ConfigAuditReadableColumnTest {
 
-    /** The table the build before this change created, verbatim. */
     private val legacyCreate = """
         CREATE TABLE config_audit (
             id            TEXT PRIMARY KEY,
@@ -38,7 +28,6 @@ class ConfigAuditReadableColumnTest {
         )
     """.trimIndent()
 
-    /** The older build's projection and insert (ContentValues → explicit columns). */
     private val legacyColumns = "id, at, actor, session_id, scope, key, old_value, new_value, confirmed_at, status, revert_of, caption"
     private val legacyInsert = "INSERT OR REPLACE INTO config_audit ($legacyColumns) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
 
@@ -103,7 +92,6 @@ class ConfigAuditReadableColumnTest {
     fun `downgrade - an older build's SELECT and INSERT still work on the new table`() {
         db().use { c ->
             c.createStatement().use { it.execute(ConfigAuditLog.CREATE_TABLE) }
-            // A new row with a description, then an old build writes one.
             c.prepareStatement(
                 "INSERT INTO config_audit (${ConfigAuditLog.COLUMNS}) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             ).use { st ->
@@ -117,7 +105,6 @@ class ConfigAuditReadableColumnTest {
                     val ids = buildList { while (rs.next()) add(rs.getString(1)) }
                     assertEquals(listOf("new-1", "old-2"), ids)
                 }
-                // ...and upgrading back finds the newer build's description intact.
                 st.executeQuery("SELECT readable FROM config_audit WHERE id = 'new-1'").use { rs ->
                     assertTrue(rs.next())
                     assertEquals("{\"v\":1}", rs.getString(1))

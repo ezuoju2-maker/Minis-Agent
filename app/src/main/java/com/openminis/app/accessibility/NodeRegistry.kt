@@ -4,16 +4,6 @@ import android.view.accessibility.AccessibilityNodeInfo
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
-/**
- * Short-lived cache mapping opaque string IDs (e.g. "a3f2") to live
- * AccessibilityNodeInfo references. AccessibilityNodeInfo has no durable
- * identity across calls — `ui dump` allocates fresh objects every time
- * the framework re-enumerates the tree, but the AI agent expects to
- * reference a node by id seconds later in `tap node a3f2`.
- *
- * Entries expire after [TTL_MS] or when [clear] is called (e.g. on
- * service destroy).
- */
 class NodeRegistry {
     private data class Entry(val node: AccessibilityNodeInfo, val createdAt: Long)
 

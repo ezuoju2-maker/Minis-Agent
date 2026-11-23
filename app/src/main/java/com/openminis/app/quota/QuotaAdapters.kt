@@ -21,23 +21,8 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
-// [T-provider-quota] Vendor detection, the adapter contract / registry, and
-// the active-query adapters. Port of iOS QuotaAdapters.swift.
-//
-// Works on [QuotaInstanceDescriptor] instead of ProviderInstance so the JVM
-// unit tests exercise it without the repository.
-//
-// Safety rules every adapter follows:
-// - A credential is only ever sent to the vendor's own fixed HTTPS host, the
-//   same host the instance is already configured to talk to. No adapter builds
-//   a request URL from user-supplied path components.
-// - Response bodies are parsed into the structured model and then dropped;
-//   nothing raw is persisted or logged. Personal fields (SiliconFlow's name /
-//   email) are never read.
 
-// MARK: - Instance descriptor
 
-/** The quota-relevant, secret-free facts about one provider instance. */
 data class QuotaInstanceDescriptor(
     val instanceId: String,
     val label: String,
@@ -45,11 +30,6 @@ data class QuotaInstanceDescriptor(
     val isOAuth: Boolean,
     val isEnabled: Boolean,
     val customBaseURL: String?,
-    /**
-     * [ISS-031] The instance is on the OpenCode channel - decided by the app's
-     * own OpenCode detection (QuotaStore.descriptor, via OpenCodeSessionHeader),
-     * carried in so this file does not grow a second one.
-     */
     val isOpenCodeChannel: Boolean = false,
 ) {
     @Suppress("EnumEntryName")
@@ -70,7 +50,6 @@ data class QuotaInstanceDescriptor(
         get() = QuotaCapabilityKey(providerKind.name, QuotaCapabilityKey.normalize(customBaseURL))
 }
 
-// MARK: - Vendor detection
 
 object QuotaVendorDetector {
     fun vendor(d: QuotaInstanceDescriptor): QuotaVendor {
@@ -79,7 +58,6 @@ object QuotaVendorDetector {
         val host = d.customHost
         if (host != null) {
             vendorForHost(host)?.let { return it }
-            // A custom endpoint on the vendor's own public host behaves like the default.
             if (host == "api.openai.com") return if (d.isOAuth) QuotaVendor.codexSubscription else QuotaVendor.openAIPlatform
             if (host == "api.anthropic.com") return if (d.isOAuth) QuotaVendor.claudeSubscription else QuotaVendor.anthropicPlatform
             if (host == "generativelanguage.googleapis.com") return QuotaVendor.geminiAPIKey
@@ -106,8 +84,6 @@ object QuotaVendorDetector {
         "api.moonshot.cn", "api.moonshot.ai" -> QuotaVendor.moonshot
         "api.siliconflow.cn", "api.siliconflow.com" -> QuotaVendor.siliconFlow
         "openrouter.ai" -> QuotaVendor.openRouter
-        // [ISS-031] Kimi Code: China and overseas hosts (both in the official
-        // Kimi Code docs; both answer 401, not 404, on /coding/v1/usages).
         "api.kimi.com", "api.kimi.ai" -> QuotaVendor.kimiCode
         "api.minimax.io", "api.minimaxi.com" -> QuotaVendor.miniMax
         "api.x.ai" -> QuotaVendor.xAI
@@ -116,29 +92,17 @@ object QuotaVendorDetector {
     }
 }
 
-// MARK: - Transport
 
 class QuotaHttpResponse(
     val status: Int,
     val body: ByteArray,
-    /** Lower-cased names. */
     val headers: Map<String, String>,
 )
 
 interface QuotaHttpTransport {
-    /** [headers] are extra request headers (e.g. the Claude CLI fingerprint); never logged. */
     suspend fun get(url: String, bearer: String, headers: Map<String, String> = emptyMap()): QuotaHttpResponse
 }
 
-/**
- * Dedicated client: 10 s timeout, no cache, no cookies - a balance response
- * must never land in a shared HTTP cache.
- *
- * [FEAT-261021-16] [netTag] is the provider instance's Settings > Network
- * tag (prov:<id>): a balance query takes the same route as the provider's
- * chat requests. One client for every instance; NetworkHttp derives a routed
- * one only when a route applies.
- */
 class QuotaOkHttpTransport(private val netTag: String? = null) : QuotaHttpTransport {
     private val client: OkHttpClient get() = com.openminis.app.network.NetworkHttp.client(netTag, baseClient)
 
@@ -160,7 +124,6 @@ class QuotaOkHttpTransport(private val netTag: String? = null) : QuotaHttpTransp
             builder.header("Authorization", "Bearer $bearer")
             builder.header("Accept", "application/json")
             client.newCall(builder.build()).execute().use { resp ->
-                // Allow-list: only what the quota layer reads.
                 val kept = HashMap<String, String>()
                 resp.header("retry-after")?.let { kept["retry-after"] = it }
                 resp.header("date")?.let { kept["date"] = it }
@@ -169,7 +132,6 @@ class QuotaOkHttpTransport(private val netTag: String? = null) : QuotaHttpTransp
         }
 }
 
-/** Thrown by adapters; converted to the persisted [QuotaError] by the store. */
 class QuotaFetchError(
     val kind: QuotaError.Kind,
     val detail: String,
@@ -180,7 +142,6 @@ class QuotaFetchError(
 }
 
 object QuotaHttp {
-    /** Maps a non-2xx response to an error; null for 2xx. */
     fun error(r: QuotaHttpResponse, endpoint: String, now: Long): QuotaFetchError? = when (r.status) {
         in 200..299 -> null
         401 -> QuotaFetchError(QuotaError.Kind.unauthorized, "HTTP 401 $endpoint", 401)
@@ -195,10 +156,6 @@ object QuotaHttp {
         else -> QuotaFetchError(QuotaError.Kind.badResponse, "HTTP ${r.status} $endpoint", r.status)
     }
 
-    /**
-     * `Retry-After` as delta-seconds or an HTTP-date. Capped at one day so a
-     * broken header cannot park a subject forever.
-     */
     fun retryAfter(raw: String?, now: Long): Long? {
         val s = raw?.trim().orEmpty()
         if (s.isEmpty()) return null
@@ -217,7 +174,6 @@ object QuotaHttp {
         return runCatching { f.parse(raw)?.time }.getOrNull()
     }
 
-    /** server - local, when the response carries a `Date` header. */
     fun clockOffset(r: QuotaHttpResponse, now: Long): Long? = httpDate(r.headers["date"])?.let { it - now }
 
     val json = Json { ignoreUnknownKeys = true; isLenient = false }
@@ -227,7 +183,6 @@ object QuotaHttp {
             ?: throw QuotaFetchError(QuotaError.Kind.unsupportedResponse, "unreadable JSON $endpoint")
 }
 
-// Small JSON accessors (a missing or mistyped field is null, never a default).
 internal fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
 internal fun JsonObject.arr(key: String): JsonArray? = this[key] as? JsonArray
 internal fun JsonObject.str(key: String): String? = (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
@@ -236,19 +191,13 @@ internal fun JsonObject.bool(key: String): Boolean? =
 internal fun JsonObject.dec(key: String): BigDecimal? = QuotaDecimalParser.parse(this[key])
 internal fun JsonElement?.asObject(): JsonObject? = this as? JsonObject
 
-// MARK: - Credential-derived account key
 
 object QuotaAccountKey {
-    /**
-     * First 16 hex chars of SHA-256(credential). Enough to tell keys apart and
-     * to share pools between two instances holding the same key; not reversible.
-     */
     fun derive(credential: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(credential.toByteArray(Charsets.UTF_8))
         return digest.take(8).joinToString("") { "%02x".format(it) }
     }
 
-    /** "sk-...a1b2" - safe to persist / show. */
     fun mask(credential: String): String {
         val trimmed = credential.trim()
         if (trimmed.length <= 8) return "…"
@@ -257,7 +206,6 @@ object QuotaAccountKey {
     }
 }
 
-// MARK: - Adapter contract & registry
 
 class QuotaFetchContext(
     val descriptor: QuotaInstanceDescriptor,
@@ -265,35 +213,16 @@ class QuotaFetchContext(
     val credential: String,
     val transport: QuotaHttpTransport,
     val now: Long,
-    /** Extra request headers the adapter needs (supplied by the store; never logged). */
     val extraHeaders: Map<String, String> = emptyMap(),
-    /** [T-quota-relay-probe] A relay's type detected by an earlier probe (within a day); null = probe now. */
     val relayKindHint: RelayKind? = null,
-    /**
-     * [ISS-031] DEV_TOOLS builds only (set by QuotaStore behind
-     * `BuildConfig.DEV_TOOLS`): send the request here instead of the vendor
-     * host, so a fake server can stand in for an endpoint whose real reply has
-     * never been captured. Only the Kimi Code adapter reads it.
-     */
     val endpointOverride: String? = null,
 )
 
-/**
- * One active fetch. `isComplete == false` when part of a multi-endpoint fetch
- * failed: the store then merges without retiring pools it did not see.
- */
 data class QuotaFetchOutcome(
     val snapshot: UpstreamQuotaSnapshot,
     val isComplete: Boolean,
-    /** Errors of the parts that failed (for logging only). */
     val partialErrors: List<QuotaFetchError> = emptyList(),
-    /** [T-quota-relay-probe] The relay type this fetch used (probed or hinted). */
     val relayKind: RelayKind? = null,
-    /**
-     * [ISS-031] Field names and value types of the response, never a value -
-     * logged once per launch for an adapter whose response shape is not yet
-     * confirmed by a captured reply (Kimi Code).
-     */
     val responseShape: String? = null,
 )
 
@@ -301,13 +230,8 @@ interface ProviderQuotaAdapter {
     val adapterId: String
     val vendor: QuotaVendor
 
-    /** Static, no I/O. */
     fun capability(d: QuotaInstanceDescriptor): QuotaCapability
 
-    /**
-     * Active query -> one snapshot with ALL pools of the subject. One call per
-     * subject; multiple currencies / windows come back from the same call.
-     */
     suspend fun fetch(ctx: QuotaFetchContext): QuotaFetchOutcome
 }
 
@@ -326,17 +250,10 @@ object QuotaAdapterRegistry {
         QuotaVendor.xAI, QuotaVendor.xiaomiMiMo, QuotaVendor.openCode ->
             UnsupportedQuotaAdapter(vendor, QuotaSubject.UnsupportedReason.vendorHasNoQuotaAPI)
         QuotaVendor.kimiCode -> KimiCodeQuotaAdapter
-        // [ISS-031] The endpoint is official but its response fields are not
-        // documented, and the one known field is reported misnamed
-        // (MiniMax-AI/MiniMax-M2#99): no parser until a reply confirms it.
         QuotaVendor.miniMax ->
             UnsupportedQuotaAdapter(vendor, QuotaSubject.UnsupportedReason.providerTypeUnsupported)
-        // Candidate interfaces exist but no captured response has confirmed
-        // their fields; never ship an unverified parser.
         QuotaVendor.geminiCodeAssist, QuotaVendor.githubCopilot ->
             UnsupportedQuotaAdapter(vendor, QuotaSubject.UnsupportedReason.providerTypeUnsupported)
-        // [T-quota-relay-probe] The relay's own account ledger, labelled as
-        // relay-reported (never as the upstream vendor's balance).
         QuotaVendor.customRelay -> RelayQuotaAdapter
         QuotaVendor.unknown -> UnsupportedQuotaAdapter(vendor, QuotaSubject.UnsupportedReason.unknownVendor)
     }
@@ -354,9 +271,7 @@ class UnsupportedQuotaAdapter(
         throw QuotaFetchError(QuotaError.Kind.unsupportedResponse, "no active quota query for ${vendor.name}")
 }
 
-// MARK: - Shared helpers for balance adapters
 
-/** The configured host when it is one of [hosts], else the first (default) host. */
 private fun QuotaInstanceDescriptor.vendorHost(hosts: List<String>): String =
     customHost?.takeIf { it in hosts } ?: hosts[0]
 
@@ -366,21 +281,12 @@ private fun officialProvenance(adapterId: String, endpoint: String) =
 private fun accountWideBinding(key: QuotaPoolKey) =
     QuotaPoolBinding(key, QuotaPoolBinding.Target.Subject, QuotaPoolBinding.Evidence.vendorDocumented)
 
-// MARK: - DeepSeek
 
-/**
- * `GET https://api.deepseek.com/user/balance` (documented).
- * `{"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"110.00",
- *   "granted_balance":"10.00","topped_up_balance":"100.00"}]}`
- * One prepaid pool PER currency - currencies are never converted or summed.
- */
 object DeepSeekQuotaAdapter : ProviderQuotaAdapter {
     override val adapterId = "deepseek.balance"
     override val vendor = QuotaVendor.deepSeek
     const val ENDPOINT = "api.deepseek.com/user/balance"
 
-    // An OAuth-typed instance on this host carries a manually pasted bearer
-    // token, which is the API key; the store resolves either.
     override fun capability(d: QuotaInstanceDescriptor) = QuotaCapability.activeQuery()
 
     override suspend fun fetch(ctx: QuotaFetchContext): QuotaFetchOutcome {
@@ -410,7 +316,6 @@ object DeepSeekQuotaAdapter : ProviderQuotaAdapter {
             val parts = mutableListOf<QuotaAmounts.Part>()
             info.dec("granted_balance")?.let { parts += QuotaAmounts.Part(QuotaAmounts.Role.Granted, it) }
             info.dec("topped_up_balance")?.let { parts += QuotaAmounts.Part(QuotaAmounts.Role.ToppedUp, it) }
-            // An item without a readable total carries no amount we can show.
             if (total == null && parts.isEmpty()) continue
             val key = QuotaPoolKey.of(subjectId, "balance", currency)
             pools += QuotaPool(
@@ -431,13 +336,7 @@ object DeepSeekQuotaAdapter : ProviderQuotaAdapter {
     }
 }
 
-// MARK: - Moonshot
 
-/**
- * `GET https://api.moonshot.cn/v1/users/me/balance` (documented; the `.ai`
- * platform bills in USD, the `.cn` one in CNY).
- * `{"code":0,"data":{"available_balance":49.58,"voucher_balance":46.58,"cash_balance":3.00},"status":true}`
- */
 object MoonshotQuotaAdapter : ProviderQuotaAdapter {
     override val adapterId = "moonshot.balance"
     override val vendor = QuotaVendor.moonshot
@@ -487,12 +386,7 @@ object MoonshotQuotaAdapter : ProviderQuotaAdapter {
     }
 }
 
-// MARK: - SiliconFlow
 
-/**
- * `GET https://api.siliconflow.cn/v1/user/info` (documented). Only the three
- * balance fields are read; id / name / email / image are never touched.
- */
 object SiliconFlowQuotaAdapter : ProviderQuotaAdapter {
     override val adapterId = "siliconflow.userinfo"
     override val vendor = QuotaVendor.siliconFlow
@@ -542,15 +436,7 @@ object SiliconFlowQuotaAdapter : ProviderQuotaAdapter {
     }
 }
 
-// MARK: - OpenRouter
 
-/**
- * Two documented endpoints, fetched in parallel, failing independently:
- * - `GET /api/v1/key` -> `data.limit` (null = no cap), `usage`, `limit_remaining`,
- *   `limit_reset` -> a spendCap pool, only when `limit` is set.
- * - `GET /api/v1/credits` -> `data.total_credits`, `total_usage` -> a
- *   prepaidBalance pool, remaining = total_credits - total_usage.
- */
 object OpenRouterQuotaAdapter : ProviderQuotaAdapter {
     override val adapterId = "openrouter.key+credits"
     override val vendor = QuotaVendor.openRouter
@@ -576,7 +462,6 @@ object OpenRouterQuotaAdapter : ProviderQuotaAdapter {
         Result.failure(QuotaFetchError(QuotaError.Kind.network, "$endpoint: ${e.javaClass.simpleName}"))
     }
 
-    /** Pure; exposed for tests. A failure must carry a [QuotaFetchError]. */
     fun combine(
         key: Result<QuotaHttpResponse>,
         credits: Result<QuotaHttpResponse>,
@@ -587,7 +472,6 @@ object OpenRouterQuotaAdapter : ProviderQuotaAdapter {
         val pools = mutableListOf<QuotaPool>()
         val errors = mutableListOf<QuotaFetchError>()
         var offset: Long? = null
-        // A /key answer with limit == null is a complete answer that yields no pool.
         var keyAnswered = false
         var creditsAnswered = false
 
@@ -613,7 +497,6 @@ object OpenRouterQuotaAdapter : ProviderQuotaAdapter {
         )
 
         if (!keyAnswered && !creditsAnswered) {
-            // Both failed: surface the most actionable error (auth first).
             val order = listOf(
                 QuotaError.Kind.unauthorized, QuotaError.Kind.forbidden, QuotaError.Kind.rateLimited,
                 QuotaError.Kind.server, QuotaError.Kind.notFound,
@@ -635,11 +518,8 @@ object OpenRouterQuotaAdapter : ProviderQuotaAdapter {
         val obj = QuotaHttp.jsonObject(data, KEY_ENDPOINT)
         val d = obj.obj("data")
             ?: throw QuotaFetchError(QuotaError.Kind.unsupportedResponse, "missing data $KEY_ENDPOINT")
-        // limit == null (or absent) -> the key has no spend cap: no pool, never "100% left".
         val limit = d.dec("limit") ?: return null
         val remaining = d.dec("limit_remaining")
-        // With a periodic reset (`limit_reset` set) `usage` is lifetime spend and
-        // does not line up with the cap; only trust it for a lifetime cap.
         val periodic = d.str("limit_reset")?.isNotEmpty() ?: false
         val used = if (periodic || remaining != null) null else d.dec("usage")
         return QuotaPool(
@@ -658,7 +538,6 @@ object OpenRouterQuotaAdapter : ProviderQuotaAdapter {
         if (total == null || usage == null) {
             throw QuotaFetchError(QuotaError.Kind.unsupportedResponse, "missing data.total_credits")
         }
-        // A prepaid balance: no total/used, so no percent is ever derived from it.
         return QuotaPool(
             id = QuotaPoolKey.of(subjectId, "account-credits"), subjectId = subjectId,
             kind = QuotaPool.Kind.prepaidBalance, unit = QuotaUnit.Currency("USD"), vendorLabel = "Credits",
@@ -668,14 +547,7 @@ object OpenRouterQuotaAdapter : ProviderQuotaAdapter {
     }
 }
 
-// MARK: - Official usage / balance pages
 
-/**
- * [T-quota-console-links] The vendor's own page for usage or balance, opened
- * in the in-app browser from the quota section and sheet. Offered even where
- * Minis cannot query the figure itself. Fixed per vendor: never built from a
- * user-supplied base URL, and null for relays and unknown hosts.
- */
 object QuotaConsoleLink {
     fun url(d: QuotaInstanceDescriptor): String? {
         val host = d.customHost.orEmpty()
@@ -688,19 +560,12 @@ object QuotaConsoleLink {
             QuotaVendor.moonshot ->
                 if (host.endsWith(".ai")) "https://platform.moonshot.ai/console/account"
                 else "https://platform.moonshot.cn/console/account"
-            // Kept next to the quota windows: the top-up pack balance is only
-            // shown on the site.
             QuotaVendor.kimiCode -> "https://www.kimi.com/code"
             QuotaVendor.openRouter -> "https://openrouter.ai/settings/credits"
             QuotaVendor.xiaomiMiMo -> "https://platform.xiaomimimo.com/console/plan-manage"
-            // [ISS-031] The pages the official Token Plan FAQ links from "How to
-            // check Token Plan usage": Billing > Token Plan (international) and
-            // Subscription billing > Plan usage (China).
             QuotaVendor.miniMax ->
                 if (host == "api.minimaxi.com") "https://platform.minimaxi.com/console/usage"
                 else "https://platform.minimax.io/user-center/payment/token-plan"
-            // [ISS-031] The "console" link of opencode.ai/docs/go ("You can
-            // track your current usage in the console").
             QuotaVendor.openCode -> "https://opencode.ai/auth"
             QuotaVendor.siliconFlow, QuotaVendor.geminiAPIKey, QuotaVendor.geminiCodeAssist,
             QuotaVendor.antigravity, QuotaVendor.xAI, QuotaVendor.githubCopilot,
@@ -708,24 +573,14 @@ object QuotaConsoleLink {
         }
     }
 
-    /** "platform.deepseek.com" for the row's second line. */
     fun host(url: String): String = runCatching { URI(url).host }.getOrNull() ?: url
 }
 
-// MARK: - Capability failure
 
 object QuotaCapabilityRules {
     fun isSubscription(v: QuotaVendor): Boolean =
         v == QuotaVendor.claudeSubscription || v == QuotaVendor.codexSubscription
 
-    /**
-     * Whether a failed query marks the endpoint unusable (24 h pause, user
-     * re-check allowed). A 404 or an unreadable answer always does. For a
-     * subscription, 401 / 403 do too: its chat requests work with the same
-     * token, so the refusal is about the undocumented usage endpoint, not the
-     * credential - and passive header updates would otherwise clear the error
-     * and re-arm a query every 5 minutes against an endpoint that refuses.
-     */
     fun failureDisablesEndpoint(kind: QuotaError.Kind, vendor: QuotaVendor): Boolean = when (kind) {
         QuotaError.Kind.notFound, QuotaError.Kind.unsupportedResponse -> true
         QuotaError.Kind.unauthorized, QuotaError.Kind.forbidden -> isSubscription(vendor)
@@ -733,25 +588,7 @@ object QuotaCapabilityRules {
     }
 }
 
-// MARK: - Claude subscription (OAuth): active usage query + passive headers
 
-/**
- * [T-quota-claude-subscription] Claude Pro / Max usage windows, from two
- * sources that write the SAME pools and windows:
- * - passive: the `anthropic-ratelimit-unified-*` headers on every reply of an
- *   OAuth instance (no extra request);
- * - active: `GET https://api.anthropic.com/api/oauth/usage`. The official CLI
- *   uses it for `/usage`; it is not publicly documented, so it is labelled
- *   providerDashboardAPI / observedClient, never "official API".
- *
- * Pools (keys shared by both sources, so they merge per window):
- * - `subscription`, windows `5h` and `7d`: the account's limit, bound
- *   account-wide (scope not stated upstream -> assumedSubjectWide);
- * - `model:opus` / `model:sonnet` (`7d`): a per-model-family weekly limit,
- *   bound to that family, named upstream (explicitUpstream);
- * - `product:oauth_apps` (`7d`): the limit for third-party OAuth apps, a
- *   product pool (never bound to a model).
- */
 object ClaudeSubscriptionQuotaAdapter : ProviderQuotaAdapter {
     override val adapterId = "claude.oauth-usage"
     override val vendor = QuotaVendor.claudeSubscription
@@ -769,7 +606,6 @@ object ClaudeSubscriptionQuotaAdapter : ProviderQuotaAdapter {
         return QuotaFetchOutcome(parseUsage(r.body, ctx.subjectId, adapterId, ctx.now), isComplete = true)
     }
 
-    // Window mapping (shared by both sources)
 
     data class WindowSpec(
         val poolFamily: String,
@@ -779,10 +615,6 @@ object ClaudeSubscriptionQuotaAdapter : ProviderQuotaAdapter {
         val evidence: QuotaPoolBinding.Evidence,
     )
 
-    /**
-     * Maps an upstream window name - API key (`five_hour`, `seven_day_opus`)
-     * or header segment (`5h`, `7d`, `7d_opus`) - to its pool / window.
-     */
     fun spec(rawName: String): WindowSpec {
         val n = rawName.lowercase().replace("-", "_")
         val family = listOf("opus", "sonnet", "haiku").firstOrNull { n.endsWith("_$it") }
@@ -813,18 +645,9 @@ object ClaudeSubscriptionQuotaAdapter : ProviderQuotaAdapter {
         )
     }
 
-    /**
-     * Utilization as a 0..1 fraction. The API reports percent (0-100) and the
-     * headers a fraction (0-1). A header value above 2 is read as a percent
-     * too, so a format change degrades to the right number, not 100x.
-     */
     fun fraction(value: BigDecimal, isPercent: Boolean): BigDecimal =
         if (isPercent || value > BigDecimal(2)) value.divide(BigDecimal(100)).canonical() else value
 
-    /**
-     * `{"five_hour":{"utilization":6.0,"resets_at":"2025-11-04T04:59:59.94+00:00"},
-     *   "seven_day":{...}, "seven_day_opus":{...}|null, "seven_day_oauth_apps":null, "extra_usage":{...}}`
-     */
     fun parseUsage(data: ByteArray, subjectId: QuotaSubjectID, adapterId: String = "claude.oauth-usage", now: Long): UpstreamQuotaSnapshot {
         val obj = QuotaHttp.jsonObject(data, ENDPOINT)
         val prov = QuotaProvenance(QuotaSource.providerDashboardAPI, QuotaConfidence.observedClient, adapterId, ENDPOINT)
@@ -846,7 +669,6 @@ object ClaudeSubscriptionQuotaAdapter : ProviderQuotaAdapter {
         return snapshot(windows, subjectId, prov, verdict = null, now = now)
     }
 
-    /** null when the response carries no unified window. Keys match case-insensitively. */
     fun parseHeaders(headers: Map<String, String>, subjectId: QuotaSubjectID, adapterId: String = "claude.oauth-usage", now: Long): UpstreamQuotaSnapshot? {
         val byWindow = LinkedHashMap<String, MutableMap<String, String>>()
         var overallStatus: String? = null
@@ -900,7 +722,6 @@ object ClaudeSubscriptionQuotaAdapter : ProviderQuotaAdapter {
                     id = key, subjectId = subjectId, kind = QuotaPool.Kind.usageWindow, unit = QuotaUnit.PercentOnly,
                     vendorLabel = if (spec.poolFamily == "subscription") "Claude subscription" else spec.poolFamily,
                     windows = listOf(window),
-                    // The overall status describes the account limit, not a family pool.
                     verdict = if (spec.poolFamily == "subscription") verdict else null,
                     provenance = provenance, observedAt = now,
                 )
@@ -920,24 +741,7 @@ object ClaudeSubscriptionQuotaAdapter : ProviderQuotaAdapter {
             ?: runCatching { java.time.Instant.parse(s).toEpochMilli() }.getOrNull()
 }
 
-// MARK: - ChatGPT / Codex subscription (OAuth): active usage query + passive headers
 
-/**
- * [T-quota-codex-subscription] Same shape as Claude's: two sources, one set
- * of pools.
- * - passive: `x-codex-primary-*` / `x-codex-secondary-*` headers on every
- *   Codex reply (used percent, window minutes, reset);
- * - active: `GET https://chatgpt.com/backend-api/wham/usage`, which the Codex
- *   CLI uses for its status line. Undocumented -> providerDashboardAPI /
- *   observedClient.
- *
- * Pools:
- * - `codex`: windows keyed by duration (300 min -> `5h`, 10080 -> `7d`,
- *   otherwise `<n>m`), account-wide;
- * - `model:<name>`: an `additional_rate_limits` entry, named upstream, bound
- *   to that model;
- * - `credits`: the credit balance when the account has one (no percent).
- */
 object CodexSubscriptionQuotaAdapter : ProviderQuotaAdapter {
     override val adapterId = "codex.wham-usage"
     override val vendor = QuotaVendor.codexSubscription
@@ -964,12 +768,6 @@ object CodexSubscriptionQuotaAdapter : ProviderQuotaAdapter {
 
     private val HUNDRED = BigDecimal(100)
 
-    /**
-     * `{"plan_type":"plus","rate_limit":{"allowed":true,"limit_reached":false,
-     *   "primary_window":{"used_percent":42,"limit_window_seconds":18000,"reset_after_seconds":3600,"reset_at":1735693200},
-     *   "secondary_window":{...}},"credits":{"has_credits":true,"unlimited":false,"balance":"12.5"},
-     *   "additional_rate_limits":[{"limit_name":"GPT-5.3-Codex-Spark","rate_limit":{"primary_window":{...}}}]}`
-     */
     fun parseUsage(data: ByteArray, subjectId: QuotaSubjectID, adapterId: String = "codex.wham-usage", now: Long): UpstreamQuotaSnapshot {
         val obj = QuotaHttp.jsonObject(data, ENDPOINT)
         val prov = QuotaProvenance(QuotaSource.providerDashboardAPI, QuotaConfidence.observedClient, adapterId, ENDPOINT)
@@ -1048,11 +846,6 @@ object CodexSubscriptionQuotaAdapter : ProviderQuotaAdapter {
         )
     }
 
-    /**
-     * `x-codex-primary-used-percent: 12.0`, `x-codex-primary-window-minutes: 300`,
-     * `x-codex-primary-reset-at: <epoch>` or `x-codex-primary-reset-after-seconds: <n>`,
-     * same for `secondary`. null when the reply carries none.
-     */
     fun parseHeaders(headers: Map<String, String>, subjectId: QuotaSubjectID, adapterId: String = "codex.wham-usage", now: Long): UpstreamQuotaSnapshot? {
         val h = headers.mapKeys { it.key.lowercase() }
         val prov = QuotaProvenance(QuotaSource.officialHeaders, QuotaConfidence.observedClient, adapterId, "response headers")
@@ -1080,43 +873,12 @@ object CodexSubscriptionQuotaAdapter : ProviderQuotaAdapter {
     }
 }
 
-// MARK: - Kimi Code subscription (usage windows)
 
-/**
- * [ISS-031] Kimi Code membership usage, from `GET {base}/usages` with base
- * `https://api.kimi.com/coding/v1` (overseas `api.kimi.ai`). Source: the
- * official MoonshotAI/kimi-cli `/usage` command (src/kimi_cli/ui/shell/usage.py,
- * commit 9ab1286), which sends only `Authorization: Bearer <api key or OAuth
- * token>`. Not in Kimi's public API docs -> `providerDashboardAPI` /
- * `observedClient`, never "official API". Port of iOS KimiCodeQuotaAdapter
- * (d7fa94168).
- *
- * NOT verified against a real reply: the field names below are what the CLI
- * parses, and the CLI already accepts several spellings, so parsing is lenient
- * and `responseShape` (names + types only) is logged on the first fetch.
- *
- * `{"usage": {limit, used | remaining, name/title, reset_at|resetAt|reset_time|resetTime
- *   | reset_in|resetIn|ttl|window},
- *   "limits": [{"detail": {...same...}, "window": {"duration": 300, "timeUnit": "MINUTE"},
- *               "name"/"title"/"scope"}]}`
- *
- * One pool (`subscription`, account-wide) with one window per entry, like
- * Claude's / Codex's: the worst window decides the status. A window carries
- * the upstream counts (total = limit, used / remaining as given); its percent
- * is computed from them. An entry without a positive limit and a used or
- * remaining count is skipped - the CLI shows such a row as "0 used", Minis
- * shows nothing rather than an invented number.
- *
- * The request carries Minis's own User-Agent and nothing else: Kimi Code's
- * terms forbid spoofing the client identity. (Android sets it explicitly; the
- * shared OkHttp transport would otherwise send `okhttp/<version>`.)
- */
 object KimiCodeQuotaAdapter : ProviderQuotaAdapter {
     override val adapterId = "kimicode.usages"
     override val vendor = QuotaVendor.kimiCode
     val hosts = listOf("api.kimi.com", "api.kimi.ai")
 
-    /** Minis's own UA (`Minis/<version> (Android <release>; <model>)`). Replaceable in tests. */
     internal var userAgent: () -> String = { com.openminis.app.provider.MinisUserAgent.DEFAULT }
 
     fun endpoint(host: String): String = "$host/coding/v1/usages"
@@ -1153,7 +915,6 @@ object KimiCodeQuotaAdapter : ProviderQuotaAdapter {
             return if (n == 1) id else "$id #$n"
         }
 
-        // Top-level `usage`: the CLI's default label for it is "Weekly limit".
         obj.obj("usage")?.let { usage ->
             val amounts = amounts(usage) ?: return@let
             val name = label(usage)
@@ -1163,7 +924,6 @@ object KimiCodeQuotaAdapter : ProviderQuotaAdapter {
                 amounts = amounts, resetsAt = resetsAt(usage, now), observedAt = now, provenance = prov,
             )
         }
-        // `limits[]`: each with its own window; `detail` holds the counts when present.
         obj.arr("limits").orEmpty().forEachIndexed { index, element ->
             val item = element.asObject() ?: return@forEachIndexed
             val detail = item.obj("detail") ?: item
@@ -1198,11 +958,6 @@ object KimiCodeQuotaAdapter : ProviderQuotaAdapter {
         )
     }
 
-    /**
-     * limit + used, or limit + remaining (the CLI derives used = limit -
-     * remaining). null when there is no positive limit or neither count, or a
-     * count is negative.
-     */
     fun amounts(d: JsonObject): QuotaAmounts? {
         val limit = d.dec("limit")?.takeIf { it.signum() > 0 } ?: return null
         val used = d.dec("used")
@@ -1221,10 +976,6 @@ object KimiCodeQuotaAdapter : ProviderQuotaAdapter {
         return null
     }
 
-    /**
-     * `duration` + `timeUnit` (MINUTE / HOUR / DAY; anything else = seconds,
-     * as in the CLI), looked up in window, then item, then detail.
-     */
     fun durationSeconds(window: JsonObject, item: JsonObject, detail: JsonObject): Long? {
         val raw = window.dec("duration") ?: item.dec("duration") ?: detail.dec("duration") ?: return null
         if (raw.signum() <= 0) return null
@@ -1239,10 +990,6 @@ object KimiCodeQuotaAdapter : ProviderQuotaAdapter {
         return Math.round(seconds)
     }
 
-    /**
-     * An absolute reset (ISO 8601 - the CLI trims nanoseconds - or epoch
-     * seconds / milliseconds), else a relative one in seconds. Epoch ms.
-     */
     fun resetsAt(d: JsonObject, now: Long): Long? {
         for (key in listOf("reset_at", "resetAt", "reset_time", "resetTime")) {
             val v = d[key] as? JsonPrimitive ?: continue
@@ -1267,10 +1014,6 @@ object KimiCodeQuotaAdapter : ProviderQuotaAdapter {
         return if (n > 1e12) Math.round(n) else Math.round(n * 1000)
     }
 
-    /**
-     * "2025-12-23T05:24:18.443553353Z" included: the fraction is cut to
-     * milliseconds first (as the CLI does), then parsed like Claude's dates.
-     */
     fun parseISO(raw: String): Long? {
         var s = raw.trim()
         val dot = s.indexOf('.')
@@ -1284,13 +1027,6 @@ object KimiCodeQuotaAdapter : ProviderQuotaAdapter {
     }
 }
 
-/**
- * [ISS-031] A response's structure with every value replaced by its type:
- * `{"limits":[{"detail":{"limit":int,"used":int},...}]x2,"usage":{...}}`.
- * Object keys are kept (they are the schema); strings, numbers and booleans
- * never appear. Bounded in depth and length so a large reply cannot flood the
- * log. Port of iOS QuotaResponseShape.
- */
 object QuotaResponseShape {
     fun describe(value: JsonElement): String {
         val text = shape(value, 0)
@@ -1325,9 +1061,7 @@ object QuotaResponseShape {
     }
 }
 
-// MARK: - Relays (Sub2API / New API / OpenAI-compatible billing)
 
-/** [T-quota-relay-probe] Which relay family answered, and so which endpoint to use next time. */
 @Suppress("EnumEntryName")
 enum class RelayKind {
     sub2api, newAPI, openAIBilling;
@@ -1357,28 +1091,6 @@ enum class RelayKind {
     }
 }
 
-/**
- * [T-quota-relay-probe] A custom relay's own balance / key quota.
- *
- * What a relay reports is its LEDGER for this key or account - what the user
- * pays the relay - not the upstream vendor's balance, so every pool is
- * relayAccountLedger / thirdParty and the UI says so.
- *
- * The type is not configured; it is detected by probing the documented
- * endpoints in order, identified by their data structure:
- * 1. Sub2API `GET /v1/usage` - a boolean `isValid` marks it. Modes:
- *    `quota_limited` (quota.remaining / limit / used), wallet (`balance`),
- *    subscription (`remaining`, -1 = unlimited). USD.
- * 2. New API `GET /api/usage/token` - `data.total_granted / total_used /
- *    total_available / unlimited_quota` in the relay's quota units (shown as
- *    units: the per-dollar rate is a per-site setting, never assumed).
- * 3. OpenAI-compatible `GET /v1/dashboard/billing/subscription` (+ `/usage`):
- *    `hard_limit_usd` (>= 1e8 = unlimited), `total_usage` in cents.
- * CLIProxyAPI has no endpoint a client key can read, so it probes as "none found".
- *
- * Requests go only to the relay the instance already sends its chats to, with
- * the same key; the root is the base URL without its trailing `/v1`.
- */
 object RelayQuotaAdapter : ProviderQuotaAdapter {
     override val adapterId = "relay.probe"
     override val vendor = QuotaVendor.customRelay
@@ -1391,7 +1103,6 @@ object RelayQuotaAdapter : ProviderQuotaAdapter {
         return QuotaCapability.activeQuery(QuotaSource.relayAccountLedger, QuotaConfidence.thirdParty)
     }
 
-    /** Base URL without trailing "/" and "/v1" (case kept for the path), as scheme://authority/path. */
     fun root(d: QuotaInstanceDescriptor): String? {
         val raw = d.customBaseURL?.trim()
         if (raw.isNullOrEmpty()) return null
@@ -1414,14 +1125,10 @@ object RelayQuotaAdapter : ProviderQuotaAdapter {
                 val snap = query(kind, root, ctx)
                 return QuotaFetchOutcome(snap, isComplete = true, partialErrors = errors, relayKind = kind)
             } catch (e: QuotaFetchError) {
-                // A known type that now refuses is reported as is (key rejected,
-                // rate limited...). While probing, move on to the next family.
                 if (ctx.relayKindHint != null) throw e
                 errors += e
             }
         }
-        // Every family refused the key -> it is the key (or the relay's policy),
-        // not a missing endpoint. Anything else -> no endpoint found.
         val first = errors.firstOrNull()
         if (first != null && errors.all { it.kind == QuotaError.Kind.unauthorized || it.kind == QuotaError.Kind.forbidden }) {
             throw first
@@ -1467,7 +1174,6 @@ object RelayQuotaAdapter : ProviderQuotaAdapter {
         runCatching { QuotaHttp.json.parseToJsonElement(data.decodeToString()) as? JsonObject }.getOrNull()
             ?: throw QuotaFetchError(QuotaError.Kind.unsupportedResponse, "not JSON at ${kind.path}")
 
-    // Sub2API
 
     fun parseSub2API(data: ByteArray, subjectId: QuotaSubjectID, relayHost: String, now: Long): UpstreamQuotaSnapshot {
         val o = obj(data, RelayKind.sub2api)
@@ -1511,7 +1217,6 @@ object RelayQuotaAdapter : ProviderQuotaAdapter {
         return snapshot(pool, RelayKind.sub2api, subjectId, relayHost, now)
     }
 
-    // New API
 
     fun parseNewAPI(data: ByteArray, subjectId: QuotaSubjectID, relayHost: String, now: Long): UpstreamQuotaSnapshot {
         val o = obj(data, RelayKind.newAPI)
@@ -1533,7 +1238,6 @@ object RelayQuotaAdapter : ProviderQuotaAdapter {
         return snapshot(pool, RelayKind.newAPI, subjectId, relayHost, now)
     }
 
-    // OpenAI-compatible billing
 
     fun parseOpenAIBilling(
         subscription: ByteArray,

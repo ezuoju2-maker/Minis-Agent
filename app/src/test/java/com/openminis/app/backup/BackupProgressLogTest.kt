@@ -8,22 +8,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-android-backup-progress-log] A backup to a local (SAF) folder called its
- * progress callback once per 8 KB buffer and appended every call to the run's
- * log, rewriting the whole history file each time: a 2.13 GB package left
- * 16,827 lines after 13 minutes (2,600 per percent) and the detail screen that
- * composes them froze the app for 32–70 s.
- *
- * These pin the iOS rules (`BackupHistory.swift` `log(_:_:isProblem:isTransient:)`,
- * `BackupProgressReporter`'s 1 s interval) on the Android side.
- */
 class BackupProgressLogTest {
 
     private fun entry(message: String, transient: Boolean = false, problem: Boolean = false) =
         BackupHistory.LogEntry(at = 0L, message = message, isProblem = problem, isTransient = transient)
 
-    // -- 1. Progress replaces, phases append -----------------------------------
 
     @Test
     fun `ten thousand percent lines leave one progress line and every phase line`() {
@@ -52,13 +41,7 @@ class BackupProgressLogTest {
         )
     }
 
-    // -- 7. Same input, same output as iOS log() --------------------------------
 
-    /**
-     * A transcription of iOS `BackupHistory.log` applied to a plain list, run on
-     * the same sequence as the Android rules. Same message as the last line →
-     * dropped; last line transient → removed before appending.
-     */
     private fun iosLog(log: MutableList<Pair<String, Boolean>>, message: String, transient: Boolean) {
         if (log.lastOrNull()?.first == message) return
         if (log.lastOrNull()?.second == true) log.removeAt(log.lastIndex)
@@ -69,10 +52,10 @@ class BackupProgressLogTest {
     fun `android log rules produce the same sequence as ios log`() {
         val input = buildList {
             add("Starting…" to false)
-            add("Starting…" to false) // duplicate phase line
+            add("Starting…" to false)
             add("Exporting chats…" to false)
             for (p in listOf(0, 0, 1, 1, 1, 2, 5, 5, 9)) add("Uploading to NAS — $p%" to true)
-            add("Uploading to NAS — 9%" to false) // same text, now permanent: still a duplicate
+            add("Uploading to NAS — 9%" to false)
             add("Delivery to NAS failed: timeout" to false)
             add("Saving to Folder… 3%" to true)
             add("Saving to Folder… 3%" to true)
@@ -93,16 +76,14 @@ class BackupProgressLogTest {
         )
     }
 
-    // -- Percent gate (the callback side) --------------------------------------
 
     @Test
     fun `percent gate admits a percent once and at most once a second`() {
         var now = 0L
         val gate = PercentGate(minIntervalMs = 1_000, clock = { now })
         var admitted = 0
-        // 2.13 GB at 8 KB per callback is ~260,000 calls; 1 % is ~2,600 calls.
         for (call in 0 until 260_000) {
-            now = call.toLong() // one call per ms: 260 s in all
+            now = call.toLong()
             if (gate.admit(call / 2_600)) admitted++
         }
         assertTrue("one line per changed percent, throttled to 1 s: $admitted", admitted in 90..101)
@@ -117,7 +98,6 @@ class BackupProgressLogTest {
         assertTrue(fast.admit(1))
     }
 
-    // -- 2. History writes: throttled, and the last one always lands ------------
 
     @Test
     fun `ten thousand progress callbacks inside a second write at most twice and the last state lands`() {
@@ -133,18 +113,16 @@ class BackupProgressLogTest {
         )
         repeat(10_000) { i ->
             state = i + 1
-            now = i / 10L // 10,000 calls spread over 1 s
+            now = i / 10L
             writer.request()
         }
         assertEquals("leading write only, the rest coalesce", 1, written.size)
         assertEquals("one trailing write is scheduled, not 9,999", 1, scheduled.size)
 
-        // The run ends (succeeded, failed, cancelled or stopped): forced write.
         writer.close()
         assertTrue("≤ 2 writes for 10,000 callbacks: ${written.size}", written.size <= 2)
         assertEquals("the final state is on disk", 10_000, written.last())
 
-        // A trailing write firing after close must not overwrite the final one.
         state = -1
         scheduled.forEach { it.second() }
         assertEquals(10_000, written.last())
@@ -168,7 +146,6 @@ class BackupProgressLogTest {
         assertEquals("outside the interval: written at once", listOf(1, 2, 3), written)
     }
 
-    // -- Wiring (source guard): the controller actually uses the rules ----------
 
     @Test
     fun `controller routes progress through the ios rules, the gate and the throttle`() {
@@ -191,7 +168,6 @@ class BackupProgressLogTest {
         assertTrue("phase line is permanent", deliver.contains("onProgress(\"Sending to \${remote.name}…\", false)"))
     }
 
-    // -- 3. Records written before isTransient existed --------------------------
 
     @Test
     fun `a records file without isTransient decodes completely`() {

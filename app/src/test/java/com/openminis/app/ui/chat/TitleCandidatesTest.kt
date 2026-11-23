@@ -16,16 +16,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-titlegen-group-order] + [T-titlegen-retry-not-retrying] Title generation
- * tries the WHOLE title group, then the chat's own model/group, then the
- * default group, then the rest — and moves on when one model fails. iOS
- * parity: 987f1f70d + 26ccf9cb4.
- *
- * Reported: one rate-limited title model left chats on "New Chat". Android
- * reached one model per auto attempt; the title group's other members were
- * never asked.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class TitleCandidatesTest {
 
@@ -71,7 +61,6 @@ class TitleCandidatesTest {
         isAvailable = { it.id !in unavailable && !it.isHidden },
     ).map { it.id }
 
-    // ---- ordering ---------------------------------------------------------
 
     @Test
     fun `the whole title group comes first, then the chat's group, the default group, then the rest`() {
@@ -135,7 +124,6 @@ class TitleCandidatesTest {
         assertNull(TitleCandidates.PrimarySource.parse("not json"))
     }
 
-    // ---- the walk ---------------------------------------------------------
 
     @Test
     fun `a failing model moves on to the next, with the pause between tries`() = runTest {
@@ -144,7 +132,7 @@ class TitleCandidatesTest {
             asked += e.id
             when (e.id) {
                 "A" -> throw RuntimeException("429 rate limited")
-                "B" -> null // empty title
+                "B" -> null
                 else -> "title"
             }
         }
@@ -170,15 +158,12 @@ class TitleCandidatesTest {
         assertEquals(1, tries)
     }
 
-    // [T-android-titlegen-stream-error-walk] Providers report a mid-stream
-    // error by cancelling their producer with the LLMError as the cause.
     @Test
     fun `a provider's mid-stream error moves on to the next model`() = runTest {
         val asked = mutableListOf<String>()
         val r = TitleCandidates.walk(listOf(a, b), origin = "t") { e ->
             asked += e.id
             if (e.id == "A") {
-                // The real shape: a channelFlow whose producer cancels itself.
                 kotlinx.coroutines.flow.channelFlow<String> {
                     cancel("Stream error", RuntimeException("inline SSE error 429"))
                 }.collect { }
@@ -195,7 +180,6 @@ class TitleCandidatesTest {
         val job = launch {
             TitleCandidates.walk(listOf(a, b), origin = "t") { e ->
                 asked += e.id
-                // The caller goes away — even with a cause attached.
                 coroutineContext.cancel(kotlinx.coroutines.CancellationException("left", RuntimeException("x")))
                 kotlinx.coroutines.yield()
                 "title"
@@ -212,22 +196,18 @@ class TitleCandidatesTest {
         assertTrue(thrown is kotlinx.coroutines.CancellationException)
     }
 
-    // ---- wiring -----------------------------------------------------------
 
     @Test
     fun `both title paths use the shared order and walk`() {
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
         assertTrue(vm.contains("TitleCandidates.forSession(providerRepository, titleSid, primarySource, currentModel?.id)"))
         assertTrue(vm.contains("pauseMs = TitleCandidates.AUTO_PAUSE_MS,"))
-        // The first-message fallback only after the whole walk failed, and no
-        // further automatic attempts after it.
         val gaveUp = vm.substringAfter("// [T-titlegen-retry-not-retrying] Every candidate failed")
             .substringBefore("} catch (e: Exception) {")
         assertTrue(gaveUp.contains("titleGenerationAttempts = TITLE_MAX_ATTEMPTS"))
         assertTrue(gaveUp.contains("applyFallbackTitleFromFirstMessage(\"all title candidates failed\")"))
         assertTrue("the single-model resolver is gone", !vm.contains("fun resolveTitleProvider("))
 
-        // [T-sessions-cli-update] Regenerate Title moved to SessionTitleRegenerator.
         val list = ProductionSources.read("ui/sessions/SessionTitleRegenerator.kt")
         assertTrue(list.contains("com.openminis.app.ui.chat.TitleCandidates.forSession("))
         assertTrue(list.contains("PrimarySource.parse(session.modelBinding)"))

@@ -22,14 +22,6 @@ import java.io.File
 import java.nio.ByteOrder
 import java.util.Locale
 
-/**
- * [T-431-engine] The provider engine's system side: the Voice Input group's
- * models, a fixed-length microphone capture, audio-file decoding and the
- * upload - through the same [VoiceProviderFactory] / [VoiceProvider] the chat
- * voice input ([com.openminis.app.speech.ProviderSpeechRecognitionEngine])
- * uses. API keys stay inside the repository and the provider; nothing here
- * returns or logs them.
- */
 internal class SpeechProviderBridge(private val context: Context) {
 
     private fun repository() =
@@ -49,8 +41,7 @@ internal class SpeechProviderBridge(private val context: Context) {
 
     fun models(): List<SpeechEngines.VoiceModel> = candidates().map { (i, e) -> describe(i, e) }
 
-    /** Record [seconds] of 16 kHz mono PCM16 from the microphone, as WAV. */
-    @SuppressLint("MissingPermission") // the handler's permission gate runs first
+    @SuppressLint("MissingPermission")
     fun record(seconds: Int, isCancelled: () -> Boolean = { false }): CaptureOutcome {
         val rate = SpeechAudio.SAMPLE_RATE
         val minBuf = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -75,13 +66,10 @@ internal class SpeechProviderBridge(private val context: Context) {
                 val now = System.currentTimeMillis()
                 if (now >= nextCancelCheck) {
                     nextCancelCheck = now + 250L
-                    // [T-431-cancel] The caller is gone: stop recording; the
-                    // handler then skips the upload.
                     if (isCancelled()) return CaptureOutcome.Cancelled
                 }
                 if (now >= nextSilenceCheck) {
                     nextSilenceCheck = now + 1_000L
-                    // [T-voice-mic-preempted] A call or another recorder owns the mic.
                     if (MicInUse.isSilenced(context, recorder.audioSessionId)) {
                         return CaptureOutcome.Failed(
                             "mic_in_use",
@@ -105,7 +93,6 @@ internal class SpeechProviderBridge(private val context: Context) {
     private fun micCode(): String =
         if (MicInUse.captureFailure(context) == com.openminis.app.speech.RecognitionError.MIC_IN_USE) "mic_in_use" else "audio_error"
 
-    /** A WAV within the upload limit as-is; anything else decoded to 16 kHz mono WAV. */
     fun decode(file: File, isCancelled: () -> Boolean = { false }): DecodeOutcome {
         val size = file.length()
         if (size > SpeechAudio.MAX_FILE_BYTES) {
@@ -146,9 +133,6 @@ internal class SpeechProviderBridge(private val context: Context) {
             codec.configure(inFormat, null, null, 0)
             codec.start()
 
-            // [T-speech-decode-streaming] Each output buffer goes straight to
-            // 16 kHz mono; only that result (at most 10 min = 9.6M samples,
-            // 19.2 MB) is kept. A reused scratch array holds one buffer.
             var resampler: SpeechAudio.StreamingResampler? = null
             var scratch = ShortArray(0)
             var totalFrames = 0L
@@ -205,7 +189,6 @@ internal class SpeechProviderBridge(private val context: Context) {
             val wav = VoiceProvider.wrapPcm16InWav(SpeechAudio.toLittleEndianBytes(mono), SpeechAudio.SAMPLE_RATE)
             return DecodeOutcome.Ok(wav, mono.size / SpeechAudio.SAMPLE_RATE.toDouble(), format, decoded = true)
         } catch (e: OutOfMemoryError) {
-            // [T-speech-decode-streaming] Never take the app down for one file.
             AppLogger.warning(TAG, "decode ran out of memory")
             return DecodeOutcome.Failed("unsupported_format", "Android ran out of memory decoding this file; trim or split it.")
         } catch (e: Exception) {
@@ -221,7 +204,6 @@ internal class SpeechProviderBridge(private val context: Context) {
         }
     }
 
-    /** Try the Voice Input candidates in order; the first transcript wins. */
     fun transcribe(wav: ByteArray, language: String?): ProviderOutcome {
         val repo = repository() ?: return ProviderOutcome.NoModel
         val list = candidates()
@@ -248,7 +230,6 @@ internal class SpeechProviderBridge(private val context: Context) {
                 }
                 return ProviderOutcome.Success(response.text.trim(), model)
             } catch (e: Exception) {
-                // Messages carry the HTTP status / body excerpt, not the key.
                 AppLogger.warning(TAG, "provider ${instance.label} failed: ${e.javaClass.simpleName}")
                 errors += model to SpeechAudioRedact.redact(e.message ?: e.javaClass.simpleName, key)
             }
@@ -261,11 +242,6 @@ internal class SpeechProviderBridge(private val context: Context) {
     }
 }
 
-/**
- * Some services echo the (partial) key in a 401 body ("Incorrect API key
- * provided: sk-...abcd"). The CLI prints provider errors, so the key and any
- * sk-style token are masked first.
- */
 internal object SpeechAudioRedact {
     private val TOKEN = Regex("""(sk|pk|ak|key)[-_][A-Za-z0-9_\-*.]{6,}""", RegexOption.IGNORE_CASE)
 

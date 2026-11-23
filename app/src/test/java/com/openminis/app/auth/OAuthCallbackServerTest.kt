@@ -11,17 +11,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * [T-oauth-callback-double-resume] Port of iOS 401ff748c: the loopback OAuth
- * server ends the flow exactly once, and a denied / failed redirect
- * (`?error=access_denied`) ends it at once with the provider's reason instead
- * of being ignored until the user gives up.
- *
- * The server is driven over a real loopback socket, like the iOS test.
- */
 class OAuthCallbackServerTest {
 
-    // --- request parsing ---
 
     @Test
     fun `code redirect parses code and state`() {
@@ -80,14 +71,12 @@ class OAuthCallbackServerTest {
         val body = page.substringAfter("\r\n\r\n")
         assertTrue(page.contains("Content-Length: ${body.toByteArray(Charsets.UTF_8).size}\r\n"))
         assertFalse(page.contains("Return to Minis"))
-        // With the package, the same way back as the success page.
         val back = OAuthCallbackServer.errorPage("access_denied", "com.openminis.app")
         assertTrue(back.contains(OAuthCallbackServer.returnToAppUrl("com.openminis.app")))
         val backBody = back.substringAfter("\r\n\r\n")
         assertTrue(back.contains("Content-Length: ${backBody.toByteArray(Charsets.UTF_8).size}\r\n"))
     }
 
-    // --- the server, over loopback ---
 
     private class Outcomes {
         val codes = AtomicInteger()
@@ -109,7 +98,6 @@ class OAuthCallbackServerTest {
             it.onExternalCancel = { o.cancels.incrementAndGet(); o.any.countDown() }
         }
 
-    /** GET [path]; retries the connect while the server thread is still binding. */
     private fun get(port: Int, path: String): String {
         val deadline = System.currentTimeMillis() + 3_000
         while (true) {
@@ -134,7 +122,7 @@ class OAuthCallbackServerTest {
         val reply = get(port, "/callback?error=access_denied&error_description=User%20said%20no")
         assertTrue(reply, reply.startsWith("HTTP/1.1 400") && reply.contains("Authorization Failed") && reply.contains("access_denied"))
         assertTrue(o.any.await(3, TimeUnit.SECONDS))
-        server.stop() // the flow's own cleanup
+        server.stop()
         server.stop()
         Thread.sleep(100)
         assertEquals(1, o.errors.get())
@@ -162,7 +150,7 @@ class OAuthCallbackServerTest {
         val port = freePort()
         val o = Outcomes()
         val server = newServer(port, o).apply { start() }
-        get(port, "/favicon.ico") // make sure it is listening
+        get(port, "/favicon.ico")
         server.stop()
         server.stop()
         assertEquals(1, o.cancels.get())

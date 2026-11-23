@@ -15,31 +15,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-android-incomplete-keep-partial] `response.incomplete` used to fail the
- * whole turn, throwing away text that had already streamed.
- *
- * Field report: a Responses-format relay proxying Claude spent the entire
- * output budget inside the reasoning phase, emitted a single space of visible
- * text, then closed with
- *
- *     {"type":"response.incomplete", …,
- *      "usage":{"input_tokens":171671,"output_tokens":0,…},
- *      "incomplete_details":{"reason":"max_output_tokens"}}
- *
- * The provider threw `LLMError.ProviderError`, the agent loop reported
- * "all fallbacks exhausted", and the turn was lost. Raising Max Output Tokens
- * could not help (the budget went to reasoning; the relay reports
- * output_tokens=0 either way), so 128k / 32k / 16k all failed identically.
- *
- * Truncation is a normal terminal condition — Chat Completions models it as
- * `finish_reason=length` and ends the stream cleanly. These tests pin the two
- * halves of the corrected behaviour:
- *
- *   - real partial text  → keep it, finish as "length", no throw;
- *   - nothing usable     → still throw, because a bubble holding one space is
- *                          indistinguishable from a bug.
- */
 class ResponsesIncompletePartialTest {
 
     private lateinit var server: MockWebServer
@@ -77,7 +52,6 @@ class ResponsesIncompletePartialTest {
             """"usage":{"input_tokens":171671,"output_tokens":0,"total_tokens":171671},""" +
             """"incomplete_details":{"reason":"$reason"}},"sequence_number":10}"""
 
-    // ── Partial output is preserved ───────────────────────────────────────
 
     @Test
     fun `truncated reply keeps its text and finishes as length`() {
@@ -96,18 +70,11 @@ class ResponsesIncompletePartialTest {
 
         val finished = chunks.filterIsInstance<LLMStreamChunk.Finished>()
         assertEquals("expected exactly one Finished, got $chunks", 1, finished.size)
-        // "length" is the Chat Completions spelling for a budget-truncated
-        // answer; reusing it means downstream needs no new branch.
         assertEquals("length", finished.first().stopReason)
     }
 
     @Test
     fun `content_filter keeps the text that arrived and finishes as a refusal`() {
-        // [T-android-model-refusal] A content_filter stop is the safety system
-        // DECLINING, not a budget truncation: the partial text is still kept,
-        // but the turn finishes as content_filter so the agent loop shows "the
-        // model declined" rather than a truncated-reply mark (iOS maps
-        // incomplete + content_filter to .refusal).
         val chunks = responsesChunks(
             """
             data: {"type":"response.output_text.delta","delta":"partial before filter"}
@@ -125,21 +92,14 @@ class ResponsesIncompletePartialTest {
 
     @Test
     fun `content_filter with no output finishes as a refusal instead of throwing`() {
-        // Previously a generic "Response ended incomplete (reason:
-        // content_filter)" error. Now a normal terminal refusal the loop words
-        // properly, with no transient retry of a request that is declined again.
         val chunks = responsesChunks("${incompleteEvent("content_filter")}\n\n")
         assertEquals("content_filter", chunks.filterIsInstance<LLMStreamChunk.Finished>().single().stopReason)
         assertTrue(chunks.none { it is LLMStreamChunk.Text })
     }
 
-    // ── Nothing usable still fails ────────────────────────────────────────
 
     @Test
     fun `whitespace-only output still throws — the reported case`() {
-        // Byte-for-byte the shape from the field report: one space of visible
-        // text. A bubble containing a space reads as a broken reply, so this
-        // must stay an error rather than become a blank turn.
         val ex = runCatching {
             responsesChunks(
                 """
@@ -152,16 +112,10 @@ class ResponsesIncompletePartialTest {
         }.exceptionOrNull()
 
         assertTrue("expected a throw, got none", ex != null)
-        // The flow cancels with a generic "Stream error" and carries the real
-        // LLMError as the cause, so walk the chain rather than reading
-        // `ex.message` (which is just the wrapper).
         val msg = generateSequence(ex) { it.cause }
             .mapNotNull { it.message }
             .joinToString(" | ")
         assertTrue("message should name the reason, got: $msg", msg.contains("max_output_tokens"))
-        // The old copy said only "raise the model's Max Output Tokens", which
-        // was actively misleading here — the reporter tried 128k/32k/16k with
-        // identical results because the budget went to reasoning.
         assertTrue(
             "message should point at the thinking budget, got: $msg",
             msg.contains("output budget") || msg.contains("Thinking"),
@@ -178,9 +132,6 @@ class ResponsesIncompletePartialTest {
 
     @Test
     fun `reasoning-only output still throws — reasoning is not an answer`() {
-        // The exact upstream behaviour: the whole budget went to reasoning and
-        // no visible text was produced. Reasoning deltas must not count as
-        // usable output, or the user gets an empty bubble.
         val ex = runCatching {
             responsesChunks(
                 """
@@ -194,7 +145,6 @@ class ResponsesIncompletePartialTest {
         assertTrue("reasoning alone must not suppress the error", ex != null)
     }
 
-    // ── The healthy path is unchanged ─────────────────────────────────────
 
     @Test
     fun `normal completion is unaffected`() {

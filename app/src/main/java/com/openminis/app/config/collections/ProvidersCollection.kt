@@ -22,28 +22,9 @@ import com.openminis.app.data.model.ProviderType
 import com.openminis.app.data.repository.EnvVarRepository
 import com.openminis.app.data.repository.ProviderRepository
 
-/**
- * Exposes `ProviderInstance` fields under `providers.<id>.…`. Mirrors
- * iOS `ProvidersCollection`.
- *
- * [T-minis-config-provider-add] Add is OPEN (by design: writes
- * are agent-permitted, reads of credentials remain guarded). Remove
- * stays denied — yanking a provider may break tool calls already in
- * flight, and the user's revertable choice is to disable it instead
- * (`providers.<id>.isEnabled = false`).
- *
- * Credential safety contract:
- *   - apiKey is a write-only ClosureField — writes accept either a
- *     literal value or a `$$ENV_VAR` reference (resolved at write time
- *     via [envVars]); reads throw permission_denied (forwarded by the
- *     bridge as `error: permission_denied`, NOT `read_failed`).
- *   - oauthToken stays HiddenField on every axis — OAuth tokens come
- *     from a multi-step browser flow that minis-config cannot drive.
- */
 class ProvidersCollection(
     private val repo: ProviderRepository,
     private val envVars: EnvVarRepository,
-    /** For the per-device response idle timeout; null (tests) leaves that field out. */
     private val context: android.content.Context? = null,
 ) : ConfigCollection {
     override val basePath: String get() = "providers"
@@ -72,8 +53,6 @@ class ProvidersCollection(
             apiKeyField(forId),
             networkRoute(forId),
         ) + listOfNotNull(context?.let { responseIdleTimeout(forId, it) }) + listOf(
-            // OAuth token stays fully hidden — the flow is browser-driven
-            // and can't be expressed as a single value.
             HiddenField(
                 path = "providers.$forId.oauthToken",
                 displayName = "OAuth Token",
@@ -83,30 +62,6 @@ class ProvidersCollection(
         )
     }
 
-    /**
-     * Create a new provider instance. JSON payload shape (mirrors iOS
-     * Provider export envelope's `config` object so a single agent
-     * surface covers both create-from-scratch and create-from-export):
-     *
-     *   {
-     *     "providerType":     "openAI" | "anthropic" | "gemini" | ...,  // required
-     *     "label":            "My Provider",                            // required, must be unique
-     *     "credentialType":   "apiKey" | "oauth",                       // default apiKey
-     *     "customBaseURL":    "https://api.x.ai",                       // optional
-     *     "appendV1Suffix":   true,                                     // optional, default true
-     *     "useResponsesAPI":  false,                                    // optional, default false
-     *     "azureMode":        false,                                    // optional, default false (OpenAI api-key only)
-     *     "apiKey":           "sk-…" | "$\$DEEPSEEK_KEY",                 // optional; literal OR env ref
-     *   }
-     *
-     * `apiKey` accepts either a literal string (stored verbatim in the
-     * encrypted credential store) or a `$\$ENV_NAME` reference. The
-     * reference is RESOLVED AT WRITE TIME (looked up against the
-     * EnvVarRepository now); missing keys fail loudly with
-     * invalid_value rather than waiting for a 401 mid-stream. Future
-     * env-var changes do NOT re-update the stored apiKey — the env var
-     * acts as a one-shot value source, not a live binding.
-     */
     override fun add(payload: ConfigValue): String {
         val obj = (payload as? ConfigValue.Obj)?.value
             ?: throw ConfigError.InvalidValue("Expected JSON object")
@@ -132,8 +87,6 @@ class ProvidersCollection(
         val useResponsesAPI = (obj["useResponsesAPI"] as? ConfigValue.Bool)?.value ?: false
         val azureMode = (obj["azureMode"] as? ConfigValue.Bool)?.value ?: false
 
-        // Resolve apiKey BEFORE addInstance, so a bad $$ENV ref aborts
-        // the whole operation without leaving a half-created instance.
         val apiKeyValue = (obj["apiKey"] as? ConfigValue.Str)?.value?.takeIf { it.isNotEmpty() }
             ?.let { resolveCredential(it, "apiKey") }
 
@@ -158,17 +111,11 @@ class ProvidersCollection(
         )
     }
 
-    // -- [T-config-readable] Readable descriptions (mirrors iOS ProvidersCollection) --
 
     override val readableSubjectFormat: String get() = "Provider “%1\$@” – %2\$@"
 
     override fun entityLabel(id: String): String? = ConfigRefResolver.names.instanceLabel(id)
 
-    /**
-     * The payload is already masked: `apiKey` is either "••• (hidden)" or a
-     * `$$VAR` reference. Only the fact that a key was given (or the variable
-     * name) is described — never a value.
-     */
     override fun readableForAdd(payload: RedactedConfigValue): List<ReadableLine> {
         val d = (payload.value as? ConfigValue.Obj)?.value ?: return emptyList()
         val label = (d["label"] as? ConfigValue.Str)?.value ?: "?"
@@ -192,10 +139,6 @@ class ProvidersCollection(
         return lines
     }
 
-    /**
-     * Not reachable today ([removable] = false); kept so the text is right if
-     * removal is ever allowed.
-     */
     override fun readableForRemove(id: String): List<ReadableLine> {
         val label = ConfigRefResolver.names.instanceLabel(id) ?: return emptyList()
         val models = ConfigRefResolver.names.modelCountOf(id)
@@ -204,18 +147,9 @@ class ProvidersCollection(
         )
     }
 
-    // -- Credential resolution ----------------------------------------
-    //
-    // `$$ENV_NAME` references are resolved at WRITE TIME against the
-    // env var store. We deliberately don't intercept reads at provider
-    // call time: doing so would mean rewriting 18+ `loadApiKey()` call
-    // sites and lose the "credential was already validated when set"
-    // invariant. A missing env var here surfaces immediately as an
-    // invalid_value error, rather than as a 401 deep inside a stream.
     private fun resolveCredential(raw: String, fieldName: String): String =
         resolveEnvReference(envVars, raw, fieldName)
 
-    // -- Field factories --
 
     private fun mutate(id: String, apply: (ProviderInstance) -> ProviderInstance) {
         val inst = repo.instance(id) ?: throw ConfigError.UnknownPath("providers.$id")
@@ -341,7 +275,6 @@ class ProvidersCollection(
             },
         )
 
-    // [T-android-azure-openai] Azure OpenAI mode. Mirrors useResponsesAPI above.
     private fun azureMode(id: String): ConfigField =
         ClosureField(
             path = "providers.$id.azureMode",
@@ -361,16 +294,6 @@ class ProvidersCollection(
             },
         )
 
-    /**
-     * [T-android-minisconfig-custom-useragent] Per-provider User-Agent
-     * override. Empty string clears the override and falls back to the
-     * branded default (Minis/<version> (Android <release>; <model>) — see
-     * MinisUserAgent.DEFAULT) at request build time. Cloned from
-     * [customBaseURL] in shape; the underlying field on ProviderInstance
-     * has been wired through ProviderFactory + applyUserAgentOverride
-     * since #802, so a write here takes effect on the very next outbound
-     * call without any restart.
-     */
     private fun customUserAgent(id: String): ConfigField =
         ClosureField(
             path = "providers.$id.customUserAgent",
@@ -386,12 +309,6 @@ class ProvidersCollection(
             },
             writer = { v ->
                 val s = (v as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
-                // [T-ua-block-oauth-provider] Custom UA only applies to
-                // third-party API-key providers. OAuth providers (Anthropic /
-                // Codex) ride their own authentication request chain with a
-                // fixed client UA — overriding it can break the handshake or be
-                // rejected upstream. Block ALL writes (including clearing to "")
-                // for non-apiKey credentials; reads stay unblocked.
                 val inst = repo.instance(id) ?: throw ConfigError.InvalidValue("Provider not found")
                 if (inst.credentialType != ProviderCredential.apiKey) {
                     throw ConfigError.InvalidValue("Custom User-Agent is only supported for third-party API-key providers. OAuth providers (Anthropic/Codex) use their own authentication UA and cannot be overridden.")
@@ -400,12 +317,6 @@ class ProvidersCollection(
             },
         )
 
-    /**
-     * [T-minis-config-coverage] Settings > provider > Response idle timeout
-     * ([ResponseIdleTimeoutSetting]): same store, range and gate as the UI
-     * row, which only OpenAI-compatible API-key instances show. Stored per
-     * device, not synced. Applies to requests built after the write.
-     */
     private fun responseIdleTimeout(id: String, context: android.content.Context): ConfigField {
         val setting = com.openminis.app.provider.ResponseIdleTimeoutSetting
         return ClosureField(
@@ -433,19 +344,6 @@ class ProvidersCollection(
         )
     }
 
-    /**
-     * Write-only API key. Read always throws permission_denied (the
-     * bridge surfaces this as `error: permission_denied`, not
-     * `read_failed`, thanks to the explicit catch added in T-minis-
-     * config-provider-add). Write accepts either a literal value or a
-     * `$$ENV_NAME` reference resolved at write time against the env
-     * var store; failed lookups throw invalid_value.
-     */
-    /**
-     * [FEAT-261021-03] The provider page's network route (iOS FEAT-261019-01).
-     * Device-local (NetworkSettings.providerRoutes), not part of the synced
-     * provider record.
-     */
     private fun networkRoute(id: String): ConfigField =
         ClosureField(
             path = "providers.$id.networkRoute",
@@ -480,8 +378,6 @@ class ProvidersCollection(
             valueSchema = ConfigSchema.Str(maxLength = 10_000),
             risk = ConfigRisk.DESTRUCTIVE,
             revertable = false,
-            // [T-config-readable] Never renders the value; a `$$VAR`
-            // reference names the variable only.
             readable = ConfigReadable(ConfigValueFormatter.Secret),
             reader = {
                 throw ConfigError.PermissionDenied(
@@ -492,9 +388,6 @@ class ProvidersCollection(
                 val s = (v as? ConfigValue.Str)?.value ?: throw ConfigError.TypeMismatch("string")
                 if (repo.instance(id) == null) throw ConfigError.UnknownPath("providers.$id")
                 if (s.isEmpty()) {
-                    // Empty string clears the stored credential. Useful for
-                    // testing the "no key" failure path, or for transitioning
-                    // an instance to OAuth.
                     repo.deleteApiKey(id)
                 } else {
                     repo.saveApiKey(id, resolveCredential(s, "apiKey"))
@@ -505,11 +398,6 @@ class ProvidersCollection(
 
 private val envRefRegex = Regex("^\\$\\$([A-Za-z_][A-Za-z0-9_]*)$")
 
-/**
- * `$$ENV_NAME` -> the variable's value, resolved at write time (see the note in
- * ProvidersCollection). Anything else is returned as is. A missing variable or
- * an empty value is an error; a DISABLED one resolves to "" with a warning.
- */
 internal fun resolveEnvReference(envVars: EnvVarRepository, raw: String, fieldName: String): String {
     val m = envRefRegex.matchEntire(raw) ?: return raw
     val key = m.groupValues[1]
@@ -518,9 +406,6 @@ internal fun resolveEnvReference(envVars: EnvVarRepository, raw: String, fieldNa
             "$fieldName references env var \$\$$key, but no such env var exists. " +
                 "Create it first via [Set $key](minis://settings/environments?create_key=$key&create_value=)."
         )
-    // [T-envvar-disable] A disabled variable resolves to an empty string -
-    // the same thing it is inside a shell - and the write goes ahead with a
-    // warning in the response (and the log) instead of failing.
     if (envVars.isDisabled(key)) {
         val message = "$fieldName references env var \$\$$key, which is disabled; it resolved to an empty string. " +
             "Enable it in [Environment Variables](minis://settings/environments?create_key=$key) and set $fieldName again."

@@ -11,13 +11,6 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/**
- * [T-android-storage-usage-cache] Settings › Storage measures once per visit
- * and afterwards only re-measures the sessions an action touched. These pin
- * the rules that make that safe: an incremental value is exactly what a full
- * rescan would show, untouched rows are left alone, deleted sessions drop out,
- * and the order (largest first) and the total follow every change.
- */
 class StorageUsageCacheTest {
     @get:Rule val tmp = TemporaryFolder()
 
@@ -27,7 +20,6 @@ class StorageUsageCacheTest {
         id = id, title = "T-$id", modelId = "m", createdAt = 0, updatedAt = 0, parentSessionId = parent,
     )
 
-    /** P (root) with hidden child C; A and B are plain roots. */
     private val sessions = listOf(session("P"), session("C", parent = "P"), session("A"), session("B"))
 
     private fun seed(filesDir: File) {
@@ -75,7 +67,6 @@ class StorageUsageCacheTest {
         assertEquals(listOf("P", "A", "B"), before.map { it.id })
         assertEquals(1465L, SessionStorageRows.total(before))
 
-        // Clear P's tree (root and child), as the batch clear does.
         listOf("P", "C").forEach { storage.deleteFiles(it) }
         val after = SessionStorageRows.applyMeasurements(
             before, SessionStorageRows.measureRoots(listOf("P"), sessions, storage),

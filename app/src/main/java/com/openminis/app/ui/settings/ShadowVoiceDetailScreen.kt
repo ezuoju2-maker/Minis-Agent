@@ -32,12 +32,6 @@ import com.openminis.app.data.model.isVoiceInputCandidate
 import com.openminis.app.data.model.isVoiceOutputCandidate
 import com.openminis.app.data.repository.ProviderRepository
 
-/**
- * [T-android-provider-voice] Read-only detail of a shadow Voice Service —
- * Android port of iOS ShadowVoiceProviderDetailView. Shows where the
- * credential/endpoint come from (the underlying text provider instance), the
- * ASR + TTS model lists, and the per-instance "Show in Voice Services" toggle.
- */
 @Composable
 fun ShadowVoiceDetailScreen(
     instanceId: String,
@@ -54,8 +48,6 @@ fun ShadowVoiceDetailScreen(
     val inputModels = entries.filter { it.model.isVoiceInputCandidate }
     val outputModels = entries.filter { it.model.isVoiceOutputCandidate }
     val shadowDisabled = providerRepository.isVoiceShadowDisabled(instanceId)
-    // Tap a voice model row → modality-matched Quick Test (mirrors iOS Voice
-    // Services Quick Test).
     var quickTestEntry by androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf<ModelEntry?>(null)
     }
@@ -64,7 +56,6 @@ fun ShadowVoiceDetailScreen(
         title = instance.label,
         onBack = onBack,
     ) {
-        // Provenance: this is a mirror of the text provider, not a stored entity.
         SettingsSection(header = stringResource(R.string.voice_service_source)) {
             InfoRow(
                 label = stringResource(R.string.voice_service_credential_from),

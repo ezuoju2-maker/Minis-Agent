@@ -8,31 +8,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 
-/**
- * C: runs every scenario of [CtxScenarios] live and after a restart, against
- * all four serializers, through the one production entry
- * (RequestContextBuilder.build) — one JUnit test per scenario.
- *
- *     ./gradlew :app:testGithubDebugUnitTest --tests 'com.openminis.app.ctx.CtxScenarioTest'
- *
- * Each test
- *  1. asserts the scenario's "current" behaviour (measured on this code);
- *  2. evaluates its "desired" behaviour: KNOWN GAP must still be a gap (a gap
- *     that starts holding fails the test, so the table gets flipped), JVM and
- *     CONFIRM rows are reported only;
- *  3. compares the final RequestView of every provider × phase against the
- *     committed golden src/test/resources/ctx-golden/android/<id>.json
- *     (structure: roles, part kinds and order, texts, image size / MIME;
- *     byte sizes and hashes are recorded but not compared). Create
- *     `ctx-golden-update.flag` in the module directory to rewrite goldens.
- * After the class: build/ctx-report/summary.md and summary.tsv, one row per
- * scenario × provider × phase: image count / max edge / MIMEs / total bytes /
- * compliant / adjacency / placeholders / duplicates.
- *
- * Images are decoded and encoded by [ImageRealJvmCodec] (the JDK) behind the
- * production ImageCodec seam: sizes, formats, qualities and control flow are
- * the production code's own; pixels are not Android's.
- */
 @RunWith(Parameterized::class)
 class CtxScenarioTest(private val id: String) {
 
@@ -88,14 +63,12 @@ class CtxScenarioTest(private val id: String) {
 
                 val errors = mutableListOf<String>()
 
-                // 1. current behaviour
                 try {
                     sc.current(run)
                 } catch (e: AssertionError) {
                     errors += "current: ${e.message}"
                 }
 
-                // 2. desired behaviour
                 val desired = sc.desired.map { d ->
                     val holds = runCatching { d.holds(run) }.getOrElse { false }
                     val status = when (d.kind) {
@@ -108,7 +81,6 @@ class CtxScenarioTest(private val id: String) {
                     DesiredResult(d.text, d.kind, d.ref, status)
                 }
 
-                // 3. golden
                 val snapshot = JSONObject()
                 for (ph in run.phases) {
                     val byProvider = JSONObject()
@@ -137,7 +109,6 @@ class CtxScenarioTest(private val id: String) {
         return CtxPhase(name, ctx, CtxProvider.entries.associateWith { CtxSession.wire(it, ctx.messages) }, s.history.toList())
     }
 
-    /** The golden minus byte sizes and hashes (encoder-dependent), canonical. */
     private fun structure(v: Any?): String {
         fun strip(x: Any?): Any? = when (x) {
             is JSONObject -> JSONObject().also { o -> for (k in x.keys()) if (k !in setOf("bytes", "base64Len", "sha256")) o.put(k, strip(x.get(k))) }
@@ -152,13 +123,9 @@ class CtxScenarioTest(private val id: String) {
             val view = ph.view(p)
             val imgs = ph.images(p)
             val th = CtxRequestView.thresholds(view)
-            // Compliant: declared MIME = magic bytes, decodable, no image over 8192 px or 5 MB
-            // base64, request under 25 MB base64.
             val compliant = CtxRequestView.mimeMismatches(view).isEmpty() && th.maxEdgeOver8192 == 0 && th.overB64_5MB == 0 && !th.totalOver25MB &&
                 imgs.all { it.decodable }
-            // ⑥ history images that reach the wire neither as an image nor as a placeholder.
             val silentDrop = maxOf(0, ph.historyImages - imgs.size - ph.placeholders(p).size)
-            // ④ the restarted request against the live one: same image bytes, or how many were lost.
             val vsLive = if (ph === run.live) "-" else {
                 val a = run.live.images(p).map { it.sha256 }
                 val b = imgs.map { it.sha256 }

@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Settings > Network. Translations shared with iOS come from its Localizable.xcstrings; locales without one fall back to English. -->
 <resources>
     <string name="network_title">ネットワーク</string>
     <string name="network_default_route">デフォルトルート</string>
@@ -51,7 +49,6 @@
     <string name="network_log_in">ログイン</string>
     <string name="network_provider_route">ネットワーク</string>
     <string name="network_provider_route_footer">このプロバイダへのリクエストの接続方法です。Tailscale とプロキシは「設定 &gt; ネットワーク」で設定します。</string>
-    <!-- [FEAT-261021-04] Settings > Network section -->
     <string name="network_routing_title">ネットワークルーティング</string>
     <string name="network_container_dns">ShellコンテナのDNS</string>
 </resources>

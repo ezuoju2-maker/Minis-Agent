@@ -21,17 +21,6 @@ import com.openminis.app.data.model.ModelEntry
 import com.openminis.app.data.model.ModelOverrides
 import com.openminis.app.data.repository.ProviderRepository
 
-/**
- * Exposes ModelEntry overrides under `models.<entry_id>.…`, where entry_id is
- * the raw "<instanceUUID>/<modelId>" `get models` prints (dots allowed).
- * Mirrors iOS `ModelsCollection`.
- *
- * `add` creates a custom entry (`isCustom = true`). `remove` is allowed
- * only for those custom entries — API-reported models can be hidden
- * (`isHidden = true`) but never deleted, since the same id may
- * reappear on the next refresh and any prior hide/override should
- * resume.
- */
 class ModelsCollection(
     private val repo: ProviderRepository,
 ) : ConfigCollection {
@@ -45,37 +34,13 @@ class ModelsCollection(
     override val addPayloadSchema: ConfigSchema get() = ConfigSchema.Json
 
 
-    // -- [T-config-path-dotted-id] Entry ids in paths ---------------------------
-    //
-    // OpenMinis#390. A model's config id is the composite
-    // `<instanceUUID>/<modelId>`, and model ids usually contain DOTS (glm-5.1,
-    // gpt-4.1, mimo-v2.6-pro). Paths now carry that id VERBATIM — exactly as
-    // `get models` prints it as `entry_id` — because
-    // ConfigRegistry.splitCollectionPath takes everything between the first
-    // and last dot as the id.
-    //
-    // Before, the resolver cut the id at its first dot, so this collection
-    // escaped dots on the way into a path ("." -> "~d", "~" -> "~~",
-    // [T-android-config-model-id-dot]). That worked, but nothing told a
-    // caller: `get` printed the raw id, the help never mentioned `~d`, and the
-    // reporter of #390 tried four escaping schemes without guessing it. The
-    // escaped form is still ACCEPTED ([lookup]), so audit-log keys and scripts
-    // written against builds 09-19 … #390 keep resolving and reverting.
-    // Same shape as iOS cef38f13b.
 
-    /**
-     * The entry a path id names: the raw id first, then the legacy escaped
-     * form. Raw wins, so an id that literally contains "~d" is never decoded
-     * into a different id.
-     */
     private fun lookup(idOrSegment: String): ModelEntry? = lookupIn(idOrSegment, ::entry)
 
     override fun childIds(): List<String> =
         repo.config.value.modelEntries.map { it.id }
 
     override fun fields(forId: String): List<ConfigField> {
-        // Raw id, or the legacy escaped form ([T-config-path-dotted-id]). The
-        // factories build their paths from the entry's RAW id either way.
         val id = lookup(forId)?.id ?: return emptyList()
         return listOf(
             providerInstanceId(id),
@@ -99,9 +64,6 @@ class ModelsCollection(
         val obj = (payload as? ConfigValue.Obj)?.value
             ?: throw ConfigError.InvalidValue("Expected JSON object")
 
-        // Accept `instance_id` (canonical, matches iOS) or `provider_id`
-        // (CLI-facing alias documented in `minis-config` help). Either
-        // must be a non-empty UUID of an existing provider instance.
         val instanceId = (
             (obj["instance_id"] as? ConfigValue.Str)?.value
                 ?: (obj["provider_id"] as? ConfigValue.Str)?.value
@@ -116,9 +78,6 @@ class ModelsCollection(
         if (repo.instance(instanceId) == null) {
             throw ConfigError.InvalidValue("No provider instance with id $instanceId")
         }
-        // Refuse silent dedupe: the spec contract is that re-adding the
-        // same provider+model pair surfaces an `already_exists` error so
-        // the agent knows the prior add already succeeded.
         val duplicate = repo.config.value.modelEntries.firstOrNull {
             it.providerInstanceId == instanceId && it.baseModel.id == modelIdStr
         }
@@ -149,12 +108,10 @@ class ModelsCollection(
             userModifiedAt = System.currentTimeMillis(),
         )
         repo.addEntry(entry)
-        // Used verbatim as a path id ([T-config-path-dotted-id]).
         return entry.id
     }
 
     override fun remove(id: String) {
-        // Raw id, or the legacy escaped form ([T-config-path-dotted-id]).
         val entry = lookup(id) ?: throw ConfigError.UnknownPath("models.$id")
         if (!entry.isCustom) {
             throw ConfigError.PermissionDenied(
@@ -164,14 +121,12 @@ class ModelsCollection(
         repo.removeEntry(entry.id)
     }
 
-    // -- [T-config-readable] Readable descriptions (mirrors iOS ModelsCollection) --
 
     override val readableSubjectFormat: String get() = "Model %1\$@ – %2\$@"
 
     override fun entityLabel(id: String): String? =
         lookup(id)?.let { ConfigRefResolver.names.modelEntryLabel(it.id) }
 
-    /** Modality names → label keys, for the override list. */
     private val modalityLabels: Map<String, String> = mapOf(
         "text_input" to "Text input", "text_output" to "Text output",
         "image_input" to "Image input", "pdf_input" to "PDF input",
@@ -200,9 +155,7 @@ class ModelsCollection(
         return lines
     }
 
-    // -- Field factories --
 
-    /** Exact match on the raw entry id. Callers with a path id use [lookup]. */
     private fun entry(id: String): ModelEntry? =
         repo.config.value.modelEntries.firstOrNull { it.id == id }
 
@@ -309,13 +262,7 @@ class ModelsCollection(
             },
         )
 
-    // -- Capability fields (modalities / contextWindow / derived) --
 
-    /**
-     * Canonical names matching `minis-model-use list` so the two tools
-     * agree on terminology. Order is meaningful for [encodeModalities]'
-     * stable output. Mirrors iOS `modalityNamesInOrder`.
-     */
     private val modalityNamesInOrder = listOf(
         "text_input", "text_output",
         "image_input", "pdf_input", "audio_input", "video_input",
@@ -323,11 +270,6 @@ class ModelsCollection(
     )
     private val allowedModalities = modalityNamesInOrder.toSet()
 
-    /**
-     * Build the *effective* modality list: union of override (if any)
-     * with baseModel input/output lists, intersected with the allowed
-     * names so we never emit junk like "image" without a direction.
-     */
     private fun effectiveModalities(e: ModelEntry): List<String> {
         val ovInputs = e.overrides.inputModalities
         val ovOutputs = e.overrides.outputModalities
@@ -336,19 +278,15 @@ class ModelsCollection(
         val inputs = ovInputs ?: baseInputs
         val outputs = ovOutputs ?: baseOutputs
 
-        // Translate models.dev short tokens (e.g. "text", "image") into
-        // direction-suffixed names that match `minis-model-use list`.
         val out = LinkedHashSet<String>()
         for (m in inputs) appendDirectional(out, m, "input")
         for (m in outputs) appendDirectional(out, m, "output")
 
-        // Stable order — matches modalityNamesInOrder.
         return modalityNamesInOrder.filter { it in out }
     }
 
     private fun appendDirectional(out: MutableSet<String>, raw: String, direction: String) {
         val short = raw.lowercase()
-        // Canonical "text" → "text_input"/"text_output".
         if (short == "text") {
             out.add("text_$direction"); return
         }
@@ -364,11 +302,9 @@ class ModelsCollection(
         if (short == "video") {
             out.add("video_$direction"); return
         }
-        // Already directional? Use as-is when it's in our allowed set.
         if (short in allowedModalities) out.add(short)
     }
 
-    /** Split the user-supplied flat list into input/output components. */
     private fun decodeModalitiesOverride(names: List<String>): Pair<List<String>, List<String>> {
         val inputs = ArrayList<String>()
         val outputs = ArrayList<String>()
@@ -440,15 +376,6 @@ class ModelsCollection(
             },
         )
 
-    /**
-     * [T-minis-config-coverage] The model's request tuning from its detail
-     * page (ModelOverrides.temperature / topP). null = not set: the parameter
-     * is left out of the request and the provider's default applies - 0 is a
-     * real value (deterministic), so it cannot double as "unset". The other
-     * two overrides on that page, custom headers and extra body parameters,
-     * are not exposed: headers can carry credentials, and raw body JSON would
-     * let a write change any request field.
-     */
     private fun samplingField(
         id: String,
         leaf: String,
@@ -489,7 +416,6 @@ class ModelsCollection(
             },
         )
 
-    /** 0.7, not 0.7000000001; 1, not 1.0. */
     private fun trimNumber(d: Double): String =
         java.math.BigDecimal(d).setScale(3, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
 
@@ -562,13 +488,6 @@ class ModelsCollection(
         )
 
     companion object {
-        /**
-         * Decode the legacy `~d` / `~~` escape. ONE left-to-right scan,
-         * deliberately — not two `replace` calls: sequential replaces break on
-         * ids that contain the escape text itself (a literal `~d~` round-trips
-         * to the wrong string). One pass consuming the escape and its argument
-         * together has no such ambiguity.
-         */
         internal fun decodeLegacySegment(segment: String): String {
             val out = StringBuilder(segment.length)
             var i = 0
@@ -586,11 +505,6 @@ class ModelsCollection(
             return out.toString()
         }
 
-        /**
-         * [lookup]'s rule, with the entry source injected so it can be tested
-         * without a ProviderRepository: [find] on the id as given, then on its
-         * legacy decode if that differs.
-         */
         internal fun <T : Any> lookupIn(idOrSegment: String, find: (String) -> T?): T? {
             find(idOrSegment)?.let { return it }
             val decoded = decodeLegacySegment(idOrSegment)

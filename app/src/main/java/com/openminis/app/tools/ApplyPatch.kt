@@ -1,39 +1,5 @@
 package com.openminis.app.tools
 
-/**
- * [v1.62-apply-patch] Multi-file, atomic patch engine.
- *
- * Why this exists: `file_edit` is one exact-string replacement per call. A
- * refactor touching six files and twenty hunks costs twenty round-trips, and
- * every partial success leaves the tree in a state the model did not intend.
- * Every serious agent (Codex CLI, Cline, Aider, OpenHands) converged on a
- * single `apply_patch` call that carries the whole change set:
- *
- *   *** Begin Patch
- *   *** Update File: src/A.kt
- *   @@ fun loadConfig(
- *    val a = 1
- *   -val b = old
- *   +val b = new
- *   *** Add File: src/B.kt
- *   +class B
- *   *** Delete File: src/C.kt
- *   *** Move to: src/D.kt          (inside an Update File block)
- *   *** End Patch
- *
- * This file is the PURE half: parse, match, and produce new contents in
- * memory. The tool wrapper ([ApplyPatchTool]) does the IO, validates every
- * path first, writes through backups, and rolls the whole set back if any
- * write fails — so the call is all-or-nothing like the model expects.
- *
- * Matching is layered, because a model reproducing a hunk from memory is
- * routinely one space off:
- *   1. exact line match;
- *   2. trailing-whitespace-insensitive;
- *   3. whitespace-collapsed (indentation and internal runs ignored).
- * Layer 3 is only accepted when it is unambiguous, so a fuzzy match can never
- * silently edit the wrong place.
- */
 object ApplyPatch {
 
     const val BEGIN = "*** Begin Patch"
@@ -43,14 +9,11 @@ object ApplyPatch {
     private const val DELETE = "*** Delete File:"
     private const val MOVE = "*** Move to:"
 
-    /** One diff line. [kind] is ' ' (context), '-' (remove), '+' (add). */
     data class Line(val kind: Char, val text: String)
 
     data class Hunk(
-        /** Free-text anchor after `@@`; matched as a substring of a target line. */
         val anchor: String?,
         val lines: List<Line>,
-        /** 1-based source line where the hunk's header appeared, for errors. */
         val headerLine: Int,
     )
 
@@ -82,14 +45,10 @@ object ApplyPatch {
 
     class ApplyError(message: String) : Exception(message)
 
-    // ---- parsing -----------------------------------------------------------
 
     fun parse(raw: String): ParseResult {
         val text = raw.replace("\r\n", "\n").replace('\r', '\n')
         val lines = text.split('\n')
-        // Tolerate prose before/after the block: models sometimes wrap it in
-        // backticks or a sentence. Require the markers to be present as whole
-        // lines, in order.
         var i = 0
         while (i < lines.size && lines[i].trim() != BEGIN) i++
         if (i == lines.size) return ParseResult(emptyList(), "Missing `$BEGIN` line.")
@@ -134,7 +93,7 @@ object ApplyPatch {
                             hl.startsWith("+") -> { hunkLines.add(Line('+', hl.substring(1))); idx++ }
                             hl.startsWith("-") -> { hunkLines.add(Line('-', hl.substring(1))); idx++ }
                             hl.startsWith(" ") -> { hunkLines.add(Line(' ', hl.substring(1))); idx++ }
-                            hl.startsWith("\\") -> idx++      // "\ No newline at end of file"
+                            hl.startsWith("\\") -> idx++
                             else -> return ParseResult(
                                 emptyList(),
                                 "Unexpected line at patch line ${idx + i + 2}: '${hl.take(60)}'. " +
@@ -189,14 +148,7 @@ object ApplyPatch {
         return t.startsWith(UPDATE) || t.startsWith(ADD) || t.startsWith(DELETE) || t == END
     }
 
-    // ---- applying ----------------------------------------------------------
 
-    /**
-     * Pure application. [contents] maps path → current text (missing = absent,
-     * except for Add which requires absence). Returns the full change set or
-     * throws [ApplyError] with a model-actionable message — nothing is written
-     * here.
-     */
     fun apply(ops: List<Op>, contents: Map<String, String?>): List<FileChange> {
         val out = ArrayList<FileChange>()
         for (op in ops) {
@@ -220,8 +172,6 @@ object ApplyPatch {
                     val (added, removed) = countChanges(before, after)
                     out.add(FileChange(op.moveTo ?: op.path, before, after, added, removed))
                     if (op.moveTo != null) {
-                        // A move is represented as delete-original + add-target
-                        // by the caller; the change itself carries the new path.
                         out.add(FileChange(op.path, before, "", added = 0, removed = before.lineCount()))
                     }
                 }
@@ -239,8 +189,6 @@ object ApplyPatch {
             val target = hunk.lines.filter { it.kind != '+' }.map { it.text }
             val replacement = hunk.lines.filter { it.kind != '-' }.map { it.text }
 
-            // An anchor (@@ text) moves the search start to the first line
-            // containing it, but only if the hunk actually matches there.
             if (!hunk.anchor.isNullOrBlank()) {
                 val anchorIdx = lines.indexOfFirst { it.contains(hunk.anchor, ignoreCase = false) }
                 if (anchorIdx >= 0) cursor = anchorIdx
@@ -266,27 +214,19 @@ object ApplyPatch {
         return joined
     }
 
-    /**
-     * Locate [target] in [lines] at or after [from]. Exact match wins; then
-     * trailing-whitespace equality; then collapsed whitespace, accepted only
-     * when exactly one position matches.
-     */
     private fun findMatch(lines: List<String>, target: List<String>, from: Int): Int? {
         if (target.isEmpty()) return from.coerceIn(0, lines.size)
         if (lines.size - from < target.size) return null
-        // 1. exact
         var i = from
         while (i <= lines.size - target.size) {
             if (matchesAt(lines, target, i) { a, b -> a == b }) return i
             i++
         }
-        // 2. rstrip
         i = from
         while (i <= lines.size - target.size) {
             if (matchesAt(lines, target, i) { a, b -> a.trimEnd() == b.trimEnd() }) return i
             i++
         }
-        // 3. whitespace-collapsed, uniqueness required
         val normTarget = target.map(::collapseWhitespace)
         val hits = ArrayList<Int>()
         i = from

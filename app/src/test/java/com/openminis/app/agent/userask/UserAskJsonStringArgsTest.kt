@@ -15,13 +15,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-port-nested-json-string] Pixel 4a, DeepSeek V4 Flash via SenseNova and
- * Bailian: 5 of 7 user_ask calls carried `questions` as JSON-in-a-string, so
- * the card never showed and the model fell back to asking in text. Both the
- * parser and the generic nested-schema path now decode it; a string that is
- * not JSON gets an error the model can act on.
- */
 class UserAskJsonStringArgsTest {
 
     @Before fun setUp() = UserAskCenter.resetForTest()
@@ -33,7 +26,6 @@ class UserAskJsonStringArgsTest {
     private fun question(opts: Any = options) = JSONObject().put("type", "options").put("question", "Which DB?").put("options", opts)
     private val confirm = JSONObject().put("type", "confirm").put("question", "rm -rf node_modules").put("risk", "high")
 
-    /** The exact shape seen on the device: the whole array as a string. */
     private fun stringifiedQuestions() = JSONObject().put("questions", JSONArray().put(question()).put(confirm).toString())
 
     @Test fun `questions as a JSON string parse like a native array`() {
@@ -42,7 +34,6 @@ class UserAskJsonStringArgsTest {
         assertEquals(listOf("SQLite", "Postgres"), r.questions[0].options!!.map { it.label })
         assertEquals(UserAskQuestionType.CONFIRM, r.questions[1].type)
         assertEquals(UserAskRisk.HIGH, r.questions[1].risk)
-        // With whitespace around it, too.
         val padded = JSONObject().put("questions", "\n  " + JSONArray().put(question()).toString() + "  ")
         assertEquals(1, UserAskParser.parse(padded).getOrThrow().questions.size)
     }
@@ -74,7 +65,6 @@ class UserAskJsonStringArgsTest {
     }
 
     @Test fun `the card's own re-parse of the stored raw arguments works`() {
-        // The card reads block.toolArgs - the model's arguments as sent.
         val raw = stringifiedQuestions().toString()
         assertEquals(2, UserAskParser.parse(raw).getOrThrow().questions.size)
     }
@@ -91,7 +81,6 @@ class UserAskJsonStringArgsTest {
         assertEquals(listOf(UserAskResultStatus.ANSWERED, UserAskResultStatus.APPROVED), UserAskResolver.statuses(out))
     }
 
-    // ── The generic nested-schema path ──────────────────────────────────────
 
     private val def = UserAskPromptText.definition()
 
@@ -100,10 +89,8 @@ class UserAskJsonStringArgsTest {
         val qs = fixed.get("questions")
         assertTrue("now a native array", qs is JSONArray)
         assertTrue((qs as JSONArray).getJSONObject(0).get("options") is JSONArray)
-        // Nested: an options string inside native questions.
         val inner = def.coerceNestedJsonStrings(JSONObject().put("questions", JSONArray().put(question(options.toString()))))
         assertTrue(inner.getJSONArray("questions").getJSONObject(0).get("options") is JSONArray)
-        // Items stringified one by one.
         val items = def.coerceNestedJsonStrings(JSONObject().put("questions", JSONArray().put(question().toString())))
         assertTrue(items.getJSONArray("questions").get(0) is JSONObject)
     }

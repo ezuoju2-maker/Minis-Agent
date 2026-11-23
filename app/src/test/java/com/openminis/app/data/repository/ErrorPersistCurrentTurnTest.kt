@@ -12,22 +12,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.lang.reflect.Proxy
 
-/**
- * [T-android-error-persist-current-turn] GH#263 (iOS fd7ec79a2 / 910708619).
- *
- * A terminal error must be persisted onto the CURRENT turn. The old write
- * stamped the session's newest assistant row, which — when the failing turn had
- * persisted nothing — was the PREVIOUS turn's good reply, so after a reload the
- * banner sat under an answer that had worked.
- *
- * [ChatRepository.persistTurnError] is exercised for real against an in-memory
- * fake of the [ChatDao] methods it uses (a dynamic proxy; any other DAO call
- * fails the test). The ViewModel wiring is asserted against source, since the
- * VM needs a Context/DB/provider to construct.
- */
 class ErrorPersistCurrentTurnTest {
 
-    // ── fixtures ──────────────────────────────────────────────────────────
 
     private val userText = """[{"type":"text","value":"hello"}]"""
     private val toolResult =
@@ -85,14 +71,13 @@ class ErrorPersistCurrentTurnTest {
         } as ChatDao
     }
 
-    // ── the bug: early failure on turn 2 ─────────────────────────────────
 
     @Test
     fun `an early failure on turn 2 does NOT stamp the previous reply - it gets a carrier`() = runBlocking {
         val f = FakeDao()
         f.add("u1", "user", userText)
-        f.add("a1", "assistant", assistantText) // turn 1's good reply
-        f.add("u2", "user", userText)           // turn 2 failed before any output
+        f.add("a1", "assistant", assistantText)
+        f.add("u2", "user", userText)
         val write = ChatRepository(f.dao).persistTurnError("s", "HTTP 529 overloaded")
 
         assertNull("the previous turn's reply must stay clean", f.row("a1").errorInfo)
@@ -122,7 +107,7 @@ class ErrorPersistCurrentTurnTest {
         f.add("a1", "assistant", assistantText)
         f.add("u2", "user", userText)
         f.add("a2", "assistant", assistantTool)
-        f.add("r2", "user", toolResult) // tool-result row does not start a turn
+        f.add("r2", "user", toolResult)
         val write = ChatRepository(f.dao).persistTurnError("s", "boom")
         assertEquals(ChatRepository.TurnErrorWrite.Stamped("a2"), write)
         assertEquals("boom", f.row("a2").errorInfo)
@@ -161,12 +146,9 @@ class ErrorPersistCurrentTurnTest {
         f.add("u2", "user", userText)
         val repo = ChatRepository(f.dao)
         val carrier = repo.persistTurnError("s", "boom") as ChatRepository.TurnErrorWrite.Carrier
-        // retryLast → clearPersistedLastAssistantError → updateLastAssistantError(sid, null)
         repo.updateLastAssistantError("s", null)
         assertNull("the clear must land on the carrier", f.row(carrier.messageId).errorInfo)
         assertNull(f.row("a1").errorInfo)
-        // The retried turn's reply lands after it; a later failure of a NEW
-        // turn must still skip both of these.
         f.add("a2", "assistant", assistantText)
         f.add("u3", "user", userText)
         assertTrue(repo.persistTurnError("s", "again") is ChatRepository.TurnErrorWrite.Carrier)
@@ -181,13 +163,11 @@ class ErrorPersistCurrentTurnTest {
         assertTrue(f.rows.isEmpty())
     }
 
-    // ── the pure classification ──────────────────────────────────────────
 
     @Test
     fun `turn-start classification matches iOS currentTurnStartIndex`() {
         assertTrue(ChatRepository.isTurnStartingUserParts(userText))
         assertFalse("tool results continue a turn", ChatRepository.isTurnStartingUserParts(toolResult))
-        // The snapshot's nested "type":"text" is inside a toolResult value, not a part.
         assertFalse(ChatRepository.isTurnStartingUserParts(toolResult))
         assertTrue("any non-tool-result part starts a turn",
             ChatRepository.isTurnStartingUserParts(
@@ -216,7 +196,6 @@ class ErrorPersistCurrentTurnTest {
         assertFalse(ChatRepository.isEmptyAssistantCarrier("user", "[]"))
     }
 
-    // ── ViewModel wiring (source facts) ──────────────────────────────────
 
     private val vm by lazy { ProductionSources.read("ui/chat/ChatViewModel.kt") }
 

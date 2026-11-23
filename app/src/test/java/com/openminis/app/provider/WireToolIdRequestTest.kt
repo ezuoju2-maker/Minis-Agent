@@ -19,14 +19,6 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 
-/**
- * [B02] A session that ran on the Responses API stores combined tool ids
- * (`call_…|fc_…`). Switching it to an Anthropic or a Chat Completions model
- * must send ids without '|', within 40 chars, every call followed by its
- * result under the same id, and two calls that share a call_id (different
- * fc_id) still told apart. Drives the real providers through a MockWebServer
- * and reads the serialized request.
- */
 class WireToolIdRequestTest {
 
     private lateinit var server: MockWebServer
@@ -45,10 +37,8 @@ class WireToolIdRequestTest {
     private val legal = Regex("^[A-Za-z0-9_-]+$")
     private val long = "call_" + "x".repeat(60) + "|fc_" + "9".repeat(48)
 
-    /** Responses-origin history: two rounds, a collision pair and an over-long id. */
     private fun history(): List<LLMMessage> {
         fun use(id: String) = AgentContentPart.ToolUse(id, "shell_execute", JSONObject().put("command", "ls"))
-        // The output text names no id: the body must carry no '|' at all.
         fun result(id: String) = AgentContentPart.ToolResult(id, "shell_execute", "file.txt")
         val first = listOf("call_same|fc_1", "call_same|fc_2", long)
         return listOf(
@@ -155,11 +145,10 @@ class WireToolIdRequestTest {
         assertEquals(anthropic[2], chat[2])
     }
 
-    // ---------------------------------------------------------------- source guards
 
     private fun source(path: String): String = sequenceOf(
-        File("src/main/java/com/openminis/app/$path"),       // CWD = src/android/app
-        File("app/src/main/java/com/openminis/app/$path"),   // CWD = src/android
+        File("src/main/java/com/openminis/app/$path"),
+        File("app/src/main/java/com/openminis/app/$path"),
     ).first { it.isFile }.readText()
 
     @Test
@@ -174,7 +163,6 @@ class WireToolIdRequestTest {
         for (w in writes) {
             assertTrue("'$w' does not go through the wire map", w.trim().startsWith("wireIds.idFor("))
         }
-        // One map per request; a Kimi target's map keeps Kimi-native ids ([T-kimi-native-tool-id]).
         assertTrue("one map per request", builder.contains("val wireIds = if (keepsKimiToolIds) {\n            WireToolIdMap(keepAsIs = ::isKimiNativeToolId)\n        } else {\n            WireToolIdMap()\n        }"))
         assertFalse("the 64-char cap is gone", src.contains("callHalf.length <= 64"))
     }

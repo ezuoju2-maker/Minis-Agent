@@ -7,17 +7,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [B02] Runs the SHARED wireToolId vectors (src/shared/tool-id, the same file
- * the iOS tests read), so both platforms send byte-identical tool ids for the
- * same stored id.
- */
 class WireToolIdVectorsTest {
 
-    // Walk up to the repo's src/ and into shared/tool-id, tolerating either CWD.
     private val vectors: JSONObject = sequenceOf(
-        File("../shared/tool-id"),         // CWD = src/android
-        File("../../shared/tool-id"),      // CWD = src/android/app
+        File("../shared/tool-id"),
+        File("../../shared/tool-id"),
     ).firstOrNull { it.isDirectory }
         .let { it ?: File("../../shared/tool-id") }
         .let { JSONObject(File(it, "wire_tool_id_vectors.json").readText()) }

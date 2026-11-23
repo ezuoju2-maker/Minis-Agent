@@ -14,18 +14,6 @@ import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * [T-android-backup-subagents] Debug-only drivers for backup / restore and the
- * sub agent roster, so a cross-platform backup round trip can be exercised on a
- * device without the UI.
- *
- * They call the same [BackupExporter] / [BackupImporter] the Backup screen
- * uses; only the trigger differs. What they deliberately do NOT do:
- *  - deliver a package to a destination: the UI's only path uploads to the
- *    user's configured servers, which a test must not touch;
- *  - include credentials: `includeCredentials` defaults to false, so a test
- *    package carries no API keys or tokens.
- */
 internal object BackupDebugMethods {
 
     private fun app(context: Context): MinisApp =
@@ -84,7 +72,6 @@ internal object BackupDebugMethods {
         return JSONObject().put("deleted", id).put("remaining", r.subAgents.size)
     }
 
-    /** Export into the app's files dir; no destination, no credentials by default. */
     suspend fun backupExport(context: Context, params: JSONObject): JSONObject {
         val a = app(context)
         val cats = categories(params, setOf(BackupCategory.PROVIDERS))!!
@@ -105,7 +92,6 @@ internal object BackupDebugMethods {
         }
     }
 
-    /** Restore a package file already on the device. */
     suspend fun backupRestore(context: Context, params: JSONObject): JSONObject {
         val a = app(context)
         val pkg = File(params.optString("path").ifBlank { throw RPCException(-32602, "Missing 'path'") })
@@ -139,13 +125,7 @@ internal object BackupDebugMethods {
         }
     }
 
-    // -- [T-android-backup-webdav-deadline] Upload drivers ------------------
 
-    /**
-     * Add a WebDAV destination for tests. Added DISABLED, so a real backup run
-     * (which delivers to every enabled destination) never sends to it; only
-     * [backupUpload], which names it explicitly, does.
-     */
     fun remotesAddWebdav(context: Context, params: JSONObject): JSONObject {
         val name = params.optString("name").ifBlank { throw RPCException(-32602, "Missing 'name'") }
         val url = params.optString("url").ifBlank { throw RPCException(-32602, "Missing 'url'") }
@@ -165,11 +145,6 @@ internal object BackupDebugMethods {
         return JSONObject().put("removed", name)
     }
 
-    /**
-     * Upload a package to ONE named destination with the real uploader.
-     * `cancelAfterMs` flips the cancel flag after that long, the way Stop
-     * does during a backup run. Returns how long it took and how it ended.
-     */
     fun backupUpload(context: Context, params: JSONObject): JSONObject {
         val file = File(params.optString("path").ifBlank { throw RPCException(-32602, "Missing 'path'") })
         if (!file.isFile) throw RPCException(-32602, "no package at ${file.absolutePath}")

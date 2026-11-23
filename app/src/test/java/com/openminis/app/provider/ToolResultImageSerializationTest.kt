@@ -11,20 +11,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-toolresult-image-dropped]
- *
- * Regression lock for the reported bug: `read_image` returned its pixels on the
- * ToolResult, the tool card rendered a green success — and the model answered
- * "I can't actually see pixels", because the request builder serialized a tool
- * result as `{role:"tool", tool_call_id, content}` and never read
- * `ToolResult.imageData`. The bytes died at the provider boundary with no error
- * anywhere, which is why it read as "read_image can't see the image".
- *
- * What is asserted is the request BODY, not a mocked HTTP exchange: the defect
- * was purely in JSON construction, and MockWebServer would only add a network
- * dependency to that question.
- */
 class ToolResultImageSerializationTest {
 
     private val pngBytes = byteArrayOf(
@@ -32,7 +18,6 @@ class ToolResultImageSerializationTest {
         0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
     )
 
-    /** A model that declares vision the way models.dev spells it. */
     private val visionModel = LLMModel(
         id = "vision-model",
         displayName = "Vision Model",
@@ -40,7 +25,6 @@ class ToolResultImageSerializationTest {
         inputModalities = listOf("text", "image"),
     )
 
-    /** The same capability spelled the way OpenAI / OpenRouter report it. */
     private val visionModelSuffixForm = visionModel.copy(
         id = "vision-model-suffix",
         inputModalities = listOf("text", "image_input"),
@@ -61,13 +45,6 @@ class ToolResultImageSerializationTest {
             useResponsesAPI = useResponsesAPI,
         )
 
-    /**
-     * A history shaped like read_image's: assistant tool_use → tool result with pixels.
-     *
-     * [T-android-chat-tool-adjacency] The call is part of the fixture: a result
-     * with no call is an orphan both request builders drop (the API 400s on
-     * it), which is not what these tests are about.
-     */
     private fun historyWithToolResultImage(mime: String = "image/jpeg") = listOf(
         LLMMessage(LLMMessage.Role.USER, "look at the chart"),
         LLMMessage(
@@ -100,7 +77,6 @@ class ToolResultImageSerializationTest {
             imageParts = emptyList(),
         )
 
-    /** Collect every "type" value appearing anywhere in the payload. */
     private fun collectTypes(node: Any?, out: MutableList<String>) {
         when (node) {
             is JSONObject -> {
@@ -123,9 +99,6 @@ class ToolResultImageSerializationTest {
             "tool-result pixels must reach the wire as an image_url block; types=$types",
             types.contains("image_url"),
         )
-        // [T-android-image-upload-format] The fixture is a PNG declared as
-        // image/jpeg. The wire label now follows the BYTES, because DeepSeek
-        // rejects a data URL whose MIME does not match its content.
         assertTrue(
             "the base64 payload must actually be inlined, labeled by its real format",
             body.toString().contains("data:image/png;base64,"),
@@ -164,8 +137,6 @@ class ToolResultImageSerializationTest {
         }
         assertTrue("tool message found", toolIdx >= 0)
         assertTrue("image-bearing message found", imageIdx >= 0)
-        // Chat Completions has no image block inside a `tool` message — its
-        // content is a plain string — so the pixels must follow it.
         assertTrue(
             "image must come AFTER the tool message (idx tool=$toolIdx image=$imageIdx)",
             imageIdx > toolIdx,
@@ -174,9 +145,6 @@ class ToolResultImageSerializationTest {
 
     @Test
     fun `suffix-spelled vision model also gets the pixels`() {
-        // Guards the second half of the fix: supportsImages used to be a raw
-        // `"image" in inputModalities` membership test, so "image_input" read as
-        // "no vision" and the pixels were swapped for a placeholder.
         val body = bodyOf(provider(visionModelSuffixForm), historyWithToolResultImage())
         assertTrue(
             "a model declaring image_input is vision-capable and must receive pixels",
@@ -186,8 +154,6 @@ class ToolResultImageSerializationTest {
 
     @Test
     fun `text-only model gets no pixels`() {
-        // The complement: a model that genuinely cannot see must not be sent
-        // image blocks (the provider would 400), and the tool text still lands.
         val body = bodyOf(provider(textOnlyModel), historyWithToolResultImage())
         val types = typesIn(body)
         assertFalse(
@@ -202,9 +168,6 @@ class ToolResultImageSerializationTest {
 
     @Test
     fun `responses api emits an input_image block for a tool-result image`() {
-        // The Responses path is a separate builder, not a flag on buildRequestBody.
-        // [T-android-responses-orphan-tool-output] The fixture carries the
-        // call: a result with no call is an orphan the Responses request drops.
         val history = historyWithToolResultImage()
         val body = provider(visionModel, useResponsesAPI = true).buildResponsesAPIBody(
             messages = history,

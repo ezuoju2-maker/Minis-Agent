@@ -6,10 +6,6 @@ import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 
-/**
- * [v1.62-project-rules] AGENTS.md support: nearest-first collection, bounded
- * size, and injection lines dropped.
- */
 class ProjectRulesTest {
 
     private fun tempDir(): File = Files.createTempDirectory("rules").toFile()

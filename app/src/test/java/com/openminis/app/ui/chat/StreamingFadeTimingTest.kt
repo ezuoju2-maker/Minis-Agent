@@ -5,12 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-stream-fade-ios-timing] The streamed word fade uses iOS
- * TextFadeAnimator's timings: 450 ms per word, and a fixed 100 ms stagger
- * window divided across the batch, so a batch of any size settles in about
- * 550 ms.
- */
 class StreamingFadeTimingTest {
 
     @Test
@@ -36,7 +30,6 @@ class StreamingFadeTimingTest {
             c.ingest(text)
             val t0 = System.nanoTime()
             assertTrue(c.tick(t0))
-            // Last word starts at most one window late, then fades for the duration.
             val settled = t0 + (STAGGER_WINDOW_MS + FADE_DURATION_MS + 20L) * 1_000_000L
             assertFalse("\"$text\" still fading after window+duration", c.tick(settled))
         }

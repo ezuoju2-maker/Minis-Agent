@@ -10,22 +10,6 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.nio.file.Files
 
-/**
- * Review 2026-09-23 — guards b8671a2a9 (#375, deleteFilesDetailed +
- * restoreWritable) against symlinks inside a session directory.
- *
- * directorySize() was taught (T-android-storage-symlink-inflation) that a
- * symlink's target is "someone else's bytes, which deleting this directory
- * would not free" and prunes directory links with onEnter. The delete path
- * does not share that rule: `File.deleteRecursively()` and the new
- * `restoreWritable()` both walk with `walkBottomUp()`, which DESCENDS into a
- * symlinked directory. The sandbox can create such links in its workspace
- * (a relative link that climbs out of `/var/minis/workspace` resolves on the
- * host relative to `minis-sessions/<sid>/workspace`).
- *
- * The invariant: clearing session A's files never removes or chmods anything
- * outside session A's own directories.
- */
 class Review0923SessionStorageSymlinkTest {
     @get:Rule val tmp = TemporaryFolder()
 
@@ -38,8 +22,6 @@ class Review0923SessionStorageSymlinkTest {
         write(File(filesDir, "minis-sessions/A/workspace/own.txt"), 10)
         val otherFile = File(filesDir, "minis-sessions/B/workspace/precious.txt")
         write(otherFile, 99)
-        // A link pointing at another session's workspace, as a relative guest
-        // link `ln -s ../../B/workspace peer` would resolve on the host.
         Files.createSymbolicLink(
             File(filesDir, "minis-sessions/A/workspace/peer").toPath(),
             File(filesDir, "minis-sessions/B/workspace").toPath(),
@@ -67,7 +49,6 @@ class Review0923SessionStorageSymlinkTest {
         assertTrue(r.isComplete)
         assertTrue(target.exists())
         assertFalse(File(filesDir, "minis-sessions/A").exists())
-        // freed must equal what the size screen showed (links count 0).
         assertEquals(10L, r.freed)
     }
 
@@ -79,11 +60,6 @@ class Review0923SessionStorageSymlinkTest {
         val outside = File(filesDir, "minis-global/skills/pinned")
         write(File(outside, "SKILL.md"), 3)
         outside.setWritable(false, false)
-        // [test-env] root (and FUSE overlays) bypass mode bits, so canWrite()
-        // stays true after setWritable(false) and the assertion below is
-        // meaningless here. On a real non-root device this assume passes and
-        // the invariant is checked strictly. Verified: root reports canWrite
-        // =true and can unlink inside a 0555 dir (CAP_DAC_OVERRIDE).
         assumeFalse("root/FUSE ignores directory mode bits", outside.canWrite())
         try {
             Files.createSymbolicLink(

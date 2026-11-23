@@ -20,35 +20,12 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
-/**
- * Checks GitHub releases for a build newer than the running one and
- * coordinates download → install. iOS has no equivalent (sideloading is not
- * permitted) so this is Android-only.
- *
- * [T-update-channels] One repo, [BuildConfig.RELEASE_REPO]; two channels:
- *  - stable: non-prerelease releases only (tags `X.Y`);
- *  - beta: everything, including the prereleases tagged `0-beta-build<N>`.
- * versionCode (the shared build counter, from the APK name's `-build<N>-` -
- * the file name is the protocol, there is no latest.json) decides what is
- * newer; see [UpdatePolicy] for every rule and
- * [UpdateStateStore] for the cache, throttle and badge this writes.
- */
 object UpdateChecker {
 
     private const val TAG = "UpdateChecker"
     private const val DOWNLOAD_FILENAME = "minis-update.apk"
-    /**
-     * Sub-directory of `filesDir` where we stage downloaded update APKs. We
-     * moved off `cacheDir/shared/` (the original location) so the OS can't
-     * evict a freshly-downloaded APK between the moment we hand the user off
-     * to "install unknown apps" settings and the moment they return — the
-     * eviction was a contributing factor to the "re-download after grant"
-     * bug. See [PendingUpdateStore]. Exposed via `file_provider_paths.xml`
-     * `<files-path name="updates" path="updates/" />`.
-     */
     private const val UPDATES_DIR = "updates"
 
-    /** Releases per page; pages are fetched until one comes back short. */
     private const val PER_PAGE = 100
     private const val MAX_PAGES = 5
 
@@ -65,18 +42,10 @@ object UpdateChecker {
             val releaseUrl: String,
         ) : CheckResult()
         data object UpToDate : CheckResult()
-        // The repo has zero usable releases (or 404'd entirely).
         data object NoReleaseAvailable : CheckResult()
-        // A newer release exists but carries no APK for this device. Distinct
-        // from NoReleaseAvailable so the UI can say "newer release exists,
-        // but it didn't ship an APK" instead of misleading "no release yet".
         data class NoApkAsset(val tagName: String) : CheckResult()
         data class Error(val message: String) : CheckResult()
-        // GitHub returned 403 / 451 — usually a geo-block or rate-limit in CN
-        // without a VPN. UI surfaces a hint with a clickable Releases link.
         data object Forbidden : CheckResult()
-        // DNS / connect / read timeout — network unreachable. UI nudges the
-        // user to check connectivity and retry.
         data object NetworkUnreachable : CheckResult()
     }
 
@@ -90,11 +59,8 @@ object UpdateChecker {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    // [FEAT-261021-16] Follows the default route in Settings > Network; the
-    // same client object when nothing is configured.
     private val client: OkHttpClient get() = com.openminis.app.network.NetworkHttp.client(com.openminis.app.network.NetworkHttp.DEFAULT_TAG, baseClient)
 
-    /** One check at a time; an automatic check never starts while any is running. */
     private val inFlight = java.util.concurrent.atomic.AtomicBoolean(false)
 
     val isChecking: Boolean get() = inFlight.get()
@@ -106,20 +72,10 @@ object UpdateChecker {
 
     private class HttpFailure(val result: CheckResult) : Exception()
 
-    /**
-     * Check the current channel now, whatever the throttle says (a manual
-     * check, or an automatic one [UpdateAutoChecker] decided to run), and
-     * write the outcome into [UpdateStateStore]: a 200 or a 304 is a success,
-     * anything else only stamps the attempt.
-     *
-     * All network work happens on [Dispatchers.IO]; safe to call from any
-     * coroutine scope.
-     */
     suspend fun check(context: Context, reason: String = "manual"): CheckResult = withContext(Dispatchers.IO) {
         UpdateStateStore.init(context)
         if (!inFlight.compareAndSet(false, true)) {
             AppLogger.info(TAG, "[UpdateCheck] $reason: a check is already running")
-            // Wait for it rather than firing a second request.
             while (inFlight.get()) kotlinx.coroutines.delay(100)
             return@withContext UpdateStateStore.available(context)?.toResult() ?: CheckResult.UpToDate
         }
@@ -144,7 +100,6 @@ object UpdateChecker {
         return try {
             val page1 = fetchPage(1, etag)
             if (page1 == null) {
-                // 304: nothing changed since the cached result.
                 AppLogger.info(TAG, "[UpdateCheck] 304 not modified")
                 UpdateStateStore.markSuccess(context, now, etag, null, notModified = true)
                 return UpdateStateStore.available(context)?.toResult() ?: CheckResult.UpToDate
@@ -171,9 +126,6 @@ object UpdateChecker {
             AppLogger.error(TAG, "check failed: SocketTimeoutException: ${e.message}")
             CheckResult.NetworkUnreachable
         } catch (e: IOException) {
-            // Catch-all for okhttp connection plumbing (e.g.
-            // "failed to connect", SSL handshake errors). Most of these in
-            // the CN-no-VPN scenario are effectively "can't reach github".
             AppLogger.error(TAG, "check failed: ${e.javaClass.simpleName}: ${e.message}")
             CheckResult.NetworkUnreachable
         } catch (e: Exception) {
@@ -182,10 +134,6 @@ object UpdateChecker {
         }
     }
 
-    /**
-     * One page of the release list, newest first: (ETag, releases), or null
-     * for a 304. A 404 is an empty list.
-     */
     private fun fetchPage(page: Int, etag: String?): Pair<String?, List<UpdatePolicy.Release>>? {
         val url = "https://api.github.com/repos/${BuildConfig.RELEASE_REPO}/releases?per_page=$PER_PAGE&page=$page"
         val b = Request.Builder()
@@ -197,8 +145,6 @@ object UpdateChecker {
             AppLogger.info(TAG, "GET releases page=$page HTTP ${resp.code}")
             if (resp.code == 304) return null
             if (resp.code == 404) return null to emptyList()
-            // 403 = rate-limit or geo-blocked. 451 = legal block. Both map to
-            // the same "open Releases in browser" hint.
             if (resp.code == 403 || resp.code == 451) {
                 AppLogger.warning(TAG, "GitHub API ${resp.code} — geo-block or rate-limit")
                 throw HttpFailure(CheckResult.Forbidden)
@@ -224,7 +170,6 @@ object UpdateChecker {
             for (j in 0 until (ja?.length() ?: 0)) {
                 val a = ja!!.optJSONObject(j) ?: continue
                 val url = a.optString("browser_download_url").ifEmpty { null } ?: continue
-                // GitHub reports "digest": "sha256:<hex>" for every asset; absent -> no check.
                 val sha = UpdatePolicy.parseDigest(a.optString("digest", "").ifEmpty { null })
                 assets += UpdatePolicy.Asset(a.optString("name"), url, a.optLong("size", 0), sha)
             }
@@ -274,7 +219,6 @@ object UpdateChecker {
             return available.toResult()
         }
         UpdateStateStore.markSuccess(context, now, etag, null, notModified = false)
-        // A newer stable by name that ships no APK for this device.
         val noApk = eligible.firstOrNull { r ->
             !r.prerelease && UpdatePolicy.compareVersionNames(r.tag, localName) > 0 &&
                 UpdatePolicy.chooseApk(r.assets, abis) == null
@@ -287,42 +231,24 @@ object UpdateChecker {
         return CheckResult.UpToDate
     }
 
-    /** Public so UI can deep-link users to manual download when GitHub is blocked. */
     const val RELEASES_URL: String = "https://github.com/OpenMinis/OpenMinis/releases"
 
-    /**
-     * Stream the APK from [url] into `${cacheDir}/shared/minis-update.apk`,
-     * surfacing progress (0..1) through [onProgress] roughly every 64 KiB.
-     * Returns the on-disk [File] on success so the caller can hand it to
-     * [installApk]. The path is intentionally inside `shared/` because that's
-     * the only sub-directory of cacheDir already exposed by FileProvider in
-     * `file_provider_paths.xml`.
-     */
     suspend fun download(
         context: Context,
         url: String,
         versionName: String? = null,
         versionCode: Int? = null,
-        // [T-update-channels] GitHub's asset digest; checked when present, skipped when not.
         expectedSha256: String? = null,
         onProgress: (Float) -> Unit = {},
     ): DownloadResult = withContext(Dispatchers.IO) {
         try {
-            // Stage under filesDir (NOT cacheDir) so the OS doesn't evict
-            // the APK mid-flow while the user is in system Settings granting
-            // install permission — that eviction caused the "re-download
-            // after grant" regression (T-android-update-resume-33637).
             val outDir = File(context.filesDir, UPDATES_DIR).apply { mkdirs() }
-            // Filename keyed by version so a partial old-version download
-            // can't accidentally satisfy a check for a newer version.
             val safeName = versionName
                 ?.replace(Regex("[^A-Za-z0-9._-]"), "_")
                 ?.takeIf { it.isNotEmpty() }
                 ?.let { "minis-$it.apk" }
                 ?: DOWNLOAD_FILENAME
             val outFile = File(outDir, safeName)
-            // A previous, possibly-aborted download could leave a stale APK
-            // behind that the installer would happily try to consume. Wipe it.
             if (outFile.exists()) outFile.delete()
 
             val req = Request.Builder().url(url).build()
@@ -353,10 +279,6 @@ object UpdateChecker {
                 }
             }
             AppLogger.info(TAG, "Downloaded ${outFile.length()} bytes to ${outFile.absolutePath}")
-            // Persist so a subsequent Activity recreate (e.g. after the user
-            // returns from "install unknown apps" settings) can resume the
-            // install without re-downloading. sha256 computed best-effort;
-            // verify() falls back to size-only when null.
             val sha = runCatching { PendingUpdateStore.sha256(outFile) }
                 .onFailure { AppLogger.warning(TAG, "sha256 compute failed: ${it.message}") }
                 .getOrNull()
@@ -385,11 +307,6 @@ object UpdateChecker {
         }
     }
 
-    /**
-     * Whether the OS will allow this app to launch a package-installer
-     * intent. On Android 8+ the user must grant "install unknown apps" per
-     * source-app; older releases inherit the system-wide setting.
-     */
     fun canInstall(context: Context): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.packageManager.canRequestPackageInstalls()
@@ -398,11 +315,6 @@ object UpdateChecker {
         }
     }
 
-    /**
-     * Send the user to the system "install unknown apps" preferences page
-     * for this package. Caller should re-check [canInstall] after the user
-     * returns.
-     */
     fun openInstallPermissionSettings(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
@@ -412,28 +324,8 @@ object UpdateChecker {
         context.startActivity(intent)
     }
 
-    /**
-     * Hand [apk] to the system package installer via FileProvider.
-     * Caller must ensure [canInstall] before calling, otherwise the system
-     * silently bounces back to the launcher. Returns false on any
-     * launch failure so callers can surface an error instead of closing
-     * the dialog with no visible feedback.
-     */
-    /**
-     * If a pending APK from a previous download is still on disk and intact,
-     * returns the [File]. The caller is responsible for checking
-     * [canInstall] and firing [installApk]. Returns null when nothing pending
-     * or when the cached file failed integrity checks — in the latter case
-     * the pending record is cleared so the UI falls through to a fresh
-     * download.
-     */
     fun resumablePendingFile(context: Context): File? {
         val pending = PendingUpdateStore.getPending(context) ?: return null
-        // Only resume if the persisted target is still newer than the running
-        // build — protects against the case where the user updated by some
-        // other means since the download.
-        // [T-update-channels] The build number decides when the download
-        // recorded one; older records fall back to the version names.
         val stale = pending.targetVersionCode?.let { it <= BuildConfig.VERSION_CODE }
             ?: (UpdatePolicy.compareVersionNames(pending.targetVersionName, BuildConfig.VERSION_NAME) <= 0)
         if (stale) {
@@ -450,13 +342,6 @@ object UpdateChecker {
         return file
     }
 
-    /**
-     * [T-update-channels] Why [apk] must not be installed, read from the
-     * archive itself: another package, or not newer than what is installed.
-     * Null when it may go to the installer. The name, the release and the
-     * digest all said it was right; this is the check that cannot be fooled
-     * by a mislabelled asset.
-     */
     fun archiveRefusal(context: Context, apk: File): String? {
         val info = runCatching {
             if (Build.VERSION.SDK_INT >= 33) {
@@ -474,7 +359,6 @@ object UpdateChecker {
 
     fun installApk(context: Context, apk: File): Boolean {
         if (archiveRefusal(context, apk) != null) {
-            // Never install it; drop it so a resume does not try again.
             PendingUpdateStore.clearPending(context)
             apk.delete()
             return false
@@ -489,10 +373,6 @@ object UpdateChecker {
             }
             context.startActivity(intent)
             AppLogger.info(TAG, "installApk launched apk=${apk.absolutePath} size=${apk.length()}")
-            // Once the installer is in flight we don't want a subsequent
-            // resume to re-fire the intent (would double-prompt). Clear the
-            // pending record now; if the user backs out, the next "Check for
-            // Updates" tap will re-discover and re-download.
             PendingUpdateStore.clearPending(context)
             true
         } catch (e: Exception) {

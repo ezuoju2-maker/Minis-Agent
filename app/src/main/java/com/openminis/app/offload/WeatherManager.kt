@@ -6,11 +6,6 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-/**
- * Fetches weather data from the Open-Meteo public API (no API key required).
- * Returns current conditions, 48-hour hourly forecast, and 10-day daily forecast
- * as a formatted human-readable string.
- */
 object WeatherManager {
 
     private const val TAG = "WeatherManager"
@@ -24,27 +19,14 @@ object WeatherManager {
         .connectionPool(okhttp3.ConnectionPool(5, 30, TimeUnit.SECONDS))
         .build()
 
-    // [FEAT-261021-16] Follows the default route in Settings > Network; the
-    // same client object when nothing is configured.
     private val client: OkHttpClient get() = com.openminis.app.network.NetworkHttp.client(com.openminis.app.network.NetworkHttp.DEFAULT_TAG, baseClient)
 
-    /**
-     * Fetch weather for the given coordinates.
-     * Returns a formatted string with current, hourly, and daily weather.
-     */
     fun fetchWeather(latitude: Double, longitude: Double): String {
         val json = fetchWeatherJson(latitude, longitude)
             ?: return "Error fetching weather: $lastError"
         return formatWeatherResponse(json, latitude, longitude)
     }
 
-    /**
-     * Fetch raw Open-Meteo JSON. Returns null on transport error and stores
-     * a user-readable reason in [lastError] so the calling handler can
-     * surface it via a structured envelope. T63 added — the
-     * subcommand-based android-weather handler needs raw JSON to slice
-     * into current/hourly/daily.
-     */
     @Volatile var lastError: String = ""
         private set
 
@@ -85,7 +67,6 @@ object WeatherManager {
         sb.appendLine("=== Weather for ($lat, $lon) | Timezone: $timezone ===")
         sb.appendLine()
 
-        // Current conditions
         val current = json.optJSONObject("current")
         if (current != null) {
             val units = json.optJSONObject("current_units")
@@ -103,7 +84,6 @@ object WeatherManager {
             sb.appendLine()
         }
 
-        // Hourly forecast (show every 3 hours to keep it readable)
         val hourly = json.optJSONObject("hourly")
         if (hourly != null) {
             val times = hourly.optJSONArray("time")
@@ -127,7 +107,6 @@ object WeatherManager {
             }
         }
 
-        // Daily forecast
         val daily = json.optJSONObject("daily")
         if (daily != null) {
             val times = daily.optJSONArray("time")
@@ -160,10 +139,6 @@ object WeatherManager {
         return sb.toString().trimEnd()
     }
 
-    /**
-     * WMO Weather interpretation codes to human-readable descriptions.
-     * https://open-meteo.com/en/docs#weathervariables
-     */
     private fun weatherCodeToDescription(code: Int): String = when (code) {
         0 -> "Clear sky"
         1 -> "Mainly clear"

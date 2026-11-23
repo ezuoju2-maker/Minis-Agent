@@ -9,11 +9,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-scheduled-tool-prefill] The data side of a scheduled task's prefilled
- * tool call: storage, validation, the envelope attribute, and the scripted
- * chunk stream the agent loop consumes in place of a model request.
- */
 class PrefilledToolCallTest {
 
     private fun task(prefill: PrefilledToolCall?) = ScheduledTask(
@@ -27,7 +22,6 @@ class PrefilledToolCallTest {
         createdAt = 1L,
     )
 
-    // ── storage ──
 
     @Test
     fun `a prefilled task round-trips through its JSON`() {
@@ -39,8 +33,6 @@ class PrefilledToolCallTest {
 
     @Test
     fun `a task without prefill writes no key, so its JSON is unchanged`() {
-        // Back-compat both ways: an older build reads exactly what it always
-        // read, and a task written before this field existed stays null.
         val json = task(null).toJson()
         assertFalse(json.has("prefillToolCall"))
         assertNull(ScheduledTask.fromJson(json).prefillToolCall)
@@ -63,7 +55,6 @@ class PrefilledToolCallTest {
         assertNull(ScheduledTask.fromJson(json).prefillToolCall)
     }
 
-    // ── construction + validation ──
 
     @Test
     fun `tool_title is filled from the label when the caller gave none`() {
@@ -98,14 +89,12 @@ class PrefilledToolCallTest {
         assertTrue(
             PrefilledToolCall("file_read", "{}").validationError()!!.contains("not supported yet"),
         )
-        // iOS limits: 1s..1h timeout, 16 000-char command.
         assertNull(PrefilledToolCall.shell("ls", timeoutSec = 3600).validationError())
         assertNotNull(PrefilledToolCall.shell("ls", timeoutSec = 0).validationError())
         assertNotNull(PrefilledToolCall.shell("ls", timeoutSec = 3601).validationError())
         assertNotNull(PrefilledToolCall.shell("x".repeat(16_001)).validationError())
     }
 
-    // ── envelope ──
 
     @Test
     fun `the envelope names the prefilled tool and parses it back`() {
@@ -116,9 +105,6 @@ class PrefilledToolCallTest {
 
     @Test
     fun `a prefilled envelope opens its body with the iOS note, verbatim`() {
-        // Word-for-word the iOS ScheduledPresetToolCall.envelopeNote, so both
-        // platforms tell the model the same thing: the call already ran, work
-        // from its output, re-run only on failure.
         val iosNote = "[This task's first step already ran for you: shell_execute — its call and output follow. " +
             "Work from that output; re-run only if it failed.]"
         assertEquals(iosNote, ScheduledTaskMarker.prefillNote("shell_execute"))
@@ -128,7 +114,6 @@ class PrefilledToolCallTest {
                 iosNote + "\nSummarise\n</scheduled_task>",
             marker.xml,
         )
-        // The card shows the prompt alone: parse strips the note back off.
         assertEquals("Summarise", ScheduledTaskMarker.parse(marker.xml)!!.prompt)
         assertEquals("Summarise", ScheduledTaskMarker.stripMarker(marker.xml))
     }
@@ -147,7 +132,6 @@ class PrefilledToolCallTest {
         assertNull(ScheduledTaskMarker.parse(marker.xml)!!.prefilledTool)
     }
 
-    // ── scripted turn ──
 
     @Test
     fun `the scripted turn streams exactly what a tool-only model turn would`() {
@@ -163,7 +147,6 @@ class PrefilledToolCallTest {
         assertEquals("ls", complete.args.getString("command"))
         assertNull(complete.thoughtSignature)
         assertEquals(LLMStreamChunk.Finished("tool_use"), chunks[3])
-        // No text, thinking or usage: nothing was asked of a model.
         assertTrue(chunks.none { it is LLMStreamChunk.Text || it is LLMStreamChunk.Usage || it is LLMStreamChunk.ThinkingDelta })
     }
 
@@ -186,7 +169,6 @@ class PrefilledToolCallTest {
     fun `scripted ids satisfy every provider's id rules and are recognisable`() {
         repeat(50) {
             val id = PrefilledToolCall.newToolUseId()
-            // Anthropic: ^[a-zA-Z0-9_-]+$ ; OpenAI-compatible: <= 64 chars.
             assertTrue(id, Regex("^[a-zA-Z0-9_-]+$").matches(id))
             assertTrue(id.length <= 64)
             assertTrue(ScriptedToolTurn.isScriptedId(id))

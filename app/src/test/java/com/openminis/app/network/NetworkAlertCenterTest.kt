@@ -9,11 +9,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [FEAT-261021-05] Port of iOS e720112cf: the "[Net][Alert]" / "[Net][Recovered]"
- * lines from nethub/exitalert.go become a banner for a proxy or Tailscale that
- * keeps failing, with the same rules as iOS NetworkAlertCenter.
- */
 class NetworkAlertCenterTest {
 
     @Before fun reset() = NetworkAlertCenter.resetForTest()
@@ -33,7 +28,6 @@ class NetworkAlertCenterTest {
                 "dial tcp 10.0.0.2:8080: connect: connection refused"),
             NetworkAlertEvent.parse(proxyAlert),
         )
-        // err= is the rest of the line, even with "=" inside it.
         assertEquals("proxy CONNECT a=b:443: 407 x=y", NetworkAlertEvent.parse(
             "[Net][Alert] exit=proxy id=p failures=4 stage=proxy-handshake class=proxy-auth err=proxy CONNECT a=b:443: 407 x=y")?.detail)
         assertEquals(NetworkAlertEvent(NetworkAlertEvent.Subject.Proxy("6F1C-22"), recovered = true),
@@ -42,7 +36,6 @@ class NetworkAlertCenterTest {
         assertNull(NetworkAlertEvent.parse("[Net][Proxy] c0001 FAIL stage=proxy-connect via=proxy:x"))
         assertNull(NetworkAlertEvent.parse("[Net][Alert] exit=direct failures=3"))
         assertNull(NetworkAlertEvent.parse("[Net][Alert] exit=proxy failures=3 err=x"))
-        // The Go side still writes these shapes.
         val go = generateSequence(ProductionSources.mainRoot()) { it.parentFile }
             .map { File(it, "deps/rclone-mobile/nethub/exitalert.go") }.firstOrNull { it.exists() }
         val src = go!!.readText()
@@ -87,7 +80,6 @@ class NetworkAlertCenterTest {
         t += NetworkAlertCenter.SNOOZE_MS + 1
         NetworkAlertCenter.handle(e, settings)
         assertEquals("snooze over", e, NetworkAlertCenter.banner.value)
-        // A tap takes the banner away; the caller opens the setting.
         assertEquals(e, NetworkAlertCenter.takeBanner())
         assertNull(NetworkAlertCenter.banner.value)
     }
@@ -117,7 +109,6 @@ class NetworkAlertCenterTest {
     fun theBannerIsWiredFromTheGoLogToEveryScreen() {
         val node = ProductionSources.read("network/TailscaleNode.kt")
         assertTrue(node.contains("NetworkAlertCenter.ingest(line)"))
-        // The sink is installed for the entry too, not only for the node.
         assertTrue(node.substringAfter("fun configureEntry(").substringBefore("entryTouched = true").contains("installLogger()"))
         assertTrue(ProductionSources.read("MainActivity.kt").contains("NetworkAlertBannerHost(navController)"))
         val screen = ProductionSources.read("ui/settings/NetworkSettingsScreen.kt")

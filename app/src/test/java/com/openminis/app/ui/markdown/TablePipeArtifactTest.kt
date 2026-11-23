@@ -4,15 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-table-cell-katex-false-positive] An inline `$ … $` that paired
- * across a table's column bars is not a formula (port of iOS 5b1d72515,
- * `isTablePipeArtifact`; Windows `is_table_pipe_artifact`).
- *
- * Math is extracted before the table is parsed, so `| a | $x-1 | y$ |` paired
- * the two dollars and rendered "x-1 | y" as one italic formula spanning two
- * cells, taking the column bar with it.
- */
 class TablePipeArtifactTest {
 
     private fun latexOf(md: String): List<String> =
@@ -23,7 +14,6 @@ class TablePipeArtifactTest {
     }
 
     @Test fun `a bar with a space beside it is a column separator`() {
-        // looksLikeMath accepts these (they hold - or +): the pipe rule rejects them.
         assertEquals(emptyList<String>(), latexOf("| a | \$x-1 | y\$ |"))
         assertEquals(emptyList<String>(), latexOf("| \$a+b |\$ c |"))
         assertEquals(emptyList<String>(), latexOf("| \$a+b| c\$ |"))
@@ -39,13 +29,10 @@ class TablePipeArtifactTest {
         assertEquals(listOf("|x-1|"), latexOf("\$|x-1|\$"))
         assertEquals(listOf("\\|v\\|"), latexOf("\$\\|v\\|\$"))
         assertEquals(listOf("\\frac{|a|}{|b|}"), latexOf("\$\\frac{|a|}{|b|}\$"))
-        // Escaped norm bars are not counted: one bare pair plus two \| is even.
         assertEquals(listOf("|x|\\|y\\|"), latexOf("\$|x|\\|y\\|\$"))
     }
 
     @Test fun `known loss, same as iOS and Windows - a bar beside a space reads as a column`() {
-        // Rule 1 cannot tell `|x| + 1` from `x | y`: both platforms accept
-        // losing the spaced absolute value to keep tables intact.
         assertEquals(emptyList<String>(), latexOf("\$|x| + 1\$"))
     }
 

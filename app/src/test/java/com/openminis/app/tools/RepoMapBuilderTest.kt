@@ -7,9 +7,6 @@ import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 
-/**
- * [v1.62-repo-map] Outline extraction, ranking and the hard budget.
- */
 class RepoMapBuilderTest {
 
     private fun tempDir(): File = Files.createTempDirectory("repomap").toFile()

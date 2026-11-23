@@ -4,13 +4,6 @@ import com.openminis.app.ProductionSources
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-file-preview-statusbar] FilePreviewScreen runs in its own Dialog
- * window (a NavHost `dialog` destination since 988bd6491). The status bar takes
- * its icon colour from that top window, which defaults to white icons — white
- * on the white preview bar in light mode. The screen must set the dialog
- * window's appearance from the app theme.
- */
 class FilePreviewStatusBarTest {
 
     @Test
@@ -26,8 +19,6 @@ class FilePreviewStatusBarTest {
         assertTrue(src.contains("isAppearanceLightStatusBars = !previewDark"))
         assertTrue(src.contains("isAppearanceLightNavigationBars = !previewDark"))
         assertTrue(src.contains("if (p is androidx.compose.ui.window.DialogWindowProvider) return p.window"))
-        // Set before the Scaffold, after the image early-return (the gallery
-        // manages its own window).
         val effect = src.indexOf("val previewDark = com.openminis.app.ui.theme.ChatColors.isDark")
         assertTrue(effect > src.indexOf("if (item.isImageFile) {"))
         assertTrue(effect < src.indexOf("    Scaffold(\n        topBar"))

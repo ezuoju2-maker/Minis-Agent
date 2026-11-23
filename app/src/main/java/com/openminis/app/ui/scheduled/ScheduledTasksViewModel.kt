@@ -15,69 +15,33 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/**
- * [T-android-scheduled-tasks-design] Backing VM for ScheduledTasksScreen
- * and ScheduledTaskEditScreen. Thin wrapper around [ScheduledTaskManager]
- * exposing a reactive [tasks] flow + suspend functions for the editor.
- */
 class ScheduledTasksViewModel(private val appContext: Context) : ViewModel() {
 
     private val manager = ScheduledTaskManager(appContext)
     private val app get() = appContext as com.openminis.app.MinisApp
 
-    /**
-     * [T-android-scheduled-lateinit-crash-156] True when the Application's
-     * repositories are actually assigned.
-     *
-     * Every `app.<repository>` read below is a lateinit getter that throws
-     * UninitializedPropertyAccessException if MinisApp.onCreate early-returned
-     * (safe-mode) or aborted partway. The screens backing this ViewModel can be
-     * composed in exactly that state — a scheduled-task notification tap
-     * restores the task into an Activity while the Application behind it is
-     * permanently half-built — so the reads must not be unconditional.
-     *
-     * Callers degrade to empty lists / nulls, which renders an empty picker
-     * instead of taking the process down.
-     */
     private fun ready(): Boolean =
         (appContext as? com.openminis.app.MinisApp)?.subsystemsReady() == true
 
-    /** Exposed for the editor's ModelPickerSheet — read-only access to the
-     *  same ProviderRepository the chat screen uses.
-     *
-     *  [T-android-scheduled-lateinit-crash-156] Nullable, behind the same
-     *  [ready] gate as every other `app.<repository>` read in this file. This
-     *  accessor was the one that read the lateinit unconditionally, so the very
-     *  half-built-Application case the rest of the class defends against
-     *  (a scheduled-task notification tap restoring the editor) crashed here
-     *  instead. Callers render the picker's empty state, matching how
-     *  [listSessions] / [listModels] degrade. */
     val providerRepository get() = if (ready()) app.providerRepository else null
 
     val tasks: StateFlow<List<ScheduledTask>> = manager.store().observe()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // [T-android-sched-badge-toggle] Home clock-icon count badge on/off.
     val showHomeBadge: StateFlow<Boolean> = manager.store().observeShowHomeBadge()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), manager.store().showHomeBadge())
 
     fun setShowHomeBadge(show: Boolean) = manager.store().setShowHomeBadge(show)
 
-    // ── [T-android-scheduled-tasks-full] Picker data for the editor ──
 
-    /** Lightweight session row for the Follow-up / Re-run session picker. */
     data class SessionOption(val id: String, val title: String, val updatedAt: Long)
 
-    /** A user message in a session, for the Re-run message picker. */
     data class MessageOption(val id: String, val preview: String, val createdAt: Long)
 
-    /** A selectable model entry for the optional model override. */
     data class ModelOption(val entryId: String, val modelId: String, val displayName: String, val providerLabel: String)
 
     suspend fun listSessions(limit: Int = 100): List<SessionOption> = withContext(Dispatchers.IO) {
         if (!ready()) return@withContext emptyList()
-        // [T-child-session-leak] A scheduled task's target picker is a
-        // user-facing session list: hide agent child sessions.
         val childIds = app.chatRepository.dao.listSessions().filter { it.isChild }.map { it.id }.toSet()
         app.chatRepository.querySessionsMeta(
             sessionIds = null, keywords = null, limit = limit, startMs = null, endMs = null,
@@ -93,10 +57,6 @@ class ScheduledTasksViewModel(private val appContext: Context) : ViewModel() {
             .map { MessageOption(it.id, extractPreview(it.partsJson), it.createdAt) }
     }
 
-    /** Best-effort human-readable label for a `model_binding` JSON string —
-     *  group name for {"type":"group"}, model display name for
-     *  {"type":"entry"}, null on parse failure or unknown ids. Mirrors the
-     *  chip text the chat screen renders for the same binding. */
     fun describeBinding(json: String?): String? {
         if (json.isNullOrBlank()) return null
         return runCatching {
@@ -138,7 +98,6 @@ class ScheduledTasksViewModel(private val appContext: Context) : ViewModel() {
             }
             sb.toString()
         }.getOrNull() ?: ""
-        // [T-md-inline-html] <br> → space, whitelisted style tags out (code untouched).
         return com.openminis.app.ui.markdown.InlineHtmlTags.stripForPreview(text)
             .trim().replace('\n', ' ').take(80).ifBlank { "(empty)" }
     }
@@ -163,18 +122,6 @@ class ScheduledTasksViewModel(private val appContext: Context) : ViewModel() {
             if (isNew) manager.create(task) else manager.update(task)
         }
 
-    /**
-     * "Run now" button on the edit screen. Fires the task immediately without
-     * touching the schedule.
-     *
-     * [T-android-scheduled-tasks-full] Async by design: we call the runner with
-     * waitForCompletion=false, so this returns as soon as the session is
-     * resolved and the prompt is dispatched (status STARTED). The agent keeps
-     * running in the background; the completion notification fires later. The
-     * UI shows a brief loading spinner that flips to "task started" — it does
-     * NOT block on the whole agent loop. STARTED carries the session id so the
-     * user can jump straight into the (now-running) chat.
-     */
     fun runNow(task: ScheduledTask) {
         viewModelScope.launch(Dispatchers.IO) {
             _runNowState.value = RunNowState(taskId = task.id, status = RunStatus.RUNNING)

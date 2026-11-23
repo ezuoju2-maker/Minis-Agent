@@ -7,12 +7,6 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-native-offload-bind] A held abstract socket name must not stop the app
- * from starting: the name is per uid, start() degrades instead of throwing,
- * the shells pass `--native-offload` only while the server listens, and the
- * handler stubs report the CLI unavailable instead of exiting 0.
- */
 class NativeOffloadBindTest {
 
     private val server = ProductionSources.read("sandbox/NativeOffload.kt")
@@ -20,9 +14,7 @@ class NativeOffloadBindTest {
     @Test
     fun `the socket name is per uid and pid and never the legacy shared name`() {
         assertEquals("native-offload-10379-4242", NativeOffloadServer.socketNameFor(10379, 4242))
-        // App clone / work profile / secondary user: same appId, other user.
         assertNotEquals(NativeOffloadServer.socketNameFor(10379, 4242), NativeOffloadServer.socketNameFor(99910379, 4242))
-        // [GH-440] Two processes of the same uid must not share a name either.
         assertNotEquals(NativeOffloadServer.socketNameFor(10379, 4242), NativeOffloadServer.socketNameFor(10379, 4243))
         for (uid in listOf(0, 10379, 99910379, Int.MAX_VALUE)) {
             val name = NativeOffloadServer.socketNameFor(uid, Int.MAX_VALUE)
@@ -50,7 +42,6 @@ class NativeOffloadBindTest {
 
     @Test
     fun `awaitListening is false when nothing is bound or pending`() {
-        // Not started in a JVM test: no server, no retry - must not wait.
         val t0 = System.currentTimeMillis()
         assertFalse(NativeOffloadServer.awaitListening(5_000L))
         assertTrue("returns at once", System.currentTimeMillis() - t0 < 1_000L)

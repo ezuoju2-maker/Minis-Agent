@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- [T-envvar-disable] Environment variable enable / disable. -->
 <resources>
     <string name="env_var_status_disabled">Désactivé</string>
     <string name="env_var_status_duplicate">Nom en double</string>

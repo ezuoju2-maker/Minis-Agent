@@ -14,17 +14,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-port-backup-secrets-defaults] `secrets.json` is written with `v` and
- * every section present, even when empty.
- *
- * iOS builds before e0fafc8cd decode BackupSecrets with the synthesized
- * Decodable, which requires every non-optional stored property - including
- * `var v: Int = 1`, whose default the synthesized decoder ignores. Android's
- * shared encoder omitted defaults, so a package from a phone without MCP OAuth
- * tokens failed to decode there as a whole and every provider key and env
- * var value was lost on restore.
- */
 class BackupSecretsDefaultsTest {
 
     private val repoRoot: File by lazy {
@@ -33,11 +22,6 @@ class BackupSecretsDefaultsTest {
         requireNotNull(dir) { "repo root with src/ios not found" }
     }
 
-    /**
-     * Non-optional stored properties of `struct <name>` in iOS
-     * BackupSecrets.swift - the keys a synthesized decoder requires.
-     * Only the struct's own members are read (nested structs are skipped).
-     */
     private fun iosRequiredKeys(structName: String): List<String> {
         val src = File(repoRoot, "src/ios/Agent/Backup/BackupSecrets.swift").readText()
         val start = src.indexOf("struct $structName: Codable {")
@@ -52,7 +36,6 @@ class BackupSecretsDefaultsTest {
             }
             i++
         }
-        // Keep only depth-1 text, so nested struct bodies / init bodies drop out.
         val body = StringBuilder()
         depth = 0
         for (c in src.substring(bodyStart + 1, i)) {
@@ -62,7 +45,7 @@ class BackupSecretsDefaultsTest {
         }
         val prop = Regex("""^\s+(?:let|var) (\w+): ([^=/\n]+?)\s*(?:=.*)?(?://.*)?$""")
         return body.lines()
-            .filter { !it.contains("{") } // computed properties
+            .filter { !it.contains("{") }
             .mapNotNull { prop.find(it) }
             .filter { !it.groupValues[2].trim().endsWith("?") }
             .map { it.groupValues[1] }
@@ -100,7 +83,6 @@ class BackupSecretsDefaultsTest {
         )
         val obj = parse(text)
         for (key in iosRequiredKeys("BackupSecrets")) assertTrue("$key missing in $text", key in obj)
-        // Absent optional credentials stay absent (iOS omits them too), not "null".
         assertFalse(text, text.contains("null"))
         val provider = obj["providers"]!!.jsonArray[0].jsonObject
         for (key in iosRequiredKeys("ProviderSecret")) assertTrue("$key missing in $provider", key in provider)
@@ -137,7 +119,6 @@ class BackupSecretsDefaultsTest {
 
     @Test
     fun `the shared backup encoder is unchanged - only secrets json writes defaults`() {
-        // Other members keep their compact shape; the defaults switch is scoped.
         assertEquals("""{"envVars":[{"name":"K","value":"dg=="}]}""",
             BackupFormat.json.encodeToString(BackupSecrets.serializer(),
                 BackupSecrets(envVars = listOf(BackupSecrets.EnvVarSecret("K", "dg==")))))

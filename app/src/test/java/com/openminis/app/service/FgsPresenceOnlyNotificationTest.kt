@@ -6,12 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-fgs-presence-no-chip] A chat the user is merely in keeps the service
- * (T166 keep-alive) but must not look like an agent at work: no status-bar
- * chip, no clock, no per-second refresh. Running, waiting for a scheduled run
- * and completed keep the chip.
- */
 class FgsPresenceOnlyNotificationTest {
 
     @Test
@@ -33,8 +27,6 @@ class FgsPresenceOnlyNotificationTest {
 
     @Test
     fun `phase transitions flip the decision both ways`() {
-        // Present, idle -> a run starts -> it completes. Same inputs the
-        // service resolves on each rebuild.
         val idle = resolveAgentPhase(isCompleted = false, toolName = null, isThinking = false, hasActiveSessions = false)
         val running = resolveAgentPhase(isCompleted = false, toolName = null, isThinking = false, hasActiveSessions = true)
         val tool = resolveAgentPhase(isCompleted = false, toolName = "shell_execute", isThinking = false, hasActiveSessions = true)

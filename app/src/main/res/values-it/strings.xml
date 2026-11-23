@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Italiano (it). Generated from the English base; keep keys in base order. -->
 <resources>
     <string name="app_name">Minis</string>
     <string name="new_chat">Nuova chat</string>
@@ -2446,7 +2444,6 @@
     <string name="restore_progress_decrypting">Decrittazione…</string>
     <string name="restore_progress_reading">Lettura del backup…</string>
     <string name="restore_progress_listing">Elenco in corso…</string>
-    <!-- [T-mcp-oauth-signin-android] MCP browser sign-in (iOS #432) -->
     <string name="mcp_form_auth_mode">Autorizzazione</string>
     <string name="mcp_form_auth_none">Nessuno</string>
     <string name="mcp_form_auth_browser">Accedi con il browser</string>

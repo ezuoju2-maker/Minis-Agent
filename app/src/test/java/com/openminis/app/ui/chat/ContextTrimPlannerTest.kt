@@ -14,19 +14,11 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-ctx-trim-ladder] Watermarks and the trim ladder: every level, the stop
- * rule, freezing, collapse, small windows and the long single-turn agent run.
- *
- * Sizes use CJK characters (1 token each in [ContextSizeMeter]) so the numbers
- * in the assertions can be reasoned about.
- */
 class ContextTrimPlannerTest {
 
     private val fixed = 1_000
     private val measure: (List<LLMMessage>) -> Int = { ContextSizeMeter.estimateTokens(it, includeReasoning = true) + fixed }
 
-    /** Records offloads; returns a guest path like the real one. */
     private class FakeOffloader : ContextTrimPlanner.Offloader {
         val calls = mutableListOf<Pair<String, String>>()
         override fun offload(content: String, toolId: String, toolName: String): String {
@@ -40,7 +32,6 @@ class ContextTrimPlannerTest {
     private fun user(text: String, id: String) =
         LLMMessage(LLMMessage.Role.USER, text, contentParts = listOf(AgentContentPart.Text(text)), dbMessageId = id)
 
-    /** One iteration: assistant (reasoning + one tool call) and its result carrier. */
     private fun iteration(
         i: Int,
         reasoning: Int = 0,
@@ -78,7 +69,6 @@ class ContextTrimPlannerTest {
     private fun uses(list: List<LLMMessage>) =
         list.flatMap { it.contentParts.filterIsInstance<AgentContentPart.ToolUse>() }
 
-    /** Byte-level view of a history (JSONObject has identity equality). */
     private fun dump(list: List<LLMMessage>) = list.joinToString("\n") { m ->
         "${m.role}|${m.dbMessageId}|${m.content}|${m.reasoningContent}|" + m.contentParts.joinToString(";") { p ->
             when (p) {
@@ -90,7 +80,6 @@ class ContextTrimPlannerTest {
         }
     }
 
-    /** Every tool result has its call and vice versa; history starts with a user turn. */
     private fun assertWellFormed(list: List<LLMMessage>) {
         assertEquals(LLMMessage.Role.USER, list.first().role)
         assertEquals(uses(list).map { it.id }.toSet(), results(list).map { it.id }.toSet())
@@ -101,7 +90,6 @@ class ContextTrimPlannerTest {
 
     private fun assistantReasoningEmptied(list: List<LLMMessage>) = reasoningOf(list).map { it == "" }
 
-    // ── watermarks ───────────────────────────────────────────────────────
 
     @Test
     fun `watermarks are based on the usable space, for every window size`() {
@@ -135,7 +123,6 @@ class ContextTrimPlannerTest {
         assertNull("unknown window", ContextTrimPlanner.watermarks(0, 21_000, 16_384))
     }
 
-    // ── iterations ───────────────────────────────────────────────────────
 
     @Test
     fun `an iteration is an assistant turn plus the carriers of its own results`() {
@@ -156,7 +143,6 @@ class ContextTrimPlannerTest {
         assertTrue(ContextTrimPlanner.iterations(history)[0].pinned)
     }
 
-    // ── plan: nothing to do ──────────────────────────────────────────────
 
     @Test
     fun `under the target nothing changes and the state stays empty`() {
@@ -167,12 +153,10 @@ class ContextTrimPlannerTest {
         assertTrue(r.steps.isEmpty())
     }
 
-    // ── L1 reasoning ─────────────────────────────────────────────────────
 
     @Test
     fun `L1 empties reasoning one iteration at a time, oldest first, and stops as soon as it fits`() {
         val history = run(10, reasoning = 5_000)
-        // Room for exactly 4 of the 10 reasonings (plus a little slack).
         val target = measure(history) - 6 * 5_000 + 100
         val r = ContextTrimPlanner.plan(history, target, opts(), measure, FakeOffloader())
         assertTrue(r.reachedTarget)
@@ -182,7 +166,6 @@ class ContextTrimPlannerTest {
         assertEquals("field kept, value \"\"", "", reasoningOf(r.messages).first())
         assertEquals("tool parts untouched by L1", results(history), results(r.messages))
         assertNull(r.state.shrinkBefore)
-        // Minimal: one fewer emptied would not fit.
         val its = ContextTrimPlanner.iterations(history)
         val fewer = ContextTrimPlanner.apply(history, ContextTrimPlanner.State(reasoningBefore = its[5].key), FakeOffloader())!!
         assertTrue(measure(fewer) > target)
@@ -201,9 +184,7 @@ class ContextTrimPlannerTest {
 
     @Test
     fun `offload also goes one iteration at a time and stops as soon as it fits`() {
-        // No reasoning: L2/L3 alone closes the gap; only as many old results as needed.
         val history = run(10, result = 3_000)
-        // Each offload frees ~2.9K: two are not enough, three are.
         val target = measure(history) - 6_600
         val r = ContextTrimPlanner.plan(history, target, opts(), measure, FakeOffloader())
         assertTrue(r.reachedTarget)
@@ -215,8 +196,6 @@ class ContextTrimPlannerTest {
 
     @Test
     fun `a later level that frees enough gives back what an earlier level took`() {
-        // Reasoning is small, results large: L1 at full extent is not enough,
-        // L2/L3 closes the gap, and then most reasoning comes back.
         val history = run(10, reasoning = 300, result = 3_000)
         val target = measure(history) - 5 * 2_800
         val r = ContextTrimPlanner.plan(history, target, opts(), measure, FakeOffloader())
@@ -247,7 +226,6 @@ class ContextTrimPlannerTest {
         assertEquals(reasoningOf(history), reasoningOf(r.messages))
     }
 
-    // ── L2 / L3 shrink ───────────────────────────────────────────────────
 
     @Test
     fun `L2 offloads large results and L3 large arguments of older iterations only`() {
@@ -283,7 +261,6 @@ class ContextTrimPlannerTest {
         assertTrue(first.contains("chars omitted from context"))
     }
 
-    // ── skeleton ─────────────────────────────────────────────────────────
 
     @Test
     fun `skeleton keeps the call and one line of the result, with where to find the rest`() {
@@ -310,17 +287,14 @@ class ContextTrimPlannerTest {
         assertTrue("the stub is already skeleton-sized and keeps its path", r0.startsWith(ContextOffload.OFFLOADED_PREFIX))
         assertTrue(r0.contains("/var/minis/offloads/tools/shell_execute_call_0.txt"))
         assertEquals("offloaded once, not again for the skeleton", 1, off.calls.count { it.first == "call_0" })
-        // Skeleton never grows what shrink produced.
         val shrunkOnly = ContextTrimPlanner.apply(history, ContextTrimPlanner.State(shrinkBefore = its[1].key), off)!!
         assertTrue(ContextSizeMeter.estimateTokens(applied) <= ContextSizeMeter.estimateTokens(shrunkOnly))
     }
 
-    // ── L4 collapse ──────────────────────────────────────────────────────
 
     @Test
     fun `collapse happens only when allowed, oldest first, and no more than needed`() {
         val history = run(20, result = 1_500)
-        // Lowest size the levels without collapse reach, minus a bit: only L4 can close the gap.
         val noCollapse = ContextTrimPlanner.plan(history, 0, opts(collapse = false), measure, FakeOffloader())
         val target = noCollapse.after - 200
         val without = ContextTrimPlanner.plan(history, target, opts(collapse = false), measure, FakeOffloader())
@@ -334,10 +308,8 @@ class ContextTrimPlannerTest {
         val its = ContextTrimPlanner.iterations(history)
         val cutAt = its.indexOfFirst { it.key == with.state.collapseBefore }
         assertTrue(cutAt > 0)
-        // Minimal: collapsing one iteration fewer would not fit.
         val fewer = ContextTrimPlanner.apply(history, with.state.copy(collapseBefore = its[cutAt - 1].key), FakeOffloader())!!
         assertTrue("one fewer collapsed would exceed the target", measure(fewer) > target)
-        // The oldest are gone, the newest three intact, the request kept.
         val kept = uses(with.messages).map { it.id }
         assertFalse(kept.contains("call_0"))
         assertTrue(kept.containsAll(listOf("call_17", "call_18", "call_19")))
@@ -396,7 +368,6 @@ class ContextTrimPlannerTest {
         assertTrue(applied.first().content.contains("earlier step(s) of this task were collapsed"))
     }
 
-    // ── freezing ─────────────────────────────────────────────────────────
 
     @Test
     fun `a frozen plan re-applied to a grown history keeps the old part byte-identical`() {
@@ -416,12 +387,9 @@ class ContextTrimPlannerTest {
         assertTrue("an empty state is a no-op", h === ContextTrimPlanner.apply(h, ContextTrimPlanner.State(), FakeOffloader()))
     }
 
-    // ── whole ladder ─────────────────────────────────────────────────────
 
     @Test
     fun `levels run cheapest first`() {
-        // Every level has something to take: reasoning (L1), 3K arguments (L3),
-        // 1.5K results only a skeleton shortens (SK), and iterations to collapse (L4).
         val history = listOf(user("请把计划表写完", "u0")) +
             (0 until 10).flatMap { iteration(it, reasoning = 4_000, result = 1_500, arg = "正".repeat(3_000)) }
         val floor = ContextTrimPlanner.plan(history, 0, opts(collapse = false), measure, FakeOffloader()).after
@@ -456,7 +424,6 @@ class ContextTrimPlannerTest {
 
     @Test
     fun `one user turn driving 200 tool iterations comes down to the target`() {
-        // Field shape: ~15K reasoning and ~3K output per iteration, one "继续".
         val history = run(200, reasoning = 15_000, result = 3_000)
         val target = 66_000
         assertTrue("starts far over the window", measure(history) > 3_000_000)
@@ -466,12 +433,6 @@ class ContextTrimPlannerTest {
         val kept = uses(r.messages).map { it.id }
         assertTrue("newest three iterations intact", kept.takeLast(3) == listOf("call_197", "call_198", "call_199"))
         assertEquals("the newest step keeps its reasoning", cjk(15_000), r.messages.last { it.role == LLMMessage.Role.ASSISTANT }.reasoningContent)
-        // [T-ctx-count-wire-framing] 189 -> 192 with estimator v3 (a049acc01):
-        // every iteration now also counts its call id (twice), argument
-        // escaping and per-message / per-call framing - measured 7,784 tokens
-        // more over this history (39 per iteration) - so three more ~3K
-        // outputs go to reach the same target. The planner still picks the
-        // smallest prefix that fits (binary search), so "just enough" holds.
         assertEquals("every older reasoning emptied, then just enough old outputs offloaded - no collapse needed",
             listOf("L1(n=199/200)", "L2L3(n=192/200)"), r.steps.map { it.substringBefore(':') })
         assertNull(r.state.collapseBefore)
@@ -480,16 +441,11 @@ class ContextTrimPlannerTest {
         assertWellFormed(r.messages)
     }
 
-    // ── estimator ────────────────────────────────────────────────────────
 
     @Test
     fun `replayed reasoning is counted only when asked, and only on assistant turns`() {
         val asst = LLMMessage(LLMMessage.Role.ASSISTANT, "ok", reasoningContent = cjk(1_000))
         val userWithReasoning = LLMMessage(LLMMessage.Role.USER, "ok", reasoningContent = cjk(1_000))
-        // [T-ctx-count-wire-framing] (a049acc01, iOS e48d29ee9) Echoed reasoning
-        // costs its wire tokens (CJK: no escaping, so 1,000) plus the
-        // `"reasoning_content":""` field itself - the same expectation iOS's
-        // ContextReasoningMeasureTests moved to.
         assertEquals(
             ContextSizeMeter.estimateTokens(asst) + ContextSizeMeter.estimateWireTokens(cjk(1_000)) +
                 ContextSizeMeter.REASONING_FIELD_OVERHEAD,
@@ -510,11 +466,9 @@ class ContextTrimPlannerTest {
         assertTrue("same key count, shorter value", ContextSizeMeter.estimateTokens(listOf(shortArg)) < ContextSizeMeter.estimateTokens(listOf(asst)))
     }
 
-    // ── [T-ctx-trim-trigger-margin] ─────────────────────────────────────
 
     @Test
     fun `a capped group's compaction line equals the hard watermark, so the trigger keeps its own margin`() {
-        // 128K cap, ~21K fixed, an output cap of 32K: the reserve is 15% of the window.
         val wm = ContextTrimPlanner.watermarks(128_000, 21_000, 32_000)!!
         val line = ContextPolicy.forUserCap(128_000).compactThreshold
         assertEquals(108_800, line)
@@ -559,11 +513,9 @@ class ContextTrimPlannerTest {
         }
     }
 
-    // ── [T-ctx-trim-escalate] ───────────────────────────────────────────
 
     @Test
     fun `a plan that ends above the midpoint of target and trigger escalates, a small miss does not`() {
-        // iOS on-device: target 63,279, trigger about 99,877 -> midpoint 81,578.
         val target = 63_279
         val trigger = 99_877
         assertTrue(ContextTrimPlanner.shouldEscalate(83_919, target, trigger))
@@ -577,7 +529,6 @@ class ContextTrimPlannerTest {
 
     @Test
     fun `a history that only collapsing can shrink - the no-collapse plan misses by a lot, the collapsing one reaches the target`() {
-        // Nothing for L1-SK to take: no reasoning, small results.
         val history = run(400, reasoning = 0, result = 40)
         val before = measure(history)
         val target = before / 2
@@ -595,7 +546,6 @@ class ContextTrimPlannerTest {
         assertFalse(ContextTrimPlanner.shouldEscalate(with.after, target, trigger))
     }
 
-    // ── [T-ctx-trim-plan-marker] ────────────────────────────────────────
 
     @Test
     fun `a plan made on another compaction marker does not fit`() {
@@ -616,23 +566,15 @@ class ContextTrimPlannerTest {
             measure, FakeOffloader(),
         )
         assertFalse(plan.state.isEmpty)
-        // What a compaction keeps: the request and the newest iterations.
         val kept = listOf(user("请把计划表写完", "u0")) + (100 until 120).flatMap { iteration(it, 600, 300) }
         val reapplied = ContextTrimPlanner.apply(kept, plan.state, FakeOffloader())
         if (reapplied != null) {
-            // The keys survived, so apply() raised no flag: the kept slice,
-            // already far under the target, is still being trimmed.
             assertTrue(measure(kept) < target)
             assertTrue("old extents still trim the small history", measure(reapplied) < measure(kept))
         }
-        // Either way the marker comparison is what asks for the re-plan.
         assertFalse(ContextTrimPlanner.planFitsMarker(null, "m1"))
     }
 
-    /**
-     * [T-ctx-trim-plan-window] The iOS on-device case, in small: a plan sized
-     * for a 128K window, then the window becomes 1M.
-     */
     @Test
     fun `a plan made for another window does not fit, in either direction`() {
         assertTrue(ContextTrimPlanner.planFitsWindow(128_000, 128_000))
@@ -656,10 +598,7 @@ class ContextTrimPlannerTest {
         assertTrue(plan.reachedTarget)
         assertFalse(plan.state.isEmpty)
         val applied = measure(ContextTrimPlanner.apply(history, plan.state, FakeOffloader())!!)
-        // The re-plan rule is "only above the trigger": under 1M the trimmed
-        // request is nowhere near it, so the old plan would never be replaced...
         assertTrue(applied <= small.target && applied < large.trigger)
-        // ...although under 1M this history needs no trim at all.
         assertTrue(untrimmed < large.target)
         assertFalse(ContextTrimPlanner.planFitsWindow(small.window, large.window))
     }

@@ -50,11 +50,6 @@ import com.openminis.app.data.repository.ProviderRepository
 import com.openminis.app.ui.components.MinisButton
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * Multi-step onboarding flow shown on first launch.
- * Step 1: Welcome + add at least one provider API key
- * Step 2: Select up to 3 models to form the default model group
- */
 @Composable
 fun OnboardingScreen(
     providerRepository: ProviderRepository,
@@ -129,7 +124,6 @@ private fun ApiKeyStep(
             )
             Spacer(Modifier.height(24.dp))
 
-            // Provider type selector
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -178,7 +172,6 @@ private fun ApiKeyStep(
                         )
                         providerRepository.addInstance(instance)
                         providerRepository.saveApiKey(instance.id, apiKey.trim())
-                        // Add built-in models
                         for (model in selectedType.builtInModels) {
                             providerRepository.addEntry(
                                 ModelEntry(providerInstanceId = instance.id, baseModel = model)
@@ -216,7 +209,7 @@ private fun ModelSelectionStep(
     onComplete: () -> Unit,
 ) {
     val config by providerRepository.config.collectAsState()
-    val selected = remember { mutableStateListOf<String>() } // entry UUIDs
+    val selected = remember { mutableStateListOf<String>() }
     var searchText by remember { mutableStateOf("") }
 
     val enabledInstanceIds = config.instances.filter { it.isEnabled }.map { it.id }.toSet()
@@ -228,7 +221,6 @@ private fun ModelSelectionStep(
         allEntries.filter { it.model.displayName.lowercase().contains(q) || it.model.id.lowercase().contains(q) }
     }
 
-    // Group by instance
     val grouped = filteredEntries.groupBy { it.providerInstanceId }
 
     Scaffold { padding ->
@@ -340,7 +332,6 @@ private fun ModelSelectionStep(
                 }
                 MinisButton(
                     onClick = {
-                        // Create default model group from selections
                         if (selected.isNotEmpty()) {
                             val group = ModelGroup(name = "Default Models")
                             group.memberEntryIds.addAll(selected)

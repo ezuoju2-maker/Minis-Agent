@@ -8,13 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-bubble-anchor] Retry, delete-from-here and edit find the
- * persisted row behind a user bubble by id (iOS 6c0de68f5 / 8a1bf2e8b).
- *
- * The counting rule they replace is reproduced here as [oldEditCutoff] so the
- * regression cases show both answers side by side.
- */
 class BubbleRowLocatorTest {
 
     private var order = 0
@@ -29,7 +22,6 @@ class BubbleRowLocatorTest {
     private fun user(id: String, content: String = "x") = ChatMessage(id = id, role = "user", content = content)
     private fun assistant(id: String) = ChatMessage(id = id, role = "assistant", content = "reply")
 
-    /** The pre-fix edit rule: the n-th user bubble is the n-th user row with visible TEXT. */
     private fun oldEditCutoff(messages: List<ChatMessage>, index: Int, rows: List<MessageEntity>): Int {
         val ordinal = messages.subList(0, index).count { it.role == "user" }
         var n = 0
@@ -48,12 +40,7 @@ class BubbleRowLocatorTest {
         return -1
     }
 
-    // ── end-of-run queue drain [T-android-bubble-anchor-drain] ──────────────
 
-    /**
-     * "A", reply; two prompts queued while it ran and drained as ONE row "Q1\n\nQ2"
-     * (one bubble each); reply; "B", reply.
-     */
     private fun drainedSession(linked: Boolean): Pair<List<ChatMessage>, List<MessageEntity>> {
         order = 0
         val rows = listOf(
@@ -73,9 +60,6 @@ class BubbleRowLocatorTest {
 
     @Test
     fun `editing the second of two drained prompts cuts their shared row, where counting cut the next turn`() {
-        // Before the fix the drained bubbles carried no link, so the locator
-        // counted: two bubbles over one row put the edit on "B" - B's turn was
-        // cut and the merged row, old Q2 included, stayed in the context.
         val (unlinked, rows) = drainedSession(linked = false)
         val old = BubbleRowLocator.locateUserRow(unlinked, 3, rows)
         assertEquals(BubbleRowLocator.Via.ORDINAL, old.via)
@@ -86,8 +70,6 @@ class BubbleRowLocatorTest {
         assertEquals(BubbleRowLocator.Via.LINKED, located.via)
         assertEquals("r2", located.row?.id)
         assertEquals(2, BubbleRowLocator.cutoffFor(located, keepBubble = false))
-        // The chat is cut from the batch's FIRST bubble: Q1 lived in the same
-        // row, so leaving its bubble would show what the model no longer has.
         assertEquals(2..3, BubbleRowLocator.groupSpan(messages, 3))
     }
 
@@ -97,7 +79,6 @@ class BubbleRowLocatorTest {
         val located = BubbleRowLocator.locateUserRow(messages, 2, rows)
         assertEquals("r2", located.row?.id)
         assertEquals(3, BubbleRowLocator.cutoffFor(located, keepBubble = true))
-        // Retry keeps the shared row, so the chat keeps through the LAST bubble.
         assertEquals(3, BubbleRowLocator.groupSpan(messages, 2).last)
     }
 
@@ -123,20 +104,15 @@ class BubbleRowLocatorTest {
         }
     }
 
-    // ── the reported shape ────────────────────────────────────────────────
 
     @Test
     fun `editing after an image-only turn cuts at the edited row, where counting cut nothing`() {
-        // image-only question, reply, "A", reply. The user edits "A".
         val rows = listOf(
             row("u1", "user", imageOnly), row("a1", "assistant", text("pic")),
             row("u2", "user", text("A")), row("a2", "assistant", text("ans")),
         )
         val messages = listOf(user("u1", ""), assistant("a1"), user("u2", "A"), assistant("a2"))
 
-        // Old rule: the image-only bubble is counted on screen but skipped in
-        // the DB, so the match runs off the end and nothing is cut - the old
-        // "A" stays in the model's history behind the edited text.
         assertEquals(-1, oldEditCutoff(messages, 2, rows))
 
         val located = BubbleRowLocator.locateUserRow(messages, 2, rows)
@@ -155,8 +131,6 @@ class BubbleRowLocatorTest {
 
     @Test
     fun `hidden synthetic rows do not shift a linked cut`() {
-        // A stop-continue <system-reminder> row and a tool-result row sit
-        // between the turns; neither has a bubble.
         val rows = listOf(
             row("u1", "user", text("first")), row("a1", "assistant", text("r1")),
             row("sr", "user", text("<system-reminder>continue</system-reminder>")),
@@ -186,7 +160,6 @@ class BubbleRowLocatorTest {
         assertEquals(BubbleRowLocator.Via.ORDINAL, located.via)
     }
 
-    // ── unlinked fallback ─────────────────────────────────────────────────
 
     @Test
     fun `an unpersisted queued bubble falls back to counting rendered rows, image-only included`() {
@@ -217,7 +190,6 @@ class BubbleRowLocatorTest {
         assertFalse(BubbleRowLocator.isVisibleUserRow(text("<user-attached-files>f</user-attached-files>")))
     }
 
-    // ── wiring ────────────────────────────────────────────────────────────
 
     @Test
     fun `retry, delete and edit all anchor through the locator, with no counting loop left`() {

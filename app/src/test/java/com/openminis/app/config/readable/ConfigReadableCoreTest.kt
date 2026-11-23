@@ -8,12 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-config-readable] Pure logic of the readable config descriptions: list
- * diff, placeholders, rendering with the bad-translation fallback, secret and
- * image masking, URL scrubbing, number formats and the persisted JSON. Same
- * cases as iOS MinisTests/Standalone/ConfigReadableTests.swift [1].
- */
 class ConfigReadableCoreTest {
 
     private fun ids(items: List<ReadableCore.ListItem>) =
@@ -24,7 +18,6 @@ class ConfigReadableCoreTest {
     private fun row(x: ReadableCore.ListDiff) =
         "${x.newFirst ?: "-"}|${ids(x.added)}|${ids(x.removed)}|${x.reordered}|${x.keptCount}"
 
-    // -- list diff --
 
     @Test
     fun `reorder only reads as a new first and a reorder`() {
@@ -67,14 +60,12 @@ class ConfigReadableCoreTest {
         assertFalse(x.reordered)
     }
 
-    // -- placeholders and rendering --
 
     @Test
     fun `placeholder counts`() {
         val counts = listOf(
             "%@: %@ → %@", "%1\$@: %2\$@ → %3\$@", "100%% done %@", "no args", "%d bad",
             "%1\$@ and %@ mixed", "\$%1\$@ – %2\$@",
-            // Android resource placeholders count the same way.
             "%1\$s: %2\$s", "%s items",
         ).map(ReadableCore::placeholderCount)
         assertEquals(listOf(3, 3, 1, 0, -1, -1, 2, 2, 1), counts)
@@ -87,7 +78,6 @@ class ConfigReadableCoreTest {
         "High" to "高", "Med" to "中",
         "; " to "；", ", " to "、",
         "added %@" to "新增 %1\$s",
-        // A translation with an extra placeholder.
         "broken %1\$@" to "坏的 %1\$s %2\$s",
         "positional %1\$@ then %2\$@" to "先 %2\$s 后 %1\$s",
     )
@@ -152,7 +142,6 @@ class ConfigReadableCoreTest {
         )
     }
 
-    // -- redaction --
 
     @Test
     fun `secrets and inline images are masked`() {
@@ -185,7 +174,6 @@ class ConfigReadableCoreTest {
         else -> emptyList()
     }
 
-    // -- helpers --
 
     @Test
     fun `urls lose user-info, query and fragment`() {
@@ -205,7 +193,6 @@ class ConfigReadableCoreTest {
         assertEquals("“line one lin…”", ReadableCore.quoted("line one\nline two that is long", 12))
     }
 
-    // -- persisted JSON --
 
     @Test
     fun `summary JSON round-trips and old or garbage rows decode to null`() {
@@ -220,8 +207,6 @@ class ConfigReadableCoreTest {
 
     @Test
     fun `summary JSON has the iOS Codable shape`() {
-        // What iOS JSONEncoder writes for the same ReadableSummary; a record
-        // must decode the same on both platforms.
         val ios = """
             {"v":1,"locale":"zh-Hans","text":"t","subject":"groups:G1","lines":[
               {"key":"%1${'$'}@: %2${'$'}@","args":[
@@ -233,7 +218,6 @@ class ConfigReadableCoreTest {
         val decoded = ReadableSummary.decode(ios)!!
         assertEquals("groups:G1", decoded.subject)
         assertEquals("Models: added A; order changed", decoded.displayText { null })
-        // Re-encoding yields the same structure.
         assertEquals(JSONObject(ios).similar(JSONObject(decoded.jsonString())), true)
     }
 

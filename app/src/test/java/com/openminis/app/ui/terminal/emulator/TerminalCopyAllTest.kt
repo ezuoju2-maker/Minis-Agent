@@ -3,10 +3,6 @@ package com.openminis.app.ui.terminal.emulator
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * [#451] Terminal "Copy All": [TerminalBuffer.plainText] / [TerminalEmulator.copyableText],
- * and the selection copy sharing its row export (the CJK padding-space fix).
- */
 class TerminalCopyAllTest {
 
     private fun emulator(cols: Int = 20, rows: Int = 5, output: String) =
@@ -15,7 +11,6 @@ class TerminalCopyAllTest {
     @Test
     fun rowsLoseTrailingBlanksAndEmptyRowsBelowTheOutputGo() {
         val em = emulator(output = "hello   \r\n\r\nworld\r\n")
-        // The blank line between stays; the empty rows under "world" do not.
         assertEquals("hello\n\nworld", em.copyableText())
     }
 
@@ -49,7 +44,6 @@ class TerminalCopyAllTest {
     @Test
     fun selectionCopyNoLongerSpacesOutCjk() {
         val em = emulator(output = "中文abc\r\nnext")
-        // Row 0 from column 0 to the last column: "中" "trailer" "文" "trailer" "a" "b" "c".
         assertEquals("中文abc", em.getSelectedText(0, 0, 19, 0))
         assertEquals("中文abc\nnext", em.getSelectedText(0, 0, 3, 1))
     }

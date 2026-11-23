@@ -48,13 +48,6 @@ import androidx.compose.ui.res.stringResource
 import com.openminis.app.data.repository.EnvVarRepository
 import com.openminis.app.deeplink.DeepLinkCoordinator
 
-/**
- * Environment Variables \u2014 adopts the SettingsScaffold/SettingsSection
- * toolkit (T80). One section stringResource(R.string.env_var_section_header) carrying every defined key/
- * value pair as a SettingsRow, with the visibility/copy/delete actions
- * in each row's trailing slot. Add affordance lives in the top-bar
- * `actions` slot (T75-part1 already moved it off the FAB).
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EnvironmentVariablesScreen(
@@ -65,12 +58,7 @@ fun EnvironmentVariablesScreen(
     var showAddSheet by remember { mutableStateOf(false) }
     var editEntryId by remember { mutableStateOf<String?>(null) }
     var deleteEntryId by remember { mutableStateOf<String?>(null) }
-    // iOS parity (AIChatView.swift L1410-1411): when a deep link arrives
-    // with `create_key`, the env screen should open with a prefilled Add
-    // sheet so the user only has to paste the value.
     var prefill by remember { mutableStateOf<DeepLinkCoordinator.EnvVarCreate?>(null) }
-    // [T-envvar-disable] Set when a deep link names a variable that exists but
-    // is disabled: the edit sheet then highlights its Enabled switch.
     var highlightEnabled by remember { mutableStateOf(false) }
     val visibleKeys = remember { mutableStateOf(setOf<String>()) }
     val clipboardManager = LocalClipboardManager.current
@@ -78,10 +66,6 @@ fun EnvironmentVariablesScreen(
     LaunchedEffect(Unit) {
         DeepLinkCoordinator.consumePendingEnvVarCreate()?.let { link ->
             prefill = link
-            // [T-envvar-disable] A link for a name that already exists opens that
-            // variable instead of an Add form that could only say "duplicate".
-            // It stays as it is - a disabled one is NOT switched on by the link;
-            // the sheet highlights the switch so the user can decide.
             val existing = envVarRepository.entries.value
                 .firstOrNull { it.key.equals(link.key.trim(), ignoreCase = true) }
             if (existing != null) {
@@ -99,8 +83,6 @@ fun EnvironmentVariablesScreen(
     SettingsScaffold(
         title = stringResource(R.string.env_var_title),
         onBack = onBack,
-        // T75-part1 moved Add off a FAB onto the top-bar action slot;
-        // kept here for visual continuity.
         actions = {
             IconButton(onClick = { showAddSheet = true }) {
                 Icon(Icons.Default.Add, contentDescription = stringResource(R.string.env_var_add))
@@ -124,9 +106,6 @@ fun EnvironmentVariablesScreen(
             footer = stringResource(R.string.env_var_section_footer),
         ) {
             if (entries.isEmpty()) {
-                // Centred empty-state message inside the same card so the
-                // section visually owns it (instead of an empty card +
-                // separately-positioned text block).
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -153,13 +132,6 @@ fun EnvironmentVariablesScreen(
                     } else {
                         "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
                     }
-                    // iOS parity (EnvironmentVariablesView.swift:139-151): show
-                    // value on one line and the optional note on a second.
-                    // SettingsRow only has one subtitle slot, so concatenate
-                    // with a newline; both render in the same secondary style.
-                    // [T-envvar-disable] A first line of tags: disabled, and a name
-                    // shared with another entry (only an older build, a restore or
-                    // a merged file can produce one; the form refuses it).
                     val tags = listOfNotNull(
                         if (!entry.enabled) stringResource(R.string.env_var_status_disabled) else null,
                         if (entry.key.uppercase() in duplicateKeys) "⚠ " + stringResource(R.string.env_var_status_duplicate) else null,
@@ -197,10 +169,6 @@ fun EnvironmentVariablesScreen(
                                         modifier = Modifier.size(20.dp),
                                     )
                                 }
-                                // [T-envvar-disable] The row's own on / off action,
-                                // next to Delete (iOS puts it beside Delete in the
-                                // swipe actions; these inline buttons are the
-                                // Android row's equivalent).
                                 IconButton(onClick = { envVarRepository.setEnabled(entry.id, !entry.enabled) }) {
                                     Icon(
                                         if (entry.enabled) Icons.Outlined.Block else Icons.Outlined.CheckCircle,
@@ -228,7 +196,6 @@ fun EnvironmentVariablesScreen(
         Spacer(Modifier.height(24.dp))
     }
 
-    // Add/Edit sheet
     if (showAddSheet || editEntryId != null) {
         val editing = editEntryId?.let { id -> entries.find { it.id == id } }
         EnvVarFormSheet(
@@ -247,7 +214,6 @@ fun EnvironmentVariablesScreen(
         )
     }
 
-    // Delete confirmation
     if (deleteEntryId != null) {
         val entry = entries.find { it.id == deleteEntryId }
         AlertDialog(
@@ -282,12 +248,8 @@ private fun EnvVarFormSheet(
     prefillNote: String = "",
     highlightEnabled: Boolean = false,
 ) {
-    // Fully expanded: half-expanded, the Enabled switch and Save sat below the
-    // screen edge on a 6" phone.
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var keyText by remember { mutableStateOf(editEntry?.key ?: prefillKey) }
-    // A deep link that opened an existing variable with a value / note fills
-    // those in; an empty one leaves what is stored.
     var valueText by remember {
         mutableStateOf(
             prefillValue.takeIf { editEntry != null && it.isNotEmpty() }
@@ -364,9 +326,6 @@ private fun EnvVarFormSheet(
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
             )
 
-            // iOS parity: optional human-readable note explaining what the
-            // variable is for. Stored alongside the metadata, surfaced in the
-            // list row below the value.
             Text(
                 text = stringResource(R.string.env_var_field_note),
                 style = MaterialTheme.typography.labelMedium,
@@ -380,7 +339,6 @@ private fun EnvVarFormSheet(
                 singleLine = true,
             )
 
-            // [T-envvar-disable] On / off, editing only (a new variable starts on).
             if (isEditing) {
                 Column(
                     modifier = Modifier
@@ -431,8 +389,6 @@ private fun EnvVarFormSheet(
                 MinisTextButton(
                     onClick = {
                         val success = if (isEditing) {
-                            // update() never touches the enabled state; the switch
-                            // is applied on its own, only when it changed.
                             envVarRepository.update(editEntry!!.id, keyText, valueText, noteText) &&
                                 (enabled == editEntry.enabled || envVarRepository.setEnabled(editEntry.id, enabled))
                         } else {

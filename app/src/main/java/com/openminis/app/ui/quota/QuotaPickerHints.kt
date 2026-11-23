@@ -40,23 +40,7 @@ import com.openminis.app.quota.QuotaTone
 import com.openminis.app.quota.QuotaToneRules
 import com.openminis.app.ui.theme.LocalChatPalette
 
-// [T-provider-quota P2] Lightweight quota hints for the model picker, the
-// Model Group rows and the chat nav bar. Port of iOS QuotaPickerHints.swift.
-// - No trailing control is added; the Active badge and the provider "Edit"
-//   link keep their places.
-// - Section header: the account's short text ("Balance CN¥110.00"), the only
-//   place a shared pool appears, as the account's.
-// - Model row: only when a pool bound to THIS model is the tightest
-//   constraint and is low / exhausted / rate limited.
-// - No data, expired data or a healthy state shows nothing (no green).
-// Each composable collects the store itself, so a quota update redraws the
-// hint and not the whole picker.
 
-/**
- * [T-quota-tag-level] Picker quota tags: gray normally, a yellow tag when
- * under 10% / $1 is left, a red tag at 0 or below. Filled backgrounds with
- * contrasting text so the state reads at a glance in light and dark mode.
- */
 object QuotaTagStyle {
     @Composable
     fun background(level: QuotaLevel): Color {
@@ -76,13 +60,6 @@ object QuotaTagStyle {
     }
 }
 
-/**
- * After the provider name in a picker section header: a gray capsule
- * ("Balance CN¥36.51 ›") in the picker's small-tag style. The chevron says it
- * opens more: a tap calls [onTap] and the picker presents the quota sheet.
- * The capsule stays gray; only its text turns orange / red for a warning,
- * or the whole tag yellow / red by level - never green.
- */
 @Composable
 fun QuotaSectionHeaderBadge(instanceId: String, onTap: (() -> Unit)?) {
     QuotaWatch(instanceId, "pickerAppeared")
@@ -126,13 +103,6 @@ fun QuotaSectionHeaderBadge(instanceId: String, onTap: (() -> Unit)?) {
     }
 }
 
-/**
- * [T-quota-group-member-pill] After the model name on a Model Group member row
- * (picker group rows, Model Group settings page): the model's own quota if it
- * has one, else its account's, as "10% used ›" or "$1.12 ›". Group rows have
- * no provider header, so this is their only way to the provider's quota sheet.
- * Smaller than the header pill so the name keeps its room.
- */
 @Composable
 fun ModelQuotaMemberPill(instanceId: String, modelId: String, onTap: () -> Unit) {
     QuotaWatch(instanceId, "groupMemberAppeared")
@@ -155,8 +125,6 @@ fun ModelQuotaMemberPill(instanceId: String, modelId: String, onTap: () -> Unit)
                 contentDescription = spoken
                 onClick(label = hint) { onTap(); true }
             }
-            // [T-quota-member-pill-padding] 2 top/bottom, 5 sides: the same
-            // proportions as the picker's Active badge beside it.
             .padding(horizontal = 5.dp, vertical = 2.dp),
     ) {
         Text(
@@ -173,7 +141,6 @@ fun ModelQuotaMemberPill(instanceId: String, modelId: String, onTap: () -> Unit)
 }
 
 private fun memberPillSpoken(context: android.content.Context, p: QuotaPickerHintRules.MemberPill): String {
-    // The text already says "used" ([T-quota-percent-used]).
     var value = p.text
     when (p.level) {
         QuotaLevel.normal -> Unit
@@ -187,17 +154,12 @@ private fun memberPillSpoken(context: android.content.Context, p: QuotaPickerHin
     }
 }
 
-/**
- * At the start of a model row's second line (provider sections only): only a
- * warning on a pool bound to THIS model; the shared account is on the header.
- */
 @Composable
 fun ModelQuotaHintView(instanceId: String, modelId: String) {
     val st by QuotaStore.state.collectAsState()
     val context = LocalContext.current
     val hint = QuotaPickerHintRules.modelRow(st.modelView(instanceId, modelId)) ?: return
     val word = hint.detail ?: statusWord(context, hint.status)
-    // Same mapping as every other quota surface; hints only ever warn.
     val color = QuotaToneRules.tone(hint.status, com.openminis.app.quota.QuotaFreshness.fresh, false).color()
     val spoken = context.getString(R.string.quota_model_own_a11y, word)
     Row(
@@ -230,16 +192,7 @@ private fun statusWord(context: android.content.Context, s: QuotaStatus): String
     QuotaStatus.available, QuotaStatus.unknown -> ""
 }
 
-// MARK: - Chat nav bar status dot  [T-quota-low-dot]
 
-/**
- * The dot before the model name in the chat's nav bar:
- * - orange: no provider signed in (unchanged);
- * - yellow: signed in, but the current model's queryable quota is low - under
- *   10% left, or under $1 (or about CN¥7.2) of balance ([QuotaLowRules]);
- * - green: otherwise, including when there is no quota data at all.
- * Keyed by instance: switching the chat's model re-targets the watch.
- */
 @Composable
 fun rememberQuotaLow(isAuthed: Boolean, instanceId: String?, modelId: String?): Boolean {
     QuotaWatch(instanceId, "chatNavBar")
@@ -254,11 +207,6 @@ fun quotaDotColor(isAuthed: Boolean, quotaLow: Boolean): Color = when {
     else -> Color(0xFF34C759)
 }
 
-/**
- * The nav bar dot itself: resolves the chat's current entry (instance +
- * model) here, so a config or quota change redraws only the dot. VoiceOver /
- * TalkBack hear "Quota low" merged into the model row when it is yellow.
- */
 @Composable
 fun ModelQuotaStatusDot(
     isAuthed: Boolean,

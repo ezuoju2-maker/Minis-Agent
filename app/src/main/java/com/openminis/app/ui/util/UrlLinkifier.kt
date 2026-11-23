@@ -9,31 +9,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 
-/**
- * Convert a plain-text string into an [AnnotatedString] where any http(s) URL
- * is wrapped in a [LinkAnnotation.Url] span — clicking it routes through
- * [onClick] (so the chat screen's in-app web-preview handler can intercept,
- * matching iOS MinisOpenURLBroker behaviour).
- *
- * Used by tool-result renderers (`shell_execute` output, generic text-mode
- * tool outputs, etc.) where the upstream content is not Markdown so the
- * existing `MarkdownText` link path doesn't apply. Mirrors iOS
- * `TerminalCanvasView.addURLLinks` — http/https only, no other schemes.
- *
- * Detection uses [android.util.Patterns.WEB_URL] which is the
- * platform-blessed regex (mirrors what TextView's Linkify uses), but
- * filtered to entries that actually start with a scheme so we don't
- * surface bare hostnames as clickable. We don't reconstruct soft-wrapped
- * URLs the way iOS does for the terminal canvas — Compose `Text` lays
- * out logical strings, not grid cells, so URLs aren't broken across grid
- * rows the way they are in a fixed-cell terminal view.
- *
- * @param text     the plain text to linkify
- * @param onClick  called with the matched URL string when the user taps a
- *                 link; typically delegates to the chat's `urlClickHandler`
- *                 (in-app `UrlPreviewSheet`).
- * @param linkColor accent color for the link span (default iOS systemBlue).
- */
 fun linkifyUrls(
     text: String,
     onClick: (String) -> Unit,
@@ -48,14 +23,10 @@ fun linkifyUrls(
             val start = matcher.start()
             val end = matcher.end()
             val candidate = text.substring(start, end)
-            // Patterns.WEB_URL matches bare hostnames too (e.g. "example.com");
-            // skip those to keep the heuristic close to iOS — only schemes
-            // we know in-app preview can render get the underline.
             val lower = candidate.lowercase()
             if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
                 continue
             }
-            // Append non-link gap before this match.
             if (start > cursor) append(text, cursor, start)
             withLink(
                 LinkAnnotation.Url(

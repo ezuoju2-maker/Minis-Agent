@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Čeština (cs). Generated from the English base; keep keys in base order. -->
 <resources>
     <string name="app_name">Minis</string>
     <string name="new_chat">Nová konverzace</string>
@@ -2455,7 +2453,6 @@
     <string name="restore_progress_decrypting">Dešifrování…</string>
     <string name="restore_progress_reading">Čtení zálohy…</string>
     <string name="restore_progress_listing">Výpis…</string>
-    <!-- [T-mcp-oauth-signin-android] MCP browser sign-in (iOS #432) -->
     <string name="mcp_form_auth_mode">Autorizace</string>
     <string name="mcp_form_auth_none">Žádné</string>
     <string name="mcp_form_auth_browser">Přihlásit se v prohlížeči</string>

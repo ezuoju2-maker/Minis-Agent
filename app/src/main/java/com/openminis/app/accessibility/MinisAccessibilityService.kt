@@ -20,11 +20,6 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/**
- * MinisAccessibilityService — host-side AccessibilityService backing the
- * `android-a11y-cli` offload command. The user must enable it manually
- * under Settings → Accessibility; we never start it programmatically.
- */
 class MinisAccessibilityService : AccessibilityService() {
 
     companion object {
@@ -60,17 +55,7 @@ class MinisAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         _instance = this
-        // [T-android-a11y-miui-service-failure] Breadcrumb on (re)bind. On OEM
-        // ROMs (MIUI etc.) the system kills + rebinds this service repeatedly,
-        // surfacing "此服务出现故障"; a connect log lets us correlate a degraded
-        // window in stall/diag logs with a kill/rebind. No self-restart logic —
-        // remediation is the user whitelisting autostart + battery (see
-        // SystemPermissionsScreen OEM guidance).
         AppLogger.info(TAG, "service connected (manufacturer=${android.os.Build.MANUFACTURER})")
-        // [T-android-a11y-force-stop-recovery] Latch that the grant existed, so
-        // a later absence can be recognized as a revocation rather than a
-        // never-configured service. This is the one callback that only fires
-        // when the user has genuinely granted it.
         try {
             AccessibilityRecoveryManager.markGranted(this)
             AccessibilityRecoveryManager.refreshRevokedState(this)
@@ -203,22 +188,12 @@ class MinisAccessibilityService : AccessibilityService() {
         return done.await(durationMs + 2000, java.util.concurrent.TimeUnit.MILLISECONDS) && ok[0]
     }
 
-    /**
-     * Result of [captureScreenshot]. On success [bitmap] is non-null and
-     * caller is responsible for `bitmap.recycle()`.
-     */
     data class ShotResult(
         val bitmap: Bitmap?,
         val errorCode: String? = null,
         val errorMessage: String? = null,
     )
 
-    /**
-     * Synchronously captures a system-wide screenshot via
-     * `AccessibilityService.takeScreenshot` (API 30+). Blocks the calling
-     * thread up to [timeoutMs]. Caller must check `Build.VERSION.SDK_INT`
-     * before invoking — annotated `@RequiresApi(R)`.
-     */
     @RequiresApi(Build.VERSION_CODES.R)
     fun captureScreenshot(displayId: Int = Display.DEFAULT_DISPLAY, timeoutMs: Long = 5_000): ShotResult {
         val done = CountDownLatch(1)
@@ -237,7 +212,6 @@ class MinisAccessibilityService : AccessibilityService() {
                         if (bmp == null) {
                             resultRef.set(ShotResult(null, "DECODE_FAILED", "wrapHardwareBuffer returned null"))
                         } else {
-                            // Copy to a software bitmap so we can encode + scale freely.
                             val sw = bmp.copy(Bitmap.Config.ARGB_8888, false)
                             bmp.recycle()
                             resultRef.set(ShotResult(sw))

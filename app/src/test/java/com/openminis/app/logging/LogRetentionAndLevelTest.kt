@@ -10,13 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-android-log-level] [T-android-log-size-cap] [T-storage-clear-logs-caches]
- *
- * Drives the real [AppLogger] write path against a temp directory. There is no
- * Robolectric/mocking here, so the logger's private state (log dir, enabled,
- * verbose) is set directly instead of going through init(Context).
- */
 class LogRetentionAndLevelTest {
 
     private lateinit var dir: File
@@ -78,16 +71,14 @@ class LogRetentionAndLevelTest {
         AppLogger.MAX_LOG_FILE_BYTES = 64 * 1024
         AppLogger.SIZE_CHECK_EVERY_BYTES = 4 * 1024
         val pad = "x".repeat(200)
-        for (i in 0 until 2000) AppLogger.info("T", "line-$i $pad")   // ~500 KB written
+        for (i in 0 until 2000) AppLogger.info("T", "line-$i $pad")
         val file = dir.listFiles { f -> f.name.startsWith("minis-") && f.extension == "log" }!!.single()
-        // Bounded: never more than the cap plus one check interval of growth.
         assertTrue("size=${file.length()}",
             file.length() <= AppLogger.MAX_LOG_FILE_BYTES + AppLogger.SIZE_CHECK_EVERY_BYTES + 1024)
         val text = file.readText()
         assertTrue(text.startsWith("[log truncated"))
         assertTrue("newest line kept", text.contains("line-1999 "))
         assertFalse("oldest line dropped", text.contains("line-0 "))
-        // Logging continues into the same file after a cut.
         AppLogger.info("T", "after-cut")
         assertTrue(file.readText().contains("after-cut"))
         assertFalse(File(dir, file.name + ".truncating").exists())
@@ -108,7 +99,6 @@ class LogRetentionAndLevelTest {
             val newShare = mk("share/new.zip", ageMs = 60_000L)
             val oldExport = mk("export-staging/x/data.json", ageMs = 3 * 3600_000L)
             File(cache, "export-staging/x").setLastModified(now - 3 * 3600_000L)
-            // Live state that must survive no matter how old.
             val prootTmp = mk("proot-tmp/sock", ageMs = 30L * 24 * 3600_000L)
             val pasted = mk("pasted_text/draft.txt", ageMs = 30L * 24 * 3600_000L)
             val inbound = mk("share_inbound/in.bin", ageMs = 30L * 24 * 3600_000L)

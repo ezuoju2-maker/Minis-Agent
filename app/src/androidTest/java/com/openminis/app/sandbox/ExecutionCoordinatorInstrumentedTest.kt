@@ -13,12 +13,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 
-/**
- * On-device tests for ExecutionCoordinator.
- * Tests session mount switching, command serialization, and lifecycle.
- *
- * Run on real device: ./gradlew connectedAndroidTest
- */
 @RunWith(AndroidJUnit4::class)
 class ExecutionCoordinatorInstrumentedTest {
 
@@ -43,7 +37,6 @@ class ExecutionCoordinatorInstrumentedTest {
         cleanupSessionDirs()
     }
 
-    // ==================== Session mounting ====================
 
     @Test
     fun executeCreatesSessionShell() = runBlocking {
@@ -78,7 +71,6 @@ class ExecutionCoordinatorInstrumentedTest {
 
         ExecutionCoordinator.execute("session-X", "echo second")
 
-        // Mounts should remain the same (not cleared and re-added)
         assertEquals(mountCount, PRootKernel.bindMounts.size)
         assertEquals(shellKeys, activeShellKeys())
     }
@@ -89,13 +81,11 @@ class ExecutionCoordinatorInstrumentedTest {
 
         ExecutionCoordinator.execute("session-mounts", "echo test")
 
-        // Verify session-level mounts
         assertTrue(PRootKernel.bindMounts.containsKey("/var/minis/attachments"))
         assertTrue(PRootKernel.bindMounts.containsKey("/var/minis/offloads"))
         assertTrue(PRootKernel.bindMounts.containsKey("/var/minis/workspace"))
         assertTrue(PRootKernel.bindMounts.containsKey("/var/minis/browser"))
 
-        // Verify global mounts
         assertTrue(PRootKernel.bindMounts.containsKey("/var/minis/memory"))
         assertTrue(PRootKernel.bindMounts.containsKey("/var/minis/skills"))
         assertTrue(PRootKernel.bindMounts.containsKey("/var/minis/shared"))
@@ -109,13 +99,11 @@ class ExecutionCoordinatorInstrumentedTest {
         val sessionId = "session-dirs-test"
         ExecutionCoordinator.execute(sessionId, "echo test")
 
-        // Verify session host directories exist
         val sessionBase = File(context.filesDir, "minis-sessions/$sessionId")
         for (subdir in listOf("attachments", "offloads", "workspace", "browser")) {
             assertTrue("$subdir should exist", File(sessionBase, subdir).isDirectory)
         }
 
-        // Verify global host directories exist
         val globalBase = File(context.filesDir, "minis-global")
         for (subdir in listOf("memory", "skills")) {
             assertTrue("$subdir should exist", File(globalBase, subdir).isDirectory)
@@ -142,7 +130,6 @@ class ExecutionCoordinatorInstrumentedTest {
         )
     }
 
-    // ==================== Command execution ====================
 
     @Test
     fun executeReturnsCorrectOutput() = runBlocking {
@@ -196,7 +183,6 @@ class ExecutionCoordinatorInstrumentedTest {
         assertTrue(lines.contains("two"))
     }
 
-    // ==================== Serialization ====================
 
     @Test
     fun executeUsesSeparateShellsForConcurrentCalls() = runBlocking {
@@ -206,7 +192,6 @@ class ExecutionCoordinatorInstrumentedTest {
             ExecutionCoordinator.execute("session-serial", "sleep 1; echo first")
         }
         val deferred2 = async {
-            // Small delay to ensure ordering
             delay(50)
             ExecutionCoordinator.execute("session-serial", "echo second")
         }
@@ -214,7 +199,6 @@ class ExecutionCoordinatorInstrumentedTest {
         val result1 = deferred1.await()
         val result2 = deferred2.await()
 
-        // Both should succeed
         assertEquals(0, result1.exitCode)
         assertEquals(0, result2.exitCode)
         assertTrue("session-serial#0" in activeShellKeys())
@@ -224,7 +208,6 @@ class ExecutionCoordinatorInstrumentedTest {
         )
     }
 
-    // ==================== sessionDidTerminate ====================
 
     @Test
     fun sessionDidTerminateClearsMountsForMatchingSession() = runBlocking {
@@ -258,40 +241,34 @@ class ExecutionCoordinatorInstrumentedTest {
         assertEquals(shellsBefore, activeShellKeys())
     }
 
-    // ==================== stopCurrentCommand ====================
 
     @Test
     fun stopCurrentCommandIsNoOpWhenIdle() {
-        ExecutionCoordinator.stopCurrentCommand() // Should not throw
+        ExecutionCoordinator.stopCurrentCommand()
     }
 
-    // ==================== Cross-session file isolation ====================
 
     @Test
     fun differentSessionsHaveIsolatedWorkspaces() = runBlocking {
         skipIfNoBoot()
 
-        // Write file in session A's workspace
         ExecutionCoordinator.execute(
             "session-iso-A",
             "echo 'from A' > /var/minis/workspace/test.txt"
         )
 
-        // Check it exists in session A
         val resultA = ExecutionCoordinator.execute(
             "session-iso-A",
             "cat /var/minis/workspace/test.txt"
         )
         assertTrue(resultA.output.contains("from A"))
 
-        // Switch to session B — workspace should be empty
         val resultB = ExecutionCoordinator.execute(
             "session-iso-B",
             "ls /var/minis/workspace/"
         )
         assertFalse("Session B should not see session A's file", resultB.output.contains("test.txt"))
 
-        // Switch back to A — file should still be there
         val resultA2 = ExecutionCoordinator.execute(
             "session-iso-A",
             "cat /var/minis/workspace/test.txt"
@@ -303,13 +280,11 @@ class ExecutionCoordinatorInstrumentedTest {
     fun globalDirsAreSharedAcrossSessions() = runBlocking {
         skipIfNoBoot()
 
-        // Write file to global memory in session A
         ExecutionCoordinator.execute(
             "session-global-A",
             "echo 'shared' > /var/minis/memory/shared.txt"
         )
 
-        // Read from session B — should see the same file
         val result = ExecutionCoordinator.execute(
             "session-global-B",
             "cat /var/minis/memory/shared.txt"
@@ -317,7 +292,6 @@ class ExecutionCoordinatorInstrumentedTest {
         assertTrue("Global dirs should be shared", result.output.contains("shared"))
     }
 
-    // ==================== Helpers ====================
 
     private fun canBoot(): Boolean {
         return try {

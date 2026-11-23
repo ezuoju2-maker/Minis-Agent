@@ -4,11 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-md-preview-links] Links inside a markdown file preview: relative paths
- * resolve against the document's folder; anything with a scheme or a guest
- * absolute path goes to the chat link resolver.
- */
 class MarkdownPreviewLinksTest {
     private val doc = File("/data/s/workspace/proj/README.md")
 

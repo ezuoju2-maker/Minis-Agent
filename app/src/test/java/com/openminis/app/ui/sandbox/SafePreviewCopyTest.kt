@@ -6,7 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [FIX-261025-13] Copying a whole large preview could crash past the binder limit. */
 class SafePreviewCopyTest {
     @Test fun `both previews copy through the safe clipboard`() {
         val src = ProductionSources.read("ui/sandbox/FilePreviewScreen.kt")

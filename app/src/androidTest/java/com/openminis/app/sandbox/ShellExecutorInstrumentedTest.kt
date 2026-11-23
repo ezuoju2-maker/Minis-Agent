@@ -10,13 +10,6 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/**
- * On-device tests for ShellExecutor.
- * These require proot and rootfs assets to be present.
- * Tests actual command execution inside the PRoot sandbox.
- *
- * Run on real device: ./gradlew connectedAndroidTest
- */
 @RunWith(AndroidJUnit4::class)
 class ShellExecutorInstrumentedTest {
 
@@ -38,7 +31,6 @@ class ShellExecutorInstrumentedTest {
         PRootKernel.customEnvironment.clear()
     }
 
-    // ==================== Basic execution ====================
 
     @Test
     fun executeEchoCommand() = runBlocking {
@@ -75,13 +67,11 @@ class ShellExecutorInstrumentedTest {
     fun executeCommandWithStderr() = runBlocking {
         skipIfNoBoot()
 
-        // stderr should be merged with stdout
         val result = ShellExecutor.execute(context, "echo out; echo err >&2")
         assertTrue("Output should contain stdout", result.output.contains("out"))
         assertTrue("Output should contain stderr", result.output.contains("err"))
     }
 
-    // ==================== Environment variables ====================
 
     @Test
     fun executeWithPerCallEnvironment() = runBlocking {
@@ -93,8 +83,6 @@ class ShellExecutorInstrumentedTest {
             environment = mapOf("MY_VAR" to "test_value")
         )
         assertEquals(0, result.exitCode)
-        // Note: environment variables may or may not pass through proot
-        // depending on how proot handles them. This tests the code path.
     }
 
     @Test
@@ -107,7 +95,6 @@ class ShellExecutorInstrumentedTest {
         assertEquals(0, result.exitCode)
     }
 
-    // ==================== Filesystem operations ====================
 
     @Test
     fun executeCanReadRootfs() = runBlocking {
@@ -150,7 +137,6 @@ class ShellExecutorInstrumentedTest {
         assertTrue("Should list attachments", result.output.contains("attachments"))
     }
 
-    // ==================== Line callback ====================
 
     @Test
     fun executeLineCallbackReceivesLines() = runBlocking {
@@ -177,7 +163,7 @@ class ShellExecutorInstrumentedTest {
         val lines = mutableListOf<String>()
         val result = ShellExecutor.execute(
             context,
-            "true", // No output
+            "true",
             lineCallback = { line -> lines.add(line) }
         )
 
@@ -185,7 +171,6 @@ class ShellExecutorInstrumentedTest {
         assertTrue(lines.isEmpty())
     }
 
-    // ==================== Timeout ====================
 
     @Test
     fun executeTimesOutLongRunningCommand() = runBlocking {
@@ -194,10 +179,10 @@ class ShellExecutorInstrumentedTest {
         val result = ShellExecutor.execute(
             context,
             "sleep 60",
-            timeout = 2_000 // 2 second timeout
+            timeout = 2_000
         )
 
-        assertEquals(124, result.exitCode) // Standard timeout exit code
+        assertEquals(124, result.exitCode)
         assertTrue(result.output.contains("timed out"))
         assertTrue("Should complete within ~3 seconds", result.durationMs < 10_000)
     }
@@ -216,7 +201,6 @@ class ShellExecutorInstrumentedTest {
         assertEquals("fast", result.output.trim())
     }
 
-    // ==================== Process management ====================
 
     @Test
     fun currentProcessIsNullWhenIdle() {
@@ -225,11 +209,10 @@ class ShellExecutorInstrumentedTest {
 
     @Test
     fun destroyCurrentIsNoOpWhenIdle() {
-        ShellExecutor.destroyCurrent() // Should not throw
+        ShellExecutor.destroyCurrent()
         assertNull(ShellExecutor.currentProcess)
     }
 
-    // ==================== Command types ====================
 
     @Test
     fun executePipeCommand() = runBlocking {
@@ -267,7 +250,6 @@ class ShellExecutorInstrumentedTest {
         assertTrue(result.output.trim().isNotEmpty())
     }
 
-    // ==================== Error handling ====================
 
     @Test
     fun executeNonexistentCommand() = runBlocking {
@@ -285,7 +267,6 @@ class ShellExecutorInstrumentedTest {
         assertNotEquals(0, result.exitCode)
     }
 
-    // ==================== Helpers ====================
 
     private fun canBoot(): Boolean {
         return try {

@@ -18,23 +18,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 
-/**
- * T155: single offscreen WebView that renders LaTeX (and mhchem chemistry)
- * via KaTeX, returning a Bitmap for inline-bubble display in markdown.
- *
- * Mirrors iOS KaTeXRenderer: one WebView is loaded from assets once,
- * each render call evaluates `renderMath(...)` JS, the bridge fires
- * `AndroidBridge.onRendered(w, h, err)` once KaTeX finishes laying out
- * the formula, then we snapshot the WebView with `view.draw(Canvas)`
- * after resizing it to the measured CSS size. Results are cached by
- * (latex, displayMode, fontSize, isDark) so re-renders during recompose
- * are free.
- *
- * Concurrency: a single Mutex serializes render requests because the
- * JS bridge has only one pending callback slot. A queue of requests
- * sharing the same WebView is enough — math formulas are small and
- * complete in tens of ms each once KaTeX is warm.
- */
 internal class KatexRenderResult(val bitmap: Bitmap, val size: IntSize)
 
 internal object KatexWebViewPool {
@@ -43,46 +26,11 @@ internal object KatexWebViewPool {
     private const val ASSET_HTML = "file:///android_asset/katex/katex-render.html"
     private const val DEFAULT_FONT_SIZE_PX = 17
     private const val RENDER_TIMEOUT_MS = 4_000L
-    // Layout viewport for the offscreen WebView, in PHYSICAL pixels. KaTeX
-    // needs this many px of width to lay out a formula before reporting its
-    // measured width via getBoundingClientRect(). On a density-2.625 device
-    // 8192 px ≈ 3120 CSS px ≈ enough for any sane single-line display
-    // formula or wide matrix. Smaller values caused wide formulas like
-    // `I_c = W_c^{\text{non-private}} \cdot \alpha_c + ...` (≈ 1000 CSS
-    // px wide) to be clipped at layout time, and the resulting bitmap
-    // showed only the leftmost portion.
     private const val LAYOUT_PIXELS = 8192
 
-    /**
-     * [GH#206] Hard ceiling on a single snapshot, in PHYSICAL pixels.
-     *
-     * `LAYOUT_PIXELS` is the WebView's layout viewport, and the snapshot used to
-     * be `measuredCssPx * density` with NO upper bound — so a wide display
-     * formula on a density-2.75 device could ask for a bitmap approaching
-     * 8192 px wide. At ARGB_8888 that is 4 bytes/px, i.e. ~5 MB for ONE formula,
-     * and bitmap pixels live in the NATIVE heap on Android 8+.
-     *
-     * A formula wider than this is downscaled rather than clipped: losing
-     * sharpness on an extreme formula is strictly better than spending 5 MB of
-     * native heap on it, and clipping would lose content outright.
-     */
     private const val MAX_BITMAP_EDGE_PX = 2048
-    private const val MAX_BITMAP_PIXELS = 4_000_000  // ~16 MB at ARGB_8888
+    private const val MAX_BITMAP_PIXELS = 4_000_000
 
-    /**
-     * [GH#206] Byte budget for the render cache.
-     *
-     * This cache used to be `LruCache(150)` — capacity counted in ENTRIES, with
-     * no `sizeOf` override, so 150 tiny inline formulas and 150 multi-megabyte
-     * display formulas were treated as identical load. Combined with the
-     * unbounded snapshot size above, a formula-dense session could pin hundreds
-     * of megabytes of native heap that nothing ever released (this object is a
-     * process-lifetime singleton, and Java GC does not reclaim native bitmap
-     * pixels).
-     *
-     * Sized against the app's own Java heap budget purely as a proportional
-     * signal of "how big a device is this"; the bitmaps themselves are native.
-     */
     private val cacheBudgetBytes: Int = run {
         val maxHeap = Runtime.getRuntime().maxMemory()
         (maxHeap / 8).coerceIn(8L * 1024 * 1024, 32L * 1024 * 1024).toInt()
@@ -91,33 +39,17 @@ internal object KatexWebViewPool {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val mutex = Mutex()
 
-    /**
-     * NOTE ON RECYCLING: entries are NOT `recycle()`d on eviction, deliberately.
-     * `render()` hands the bitmap to Compose (`produceState` → `asImageBitmap()`),
-     * and a composable can keep drawing an on-screen formula long after its
-     * entry is evicted. Recycling on eviction would hand a live composition a
-     * recycled bitmap and crash with "trying to use a recycled bitmap".
-     * Dropping the reference is enough: once no composition holds it, the
-     * bitmap's native pixels are freed by GC/finalization. The fix that matters
-     * is bounding what enters the cache, which is what the budget above does.
-     */
     private val cache = object : LruCache<String, KatexRenderResult>(cacheBudgetBytes) {
         override fun sizeOf(key: String, value: KatexRenderResult): Int =
             value.bitmap.allocationByteCount.coerceAtLeast(1)
     }
 
-    /** [GH#206] Drop every cached formula. Safe at any time — see the note above. */
     fun evictAll() {
         val before = cache.size()
         cache.evictAll()
         android.util.Log.i(TAG, "evictAll: released ~${before / 1024}KB of cached formula bitmaps")
     }
 
-    /**
-     * [GH#206] Tear down the offscreen WebView too. Only for
-     * `TRIM_MEMORY_COMPLETE`-class pressure: it is recreated (and the KaTeX
-     * asset reloaded) on the next render, which costs a few hundred ms.
-     */
     fun releaseWebView() {
         runOnMain {
             webView?.let {
@@ -136,10 +68,6 @@ internal object KatexWebViewPool {
     @Volatile
     private var pending: CompletableDeferred<Triple<Int, Int, String>>? = null
 
-    /**
-     * Render [latex] via KaTeX. Returns null on error / timeout. Callers
-     * are expected to fall back to displaying the raw LaTeX text.
-     */
     suspend fun render(
         context: Context,
         latex: String,
@@ -197,22 +125,11 @@ internal object KatexWebViewPool {
     private fun createWebView(appContext: Context): WebView? {
         webView?.let { return it }
         val wv = WebView(appContext).apply {
-            // Offscreen layout — a real frame is required so KaTeX can measure
-            // the formula. We resize to the measured size before snapshotting.
             measure(
                 android.view.View.MeasureSpec.makeMeasureSpec(LAYOUT_PIXELS, android.view.View.MeasureSpec.EXACTLY),
                 android.view.View.MeasureSpec.makeMeasureSpec(LAYOUT_PIXELS, android.view.View.MeasureSpec.EXACTLY),
             )
             layout(0, 0, LAYOUT_PIXELS, LAYOUT_PIXELS)
-            // T208-6: force software layer — hardware-accelerated WebView
-            // drawn onto a software Canvas via wv.draw() returns stale or
-            // empty pixels because the GPU layer's framebuffer is opaque
-            // to software readback. With LAYER_TYPE_SOFTWARE, draw() walks
-            // the actual display list and paints into the destination
-            // bitmap. (Symptom this fixes: each captured bitmap had the
-            // right dimensions but the pixels were the *previous* render's
-            // formula — Σ in the integral cell, P=[…] in the matrix cell
-            // missing its leading mathbf, etc.)
             setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
             setBackgroundColor(Color.TRANSPARENT)
             settings.javaScriptEnabled = true
@@ -222,8 +139,6 @@ internal object KatexWebViewPool {
                 pending?.complete(Triple(w, h, err))
             }, "AndroidBridge")
             webViewClient = object : WebViewClient() {
-                // [T-net-android-phase3] Settings > Network: answer the local entry's
-                // proxy challenge (WebViewNetworkProxy); any other auth request as before.
                 override fun onReceivedHttpAuthRequest(view: android.webkit.WebView?, handler: android.webkit.HttpAuthHandler?, host: String?, realm: String?) {
                     if (handler != null && com.openminis.app.network.WebViewNetworkProxy.answerAuth(handler, host, realm, view?.url)) return
                     super.onReceivedHttpAuthRequest(view, handler, host, realm)
@@ -235,20 +150,10 @@ internal object KatexWebViewPool {
                     readyDeferred?.complete(Unit)
                 }
 
-                // [T-android-webview-render-process-gone] (GH#341)
-                // Route to the pool's OWN teardown, not a bare destroy():
-                // releaseWebView() also nulls `webView` and clears `isReady`,
-                // which is what lets ensureWebView() build a fresh one on the
-                // next render. A plain destroy() would leave the singleton
-                // holding a dead object and every later formula would come
-                // back blank, for the rest of the process's life.
                 override fun onRenderProcessGone(
                     view: WebView?,
                     detail: android.webkit.RenderProcessGoneDetail?,
                 ): Boolean {
-                    // Unblock anyone awaiting a render that can no longer
-                    // arrive — the renderer that would have called the JS
-                    // bridge is gone, so `pending` would hang until timeout.
                     runCatching { pending?.complete(Triple(0, 0, "render process gone")) }
                     runCatching { readyDeferred?.complete(Unit) }
                     runCatching { releaseWebView() }
@@ -265,31 +170,9 @@ internal object KatexWebViewPool {
     private fun snapshot(wv: WebView, w: Int, h: Int): KatexRenderResult? {
         return try {
             val density = wv.context.resources.displayMetrics.density
-            // KaTeX reports `w`/`h` in CSS pixels (initial-scale=1.0 → 1 CSS px = 1 dp).
-            // The bitmap holds physical pixels (= CSS px × density). T208-5.
-            //
-            // Important (T208-6): do NOT resize the WebView before drawing.
-            // Resizing the body changes its CSS width, which causes the
-            // already-laid-out KaTeX HTML to reflow — and reflow shifts the
-            // span's left edge / triggers wrap. The previous code resized to
-            // pxW × pxH then drew, which captured the post-reflow layout
-            // (sometimes with the leading glyph clipped, e.g. the `Σ` cut
-            // from `\sum_{i=1}^{n} i^2`). Instead we keep the WebView at its
-            // full LAYOUT_PIXELS canvas and let canvas clipping crop to the
-            // formula's rectangle at (0,0)–(pxW,pxH). Equivalent to a CSS
-            // overflow-hidden viewport of exactly (pxW, pxH) physical px.
             val rawW = (w * density).toInt().coerceAtLeast(1)
             val rawH = (h * density).toInt().coerceAtLeast(1)
 
-            // [GH#206] Clamp the snapshot. Previously rawW/rawH went straight
-            // into createBitmap with no upper bound, so a wide display formula
-            // could allocate multiple MB of NATIVE heap for a single formula.
-            //
-            // We scale DOWN (never clip): the canvas is scaled by the same
-            // factor before drawing, so the whole formula is still captured,
-            // just at lower resolution. `size` keeps reporting the CSS size, so
-            // the caller lays the formula out identically either way and only
-            // sharpness changes.
             val edgeScale = minOf(
                 1f,
                 MAX_BITMAP_EDGE_PX.toFloat() / rawW,

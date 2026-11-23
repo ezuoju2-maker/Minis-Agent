@@ -3,13 +3,6 @@ package com.openminis.app.browser
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * [security] A download name comes from page-controlled content
- * (`Content-Disposition` / blob name). `uniqueFile` builds the destination as
- * `File(workspace, name)`, so an unsanitized name with `../` or a separator
- * could escape the per-session workspace. These tests pin the pure helper so
- * the isolation guarantee survives refactors.
- */
 class DownloadNameSanitizeTest {
 
     @Test

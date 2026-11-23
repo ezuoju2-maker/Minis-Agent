@@ -26,77 +26,20 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-/**
- * [T-android-browser-gpu-capture] Renders a headless (window-less) agent
- * WebView through the real GPU compositor so a screenshot contains what a
- * user would see — including WebGL, `<video>` and other GPU-only layers.
- *
- * Why this exists: the pool's WebViews are never attached to a window while
- * the browser sheet is closed, and the old capture drew them with
- * `WebView.draw(softwareCanvas)`. Chromium answers a software draw by
- * re-rasterising the page on the CPU, which has no access to GPU surfaces, so
- * a WebGL canvas came out as an empty box (reproduced on a Pixel 4a: DOM text
- * and a 2D canvas captured, the WebGL canvas beside them blank white, while
- * the same page on screen showed the rendered scene). A detached View has no
- * window surface, so reading screen pixels (PixelCopy) is not an option
- * either — there is nothing on screen to read.
- *
- * The fix gives the WebView a real surface only for the duration of a
- * capture: a PRIVATE virtual display (visible to nothing but this app)
- * backed by an [ImageReader], with a [Presentation] window on it. The WebView
- * is parented into that window, drawn by the normal hardware pipeline, one
- * composited frame is read back from the ImageReader, and the WebView is
- * detached again. This is how an offscreen browser is given a GPU on Android.
- *
- * Cost control, deliberately:
- *  - Nothing exists until the first capture, and the display, window and
- *    buffers are released [IDLE_RELEASE_MS] after the last one, so an idle
- *    app pays no rendering, memory or battery cost. The WebView is only in
- *    the window during a capture, so pages do not start animating in the
- *    background as a permanently attached view would.
- *  - Captures are serialised; the host is sized to the viewport being
- *    captured and never larger than [MAX_EDGE_PX] on either edge — a
- *    full-page capture (tens of thousands of px tall) stays on the software
- *    path rather than allocating a display that size.
- *  - Any failure returns null and the caller falls back to the software
- *    draw, so the worst case is the previous behaviour. Repeated failures to
- *    create the host trip [disabled] for the rest of the process, so a device
- *    that cannot do this does not pay the attempt on every screenshot.
- *  - The window is NOT_FOCUSABLE / NOT_TOUCHABLE: a focused input inside the
- *    page must never raise the IME on the phone's real screen.
- */
 internal object HeadlessRenderHost {
     private const val TAG = "HeadlessRenderHost"
 
     const val IDLE_RELEASE_MS = 15_000L
     const val MAX_EDGE_PX = 4096
     private const val VISUAL_STATE_TIMEOUT_MS = 1_500L
-    /**
-     * Upper bound on waiting for the page to finish drawing. Only a page that
-     * never stops changing (a running animation) waits this long; re-raster
-     * of a detached page measured ~100 ms (Wikipedia, Pixel 4a), so this
-     * leaves wide margin without making every animated page cost 1.5 s.
-     */
     private const val SETTLE_TIMEOUT_MS = 700L
-    /**
-     * A frame counts as final once no newer one has arrived for this long.
-     *
-     * Why a quiet window and not a fixed frame count: Chromium drops a
-     * page's rasterised tiles while the WebView is detached, so on re-attach
-     * it presents what it has (white where tiles are missing) and keeps
-     * presenting as raster completes. Two frames was enough for a tiny page
-     * and gave a mostly-white Wikipedia article (measured on a Pixel 4a).
-     * A finished static page stops producing frames, which is the signal.
-     */
     private const val QUIET_MS = 150L
-    /** At least this many frames after the content is ready. */
     private const val MIN_FRAMES = 2
     private const val MAX_HOST_FAILURES = 3
 
     private val mutex = Mutex()
     private val main = Handler(Looper.getMainLooper())
 
-    // All state below is touched on the main thread only.
     private var reader: ImageReader? = null
     private var display: VirtualDisplay? = null
     private var presentation: Presentation? = null
@@ -109,34 +52,23 @@ internal object HeadlessRenderHost {
     private var hostFailures = 0
     private var visualStateRequest = 0L
 
-    /** Non-null once the GPU path has been given up on for this process. */
     @Volatile
     var disabled: String? = null
         private set
 
     private val releaseTask = Runnable { release("idle") }
 
-    /**
-     * Capture [webView] at [w]×[h] physical px through the GPU compositor, or
-     * null when this path does not apply (the WebView is on screen in the
-     * browser sheet, the size is out of range, the host could not be built)
-     * or fails — callers then use the software draw.
-     */
     suspend fun capture(webView: WebView, w: Int, h: Int): Bitmap? {
         if (disabled != null) return null
         return mutex.withLock { withContext(Dispatchers.Main) { captureOnMain(webView, w, h) } }
     }
 
     private suspend fun captureOnMain(webView: WebView, w: Int, h: Int): Bitmap? {
-        // Shown in the browser sheet: it is not ours to move, and taking it
-        // would blank the sheet for the length of the capture.
         if (webView.parent != null || webView.isAttachedToWindow) return null
         if (w <= 0 || h <= 0 || w > MAX_EDGE_PX || h > MAX_EDGE_PX) return null
 
         main.removeCallbacks(releaseTask)
         val t0 = SystemClock.elapsedRealtime()
-        // Main-thread time actually spent blocking (the waits in between
-        // suspend and let the UI run) — the number that matters for jank.
         var mainBlockMs = 0L
         fun <T> onMain(block: () -> T): T {
             val s = SystemClock.elapsedRealtime()
@@ -148,8 +80,6 @@ internal object HeadlessRenderHost {
             val host = onMain { ensureHost(webView.context, w, h) } ?: return null
             val tHost = SystemClock.elapsedRealtime()
             onMain {
-                // Scrollbars fade in on attach and would be baked into the
-                // image; the software path never drew them.
                 scrollbars = webView.isVerticalScrollBarEnabled to webView.isHorizontalScrollBarEnabled
                 webView.isVerticalScrollBarEnabled = false
                 webView.isHorizontalScrollBarEnabled = false
@@ -165,13 +95,8 @@ internal object HeadlessRenderHost {
                 ) delay(8)
                 true
             } == true
-            // Timing out is normal for an animated page (it never goes
-            // quiet); any frame of it is a true picture. Only NO frame fails.
             val gotFrames = frameCount >= start + 1
             val tFrame = SystemClock.elapsedRealtime()
-            // The sheet can open mid-capture and re-parent the WebView
-            // (BrowserWebView detaches it from whatever holds it); the frame
-            // we have would then be of an empty window.
             if (webView.parent !== host) {
                 Log.w(TAG, "WebView left the host during capture; falling back")
                 return null
@@ -180,9 +105,6 @@ internal object HeadlessRenderHost {
                 Log.w(TAG, "No composited frame (ready=$ready frames=${frameCount - start}); falling back")
                 return null
             }
-            // Take ownership so the listener cannot close it under us, and
-            // hand the WebView back before the copy: the copy is ~w*h*4
-            // bytes and runs off the main thread.
             image = latest
             latest = null
             onMain { host.removeView(webView) }
@@ -211,12 +133,6 @@ internal object HeadlessRenderHost {
         }
     }
 
-    /**
-     * Resolves once the WebView's current content will be in the next frame
-     * it draws — the documented way to know a (re)attached WebView is not
-     * about to present a stale or empty frame. Bounded: a wedged renderer
-     * must not wedge the screenshot.
-     */
     private suspend fun awaitVisualState(webView: WebView): Boolean {
         val done = CompletableDeferred<Unit>()
         val id = ++visualStateRequest
@@ -242,8 +158,6 @@ internal object HeadlessRenderHost {
         try {
             val dm = app.getSystemService(DisplayManager::class.java) ?: return fail("no DisplayManager")
             r = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 3)
-            // Keep only the newest frame: an ImageReader whose images are
-            // never acquired stops receiving once its queue is full.
             r.setOnImageAvailableListener({ rr ->
                 val img = runCatching { rr.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
                 latest?.close()
@@ -251,8 +165,6 @@ internal object HeadlessRenderHost {
                 frameCount++
                 lastFrameAt = SystemClock.elapsedRealtime()
             }, main)
-            // No PUBLIC flag: a private display only this app can put
-            // content on, needing no permission and invisible to the user.
             vd = dm.createVirtualDisplay(
                 "minis-headless-browser", w, h, app.resources.displayMetrics.densityDpi,
                 r.surface, DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY,
@@ -296,7 +208,6 @@ internal object HeadlessRenderHost {
         return null
     }
 
-    /** Tear everything down; the next capture rebuilds on demand. Main thread. */
     private fun release(why: String) {
         if (presentation == null && display == null && reader == null) return
         main.removeCallbacks(releaseTask)
@@ -315,11 +226,6 @@ internal object HeadlessRenderHost {
         hostH = 0
     }
 
-    /**
-     * Copy an RGBA_8888 [image] into a [w]×[h] ARGB_8888 bitmap. The plane's
-     * rows may be padded (rowStride > w*4), and the last row is not padded, so
-     * the buffer is re-packed row by row rather than bulk-copied.
-     */
     private fun toBitmap(image: Image, w: Int, h: Int): Bitmap {
         val plane = image.planes[0]
         val src = plane.buffer.duplicate().apply { rewind() }

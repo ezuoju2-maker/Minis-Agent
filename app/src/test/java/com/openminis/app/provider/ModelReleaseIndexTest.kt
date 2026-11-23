@@ -5,18 +5,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-model-release-ranking] Guards the parsing and ordering rules that keep a
- * stale (or uncallable) model off the top of a picker — see OpenMinis#83.
- *
- * These exercise the pure logic (date parsing + the Rank comparator). The id
- * matcher itself needs the bundled catalog, which is an Android asset and so is
- * out of reach of a plain JVM unit test; its behaviour was validated separately
- * against the real catalog and a live 868-model device list.
- */
 class ModelReleaseIndexTest {
 
-    // ── date parsing ──────────────────────────────────────────────────────
 
     @Test
     fun `parses full ISO dates`() {
@@ -24,11 +14,6 @@ class ModelReleaseIndexTest {
         assertEquals(2025_08_08, ModelReleaseIndex.parseReleaseDay("2025-08-08"))
     }
 
-    /**
-     * 181 entries in the bundled catalog publish `YYYY-MM` with no day. A strict
-     * parser would return null for all of them and silently sink those models to
-     * the bottom of every list, so the short form must be accepted.
-     */
     @Test
     fun `accepts year-month with no day and treats it as the 1st`() {
         assertEquals(2026_01_01, ModelReleaseIndex.parseReleaseDay("2026-01"))
@@ -39,10 +24,10 @@ class ModelReleaseIndexTest {
         assertNull(ModelReleaseIndex.parseReleaseDay(null))
         assertNull(ModelReleaseIndex.parseReleaseDay(""))
         assertNull(ModelReleaseIndex.parseReleaseDay("soon"))
-        assertNull(ModelReleaseIndex.parseReleaseDay("2026"))          // year only
-        assertNull(ModelReleaseIndex.parseReleaseDay("2026-13-01"))    // month 13
-        assertNull(ModelReleaseIndex.parseReleaseDay("2026-07-32"))    // day 32
-        assertNull(ModelReleaseIndex.parseReleaseDay("26-07-09"))      // 2-digit year
+        assertNull(ModelReleaseIndex.parseReleaseDay("2026"))
+        assertNull(ModelReleaseIndex.parseReleaseDay("2026-13-01"))
+        assertNull(ModelReleaseIndex.parseReleaseDay("2026-07-32"))
+        assertNull(ModelReleaseIndex.parseReleaseDay("26-07-09"))
     }
 
     @Test
@@ -52,7 +37,6 @@ class ModelReleaseIndexTest {
         assertTrue("March must sort after February", newer > older)
     }
 
-    // ── ordering ──────────────────────────────────────────────────────────
 
     private fun rank(day: Int?, cost: Double = 0.0, ctx: Int = 0, name: String = "m") =
         ModelReleaseIndex.Rank(day, cost, ctx, name)
@@ -67,11 +51,6 @@ class ModelReleaseIndexTest {
         assertEquals(listOf(new, old), sorted(old, new))
     }
 
-    /**
-     * The concrete regression: sol/terra/luna all shipped 2026-07-09, so date
-     * alone cannot separate them. Output price is what reflects the capability
-     * tier (30 / 12 / 1.2 USD per Mtok).
-     */
     @Test
     fun `same-day models break the tie on output price, dearest first`() {
         val sol = rank(2026_07_09, cost = 30.0, name = "sol")
@@ -87,11 +66,6 @@ class ModelReleaseIndexTest {
         assertEquals(listOf(big, small), sorted(small, big))
     }
 
-    /**
-     * Undated models are custom / local / relay-hosted entries. They must sink
-     * below everything dated, but they must NOT be dropped — hiding them would
-     * break exactly the users who self-host.
-     */
     @Test
     fun `undated models sink to the bottom but are kept`() {
         val dated = rank(2020_01_01, name = "ancient-but-dated")
@@ -108,11 +82,6 @@ class ModelReleaseIndexTest {
         assertEquals(listOf(a, b), sorted(b, a))
     }
 
-    /**
-     * End-to-end shape of the OpenMinis#83 scenario: ranking the Codex OAuth ids
-     * by their real release dates must float every callable model above every
-     * one the backend rejects.
-     */
     @Test
     fun `codex oauth ordering puts callable models above rejected ones`() {
         val callable = mapOf(

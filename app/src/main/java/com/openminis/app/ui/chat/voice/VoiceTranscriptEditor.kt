@@ -18,25 +18,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.viewinterop.AndroidView
 
-/**
- * [T-android-voice-dblclick-select] The voice transcript's edit mode.
- *
- * It used to be a Compose `BasicTextField`. Compose text fields (1.9) count
- * clicks for the MOUSE only: on touch, a second tap just moves the caret, and
- * selecting a word takes a long press. So once the transcript was in edit
- * mode, double-tapping a word did nothing visible - unlike iOS, where the
- * editor is a UITextView and a double tap selects the word or phrase.
- *
- * A platform EditText behaves like the iOS editor: double tap selects the word
- * under the finger (the platform word iterator, which segments Chinese by
- * dictionary rather than one character at a time), followed by the system
- * selection handles and the copy / cut / paste menu. Long press and caret
- * placement are the platform's own as well.
- *
- * The caller keeps its String; [onValueChange] reports every edit. Focus and
- * the keyboard are taken when the editor appears and given back when it
- * leaves, as the Compose field did.
- */
 @Composable
 internal fun VoiceTranscriptEditor(
     value: String,
@@ -86,8 +67,6 @@ internal fun VoiceTranscriptEditor(
             edit.setTextColor(textColor)
             edit.highlightColor = highlight
             edit.maxHeight = maxHeightPx
-            // An outside change (Clear, backspace button): replace the text,
-            // keeping the caret where it was as far as the new text allows.
             if (edit.tag != value) {
                 val caret = edit.selectionEnd.coerceIn(0, value.length)
                 edit.tag = value

@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- [T-in-chat-search] Search in Chat. English keys from the iOS catalog; locales without an iOS translation fall back to English. -->
 <resources>
     <string name="chat_search_in_chat">Search in Chat</string>
     <string name="chat_search_placeholder">Search this chat</string>

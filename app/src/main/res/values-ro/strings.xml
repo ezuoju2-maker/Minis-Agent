@@ -1,4 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Minis</string>
     <string name="new_chat">Conversație nouă</string>
@@ -1902,7 +1901,6 @@
     <string name="chat_share_n_selected">Selectate: %1$d</string>
     <string name="chat_share_select_all">Selectează tot</string>
     <string name="chat_share_deselect_all">Deselectează tot</string>
-    <!-- [T-port-user-ask] user_ask card and settings; text from the iOS string catalog. -->
     <string name="user_ask_needs_answer">Este nevoie de răspunsul tău</string>
     <string name="user_ask_needs_approval">Este nevoie de aprobarea ta</string>
     <string name="user_ask_high_risk">Acțiune cu risc ridicat</string>
@@ -1945,17 +1943,14 @@
     <string name="user_ask_setting_indefinitely">Nelimitat</string>
     <string name="user_ask_setting_minutes">%1$d min</string>
     <string name="user_ask_setting_footer">Permite asistentului să îți ceară să alegi între opțiuni sau să confirmi o acțiune riscantă înainte de a o face, printr-un card în conversație. Doar în conversațiile în care ești — niciodată pentru subagenți, Scurtături sau sarcini programate. Dezactivat, asistentul decide singur și nu face acțiuni riscante fără acordul tău.</string>
-    <!-- [T-android-user-ask-notify] user_ask background notification. -->
     <string name="user_ask_setting_notify">Notifică în fundal</string>
     <string name="user_ask_notif_high_risk">Aprobare necesară · Risc ridicat</string>
     <string name="user_ask_notif_open_app">Deschide aplicația</string>
     <string name="user_ask_notif_hidden_body">O întrebare așteaptă răspunsul tău</string>
     <string name="user_ask_notif_channel_name">Întrebări pentru tine</string>
     <string name="user_ask_notif_channel_description">Întrebările asistentului cât Minis e în fundal, la care poți răspunde din notificare</string>
-    <!-- [T-tool-preview-longpress-close] Long-press the tool status bar preview -->
     <string name="tool_preview_close_menu">Închide fereastra de previzualizare</string>
     <string name="tool_preview_closed_toast">Fereastra de previzualizare a fost închisă. O puteți reactiva din Configurări &gt; Aspect.</string>
-    <!-- [T-mcp-oauth-signin-android] MCP browser sign-in (iOS #432) -->
     <string name="mcp_form_auth_mode">Autorizare</string>
     <string name="mcp_form_auth_none">Niciunul</string>
     <string name="mcp_signin_not_signed_in">Neautentificat</string>

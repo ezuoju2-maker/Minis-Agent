@@ -39,29 +39,11 @@ import com.openminis.app.data.model.ProviderInstance
 import com.openminis.app.data.repository.ProviderRepository
 import com.openminis.app.provider.thinking.ThinkingRule
 
-/**
- * [T-android-thinking-rules-phase2 §3 / parity with iOS ThinkingRulesSection.swift]
- * Provider-detail "Thinking Rules" section.
- *
- * Behaviour, correct from the start (avoiding the two mistakes iOS shipped then fixed):
- *  1. Built-in rules are collapsed behind a single "Default rules (N)" summary row with a
- *     lock icon — never flat-listed. Tapping one duplicates it as an editable custom rule.
- *  2. Only rules RELEVANT to this provider are shown (relevance-filtered upstream by
- *     [ProviderRepository.builtInThinkingRulesForDisplay]).
- *  3. UI scoping is one-shot: Chat-Completions instances get the full editable list;
- *     Responses-API / Gemini / Anthropic get an explanatory notice (never a hidden
- *     section — silently dropping reads as "feature missing").
- *
- * Reorder is via up/down affordances rather than drag: this section lives inside the
- * provider screen's plain Column (not a LazyColumn), so a drag handle would fight the
- * outer scroll. Up/down is the robust equivalent and keeps sort_order = priority.
- */
 @Composable
 fun ThinkingRulesSection(
     instance: ProviderInstance,
     providerRepository: ProviderRepository,
 ) {
-    // --- UI scoping: official-protocol providers get a notice, not a list ---
     if (!instance.supportsCustomThinkingRules) {
         SettingsSection(header = stringResource(R.string.thinking_rules_section)) {
             Row(
@@ -85,13 +67,11 @@ fun ThinkingRulesSection(
         return
     }
 
-    // reloadKey bumps to force a re-read after any mutation (rules live in Room).
     var reloadKey by remember { mutableStateOf(0) }
     var defaultsExpanded by remember { mutableStateOf(false) }
     var editorRequest by remember { mutableStateOf<ThinkingRuleEditorRequest?>(null) }
 
     val customRules = remember(instance.id, reloadKey) { providerRepository.thinkingRules(instance.id) }
-    // The persisted ids parallel the custom rules in stored order (for edit/delete/reorder).
     val customIds = remember(instance.id, reloadKey) {
         providerRepository.thinkingRuleIds(instance.id)
     }
@@ -106,7 +86,6 @@ fun ThinkingRulesSection(
         header = stringResource(R.string.thinking_rules_section),
         footer = stringResource(R.string.thinking_rules_footer),
     ) {
-        // --- Custom rules (editable, reorderable) ---
         customRules.forEachIndexed { idx, rule ->
             val ruleId = customIds.getOrNull(idx)
             ThinkingRuleRow(
@@ -143,7 +122,6 @@ fun ThinkingRulesSection(
             )
         }
 
-        // --- Default (built-in) rules, collapsed ---
         SettingsRow(
             title = stringResource(R.string.thinking_rules_default_rules_count, builtIns.size),
             icon = Icons.Default.Lock,
@@ -165,7 +143,6 @@ fun ThinkingRulesSection(
                     title = rule.label,
                     subtitle = ruleScopeSummary(rule) + " · " + wireFormatSummary(rule.wireFormat),
                     locked = true,
-                    // Tapping a built-in seeds a NEW custom rule (duplicate-to-override).
                     onClick = {
                         editorRequest = ThinkingRuleEditorRequest(
                             existingId = null,
@@ -181,7 +158,6 @@ fun ThinkingRulesSection(
             }
         }
 
-        // --- Add rule ---
         SettingsRow(
             title = stringResource(R.string.thinking_rules_add_rule),
             icon = Icons.Default.Add,
@@ -202,7 +178,6 @@ fun ThinkingRulesSection(
         )
     }
 
-    // --- Trace line: which rule the sample model would hit ---
     if (sampleModelId != null) {
         val hit = resolveHitDescription(customRules, builtIns, sampleModelId)
         if (hit != null) {
@@ -215,7 +190,6 @@ fun ThinkingRulesSection(
         }
     }
 
-    // --- Editor dialog (hoisted here, not inside a row — Dialog has its own window) ---
     editorRequest?.let { req ->
         ThinkingRuleEditorDialog(
             request = req,
@@ -229,7 +203,6 @@ fun ThinkingRulesSection(
     }
 }
 
-/** Compact rule row with a lock badge for built-ins and up/down/delete affordances for custom. */
 @Composable
 private fun ThinkingRuleRow(
     title: String,

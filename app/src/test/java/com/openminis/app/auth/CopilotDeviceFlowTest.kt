@@ -7,20 +7,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-copilot-provider] Covers the decision surface of the Copilot auth
- * protocol — the parts where a wrong answer is silent rather than loud.
- */
 class CopilotDeviceFlowTest {
 
-    // ── Poll classification ──────────────────────────────────────────────
 
-    /**
-     * The trap this pins: GitHub answers the poll endpoint with HTTP 200 even
-     * while the user has not approved yet, putting `authorization_pending` in
-     * the body. Reading `httpOK` as success would end the poll loop on the
-     * first try and report a login that never happened.
-     */
     @Test
     fun `http 200 with authorization_pending is pending, not success`() {
         val json = JSONObject("""{"error":"authorization_pending"}""")
@@ -46,7 +35,6 @@ class CopilotDeviceFlowTest {
         assertEquals(CopilotDeviceFlow.PollResult.SlowDown, cls("slow_down"))
         assertTrue(cls("access_denied") is CopilotDeviceFlow.PollResult.Denied)
         assertTrue(cls("expired_token") is CopilotDeviceFlow.PollResult.Expired)
-        // Anything unrecognised must stop the loop rather than spin forever.
         assertTrue(cls("unauthorized_client") is CopilotDeviceFlow.PollResult.Fatal)
     }
 
@@ -56,7 +44,6 @@ class CopilotDeviceFlowTest {
         assertEquals(15L, CopilotDeviceFlow.bumpedInterval(10))
     }
 
-    // ── Device authorization parsing ─────────────────────────────────────
 
     @Test
     fun `device authorization parses and defaults interval and expiry`() {
@@ -68,7 +55,6 @@ class CopilotDeviceFlowTest {
         assertEquals(900L, a.expiresInSeconds)
     }
 
-    /** A response missing a required field must not start a poll loop. */
     @Test
     fun `device authorization missing a required field is null`() {
         assertNull(
@@ -78,7 +64,6 @@ class CopilotDeviceFlowTest {
         )
     }
 
-    // ── Session token ────────────────────────────────────────────────────
 
     @Test
     fun `session token prefers absolute expires_at`() {
@@ -89,7 +74,6 @@ class CopilotDeviceFlowTest {
         assertEquals(2000L, s.expiresAtEpochSeconds)
     }
 
-    /** Only `refresh_in` present — derive a deadline rather than give up. */
     @Test
     fun `session token falls back to refresh_in`() {
         val s = CopilotDeviceFlow.parseSessionToken(
@@ -99,11 +83,6 @@ class CopilotDeviceFlowTest {
         assertEquals(2500L, s.expiresAtEpochSeconds)
     }
 
-    /**
-     * No usable expiry means we cannot tell a live token from a dead one.
-     * Returning null forces a fresh exchange instead of caching something
-     * that will 401 later.
-     */
     @Test
     fun `session token with no expiry at all is rejected`() {
         assertNull(
@@ -111,7 +90,6 @@ class CopilotDeviceFlowTest {
         )
     }
 
-    /** Refreshes a minute early, so a request never rides an expiring token. */
     @Test
     fun `session token refreshes sixty seconds before expiry`() {
         val s = CopilotDeviceFlow.SessionToken("t", expiresAtEpochSeconds = 1000)
@@ -120,22 +98,7 @@ class CopilotDeviceFlowTest {
         assertTrue(s.needsRefresh(1001))
     }
 
-    // ── Model list ───────────────────────────────────────────────────────
 
-    /**
-     * An explicit `model_picker_enabled: false` means the account may not choose
-     * that model, so it is dropped.
-     *
-     * [T-android-copilot-model-capabilities] An ABSENT flag is now treated as
-     * VISIBLE, which is a deliberate reversal of the previous default and the
-     * behaviour iOS has always had. The field is missing on older responses, and
-     * there is no fallback behind this list — Copilot ships no built-in catalog
-     * and has no models.dev entry — so excluding-on-absent turns a parsing gap
-     * into a bare "no models" with nothing to diagnose. The reported free-tier
-     * case is the sharp edge: an account limited to the auto-select model would
-     * lose the only model it can use. Showing one extra entry that might fail on
-     * send is the recoverable direction; showing none is not.
-     */
     @Test
     fun `an explicit picker-disabled entry is dropped`() {
         val json = JSONObject(
@@ -152,19 +115,13 @@ class CopilotDeviceFlowTest {
         )
     }
 
-    /** Missing display name falls back to the id rather than an empty label. */
     @Test
     fun `model without a name falls back to its id`() {
         val json = JSONObject("""{"data":[{"id":"o4-mini","model_picker_enabled":true}]}""")
         assertEquals(listOf("o4-mini" to "o4-mini"), CopilotDeviceFlow.parseModelIds(json))
     }
 
-    // ── Headers ──────────────────────────────────────────────────────────
 
-    /**
-     * The exchange uses `token`, chat uses `Bearer`. Mixing them up is silent
-     * — api.github.com simply refuses — so the scheme is pinned here.
-     */
     @Test
     fun `token exchange uses the token scheme, not bearer`() {
         val h = CopilotDeviceFlow.tokenExchangeHeaders("gho_x")
@@ -183,11 +140,6 @@ class CopilotDeviceFlowTest {
         assertEquals("r2", agent["X-Request-Id"])
     }
 
-    // ── [T-android-copilot-per-request-headers] derivation from the body ──
-    //
-    // These headers used to be pinned at construction to user/no-images/one
-    // UUID, so every agent turn went out labelled as human traffic — the
-    // specific thing GitHub acts on.
 
     private fun msg(role: String, text: String) = JSONObject()
         .put("role", role)
@@ -208,7 +160,6 @@ class CopilotDeviceFlowTest {
 
     @Test
     fun `a trailing tool result is labelled agent`() {
-        // The agent loop feeding tool output back is not a person typing.
         val msgs = org.json.JSONArray()
             .put(msg("user", "hi"))
             .put(msg("assistant", "calling a tool"))
@@ -219,8 +170,6 @@ class CopilotDeviceFlowTest {
 
     @Test
     fun `a tool result earlier in the history does not make the turn agent`() {
-        // Only the LAST message decides: a conversation that used tools and then
-        // got a human reply is a user turn again.
         val msgs = org.json.JSONArray()
             .put(msg("tool", "result"))
             .put(msg("user", "thanks, now do this"))
@@ -235,8 +184,6 @@ class CopilotDeviceFlowTest {
         )
         assertEquals("true", CopilotDeviceFlow.perRequestHeaders(chat)["Copilot-Vision-Request"])
 
-        // Responses API spells it differently; Copilot rides whichever builder
-        // the model selects, so both shapes must be recognised.
         val responses = JSONObject().put(
             "input", org.json.JSONArray().put(imageMsg("user", "input_image")),
         )
@@ -245,8 +192,6 @@ class CopilotDeviceFlowTest {
 
     @Test
     fun `the request id differs per call`() {
-        // It used to be one UUID for the life of the provider, which identified
-        // an instance rather than a request.
         val body = JSONObject().put("messages", org.json.JSONArray().put(msg("user", "hi")))
         val a = CopilotDeviceFlow.perRequestHeaders(body)["X-Request-Id"]
         val b = CopilotDeviceFlow.perRequestHeaders(body)["X-Request-Id"]
@@ -256,7 +201,6 @@ class CopilotDeviceFlowTest {
 
     @Test
     fun `an empty or unrecognised body is still answered safely`() {
-        // A sizing/derivation helper must never be the thing that throws.
         val h = CopilotDeviceFlow.perRequestHeaders(JSONObject())
         assertEquals("user", h["X-Initiator"])
         assertNull(h["Copilot-Vision-Request"])
@@ -267,18 +211,14 @@ class CopilotDeviceFlowTest {
         val h = CopilotDeviceFlow.staticChatHeaders()
         assertEquals(CopilotDeviceFlow.EDITOR_VERSION, h["Editor-Version"])
         assertEquals(CopilotDeviceFlow.INTEGRATION_ID, h["Copilot-Integration-Id"])
-        // These vary per request and must NOT be frozen onto the provider.
         assertNull(h["X-Initiator"])
         assertNull(h["X-Request-Id"])
         assertNull(h["Copilot-Vision-Request"])
     }
 
-    // ── [T-android-copilot-model-capabilities] /models parsing ────────────
 
     @Test
     fun `capabilities are carried through, not discarded`() {
-        // Dropping these left every Copilot model with a null context window,
-        // which disables everything that reasons about context size.
         val json = JSONObject(
             """
             {"data":[{"id":"gpt-5","name":"GPT-5","model_picker_enabled":true,
@@ -298,9 +238,6 @@ class CopilotDeviceFlowTest {
 
     @Test
     fun `a missing picker flag means visible, matching iOS`() {
-        // Absent is treated as VISIBLE. Excluding on absent is the dangerous
-        // direction: there is no built-in catalog and no models.dev entry behind
-        // Copilot, so a parsing gap would surface as "no models" with no clue.
         val json = JSONObject("""{"data":[{"id":"only-model"}]}""")
         val parsed = CopilotDeviceFlow.parseModelsDetailed(json)
         assertEquals(1, parsed.models.size)
@@ -327,8 +264,6 @@ class CopilotDeviceFlowTest {
 
     @Test
     fun `unknown capability fields stay null rather than becoming false`() {
-        // null = "the server did not say"; false would read as a real answer and
-        // would, for reasoning, hide the thinking toggle on a capable model.
         val json = JSONObject("""{"data":[{"id":"m","capabilities":{"type":"chat"}}]}""")
         val m = CopilotDeviceFlow.parseModels(json).single()
         assertNull(m.contextWindow)
@@ -348,36 +283,22 @@ class CopilotDeviceFlowTest {
         assertTrue(CopilotDeviceFlow.parseModels(JSONObject("""{"nope":1}""")).isEmpty())
     }
 
-    // ── [T-android-copilot-not-connected] which store answers "signed in" ──
-    //
-    // CopilotOAuthManager needs a Context and EncryptedSharedPreferences, so a
-    // plain JVM test cannot drive the real thing. What IS testable — and what
-    // actually broke — is the decision: which key the answer is read from.
-    // Copilot persists `copilot_github_token`, while the inherited check looked
-    // for `access_token` inside `oauth_tokens_<id>`, a blob Copilot never
-    // writes. So a completed sign-in read as "not signed in" everywhere.
 
-    /** The prefs shapes the two implementations inspect. */
     private class FakeStore {
         val prefs = mutableMapOf<String, String>()
         fun copilotLogin(id: String) { prefs["oauth_copilot_github_token_$id"] = "gho_abc123" }
-        /** What every OTHER provider writes, and what the base class reads. */
         fun genericLogin(id: String) { prefs["oauth_tokens_$id"] = """{"access_token":"tok"}""" }
 
-        /** The inherited implementation. */
         fun baseIsAuthenticated(id: String): Boolean {
             val blob = prefs["oauth_tokens_$id"] ?: return false
             return JSONObject(blob).optString("access_token", "").isNotEmpty()
         }
-        /** Copilot's override. */
         fun copilotIsAuthenticated(id: String): Boolean =
             !prefs["oauth_copilot_github_token_$id"].isNullOrEmpty()
     }
 
     @Test
     fun `the inherited check cannot see a Copilot sign-in`() {
-        // This is the bug, pinned: the base implementation is not merely
-        // incomplete for Copilot, it is unable to answer at all.
         val store = FakeStore()
         store.copilotLogin("i1")
         assertFalse("the store Copilot writes is not the one the base reads",
@@ -400,33 +321,21 @@ class CopilotDeviceFlowTest {
 
     @Test
     fun `the override does not disturb other providers`() {
-        // The base path must keep working for everyone who does write the
-        // generic blob — the fix is an override, not a change of default.
         val store = FakeStore()
         store.genericLogin("i2")
         assertTrue(store.baseIsAuthenticated("i2"))
-        // …and a generic login is NOT a Copilot credential.
         assertFalse(store.copilotIsAuthenticated("i2"))
     }
 
     @Test
     fun `an expired session token does not revoke the sign-in`() {
-        // Only the GitHub token is the credential; the session tier is derived
-        // and re-minted on demand, so its absence must not read as signed-out.
         val store = FakeStore()
         store.copilotLogin("i1")
         store.prefs.remove("oauth_copilot_session_token_i1")
         assertTrue(store.copilotIsAuthenticated("i1"))
     }
 
-    // ── the credential-visibility rule, stated once ──────────────────────
-    //
-    // Three screens reported "not signed in" for a Copilot instance that WAS
-    // signed in — the detail screen, the provider list, and the send path —
-    // because each asked a store Copilot does not write to. They are one bug
-    // with three faces, and this pins the rule that fixes all of them.
 
-    /** Mirrors `hasAnyCredential`: api key, else the manager, else the blob. */
     private fun hasAnyCredential(
         apiKey: String?,
         allowsEmptyApiKey: Boolean,
@@ -440,9 +349,6 @@ class CopilotDeviceFlowTest {
 
     @Test
     fun `an OAuth provider with no API key is credentialed when its manager says so`() {
-        // The Copilot shape: no API key, nothing in the generic blob, but the
-        // manager holds the credential. Answering false here is what made
-        // sending a message report "No provider configured".
         assertTrue(
             hasAnyCredential(
                 apiKey = null,
@@ -455,8 +361,6 @@ class CopilotDeviceFlowTest {
 
     @Test
     fun `the generic blob still answers for providers that use it`() {
-        // The fix must not narrow the existing path: a provider type that
-        // `forInstance` omits (gemini) has no manager but does have the blob.
         assertTrue(
             hasAnyCredential(
                 apiKey = null,
@@ -491,12 +395,6 @@ class CopilotDeviceFlowTest {
         )
     }
 
-    // ── [T-android-copilot-reasoning-fields] reasoning capability ─────────
-    //
-    // Copilot does NOT send `supports.thinking` — the field iOS reads and this
-    // parser mirrored, which therefore always yielded null. A captured payload
-    // states reasoning as `adaptive_thinking` + `reasoning_effort` instead, and
-    // null means "unknown", which every thinking gate in the app treats as no.
 
     @Test
     fun `adaptive_thinking marks a model as reasoning-capable`() {
@@ -520,8 +418,6 @@ class CopilotDeviceFlowTest {
 
     @Test
     fun `a model advertising neither signal is not reasoning-capable`() {
-        // A real "no", not a gap: this response describes the capability when
-        // it exists, so its absence is informative.
         val json = JSONObject(
             """{"data":[{"id":"m","capabilities":{"type":"chat","supports":
                {"streaming":true,"tool_calls":true}}}]}""".trimIndent(),
@@ -539,8 +435,6 @@ class CopilotDeviceFlowTest {
 
     @Test
     fun `the legacy thinking field still works if it ever appears`() {
-        // Kept as a fallback in case the shape shifts or a proxy emulates the
-        // field iOS assumes.
         val json = JSONObject(
             """{"data":[{"id":"m","capabilities":{"type":"chat","supports":{"thinking":true}}}]}""",
         )

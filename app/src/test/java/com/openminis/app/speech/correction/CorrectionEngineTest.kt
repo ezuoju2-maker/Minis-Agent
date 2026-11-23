@@ -7,15 +7,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-voice-correction] Phase 2 engine + strategy tests. The strategy and
- * signal sources are faked, so these run on the JVM with no model, DB or device.
- */
 class CorrectionEngineTest {
 
-    /** Character-level tokenizer, enough to exercise key extraction. */
     private val charTokens: (String) -> List<String> = { text ->
-        // Crude bigram split so tokens clear the length >= 2 filter.
         text.chunked(2)
     }
 
@@ -67,7 +61,6 @@ class CorrectionEngineTest {
         consent: () -> Boolean = { false },
     ) = VoiceCorrectionEngine(sources, strategy, null, charTokens, consent)
 
-    // -- bail-outs --
 
     @Test
     fun `empty input is rejected without calling the model`() = runBlocking {
@@ -82,7 +75,6 @@ class CorrectionEngineTest {
     fun `unchanged output is not a failure`() = runBlocking {
         val s = engine(FakeStrategy({ it })).correct("今天天气不错")
         assertFalse(s.hasChange)
-        // Explicitly NOT a rejection — the model looked and found nothing.
         assertNull(s.rejectedReason)
         assertEquals("sub", s.modelGroupUsed)
     }
@@ -92,7 +84,6 @@ class CorrectionEngineTest {
         val s = engine(FakeStrategy({ "完全不同的另外一段话内容在这里" })).correct("张山说今天有空")
         assertEquals("diff_too_large", s.rejectedReason)
         assertFalse(s.hasChange)
-        // The user's original text must be preserved.
         assertEquals("张山说今天有空", s.corrected)
     }
 
@@ -113,7 +104,6 @@ class CorrectionEngineTest {
         assertTrue("summary was '${s.diffSummary}'", s.diffSummary.contains("→"))
     }
 
-    // -- retrieval / fusion --
 
     @Test
     fun `unsupported locale yields no candidates`() = runBlocking {
@@ -123,14 +113,9 @@ class CorrectionEngineTest {
         assertEquals("source must not be queried for an unsupported locale", 0, src.lookups)
     }
 
-    // NOTE: retrieveCandidates() cannot be exercised end-to-end on the JVM —
-    // it normalizes through android.icu, which is not available here. Fusion is
-    // therefore tested directly via the exposed helper, and the full retrieval
-    // path is covered by the instrumented tests.
 
     @Test
     fun `fusion prefers the higher weighted source for the same term`() {
-        // confusion: 1.0 x 0.9 = 0.90   vocabulary: 0.6 x 1.0 = 0.60
         val confusion = CorrectionCandidate("k", "食堂", 0.9, "confusion_dictionary", "e1")
         val vocab = CorrectionCandidate("k", "食堂", 1.0, "typed_vocabulary", "e2")
         val sources = listOf(
@@ -139,9 +124,7 @@ class CorrectionEngineTest {
         )
         val e = VoiceCorrectionEngine(sources, FakeStrategy({ it }), null, charTokens) { false }
         val out = e.fuseForTest(listOf(vocab, confusion))
-        // Deduped to ONE entry for the same phoneticKey|term…
         assertEquals(1, out.count { it.term == "食堂" })
-        // …and the winner is the higher-scoring confusion row.
         assertEquals("confusion_dictionary", out.first { it.term == "食堂" }.sourceIdentifier)
     }
 
@@ -167,12 +150,10 @@ class CorrectionEngineTest {
             ): List<CorrectionCandidate> = throw IllegalStateException("db down")
         }
         val e = VoiceCorrectionEngine(listOf(bad), FakeStrategy({ it }), null, charTokens) { false }
-        // Must not throw.
         assertEquals(emptyList<CorrectionCandidate>(), e.retrieveCandidates("食堂在哪", "zh"))
     }
 }
 
-/** Prompt assembly and response cleaning — pure functions, no model. */
 class CorrectionStrategyTest {
 
     private fun candidate(source: String, term: String, evidence: String) =
@@ -182,18 +163,13 @@ class CorrectionStrategyTest {
     fun `max tokens floors high enough for reasoning models and respects the cap`() {
         val floor = LlmCorrectionStrategy.MIN_OUTPUT_TOKENS
         assertEquals(floor, LlmCorrectionStrategy.correctionMaxTokens(10, null))
-        // Long transcripts scale past the floor.
         assertEquals(12000, LlmCorrectionStrategy.correctionMaxTokens(10000, null))
-        // The model's own cap always wins.
         assertEquals(800, LlmCorrectionStrategy.correctionMaxTokens(10000, 800))
-        // A zero/absent cap must not clamp to zero.
         assertEquals(floor, LlmCorrectionStrategy.correctionMaxTokens(10, 0))
     }
 
     @Test
     fun `the floor leaves room for a reasoning model's hidden tokens`() {
-        // Regression guard: at 512 a MiMo correction spent every output token
-        // on reasoning and returned empty content. Do not lower this.
         assertTrue(
             "floor is ${LlmCorrectionStrategy.MIN_OUTPUT_TOKENS}",
             LlmCorrectionStrategy.MIN_OUTPUT_TOKENS >= 2048,
@@ -240,7 +216,6 @@ class CorrectionStrategyTest {
         )
     }
 
-    // -- response cleaning --
 
     @Test
     fun `clean strips code fences`() {
@@ -268,12 +243,10 @@ class CorrectionStrategyTest {
 
     @Test
     fun `clean does not strip an asymmetric quote`() {
-        // Only symmetric pairs unwrap, so a legitimate leading quote survives.
         assertEquals("\"食堂在哪", LlmCorrectionStrategy.cleanResponse("\"食堂在哪"))
     }
 }
 
-/** Rare-content scoring and the budgeted context builder. */
 class CorrectionContextBuilderTest {
 
     private val fakeRank: (String) -> Int? = { term ->
@@ -289,11 +262,11 @@ class CorrectionContextBuilderTest {
 
     @Test
     fun `technical shapes score 90`() {
-        assertEquals(90, RareContentScorer.score("CppJieba", fakeRank))   // interior caps
-        assertEquals(90, RareContentScorer.score("HTTP", fakeRank))       // all caps
-        assertEquals(90, RareContentScorer.score("read_image", fakeRank)) // joiner
-        assertEquals(90, RareContentScorer.score("gpt5", fakeRank))       // latin+digit
-        assertEquals(90, RareContentScorer.score("用iPhone", fakeRank))   // cjk+latin
+        assertEquals(90, RareContentScorer.score("CppJieba", fakeRank))
+        assertEquals(90, RareContentScorer.score("HTTP", fakeRank))
+        assertEquals(90, RareContentScorer.score("read_image", fakeRank))
+        assertEquals(90, RareContentScorer.score("gpt5", fakeRank))
+        assertEquals(90, RareContentScorer.score("用iPhone", fakeRank))
     }
 
     @Test
@@ -305,9 +278,7 @@ class CorrectionContextBuilderTest {
 
     @Test
     fun `multi-char cjk scores by rare ratio`() {
-        // All-common hanzi -> the 40 floor.
         assertEquals(40, RareContentScorer.score("电话", fakeRank))
-        // Contains rare chars -> above the floor.
         assertTrue(RareContentScorer.score("鉴权", fakeRank) > 40)
     }
 
@@ -332,7 +303,6 @@ class CorrectionContextBuilderTest {
         )
         val ctx = CorrectionContextBuilder.build(msgs, charTokens, fakeRank)
         assertEquals(2, ctx.recentExcerpts.size)
-        // Re-sorted oldest -> newest so the model reads chronologically.
         assertTrue(ctx.recentExcerpts[0].contains("用户"))
         assertTrue(ctx.recentExcerpts[1].contains("最新"))
     }

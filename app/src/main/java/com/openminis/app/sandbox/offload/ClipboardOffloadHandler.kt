@@ -12,40 +12,12 @@ import com.openminis.app.sandbox.NativeOffloadResult
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * android-clipboard — get, set, clear, or query the device clipboard.
- *
- * T65: re-aligned with iOS apple-clipboard (NativeOffloads/ClipboardOffload.m).
- * Adds:
- *   - `status` subcommand mirroring iOS — returns `has_content`, `types`,
- *     `item_count` so the model can probe before reading.
- *   - `--text <value>` named flag on `set` — preferred over the legacy
- *     positional form (`android-clipboard set Hello world`) so multi-word
- *     text without explicit quoting works without surprising tokenisation.
- *     The legacy positional form still works for back-compat.
- *
- * Android 10+ restricts clipboard reads from background — `primaryClip`
- * returns null unless the app has window focus or is the default IME. We
- * detect that case and return a specific error so the caller knows the
- * failure is recoverable by foregrounding the app rather than a permission
- * problem.
- *
- * Usage:
- *   android-clipboard get
- *   android-clipboard set --text "Hello world"
- *   android-clipboard set Hello world         # legacy positional, still works
- *   android-clipboard clear
- *   android-clipboard status
- */
 class ClipboardOffloadHandler(private val context: Context) : NativeOffloadHandler {
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
         val args = OffloadArgs(request.argv.drop(1))
-        // [T-offload-defaults-batch-android] Help only on explicit
-        // --help/-h; no subcommand defaults to `get`.
         if (args.hasFlag("h", "help")) {
             return NativeOffloadResult(0, HELP)
         }
-        // T330: tri-state agent gate before any work.
         OffloadGate.enforce("clipboard", "android-clipboard", args, request)?.let { return it }
 
         val cm = try {
@@ -79,7 +51,6 @@ class ClipboardOffloadHandler(private val context: Context) : NativeOffloadHandl
         }
     }
 
-    // ── Subcommands ──────────────────────────────────────────────────────────
 
     private fun doGet(cm: ClipboardManager, args: OffloadArgs): NativeOffloadResult {
         if (!isAppForeground() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -89,19 +60,12 @@ class ClipboardOffloadHandler(private val context: Context) : NativeOffloadHandl
         if (clip == null || clip.itemCount == 0) {
             return NativeOffloadResult(0, "")
         }
-        // Backwards-compat: get's primary output is still the raw clipboard
-        // text (lots of pipe consumers depend on it). The iOS version emits
-        // structured JSON; we only switch to JSON when --json is requested
-        // so existing prompts (`text=$(android-clipboard get)`) keep working.
         val text = try { clip.getItemAt(0).coerceToText(context).toString() } catch (_: Throwable) { "" }
         val body = OffloadOutput.formatBody(text.trimEnd('\n'), args)
         return NativeOffloadResult(0, "$body\n")
     }
 
     private fun doSet(cm: ClipboardManager, args: OffloadArgs): NativeOffloadResult {
-        // T65: --text is the preferred form; falls back to the legacy
-        // positional form for back-compat. Whichever path delivers
-        // non-blank text wins.
         val text = args.get("text") ?: args.positional.drop(1).joinToString(" ")
         if (text.isBlank()) {
             return NativeOffloadResult(
@@ -126,22 +90,6 @@ class ClipboardOffloadHandler(private val context: Context) : NativeOffloadHandl
         return NativeOffloadResult(0, OffloadOutput.formatBody("Clipboard cleared.", args) + "\n")
     }
 
-    /**
-     * iOS apple-clipboard `status` returns:
-     *   {has_content, types, item_count, change_count}
-     *
-     * Android port:
-     *   - `has_content` — true iff there's a primary clip with at least 1 item
-     *   - `types` — list of MIME types from the first item's clip description
-     *     (Android exposes MIME types directly, more precise than iOS's
-     *     coarse "strings/urls/images" buckets — we still bucket the
-     *     iOS-style values into a parallel `categories` array so prompts
-     *     learned for iOS keep working without modification)
-     *   - `item_count` — `primaryClip.itemCount`
-     *   - `change_count` — Android doesn't expose a clipboard change counter,
-     *     omitted (the field is simply not in the JSON body, not zero,
-     *     so prompts can detect platform difference)
-     */
     private fun doStatus(cm: ClipboardManager, args: OffloadArgs): NativeOffloadResult {
         if (!isAppForeground() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             return backgroundError(args)
@@ -181,12 +129,11 @@ class ClipboardOffloadHandler(private val context: Context) : NativeOffloadHandl
         return NativeOffloadResult(0, OffloadOutput.formatBody(body, args) + "\n")
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
 
     private fun isAppForeground(): Boolean {
         return try {
             val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-                ?: return true  // can't tell — assume OK, let the actual call surface errors
+                ?: return true
             val procs = am.runningAppProcesses.orEmpty()
             val pid = android.os.Process.myPid()
             procs.any { it.pid == pid && it.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND }
@@ -207,8 +154,6 @@ class ClipboardOffloadHandler(private val context: Context) : NativeOffloadHandl
 
     companion object {
         private const val TAG = "ClipboardOffload"
-        // Local copies of android.content.ClipDescription constants so the
-        // status switch reads cleanly without an extra import.
         private const val ClipDescription_MIMETYPE_TEXT_PLAIN = "text/plain"
         private const val ClipDescription_MIMETYPE_TEXT_URILIST = "text/uri-list"
         private const val HELP = """android-clipboard — access the device clipboard

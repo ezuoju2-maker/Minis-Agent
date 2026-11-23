@@ -5,16 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-programmatic-prompt-keeps-draft] A prompt nobody typed (a
- * scheduled fire, a sub-agent callback, the sessions CLI) must never touch the
- * composer draft (iOS 2a06de66a).
- *
- * Android's headless path already carried its text as an argument, but the
- * pre-send context check's auto-compact branch cleared `_inputText`
- * unconditionally, so a background prompt that tripped the compact threshold
- * erased what the user was typing.
- */
 class ProgrammaticPromptKeepsDraftTest {
 
     private val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
@@ -35,7 +25,6 @@ class ProgrammaticPromptKeepsDraftTest {
     @Test
     fun `the send after compaction stays headless`() {
         val compactAndSend = branch("fun compactAndSendPending(", "fun sendPendingWithoutCompacting(")
-        // [T-headless-own-attachments] ...and takes its own files, never the composer's.
         assertTrue(compactAndSend.contains("sendMessage(text, skipContextCheck = true, headless = headless, prefill = prefill, headlessAttachments = ownFiles)"))
         val sendWithout = branch("fun sendPendingWithoutCompacting(", "fun cancelCompactBeforeSend(")
         assertTrue(sendWithout.contains("headless = headless"))

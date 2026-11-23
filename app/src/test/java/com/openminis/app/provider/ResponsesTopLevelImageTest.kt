@@ -15,32 +15,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-android-responses-toplevel-images] Regression tests for images passed as
- * the TOP-LEVEL `imageParts` argument on the Responses API path.
- *
- * The bug: `buildResponsesAPIBody` had no `imageParts` parameter at all, so
- * every caller that supplies images that way — `minis-model-use` (`image_url`
- * blocks) and `VisionGroupResolver.describeOnce` — had the pixels dropped with
- * no error the moment the provider used `useResponsesAPI`. The reported symptom
- * was a vision model replying "no image was provided" while the UI happily
- * showed the thumbnail.
- *
- * These assert the WIRE BODY, because the wire body is what was wrong. A test
- * that only checked "the call succeeded" would have passed against the bug.
- */
 class ResponsesTopLevelImageTest {
 
     private lateinit var server: MockWebServer
 
-    /** 1x1 PNG-ish bytes; content is irrelevant, presence on the wire is not. */
     private val pixels = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
 
     @Before
     fun setUp() {
         server = MockWebServer()
         server.start()
-        // Minimal well-formed Responses SSE so the call completes.
         server.enqueue(
             MockResponse()
                 .setHeader("Content-Type", "text/event-stream")
@@ -75,7 +59,6 @@ class ResponsesTopLevelImageTest {
         useResponsesAPI = true,
     )
 
-    /** Run one request and return the JSON body that actually went out. */
     private fun capturedBody(
         model: LLMModel,
         images: List<LLMMessage.ImagePart>,
@@ -93,7 +76,6 @@ class ResponsesTopLevelImageTest {
         return JSONObject(server.takeRequest().body.readUtf8())
     }
 
-    /** All content blocks of the last `input` item, flattened. */
     private fun lastInputContent(body: JSONObject): JSONArray {
         val input = body.optJSONArray("input")
         assertNotNull("request has no `input` array: $body", input)
@@ -111,7 +93,6 @@ class ResponsesTopLevelImageTest {
             .map { content.getJSONObject(it) }
             .filter { it.optString("type") == type }
 
-    // ---- the reported bug -------------------------------------------------
 
     @Test
     fun `top-level image reaches the wire as input_image`() {
@@ -131,8 +112,6 @@ class ResponsesTopLevelImageTest {
 
     @Test
     fun `the prompt text still rides along with the image`() {
-        // The original bug shipped text-only; asserting the image alone would
-        // not catch a fix that dropped the instruction instead.
         val content = lastInputContent(
             capturedBody(
                 visionModel(),
@@ -157,7 +136,6 @@ class ResponsesTopLevelImageTest {
         assertEquals(2, blocksOfType(lastInputContent(body), "input_image").size)
     }
 
-    // ---- controls ---------------------------------------------------------
 
     @Test
     fun `a non-vision model gets the placeholder, never raw pixels`() {
@@ -186,8 +164,6 @@ class ResponsesTopLevelImageTest {
 
     @Test
     fun `no images means the body shape is unchanged`() {
-        // Guards the common path: adding image support must not restructure
-        // ordinary text-only requests.
         val body = capturedBody(visionModel(), emptyList(), text = "plain question")
         val input = body.optJSONArray("input")!!
         val last = input.getJSONObject(input.length() - 1)

@@ -7,29 +7,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * How a destination's credentials reach rclone.
- *
- * Two rules here are counter-intuitive and were each found against a real
- * server, so they are pinned rather than left to a future reader's judgement:
- *
- *  1. `secret_access_key` is consumed VERBATIM. Obscuring it — which is right
- *     for every password field — makes S3 sign each request with the obscured
- *     blob and every call fails with SignatureDoesNotMatch.
- *  2. Anonymous access needs an OBSCURED EMPTY password, not an absent one.
- *     rclone de-obscures whatever it finds in `pass`, including the option's
- *     own "" default, so both a bare "" and a missing key fail with
- *     "input too short when revealing password".
- *
- * No test asserts on a real credential value beyond the fixtures defined here,
- * and nothing is logged.
- */
 class RcloneRemoteConfigTest {
 
-    /** Stand-in for `core/obscure`: prefixed so it is unmistakably transformed. */
     private val obscure: (String) -> String? = { "OBSCURED(${it.length})" }
 
-    /** The RPC being unavailable — exercises each fallback. */
     private val obscureFails: (String) -> String? = { null }
 
     private fun build(
@@ -39,7 +20,6 @@ class RcloneRemoteConfigTest {
         obscureFn: (String) -> String? = obscure,
     ) = RcloneRemoteStore.buildConfigParams(backend, params, secret, obscureFn)
 
-    // MARK: - A. S3 secret must not be obscured
 
     @Test
     fun `s3 secret is passed through verbatim`() {
@@ -50,10 +30,6 @@ class RcloneRemoteConfigTest {
         assertNull("s3 must not write a pass key", out["pass"])
     }
 
-    /**
-     * The reported shape: base64-ish secrets carry `/`, `+` and `=`, which is
-     * exactly the class of value a naive transform mangles.
-     */
     @Test
     fun `s3 secret survives special characters unchanged`() {
         for (secret in listOf(
@@ -83,7 +59,6 @@ class RcloneRemoteConfigTest {
     @Test
     fun `obscure failure falls back to the plaintext rather than dropping the key`() {
         val out = build("webdav", mapOf("user" to "u"), "hunter2", obscureFails)
-        // Better a working config than a silently credential-less one.
         assertEquals("hunter2", out["pass"])
     }
 
@@ -103,13 +78,11 @@ class RcloneRemoteConfigTest {
         }
     }
 
-    // MARK: - B. Anonymous access
 
     @Test
     fun `anonymous webdav gets an obscured empty password, not an absent key`() {
         val out = build("webdav", mapOf("url" to "https://example.com/dav"), secret = null)
 
-        // The whole point: present, and obscured.
         assertEquals("OBSCURED(0)", out["pass"])
     }
 
@@ -125,10 +98,6 @@ class RcloneRemoteConfigTest {
         assertEquals("OBSCURED(0)", out["pass"])
     }
 
-    /**
-     * S3 is the exception: an anonymous bucket wants NO key, because the value
-     * would be used literally rather than de-obscured.
-     */
     @Test
     fun `anonymous s3 writes no secret key at all`() {
         val out = build("s3", mapOf("endpoint" to "s3.example.com"), secret = null)
@@ -139,13 +108,10 @@ class RcloneRemoteConfigTest {
 
     @Test
     fun `an empty secret is never written as a parameter`() {
-        // s3 takes the no-key branch; the others take the obscured-blank one,
-        // so neither ever stores a bare empty string.
         assertFalse(build("s3", secret = "").containsKey("secret_access_key"))
         assertEquals("OBSCURED(0)", build("ftp", secret = "")["pass"])
     }
 
-    // MARK: - B. SMB share-less + guest
 
     @Test
     fun `a legacy stored share is stripped from smb config`() {
@@ -161,17 +127,10 @@ class RcloneRemoteConfigTest {
 
     @Test
     fun `share is only stripped for smb`() {
-        // No other backend uses the key, but a blanket strip would be a
-        // surprising thing to leave in place.
         val out = build("webdav", mapOf("url" to "https://x/dav", "share" to "keepme"), "pw")
         assertEquals("keepme", out["share"])
     }
 
-    /**
-     * rclone's smb `user` defaults to the OS login name when absent, so an
-     * omitted username authenticates as some unrelated account instead of
-     * connecting as guest. It has to be an explicit empty string.
-     */
     @Test
     fun `smb guest forces an explicit empty username`() {
         for (params in listOf(
@@ -192,7 +151,6 @@ class RcloneRemoteConfigTest {
         assertEquals("OBSCURED(2)", out["pass"])
     }
 
-    // MARK: - Untouched backends
 
     @Test
     fun `sftp and s3 required fields are unaffected`() {

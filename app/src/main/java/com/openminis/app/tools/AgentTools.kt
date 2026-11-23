@@ -5,27 +5,11 @@ import com.openminis.app.data.model.AgentToolDefinition
 import com.openminis.app.data.model.AgentToolParam
 import com.openminis.app.data.model.SubAgentDefinition
 
-/**
- * Central registry of all agent tool definitions.
- * Returns provider-agnostic AgentToolDefinition list used by the agent loop.
- * Tool definitions aligned with iOS AIChatViewModel.makeAgentTools().
- */
 object AgentTools {
 
-    // [perf-tool-schema-cache] Every agent turn reads `agentTools` 3+ times
-    // (token estimate, preflight validation, provider request). makeAgentTools
-    // is a PURE function of its 9 flags (definition() calls build plain data
-    // classes, no I/O), and the flags do not change mid-turn — so rebuilding
-    // the whole schema (~12 definitions, hundreds of maps/lists and long
-    // description strings) every read is pure waste. Cache by the full
-    // argument signature with a small LRU; a flag change produces a new key
-    // and takes effect on the next request, preserving the "rename is live"
-    // guarantee the roster/skill comments promise. The returned definitions
-    // are immutable data classes that providers only READ (toXxxJson builds a
-    // fresh JSONObject each time), so sharing the list across reads is safe.
     private const val TOOL_CACHE_CAPACITY = 16
     private val toolsCache = object : LinkedHashMap<List<Any?>, List<AgentToolDefinition>>(
-        TOOL_CACHE_CAPACITY, 0.75f, true, // accessOrder=true → LRU
+        TOOL_CACHE_CAPACITY, 0.75f, true,
     ) {
         override fun removeEldestEntry(
             eldest: MutableMap.MutableEntry<List<Any?>, List<AgentToolDefinition>>?,
@@ -35,45 +19,13 @@ object AgentTools {
     @Synchronized
     fun makeAgentTools(
         supportsImageInput: Boolean = true,
-        // [T-android-vision-group / GH#182] When the main model can't natively
-        // see images but the user has bound a Vision Group, still expose
-        // read_image: ReadImageTool routes the image through a vision-capable
-        // group member and returns a text description. Mirrors iOS makeAgentTools
-        // visionGroupConfigured. Neither native vision nor a Vision Group → tool
-        // stays absent (current behaviour).
         visionGroupConfigured: Boolean = false,
-        // [T-memory-toggle-gates-injection-and-tools-android] When the
-        // user has turned memory off (via /memory or
-        // Settings/SessionMemorySheet), drop both memory_write and
-        // memory_get from the schema entirely so the model can't even
-        // attempt those calls. Mirrors the iOS gate at
-        // AIChatViewModel.makeAgentTools(memoryEnabled:).
         memoryEnabled: Boolean = true,
-        // [T-p1-delegate-task] True for a helper (child) vm. Depth = 1: a
-        // helper never sees delegate_task; it also loses memory_write (design
-        // §4.3 — helpers have no long-term memory). memory_get stays so a
-        // helper can still LOOK things up.
         isHelper: Boolean = false,
-        // [T-p2-agent-settings] Settings › Agents can remove delegation globally.
         delegateEnabled: Boolean = true,
-        // [T-tools-granular-switches] Settings › Agent Tools can remove
-        // browser_use globally. Separate from delegateEnabled because the two
-        // are independent user choices; mirrors iOS AgentToolSwitch.browser.
         browserEnabled: Boolean = true,
-        // [T-sub-agents-v1] The names of the enabled sub agents, in roster
-        // order. These become `subagent_task.agent`'s enum, and the caller
-        // rebuilds them every turn: the schema is not cached, so a rename takes
-        // effect on the next request and the model cannot emit a name that
-        // would fail to resolve. Empty falls back to the built-in's name so the
-        // enum is never an empty list (which some providers reject).
         rosterNames: List<String> = listOf(SubAgentDefinition.BUILT_IN_NAME),
-        // [T-port-user-ask] Decided once per run by UserAskExposure (switch on,
-        // not a sub agent, an interactive run). Not in the list = does not
-        // exist: no schema, no prompt line, no retries on it. Last, as on iOS.
         userAskExposed: Boolean = false,
-        // [OPT-skill-load] True when the session has at least one enabled skill.
-        // The schema is rebuilt each turn, so installing/removing a skill takes
-        // effect on the next request without a VM rebuild.
         skillsAvailable: Boolean = false,
     ): List<AgentToolDefinition> {
         val key = listOf<Any?>(
@@ -89,7 +41,6 @@ object AgentTools {
         return built
     }
 
-    /** Pure builder — kept separate so [makeAgentTools] can memoize its result. */
     private fun buildTools(
         supportsImageInput: Boolean,
         visionGroupConfigured: Boolean,
@@ -105,11 +56,7 @@ object AgentTools {
         add(FileReadTool.definition())
         add(FileWriteTool.definition())
         add(FileEditTool.definition())
-        // [v1.62-apply-patch] Multi-file atomic change set. Exposed to helpers
-        // too: a delegated refactor benefits from one round-trip the same way.
         add(ApplyPatchTool.definition())
-        // [v1.62-repo-map] Read-only project outline; the cheap first look that
-        // replaces blind ls/find + full-file reads.
         add(RepoMapTool.definition())
         if (supportsImageInput || visionGroupConfigured) {
             add(ReadImageTool.definition())
@@ -118,48 +65,18 @@ object AgentTools {
         if (memoryEnabled) {
             if (!isHelper) add(memoryWriteDefinition())
             add(memoryGetDefinition())
-            // [self-improvement] Structured, strengthening facts — the
-            // "gets wiser with use" layer. Helpers may READ facts but must not
-            // write them (same rule as memory_write).
             if (!isHelper) add(memoryFactDefinition())
             else add(memoryFactDefinition(helperReadOnly = true))
         }
         if (!isHelper && delegateEnabled) {
             add(subAgentTaskDefinition(rosterNames))
         }
-        // [OPT-todo-write] Task-planning tool for multi-step work. Helpers don't
-        // get it (a delegated subtask manages its own short loop).
         if (!isHelper) add(TodoTools.definition())
-        // [OPT-skill-load] Resolve a skill by name and inject its full SKILL.md,
-        // avoiding storage-path/id hallucinations. Only when skills exist.
         if (skillsAvailable) add(SkillLoadTool.definition())
-        // [self-improvement] Let the main agent distil a proven, reusable
-        // procedure into a durable skill it can reload in future sessions.
-        // Always exposed (even with zero skills, so the first one can be
-        // created) but never to helpers — a child must not pollute the library.
         if (!isHelper) add(SkillSaveTool.definition())
         if (userAskExposed && !isHelper) add(com.openminis.app.agent.userask.UserAskPromptText.definition())
     }
 
-    /**
-     * [T-sub-agents-v1] The one sub agent tool: delegate, and inspect or stop
-     * what you delegated.
-     *
-     * Replaces `delegate_task` + `agent_status`. The separate status tool is
-     * folded in as an `action`, so the model sees ONE tool — the shape iOS
-     * settled on. Description text is byte-identical to iOS
-     * `AIChatViewModel+ToolDefinitions.swift`; the two clients present one
-     * contract to the same models, so these strings are copied, never
-     * paraphrased.
-     *
-     * [rosterNames] are the enabled sub agents' names, rebuilt every turn
-     * (the schema is not cached), so a rename takes effect on the next request
-     * and the model cannot invent a name that would fail to resolve.
-     *
-     * `task` is deliberately NOT in [required]: it is required for
-     * action=delegate and meaningless for status/cancel, which JSON Schema
-     * cannot express here. The dispatcher rejects a delegate call with no task.
-     */
     private fun subAgentTaskDefinition(rosterNames: List<String>): AgentToolDefinition =
         AgentToolDefinition(
             name = SubAgentDefinition.TOOL_NAME,
@@ -186,7 +103,6 @@ object AgentTools {
             ),
         )
 
-    // Aligned with iOS AIChatViewModel.swift:4982-4993
     private fun shellExecuteDefinition(): AgentToolDefinition = AgentToolDefinition(
         name = "shell_execute",
         description = "Execute a command in an isolated Linux process (Ubuntu 24.04 via PRoot). " +
@@ -198,8 +114,6 @@ object AgentTools {
         parameters = mapOf(
             "tool_title" to AgentToolParam("string", "A concise 5-10 word summary of what this tool call does, shown to the user (e.g. 'Install Python data analysis packages', 'List files in home directory'). Use the same language as the user."),
             "command" to AgentToolParam("string", "The shell command to execute. Supports multi-line commands directly — no special escaping needed. Keep under 1000 chars; for longer scripts, write to a file with file_write first, then run it."),
-            // [T-android-parity-fixes] State the ceiling. It used to say only "use
-            // a larger value" while values above 900 were silently cut to 900.
             "timeout" to AgentToolParam("integer", "Timeout in seconds. Omit it and the app picks by command type: quick commands ~60s, network ~180s, package installs ~600s, builds ~1200s. If you set it explicitly, 1–3600 (larger values are capped). Set a larger value only for genuinely long-running commands."),
             "delay" to AgentToolParam("integer", "Delay in seconds before execution begins. The tool blocks the agent flow during this wait WITHOUT occupying the shell, so other concurrent tasks can use it. Use this instead of sleep commands to avoid resource contention."),
         ),
@@ -207,13 +121,8 @@ object AgentTools {
         propertyOrdering = listOf("tool_title", "command", "timeout", "delay"),
     )
 
-    // Aligned with iOS AIChatViewModel.swift browser_use definition
     private fun browserUseDefinition(): AgentToolDefinition = AgentToolDefinition(
         name = "browser_use",
-        // [T-android-browser-tab-ownership] "up to 3" stopped being true once
-        // the ceiling became dynamic (3 alone, +2 per active agent, capped at
-        // 6), and an agent sees only its own tabs anyway — so the honest thing
-        // to tell it is which tabs it may use, not a number that is now wrong.
         description = "Control a web browser with a few tabs (list_tabs shows the ones you may use). " +
             "Do NOT use this tool for minis:// action URLs (open_terminal, views, settings) — those are app deep links, use Markdown links in chat instead. " +
             "The browser supports both web URLs and minis:// resource URLs. Use minis:// URLs to preview session files (e.g. navigate to minis://workspace/index.html). " +
@@ -254,21 +163,12 @@ object AgentTools {
             "viewport_width" to AgentToolParam("integer", "Viewport width in CSS pixels for set_viewport (e.g. 1920). Required together with viewport_height unless reset=true."),
             "viewport_height" to AgentToolParam("integer", "Viewport height in CSS pixels for set_viewport (e.g. 1080). Required together with viewport_width unless reset=true."),
             "reset" to AgentToolParam("boolean", "For set_viewport: when true, clear the session-level viewport override and fall back to the global browser setting."),
-            // [T-android-browser-full-page-schema] The capability was already
-            // implemented end to end (BrowserActionInput parses `full_page`,
-            // BrowserUseManager.screenshot stretches the WebView and caps at
-            // MAX_FULL_PAGE_HEIGHT_PX) — it was simply never declared, so the
-            // model had no way to ask for it. Wording adapted from iOS: the
-            // mechanism differs (Android stretches the WebView's viewport
-            // rather than resizing a WKWebView), the cap and the truncation
-            // reporting are identical.
             "full_page" to AgentToolParam("boolean", "For screenshot: capture the entire scrollable page by temporarily stretching the browser viewport to document.documentElement.scrollHeight. Default false captures the visible viewport only. Capped at 32768px tall; when capped, the result text includes 'Truncated: true' and the original height, so you can scroll and capture the remainder separately."),
         ),
         required = listOf("tool_title", "action"),
         propertyOrdering = listOf("tool_title", "action", "tab_id", "url", "selector", "text", "coordinate_x", "coordinate_y", "direction", "amount", "scroll_count", "item_selector", "script", "user_agent", "max_depth", "keywords", "fuzzy", "cookies", "timeout", "viewport_width", "viewport_height", "reset", "full_page"),
     )
 
-    // Aligned with iOS AIChatViewModel.swift:5059-5067
     private fun memoryWriteDefinition(): AgentToolDefinition = AgentToolDefinition(
         name = "memory_write",
         description = "Write a memory entry to today's daily log (YYYY-MM-DD.md). Memories persist across all sessions. " +
@@ -284,13 +184,6 @@ object AgentTools {
         propertyOrdering = listOf("tool_title", "content"),
     )
 
-    /**
-     * [self-improvement] Structured fact memory with an `action` switch.
-     * `remember` upserts (re-stating strengthens), `search` recalls. A fact
-     * is subject · predicate = value, e.g. "user · prefers editor = vim".
-     * High-confidence facts are also auto-injected into the system prompt,
-     * so learned preferences are available without an explicit lookup.
-     */
     private fun memoryFactDefinition(helperReadOnly: Boolean = false): AgentToolDefinition =
         AgentToolDefinition(
             name = "memory_fact",
@@ -312,7 +205,6 @@ object AgentTools {
             propertyOrdering = listOf("tool_title", "action", "subject", "predicate", "value", "keywords"),
         )
 
-    // Aligned with iOS AIChatViewModel.swift:5069-5078
     private fun memoryGetDefinition(): AgentToolDefinition = AgentToolDefinition(
         name = "memory_get",
         description = "Retrieve memories from persistent storage. Supports keyword-based fuzzy search across memory files. " +

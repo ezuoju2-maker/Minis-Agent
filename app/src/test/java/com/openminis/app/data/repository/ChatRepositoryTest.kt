@@ -3,12 +3,6 @@ package com.openminis.app.data.repository
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * Unit tests for the lastMessage preview filter. The repository's
- * `stripSystemReminders` strips harness-injected `<system-reminder>` blocks
- * before the cleaned preview reaches the session-list row, so users never
- * see internal nudges like "task tools haven't been used recently".
- */
 class ChatRepositoryTest {
 
     @Test
@@ -28,10 +22,6 @@ class ChatRepositoryTest {
             keep this content
         """.trimIndent()
         val cleaned = ChatRepository.stripSystemReminders(raw)
-        // trimIndent strips the leading 12 spaces from every line, so the
-        // pre/post-reminder lines have no indent. After the regex strips the
-        // entire <system-reminder>...</system-reminder> block (DOTALL match),
-        // what's left is "User asked a question\n\nkeep this content".
         assertEquals("User asked a question\n\nkeep this content", cleaned)
     }
 
@@ -44,8 +34,6 @@ class ChatRepositoryTest {
     @Test
     fun `stripSystemReminders strips multiple back-to-back reminders independently`() {
         val raw = "a<system-reminder>x</system-reminder>b<system-reminder>y</system-reminder>c"
-        // Reluctant quantifier prevents the two blocks merging into one match
-        // that would also swallow the "b" between them.
         assertEquals("abc", ChatRepository.stripSystemReminders(raw))
     }
 

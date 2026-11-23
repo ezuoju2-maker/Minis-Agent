@@ -14,14 +14,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-ctx-trim-ladder] [T-ctx-count-reasoning] Everything around the planner:
- * which providers replay reasoning, what counts as the user speaking, the
- * pinned request on a long single turn, and where the view model calls in.
- */
 class ContextTrimWiringTest {
 
-    // ── which providers replay reasoning ────────────────────────────────
 
     private val deepseek = LLMModel(id = "deepseek-flash", displayName = "DeepSeek", provider = "DeepSeek", supportsReasoning = true)
 
@@ -56,7 +50,6 @@ class ContextTrimWiringTest {
         assertFalse(ProductionSources.read("provider/gemini/GeminiProvider.kt").contains("echoesReasoningContent"))
     }
 
-    // ── what counts as the user speaking ────────────────────────────────
 
     private fun userText(t: String) = LLMMessage(LLMMessage.Role.USER, t, contentParts = listOf(AgentContentPart.Text(t)))
 
@@ -88,7 +81,6 @@ class ContextTrimWiringTest {
         assertEquals(3, walk.userTextTurnsFound)
     }
 
-    // ── pinned request on a long single turn ────────────────────────────
 
     @Test
     fun `a single turn longer than the cap keeps the user's request verbatim`() {
@@ -111,7 +103,6 @@ class ContextTrimWiringTest {
         assertTrue("the summary is still injected", out.any { m -> m.content.contains("<context-summary>") || m.contentParts.any { it is AgentContentPart.Text && it.text.contains("<context-summary>") } })
     }
 
-    // ── view model wiring ───────────────────────────────────────────────
 
     private val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
 
@@ -174,7 +165,6 @@ class ContextTrimWiringTest {
         assertTrue("an OK verdict becomes the compaction branch; any other verdict is untouched",
             check.contains("val verdict = if (policyVerdict == ContextPolicy.CheckResult.OK && escalate) {"))
         assertTrue(check.contains("[ctx-trim] the re-plan recovered too little without collapse"))
-        // The branch it lands in still tries collapse before a model summary.
         assertTrue(check.indexOf("ContextPolicy.CheckResult.NEEDS_COMPACT -> {") < check.indexOf("if (summaryWouldFreeLittle(tokens)) {"))
     }
 
@@ -210,12 +200,6 @@ class ContextTrimWiringTest {
         assertEquals("the window is recorded only where a plan is made", 1, Regex("trimStateWindow = ").findAll(vm).count())
     }
 
-    /**
-     * Field 2026-10-07 15:50: a ratio of 8.0 replayed from rows written by the
-     * old estimator turned a 22K request into a measured 229K, the fixed share
-     * alone (20,295 x 8) exceeded the 128K window, and every turn stopped as
-     * "context full" without sending - so the ratio could never correct.
-     */
     @Test
     fun `a wrong ratio cannot wedge the session as context full`() {
         val hard = body("private fun trimmedOverHard(", "private fun calibrateContextSize(")
@@ -231,7 +215,6 @@ class ContextTrimWiringTest {
             .contains("if (o.optInt(\"estimatorVersion\", 1) != ESTIMATOR_VERSION) return null"))
     }
 
-    // ── collapse-first and sticky collapse (field 2026-10-07 18:11-18:26) ──
 
     private fun turn(prefix: String, iterations: Int, result: Int): List<LLMMessage> =
         listOf(userText("$prefix 的任务").copy(dbMessageId = "u_$prefix")) + (0 until iterations).flatMap { i ->
@@ -244,8 +227,6 @@ class ContextTrimWiringTest {
 
     @Test
     fun `inside one long user turn a summary frees almost nothing`() {
-        // One request driving 40 tool rounds (80 messages, under the 100 cap):
-        // the whole turn is the kept slice, the summary only adds to it.
         val history = turn("one", 40, 900)
         val gain = RequestContextBuilder.simulatedSummaryGain(history, null, 3, 3_000)!!
         assertTrue("gain=$gain", gain < 3_000)
@@ -253,7 +234,6 @@ class ContextTrimWiringTest {
 
     @Test
     fun `older user turns are what a summary pays for`() {
-        // Three finished turns with big outputs before the current short one.
         val history = turn("a", 12, 3_000) + turn("b", 12, 3_000) + turn("c", 12, 3_000) + turn("d", 12, 3_000) + turn("now", 3, 200)
         val gain = RequestContextBuilder.simulatedSummaryGain(history, null, 3, 3_000)!!
         assertTrue("turn a (~36K) is summarised away: gain=$gain", gain > 30_000)

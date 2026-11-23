@@ -1,20 +1,5 @@
 package com.openminis.app.harness
 
-/**
- * v2.0 · Deterministic execution runtime.
- *
- * Brings in the engineering contracts that make long agent tasks survivable:
- *  - typed tool schemas, idempotency keys and bounded exponential backoff
- *    (OpenHands / MCP);
- *  - loop detection (Devin's "infinite HTML parsing" failure mode);
- *  - a single shared step/token/cost/wall-clock governor with an explicit
- *    wrap-up verdict (DeadlineBudget generalised);
- *  - model routing with a circuit breaker, a user-editable fallback chain,
- *    privacy mode and a live cost counter (LiteLLM / Claude gateway / OPPO).
- *
- * No I/O is performed here: the host injects `executor` and `clock`, which
- * makes the whole runtime unit-testable and replayable on a plain JVM.
- */
 
 data class ToolResult(
     val content: String,
@@ -32,7 +17,6 @@ class ToolRuntime(
     private val recentCalls = ArrayList<String>()
     private val loopThreshold = 2
 
-    /** Minimal JSON-Schema validation: required keys + primitive types. */
     fun validate(schemaJson: String, argsJson: String): String? {
         val schema = MiniJson.parseObject(schemaJson) ?: return "invalid tool schema"
         val args = MiniJson.parseObject(argsJson) ?: return "arguments must be a JSON object"
@@ -62,31 +46,22 @@ class ToolRuntime(
         return null
     }
 
-    /** Stable fingerprint of (tool, normalised args) for loop detection. */
     private fun fingerprint(tool: ToolDescriptor, argsJson: String): String =
         tool.name + "|" + (MiniJson.parseObject(argsJson)?.toSortedMap()?.toString() ?: argsJson.trim())
 
     fun detectLoop(tool: ToolDescriptor, argsJson: String): Boolean {
         val fp = fingerprint(tool, argsJson)
-        // Sliding window: two identical calls with identical results in a row.
         val count = recentCalls.count { it == fp }
         recentCalls.add(fp)
         if (recentCalls.size > 24) recentCalls.removeAt(0)
         return count + 1 >= loopThreshold
     }
 
-    /**
-     * Execute once. Returns a *classified* result; network 5xx/429 is
-     * `retryable`, schema errors are not (the model must correct its arguments).
-     * Non-idempotent tools are never replayed without an explicit key.
-     */
     fun execute(
         tool: ToolDescriptor, argsJson: String, idempotencyKey: String? = null,
     ): ToolResult {
         val invalid = validate(tool.schemaJson, argsJson)
         if (invalid != null) return ToolResult("schema error: $invalid", isError = true, errorCode = "SCHEMA")
-        // [v2.0 audit fix] Replay a cached idempotent result BEFORE loop
-        // detection: a legitimate retry of the same key is not a loop.
         if (idempotencyKey != null && tool.idempotent) {
             idempotency[idempotencyKey]?.let { return it }
         }
@@ -106,7 +81,6 @@ class ToolRuntime(
         return withDuration
     }
 
-    /** Jitter-free, bounded exponential backoff. Host performs the actual delay. */
     fun backoffDelays(maxAttempts: Int = 3, baseMs: Long = 500L, capMs: Long = 8_000L): List<Long> {
         require(maxAttempts >= 1)
         val out = ArrayList<Long>()
@@ -119,7 +93,6 @@ class ToolRuntime(
 
     private val IMPORTANT = listOf("error", "fail", "exception", "timeout", "denied", "panic", "traceback")
 
-    /** Structure-aware trim: keep head (context), tail (verdict) and error lines. */
     fun trim(text: String, maxLines: Int = 240, maxChars: Int = 24_000): Trimmed {
         val lines = if (text.isEmpty()) emptyList() else text.lineSequence().toList()
         val lineCap = maxLines.coerceAtLeast(1)
@@ -146,7 +119,6 @@ class ToolRuntime(
     }
 }
 
-// ---------------------------------------------------------------- budgets
 
 class BudgetGovernor(
     private val maxSteps: Int = 200,
@@ -197,12 +169,11 @@ class BudgetGovernor(
     )
 }
 
-// ---------------------------------------------------------------- model routing
 
 data class ModelEndpoint(
     val id: String,
     val label: String,
-    val tier: Int,                 // 0 = strongest / primary, 1..n = fallbacks
+    val tier: Int,
     val inputMicrosPer1k: Long,
     val outputMicrosPer1k: Long,
     val isLocal: Boolean = false,
@@ -241,7 +212,6 @@ class ModelRouter(
         if (candidates.isEmpty()) return RouteDecision(null, "privacy mode: no local model configured", true)
         val usable = candidates.filter { !isOpen(it) }
         if (usable.isEmpty()) return RouteDecision(null, "all providers circuit-open", true)
-        // A weak/small model must not be handed the full toolset on hard tasks.
         val best = usable.first()
         val degraded = best.tier > 0 || (best.simplifiedToolset && complexity >= 3)
         return RouteDecision(

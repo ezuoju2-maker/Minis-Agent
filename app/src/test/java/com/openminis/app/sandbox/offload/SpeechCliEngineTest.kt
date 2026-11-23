@@ -8,11 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-431-engine] GH #431 feature request: transcribe with the configured
- * speech-to-text model (mic and files). The rules here decide where audio
- * goes, so they are pinned down directly.
- */
 class SpeechCliEngineTest {
 
     @Test
@@ -73,7 +68,7 @@ class SpeechCliEngineTest {
 
     @Test
     fun `a pass-through WAV gets its length from the header`() {
-        val pcm = ByteArray(32_000) // 1 s of 16 kHz mono PCM16
+        val pcm = ByteArray(32_000)
         val wav = com.openminis.app.provider.voice.VoiceProvider.wrapPcm16InWav(pcm, 16_000)
         assertEquals(1.0, SpeechAudio.wavSeconds(wav.copyOf(44), wav.size.toLong())!!, 0.001)
         assertNull(SpeechAudio.wavSeconds("ID3".toByteArray(), 100))
@@ -113,9 +108,6 @@ class SpeechCliEngineTest {
         assertFalse(partial.contains("sk-...cdef"))
     }
 
-    // [T-speech-decode-streaming] Fed one decoder buffer at a time, the
-    // streaming resampler gives exactly what downmix + resample gave the
-    // whole file.
     @org.junit.Test
     fun `streaming downmix and resample match the batch result`() {
         val rnd = java.util.Random(7)

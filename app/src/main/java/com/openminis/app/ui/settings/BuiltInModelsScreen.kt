@@ -31,14 +31,6 @@ import androidx.compose.ui.unit.sp
 import com.openminis.app.R
 import com.openminis.app.data.model.ProviderType
 
-/**
- * One built-in platform card.
- *
- * [platformId] is non-null for platforms with a dedicated screen (WorkBuddy).
- * [providerType] is non-null for platforms that reuse the existing OAuth /
- * device-code provider flow — those already know how to sign in with an
- * account, so surfacing them as a card is all that's needed.
- */
 data class BuiltInPlatform(
     val id: String,
     val name: String,
@@ -47,17 +39,9 @@ data class BuiltInPlatform(
     val accent: androidx.compose.ui.graphics.Color,
     val platformId: String? = null,
     val providerType: ProviderType? = null,
-    /** Site variants, domestic first. Empty / one entry hides the badge. */
     val regions: List<String> = emptyList(),
 )
 
-/**
- * Platform registry — add future built-in platforms here.
- *
- * Only platforms that can hand out models from an ACCOUNT LOGIN belong here:
- * either a dedicated integration ([platformId]) or one of the app's existing
- * OAuth/device-code providers, which need no API key from the user.
- */
 val builtInPlatforms: List<BuiltInPlatform> = listOf(
     BuiltInPlatform(
         id = "workbuddy",
@@ -88,13 +72,6 @@ val builtInPlatforms: List<BuiltInPlatform> = listOf(
     ),
 )
 
-/**
- * [T-workbuddy] Settings → Discover → Built-in Models.
- *
- * A compact list of built-in platforms. Each is a small card; tapping one
- * either opens that platform's own screen or starts the pre-selected account
- * login flow. Kept as a list so future platforms only need a registry entry.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BuiltInModelsScreen(

@@ -1,10 +1,5 @@
 package com.openminis.app.ui.markdown
 
-/**
- * Lightweight markdown parser that converts raw markdown text into a list of block nodes.
- * Supports: headings, code blocks (fenced), blockquotes, bullet/numbered/task lists,
- * thematic breaks, tables, and paragraphs. Inline parsing is handled separately.
- */
 object MarkdownParser {
 
     sealed class Block {
@@ -17,58 +12,29 @@ object MarkdownParser {
         data class Table(val headers: List<String>, val alignments: List<Alignment>, val rows: List<List<String>>) : Block()
         data object ThematicBreak : Block()
 
-        /**
-         * Display-mode LaTeX. Either extracted from `$$ … $$` / `\[ … \]`,
-         * or promoted from a paragraph that contained nothing but a single
-         * inline-math placeholder. mhchem (\ce{…}, \pu{…}) is supported via
-         * the bundled assets/katex/mhchem.min.js extension.
-         */
         data class MathBlock(val latex: String) : Block()
 
-        /**
-         * Media blocks extracted from `![alt](url)` when the line only contains
-         * that one image-syntax node. Routing by file extension mirrors iOS
-         * SelectableMarkdownView (nativeImageExts / nativeVideoExts / nativeAudioExts).
-         */
         data class Image(val alt: String, val url: String) : Block()
         data class Video(val alt: String, val url: String) : Block()
         data class Audio(val alt: String, val url: String) : Block()
     }
 
-    /**
-     * A single extracted math expression, identified by a unique placeholder
-     * inserted into the markdown stream before block-parsing. After the AST
-     * is built, the placeholders are looked up by id and restored either as
-     * MathBlock (display) or kept inline (rendered by the inline pass).
-     */
     data class MathSpan(val placeholder: String, val latex: String, val isBlock: Boolean)
 
-    /**
-     * Holder shared with [MarkdownText] so the inline parser can also resolve
-     * placeholders to their original LaTeX. Threaded through composition by
-     * passing the whole list of spans alongside the parsed blocks.
-     */
     data class ParseResult(val blocks: List<Block>, val mathSpans: List<MathSpan>)
 
-    /** Object Replacement Character (U+FFFC) — sentinel used by math placeholders. */
     private const val ORC = '￼'
 
     private val nativeVideoExts = setOf("mp4", "mov", "m4v", "avi", "mkv", "webm")
     private val nativeAudioExts = setOf("mp3", "m4a", "wav", "aac", "ogg", "flac")
 
-    /** Regex for a standalone `![alt](url)` node on its own line. */
     private val standaloneImageRegex = Regex("""^\s*!\[([^\]]*)\]\(([^)\s]+)\)\s*$""")
 
-    // Block patterns are compiled once. Each Regex(...) built inside the
-    // per-line loop compiled a fresh ICU pattern whose native memory waits for
-    // a GC to be freed; parsing a long session that way piled up native
-    // mappings until vm.max_map_count was hit and Scudo aborted (OpenMinis#426).
     private val thematicBreakRegex = Regex("^\\s{0,3}([-*_])\\s*\\1\\s*\\1(\\s*\\1)*\\s*$")
     private val headingRegex = Regex("^(#{1,6})\\s+(.+)$")
     private val bulletItemRegex = Regex("^\\s{0,3}[-*+]\\s+(.*)$")
     private val bulletMarkerRegex = Regex("^\\s{0,3}[-*+]\\s")
     private val bulletStartRegex = Regex("^\\s{0,3}[-*+]\\s+")
-    // Marker digits capped at 2; keep the two numbered-list patterns in sync.
     private val numberedItemRegex = Regex("^\\s{0,3}(\\d{1,2})[.)\\s]\\s*(.*)$")
     private val numberedStartRegex = Regex("^\\s{0,3}\\d{1,2}[.)\\s]\\s")
     private val tableSeparatorCellRegex = Regex("^:?-+:?$")
@@ -76,12 +42,6 @@ object MarkdownParser {
     private val trailingNewlineRegex = Regex("\\n[ \\t]*$")
     private val mathPlaceholderRegex = Regex("$ORC" + "MATH(\\d+)" + "$ORC")
 
-    /**
-     * Classify a media URL by file extension. Extracts the extension from the
-     * *last path segment only* so filenames that contain '#' or '?' (either
-     * literal or percent-encoded) still get their real extension. Handles both
-     * unencoded names (e.g. `foo#China.mp4`) and encoded ones (`foo%23China.mp4`).
-     */
     private fun mediaBlockFor(alt: String, url: String): Block {
         val lastSeg = url.substringAfterLast('/')
         val decoded = runCatching { java.net.URLDecoder.decode(lastSeg, "UTF-8") }.getOrDefault(lastSeg)
@@ -97,13 +57,6 @@ object MarkdownParser {
 
     enum class Alignment { LEFT, CENTER, RIGHT }
 
-    /**
-     * Top-level entry: extract math, run the standard block parser on the
-     * placeholder-substituted text, then run the math-restore pass that
-     * promotes single-math paragraphs to MathBlock. Inline math placeholders
-     * stay in the paragraph text so the inline pass can render them via
-     * KaTeX. Mirrors iOS MarkdownMathExtractor.extract → cmark → restore.
-     */
     fun parseWithMath(markdown: String): ParseResult {
         val (cleaned, spans) = extractMath(markdown)
         val rawBlocks = parse(cleaned)
@@ -120,7 +73,6 @@ object MarkdownParser {
         while (i < lines.size) {
             val line = lines[i]
 
-            // Fenced code block
             if (line.trimStart().startsWith("```")) {
                 val indent = line.indexOf('`')
                 val fence = line.trimStart()
@@ -140,14 +92,12 @@ object MarkdownParser {
                 continue
             }
 
-            // Thematic break
             if (line.matches(thematicBreakRegex)) {
                 blocks.add(Block.ThematicBreak)
                 i++
                 continue
             }
 
-            // ATX Heading
             val headingMatch = headingRegex.find(line)
             if (headingMatch != null) {
                 val level = headingMatch.groupValues[1].length
@@ -157,7 +107,6 @@ object MarkdownParser {
                 continue
             }
 
-            // Blockquote
             if (line.trimStart().startsWith("> ") || line.trimStart() == ">") {
                 val quoteLines = mutableListOf<String>()
                 while (i < lines.size && (lines[i].trimStart().startsWith("> ") || lines[i].trimStart() == ">")) {
@@ -170,7 +119,6 @@ object MarkdownParser {
                 continue
             }
 
-            // Table (must have at least header + separator)
             if (i + 1 < lines.size && isTableSeparator(lines[i + 1])) {
                 val table = parseTable(lines, i)
                 if (table != null) {
@@ -180,7 +128,6 @@ object MarkdownParser {
                 }
             }
 
-            // Bullet list (-, *, +)
             val bulletMatch = bulletItemRegex.find(line)
             if (bulletMatch != null) {
                 val items = mutableListOf<ListItem>()
@@ -190,7 +137,6 @@ object MarkdownParser {
                     val content = bm.groupValues[1]
                     items.add(parseListItem(content))
                     i++
-                    // Collect continuation lines (indented)
                     while (i < lines.size && lines[i].startsWith("  ") && !bulletMarkerRegex.matches(lines[i])) {
                         items[items.lastIndex] = items.last().copy(
                             content = items.last().content + "\n" + lines[i].trimStart()
@@ -202,11 +148,6 @@ object MarkdownParser {
                 continue
             }
 
-            // Numbered list. Marker digits are capped at 2 so a paragraph
-            // starting with a year or big number ("2020. 年的…") isn't
-            // misparsed as ordered-list item #2020 (user report). Real lists
-            // rarely exceed 99 items; CommonMark itself caps markers at 9
-            // digits, we deliberately go tighter.
             val numMatch = numberedItemRegex.find(line)
             if (numMatch != null) {
                 val startNum = numMatch.groupValues[1].toIntOrNull() ?: 1
@@ -221,9 +162,6 @@ object MarkdownParser {
                 continue
             }
 
-            // Standalone image / video / audio on its own line:
-            //   ![alt](minis://workspace/clip.mp4)
-            // Routed by extension so the media renderer can pick the right preview.
             val mediaMatch = standaloneImageRegex.find(line)
             if (mediaMatch != null) {
                 val alt = mediaMatch.groupValues[1]
@@ -237,13 +175,11 @@ object MarkdownParser {
                 android.util.Log.d("MdParser", "image-like line did NOT match standalone regex: ${line.take(160)}")
             }
 
-            // Blank line — skip
             if (line.isBlank()) {
                 i++
                 continue
             }
 
-            // Paragraph (collect contiguous non-blank lines that don't match other patterns)
             val paraLines = mutableListOf(line)
             i++
             while (i < lines.size) {
@@ -251,7 +187,6 @@ object MarkdownParser {
                 if (pl.isBlank() || pl.trimStart().startsWith("```") ||
                     pl.trimStart().startsWith("# ") || pl.trimStart().startsWith("> ") ||
                     bulletStartRegex.containsMatchIn(pl) ||
-                    // Keep in sync with the numbered-list marker above (≤2 digits).
                     numberedStartRegex.containsMatchIn(pl) ||
                     pl.matches(thematicBreakRegex) ||
                     standaloneImageRegex.containsMatchIn(pl)
@@ -266,7 +201,6 @@ object MarkdownParser {
     }
 
     private fun parseListItem(content: String): ListItem {
-        // Task list: [x] or [ ]
         if (content.startsWith("[x] ") || content.startsWith("[X] ")) {
             return ListItem(content.substring(4), checked = true)
         }
@@ -314,17 +248,6 @@ object MarkdownParser {
 
     private fun splitTableRow(line: String): List<String> {
         val trimmed = line.trim().removePrefix("|").removeSuffix("|")
-        // [T-minis-url-fullwidth-pipe-android] Fast path: the only reason to
-        // protect a `|` from the cell split is a markdown link whose URL
-        // contains a raw ASCII pipe, e.g. `[f](minis://ns/a|b.png)` — the model
-        // (or a hand-authored row) can emit an un-encoded `|` inside the URL,
-        // and a naive `split('|')` would chop the link in two. App-generated
-        // minis:// URLs already percent-encode `|` to `%7C`, so this is purely
-        // defence-in-depth. Rows WITHOUT a `](` link keep the original exact
-        // `split('|')` behaviour verbatim — important because the paren-aware
-        // walk below would otherwise swallow a `|` after an unbalanced `(` in a
-        // plain text cell (e.g. `| a (note | b |`). Fullwidth `｜` (U+FF5C) is
-        // never split by either path since `split('|')` matches only U+007C.
         if (!trimmed.contains("](")) {
             return trimmed.split('|').map { it.trim() }
         }
@@ -345,21 +268,6 @@ object MarkdownParser {
         return cells
     }
 
-    // ─── Math extraction ──────────────────────────────────────────────────────
-    //
-    // Walks the source character-by-character, swallowing four math delimiters:
-    //
-    //   $$ … $$    display math
-    //   \[ … \]    display math (LaTeX-style)
-    //   $ … $      inline math
-    //   \( … \)    inline math (LaTeX-style)
-    //
-    // Fenced code blocks and inline code spans are skipped verbatim so the
-    // delimiters inside them survive (chat transcripts often paste raw
-    // markdown source). Each match is replaced with a sentinel like
-    // ￼ MATH<n> ￼ so the placeholder cannot collide with normal
-    // Markdown syntax (￼ = Object Replacement Character, never appears
-    // in user prose). Mirrors iOS MarkdownMathExtractor.extract verbatim.
 
     private fun extractMath(markdown: String): Pair<String, List<MathSpan>> {
         val spans = mutableListOf<MathSpan>()
@@ -372,15 +280,11 @@ object MarkdownParser {
         var fenceChar = '`'
         var fenceLen = 0
 
-        // [T-android-latex-code-mask] Precomputed once: which indices sit
-        // inside a fence or inline code, so a closing `$`/`$$` can never be
-        // matched across a code boundary (issue #117 defect 3).
         val codeMask = buildCodeMask(chars)
 
         fun atLineStart(idx: Int): Boolean = idx == 0 || chars[idx - 1] == '\n' || chars[idx - 1] == '\r'
 
         while (i < n) {
-            // Detect opening fence at line start
             if (!inFence && atLineStart(i)) {
                 val c = chars[i]
                 if (c == '`' || c == '~') {
@@ -414,7 +318,6 @@ object MarkdownParser {
                 continue
             }
 
-            // Inline code spans — copy verbatim, including the dollar signs inside.
             if (chars[i] == '`') {
                 var run = 0
                 var j = i
@@ -438,14 +341,12 @@ object MarkdownParser {
                 continue
             }
 
-            // \$ — preserve escaped dollar verbatim.
             if (chars[i] == '\\' && i + 1 < n && chars[i + 1] == '$') {
                 out.append(chars[i]); out.append(chars[i + 1])
                 i += 2
                 continue
             }
 
-            // \[ … \] — display math.
             if (chars[i] == '\\' && i + 1 < n && chars[i + 1] == '[') {
                 val end = findClose(chars, i + 2, "\\]")
                 if (end != null) {
@@ -457,7 +358,6 @@ object MarkdownParser {
                 }
             }
 
-            // \( … \) — inline math.
             if (chars[i] == '\\' && i + 1 < n && chars[i + 1] == '(') {
                 val end = findClose(chars, i + 2, "\\)")
                 if (end != null) {
@@ -469,12 +369,8 @@ object MarkdownParser {
                 }
             }
 
-            // $$ … $$ — display math.
             if (chars[i] == '$' && i + 1 < n && chars[i + 1] == '$') {
                 val end = findDoubleDollar(chars, i + 2, codeMask)
-                // [T-android-latex-code-mask] The closer must be outside code
-                // (codeMask, above) AND a multi-line body must still look like
-                // a formula — otherwise an unclosed `$$` swallows prose.
                 if (end != null && isPlausibleDisplayBody(chars.substring(i + 2, end))) {
                     val latex = stripBlockquoteMarkers(chars.substring(i + 2, end))
                     spans.add(MathSpan(makePlaceholder(spans.size), latex, true))
@@ -484,17 +380,12 @@ object MarkdownParser {
                 }
             }
 
-            // $ … $ — inline math (with currency-skip heuristic).
-            // [T-math-dollar-rules] `${NAME}` and `$NAME` are shell variables,
-            // not openers (rules 2 and 3 above `variableNameLength`).
             if (chars[i] == '$' && i + 1 < n && chars[i + 1] != '$' && chars[i + 1] != ' ' &&
                 !opensVariable(chars, i)
             ) {
                 val end = findSingleDollar(chars, i + 1, codeMask)
                 if (end != null) {
                     val latex = chars.substring(i + 1, end)
-                    // [T-android-table-cell-katex-false-positive] Also skip a
-                    // span that is really a table-cell artifact (iOS 5b1d72515).
                     if (looksLikeMath(latex) && !isTablePipeArtifact(latex)) {
                         spans.add(MathSpan(makePlaceholder(spans.size), latex, false))
                         out.append(spans.last().placeholder)
@@ -513,35 +404,17 @@ object MarkdownParser {
 
     private fun makePlaceholder(idx: Int): String = "${ORC}MATH$idx$ORC"
 
-    /**
-     * Strip blockquote markers from a multi-line math body. Math is extracted
-     * before block-level parsing, so a display formula written inside a
-     * blockquote drags the continuation lines' `> ` markers into the LaTeX:
-     *
-     *     > $$
-     *     > E = mc^2
-     *     > $$
-     *
-     * used to yield `"\n> E = mc^2\n> "` and render a literal `>`. Only strip
-     * when *every* non-blank line after the first carries a `^ {0,3}> ?`
-     * marker — that proves the span really sits inside a quote, and protects
-     * legitimate formula content whose lines begin with `>` (comparisons,
-     * matrix rows). Mirrors iOS MarkdownMathExtractor.stripBlockquoteMarkers.
-     */
     private fun stripBlockquoteMarkers(latex: String): String {
         if (!latex.contains('\n')) return latex
 
-        // The opening `$$` / `\[` is consumed by the caller, so the first
-        // segment is the tail of the marker line and never carries a marker
-        // of its own — validate and strip only lines 2…n.
         val lines = latex.split("\n").toMutableList()
         var sawMarker = false
         for (idx in 1 until lines.size) {
             val line = lines[idx]
             var cursor = 0
             while (cursor < line.length && line[cursor] == ' ' && cursor < 3) cursor++
-            if (cursor >= line.length) continue // blank line: neutral
-            if (line[cursor] != '>') return latex // a bare line — not a quote
+            if (cursor >= line.length) continue
+            if (line[cursor] != '>') return latex
             sawMarker = true
             cursor++
             if (cursor < line.length && line[cursor] == ' ') cursor++
@@ -565,22 +438,6 @@ object MarkdownParser {
         return null
     }
 
-    /**
-     * [T-android-latex-code-mask] (issue #117 defect 3, iOS bce7e2ed)
-     *
-     * The main [extractMath] loop skips fenced blocks and inline code when
-     * deciding where a formula may *open*, but the closing-delimiter searches
-     * were blind forward scans. So one bare `$$` in prose — a model that
-     * forgot to close it, or text merely *explaining* LaTeX — paired with a
-     * `$$` inside a later ``` fence and swallowed every paragraph between
-     * them, including the fence's own opening line. The renderer then saw the
-     * orphaned closing ``` as a NEW fence and turned the remainder into a code
-     * block: the "a whole section suddenly disappeared" symptom.
-     *
-     * This precomputes, once per parse, which indices sit inside fenced blocks
-     * or inline code, mirroring the main loop's rules. A closer inside the mask
-     * is rejected.
-     */
     private fun buildCodeMask(chars: String): BooleanArray {
         val n = chars.length
         val mask = BooleanArray(n)
@@ -622,8 +479,6 @@ object MarkdownParser {
                 mask[i] = true; i++
                 continue
             }
-            // Inline code span: `…` / ``…`` — same run-matching rule the main
-            // loop uses when it copies these verbatim.
             if (chars[i] == '`') {
                 var run = 0
                 var j = i
@@ -649,24 +504,10 @@ object MarkdownParser {
         return mask
     }
 
-    /**
-     * [T-android-latex-code-mask] A multi-line `$$` body must still look like a
-     * formula, so a genuinely unclosed `$$` cannot eat prose even when the
-     * closer is outside any code span. Single-line `$$…$$` is accepted
-     * unconditionally, leaving ordinary display math untouched. Mirrors iOS.
-     */
     private fun isPlausibleDisplayBody(body: String): Boolean {
         if (!body.contains('\n')) return true
-        // A blank line means a paragraph break — prose, not one formula.
         if (blankLineRegex.containsMatchIn(body)) return false
-        // The conventional block shape puts the closing `$$` alone on its own
-        // line, i.e. the body ends with a newline (plus optional indent). That
-        // is a strong enough signal on its own — requiring a LaTeX glyph here
-        // too would wrongly demote glyph-free but valid math such as
-        // "$$\n1 + 2 = 3\n$$" to plain text.
         if (trailingNewlineRegex.containsMatchIn(body)) return true
-        // Otherwise the closer is mid-line, which is the shape a stray
-        // delimiter in prose produces — require a LaTeX-ish glyph.
         return body.any { it == '\\' || it == '^' || it == '_' || it == '{' || it == '}' }
     }
 
@@ -688,14 +529,8 @@ object MarkdownParser {
         while (i < n) {
             if (chars[i] == '\\' && i + 1 < n) { i += 2; continue }
             val plainDollar = chars[i] == '$' && (codeMask == null || !codeMask[i])
-            // [T-math-dollar-rules] Rule 1: the dollar of an amount or of a
-            // variable starts that, it does not end a formula
-            // (`$5-$10`, `$HOME/bin:$PATH`).
             if (plainDollar && startsAmountOrVariable(chars, i)) return null
             if (plainDollar && (i == 0 || chars[i - 1] != ' ')) return i
-            // Rule 4: after a blank it opens the next thing. What began with a
-            // digit ends there, as the amount it was: in "$10 and $x+1$" the
-            // formula is x+1.
             if (plainDollar && from < n && isAsciiDigit(chars[from])) return null
             if (chars[i] == '\n') return null
             i++
@@ -703,47 +538,11 @@ object MarkdownParser {
         return null
     }
 
-    // ─── Amounts and shell variables ─────────────────────────────────────────
-    //
-    // [T-math-dollar-rules] Port of iOS 216160978 + 23635b48e (the Windows
-    // port has the same rules in minis-markdown/src/math.rs). All three run
-    // one list of test vectors: DollarMathRulesTest here,
-    // MathExtractorDollarRulesTests.swift on iOS, DOLLAR_VECTORS on Windows.
-    //
-    // A dollar is also money and a shell's variable mark: "$5-$10" lost both
-    // dollars and became the italic formula "5-", and PATH=$HOME/bin:$PATH
-    // lost its dollars the same way, because the closer was simply the first
-    // `$` not after a blank. Four rules keep those out of the formulas;
-    // everything else is the extraction as it was.
-    //  1. A `$` followed by a digit (`$10`), by `{NAME}` or by an upper-case
-    //     name (`$HOME`) never *closes* a formula - it begins something.
-    //  2. `${NAME}` never opens a formula.
-    //  3. `$NAME` (upper case, two characters or more) does not open one when
-    //     the name is followed by what follows a variable - the end of the
-    //     line, one of `/ : ; , . " ' ) ]`, or a blank and then a word. It
-    //     still does when a formula goes on: `$AB$`, `$PV = nRT$`,
-    //     `$AB \parallel CD$`.
-    //  4. What opens with `$` and a digit (`$2x+1=5$` is a formula, `$10` an
-    //     amount) does not reach past a later `$` that stands after a blank.
-    // A `$` followed by a digit may still open a formula: an amount on its own
-    // was never one ([looksLikeMath]). Known, accepted losses: `$AB/CD$` and
-    // `$AB:CD$` read as variables.
 
     private fun isAsciiDigit(c: Char): Boolean = c in '0'..'9'
     private fun isAsciiUpper(c: Char): Boolean = c in 'A'..'Z'
     private fun isAsciiLower(c: Char): Boolean = c in 'a'..'z'
 
-    /**
-     * The length of an upper-case variable name at [from], 0 when there is
-     * none: two or more of `A-Z 0-9` starting with a letter, then any number
-     * of `_WORD` parts that each start with a letter (`HOME`, `MY_VAR`,
-     * `XDG_CONFIG_HOME`), with no lower-case letter after it (`$NaCl`).
-     *
-     * An underscore is also a subscript, so the name stops short of one that
-     * is followed by a digit, and a single letter is no name: `$X_1, X_2$`,
-     * `$H_0: \mu = 0$`, `$P_1 V_1 = P_2 V_2$` are formulas (iOS 23635b48e: the
-     * first version counted `_` and digits into the name).
-     */
     private fun variableNameLength(chars: String, from: Int): Int {
         val n = chars.length
         fun upper(i: Int) = i < n && isAsciiUpper(chars[i])
@@ -756,18 +555,11 @@ object MarkdownParser {
             len += 2
             while (part(from + len)) len++
         }
-        // What follows continues the word (`NaCl`) or is a subscript (`AB_1`):
-        // a formula's, not a variable's.
         val continued = from + len < n && isAsciiLower(chars[from + len])
         val subscripted = from + len < n && chars[from + len] == '_'
         return if (continued || subscripted) 0 else len
     }
 
-    /**
-     * `{NAME}` at [from], any case: `[A-Za-z_][A-Za-z0-9_]*` in braces - and
-     * not followed by `^` or `_`, which make it a formula's group
-     * (`${a}^{2}+{b}^{2}$`, `${x}^2$`).
-     */
     private fun isBracedVariable(chars: String, from: Int): Boolean {
         val n = chars.length
         if (from >= n || chars[from] != '{') return false
@@ -783,13 +575,11 @@ object MarkdownParser {
         return !(after < n && (chars[after] == '^' || chars[after] == '_'))
     }
 
-    /** Rule 1: the `$` at [at] begins an amount or a variable. */
     private fun startsAmountOrVariable(chars: String, at: Int): Boolean {
         if (at + 1 < chars.length && isAsciiDigit(chars[at + 1])) return true
         return isBracedVariable(chars, at + 1) || variableNameLength(chars, at + 1) > 0
     }
 
-    /** Rules 2 and 3: the `$` at [at] is a variable's, not a formula's opener. */
     private fun opensVariable(chars: String, at: Int): Boolean {
         val n = chars.length
         if (isBracedVariable(chars, at + 1)) return true
@@ -809,58 +599,23 @@ object MarkdownParser {
         return false
     }
 
-    /**
-     * Currency-skip heuristic: $5 / $10.99 should stay as plain text. Treat
-     * the `$ … $` content as math only if it has a math-ish character
-     * (`\\^_{}` / common big-symbol unicode) or is longer than 2 chars (so
-     * `x+y` qualifies but bare digits like `5` do not). Mirrors iOS.
-     */
     private fun looksLikeMath(content: String): Boolean {
         if (content.isEmpty()) return false
-        // T208 Layer B: previous heuristic rejected single-letter math like
-        // `$c$` or `$i$` — `length > 2` returned false and the literal
-        // dollar-wrapped text leaked into the rendered output. Any of:
-        //   - obvious LaTeX glyphs (`\`, `^`, `_`, `{`, `}`, integrals…)
-        //   - short alphanumeric content with no whitespace and no leading
-        //     digit (currency like `$5` filtered out by the leading-digit
-        //     check; `$5.99` further filtered by the dot rule below)
-        // qualifies as math. Mirrors iOS MarkdownMathExtractor.looksLikeMath.
         val mathChars = charArrayOf('\\', '^', '_', '{', '}', '∫', '∑', '∏', '√', '+', '-', '=', '<', '>')
         for (c in content) {
             if (c in mathChars) return true
         }
-        // Currency heuristic: `$5`, `$5.99`, `$1,000` look numeric. Skip.
         if (content[0].isDigit()) return false
-        // Whitespace at either edge usually means a stray dollar, not math.
         if (content.first().isWhitespace() || content.last().isWhitespace()) return false
-        // Short ASCII identifier-ish content (`$c$`, `$x$`, `$pi$`) up to
-        // 30 chars is almost certainly a variable reference.
         if (content.length <= 30 && content.all { it.isLetterOrDigit() }) return true
         return content.length > 2
     }
 
-    /**
-     * [T-android-table-cell-katex-false-positive] True when an inline `$ … $`
-     * candidate is really a markdown table-cell artifact — a `$` that paired
-     * across `|` column separators — rather than a formula. Port of iOS
-     * `isTablePipeArtifact` (5b1d72515); Windows has the same rule
-     * (`is_table_pipe_artifact`, minis-markdown/src/math.rs).
-     *
-     * Math is extracted from the raw markdown before table structure is known,
-     * so a row like `| a | $x-1 | y$ |` paired the two dollars and rendered
-     * "x-1 | y" as one serif-italic formula across two cells. Two signals,
-     * both of which a real formula avoids:
-     *  1. An unescaped pipe with whitespace on a side — the column separator
-     *     is written ` | ` / `| ` / ` |`; real LaTeX keeps bars flush.
-     *  2. An ODD number of unescaped pipes — absolute-value / norm bars come in
-     *     pairs (`|x|`, `\frac{|a|}{|b|}`), so `n+1|` is a stray separator.
-     * Escaped `\|` (a LaTeX norm) is never counted.
-     */
     private fun isTablePipeArtifact(content: String): Boolean {
         var bare = 0
         for (idx in content.indices) {
             if (content[idx] != '|') continue
-            if (idx > 0 && content[idx - 1] == '\\') continue // escaped norm bar
+            if (idx > 0 && content[idx - 1] == '\\') continue
             bare++
             val prevIsSpace = idx > 0 && content[idx - 1].isWhitespace()
             val nextIsSpace = idx + 1 < content.length && content[idx + 1].isWhitespace()
@@ -869,12 +624,6 @@ object MarkdownParser {
         return bare % 2 == 1
     }
 
-    /**
-     * Walk the AST replacing math placeholders. Display-math placeholders
-     * promote (or replace) their containing paragraph to a [Block.MathBlock];
-     * inline placeholders remain in the paragraph text so the inline parser
-     * can render them by looking up the placeholder in the [MathSpan] list.
-     */
     private fun restoreMath(blocks: List<Block>, spans: List<MathSpan>): List<Block> {
         if (spans.isEmpty()) return blocks
         val byPlaceholder = spans.associateBy { it.placeholder }
@@ -884,7 +633,7 @@ object MarkdownParser {
     private fun restoreBlock(block: Block, map: Map<String, MathSpan>): List<Block> {
         return when (block) {
             is Block.Paragraph -> restoreParagraph(block.content, map)
-            is Block.Heading -> listOf(block)  // headings keep their inline placeholders
+            is Block.Heading -> listOf(block)
             is Block.Blockquote -> listOf(Block.Blockquote(block.blocks.flatMap { restoreBlock(it, map) }))
             is Block.BulletList,
             is Block.NumberedList,
@@ -898,14 +647,6 @@ object MarkdownParser {
         }
     }
 
-    /**
-     * Splits a paragraph that contains math placeholders. Each display-math
-     * placeholder breaks the paragraph and emits a [Block.MathBlock] of its
-     * own; inline placeholders stay embedded so the inline parser can render
-     * them through KaTeX. A paragraph that contained nothing but a single
-     * display-math placeholder collapses to one MathBlock with no surrounding
-     * Paragraph stub.
-     */
     private fun restoreParagraph(content: String, map: Map<String, MathSpan>): List<Block> {
         if (!content.contains(ORC)) return listOf(Block.Paragraph(content))
 
@@ -916,26 +657,22 @@ object MarkdownParser {
         for (match in regex.findAll(content)) {
             val full = match.value
             val span = map[full] ?: continue
-            // Append text before this placeholder.
             if (match.range.first > lastEnd) {
                 buf.append(content, lastEnd, match.range.first)
             }
             if (span.isBlock) {
-                // Flush any accumulated text as a paragraph, then emit the math block.
                 if (buf.isNotBlank()) {
                     out.add(Block.Paragraph(buf.toString().trimEnd()))
                 }
                 buf.clear()
                 out.add(Block.MathBlock(span.latex))
             } else {
-                // Keep inline placeholder in-stream — inline pass will render it.
                 buf.append(full)
             }
             lastEnd = match.range.last + 1
         }
         if (lastEnd < content.length) buf.append(content, lastEnd, content.length)
         if (buf.isNotBlank()) out.add(Block.Paragraph(buf.toString().trimEnd()))
-        // Empty paragraph (only whitespace remained) — drop entirely.
         return if (out.isEmpty()) listOf(Block.Paragraph(content)) else out
     }
 }

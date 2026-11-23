@@ -48,13 +48,6 @@ import androidx.compose.ui.res.stringResource
 import com.openminis.app.data.repository.MemoryRepository
 import com.openminis.app.ui.components.DialogTextField
 
-/**
- * Settings-level memory file management.
- * Lists GLOBAL.md + daily logs in grouped card style.
- * Tapping a file navigates to a full-page editor.
- * GLOBAL.md cannot be deleted.
- * Mirrors iOS MemoryManagementView.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MemoryManagementScreen(
@@ -65,12 +58,6 @@ fun MemoryManagementScreen(
     var files by remember { mutableStateOf<List<MemoryRepository.MemoryFileInfo>>(emptyList()) }
     var deleteFileName by remember { mutableStateOf<String?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
-    // [T-memory-global-toggle-settings-ui-android] Global default for
-    // newly-created sessions. Stored separately from per-session
-    // memoryEnabled (which lives in the sessions DB row) so toggling
-    // here never retroactively rewrites existing chats. Read once on
-    // entry; the Switch's onCheckedChange writes back synchronously
-    // and updates the local state mirror.
     var globalMemoryOn by remember {
         mutableStateOf(com.openminis.app.data.MemoryGlobalPrefs.isGlobalEnabled(context))
     }
@@ -80,8 +67,6 @@ fun MemoryManagementScreen(
     }
 
     SettingsScaffold(title = stringResource(R.string.memory_title), onBack = onBack) {
-        // Always-visible global toggle — sits above the file list so the
-        // user finds it whether or not any memory files exist yet.
         SettingsSection(
             header = stringResource(R.string.settings_memory_global_header),
             footer = stringResource(R.string.settings_memory_global_footer),
@@ -138,7 +123,6 @@ fun MemoryManagementScreen(
         }
     }
 
-    // Delete confirmation
     if (deleteFileName != null) {
         AlertDialog(
             onDismissRequest = { deleteFileName = null },
@@ -183,24 +167,6 @@ private fun MemoryFileRow(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // [T-android-memory-row-date-wrap] The name+size group flexes and
-                // truncates; the date never wraps.
-                //
-                // Previously neither child had a weight, so the name group claimed
-                // its full intrinsic width and the date was left with the
-                // remainder. A daily-log name is itself a date ("2026-08-16.md"),
-                // which is long enough that the 16-char "yyyy-MM-dd HH:mm" stamp no
-                // longer fit — it wrapped to two lines and made that one row
-                // visibly taller than its neighbours (user-reported).
-                //
-                // Giving the name group weight(1f, fill = false) lets it shrink
-                // only as far as needed, and maxLines/ellipsis on the NAME means
-                // the truncation lands on the element that can afford it. softWrap
-                // = false on the date is the actual guarantee of a uniform row
-                // height — the date is short, fixed-width, and the one thing that
-                // must never reflow. Deliberately NOT solved by shortening the
-                // format: the time is real information, and dropping it would only
-                // move the threshold rather than remove it.
                 Row(
                     modifier = Modifier.weight(1f, fill = false),
                     verticalAlignment = Alignment.CenterVertically,
@@ -243,13 +209,6 @@ private fun MemoryFileRow(
                 )
             }
         }
-        // [T-memory-file-delete-entrypoint] Daily logs are deletable per the
-        // repository contract, but the row previously accepted onDelete and
-        // never rendered it — the confirm dialog was unreachable, so users
-        // could not delete memory files at all (iOS exposes this via
-        // List .onDelete swipe). An always-visible trash button is the
-        // Android-convention equivalent; GLOBAL.md passes onDelete = null
-        // and keeps its chevron-only layout.
         if (onDelete != null) {
             IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
                 Icon(
@@ -269,19 +228,6 @@ private fun MemoryFileRow(
     }
 }
 
-/**
- * Full-page memory file editor, matching iOS MemoryFileEditView.
- * Monospaced text. The Save button stays ALWAYS visible.
- *
- * [T-global-memory-save-always-visible] Previously the Save action was
- * gated on a `hasChanges` flag that only flipped true inside the field's
- * onValueChange. Programmatic content changes (paste, IME commit, state
- * restore) don't always route through onValueChange, so Save could fail
- * to appear after a paste until the user typed another key — the exact
- * symptom reported on iOS/macOS. Keeping Save permanently
- * visible removes the dependency entirely; saveFile is idempotent so a
- * no-op Save on unchanged content is harmless.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MemoryFileEditScreen(
@@ -293,12 +239,6 @@ fun MemoryFileEditScreen(
     var content by remember { mutableStateOf("") }
     var saveError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
-    // [T-memory-save-toast-feedback] Confirm Save actually committed by
-    // flashing a toast — previously the Save tap silently closed nothing,
-    // showed no state change, and the user had no signal that the edit
-    // landed (user-reported confusion). Reuses the existing
-    // memory_save_toast string already wired for the per-chat memory
-    // detail editor's SavedToast so the wording stays consistent.
     val savedToastText = stringResource(R.string.memory_save_toast)
 
     LaunchedEffect(fileName) {
@@ -315,8 +255,6 @@ fun MemoryFileEditScreen(
                     }
                 },
                 actions = {
-                    // [T-global-memory-save-always-visible] Always render Save —
-                    // no hasChanges gate (see KDoc above).
                     MinisTextButton(onClick = {
                         try {
                             memoryRepository.saveFile(fileName, content)
@@ -344,8 +282,6 @@ fun MemoryFileEditScreen(
         ) {
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Editor. [T-android-editor-keyboard-overlap] The caret stays
-            // above the keyboard; see DocumentEditorField.
             com.openminis.app.ui.components.DocumentEditorField(
                 value = content,
                 onValueChange = {
@@ -359,7 +295,6 @@ fun MemoryFileEditScreen(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
 
-            // Footer text
             if (isGlobal) {
                 Text(
                     stringResource(R.string.memory_global_footer),

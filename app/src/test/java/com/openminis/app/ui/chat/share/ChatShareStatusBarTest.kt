@@ -5,12 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T7c-share-statusbar] The share picker and preview are full-screen Dialogs with
- * their own windows; the system bars take their icon colour from the top window,
- * which defaults to white icons. Each must set its window's bar icons from the
- * APP theme (not the export's Appearance option).
- */
 class ChatShareStatusBarTest {
     private val picker = ProductionSources.read("ui/chat/share/ChatShareSelectionScreen.kt")
     private val preview = ProductionSources.read("ui/chat/share/ChatSharePreviewScreen.kt")

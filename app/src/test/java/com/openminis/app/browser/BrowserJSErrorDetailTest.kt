@@ -12,20 +12,6 @@ import org.junit.Test
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-/**
- * [T-android-js-error-detail] Port of iOS adb784ed2. On a document with no
- * body, get_text / get_readable / get_page_info / scroll returned the success
- * text "null" and get_backbone "Value null of type org.json.JSONObject$1
- * cannot be converted to JSONObject" (reproduced on a Pixel 4a): the scripts
- * threw, and `WebView.evaluateJavascript` swallows the exception and hands the
- * callback a bare null.
- *
- *   [1] The shipped scripts, run in Node against a fake `document`: clear
- *       errors without a body, "Script threw: <name>: <message>" for a throw,
- *       success output unchanged. Skipped when no `node` is installed.
- *   [2] BrowserJSResult: null is "no result" for must-return scripts.
- *   [3] Source guards on BrowserUseManager's call sites.
- */
 class BrowserJSErrorDetailTest {
 
     companion object {
@@ -55,7 +41,6 @@ class BrowserJSErrorDetailTest {
         private const val WITH_BODY = "document.body = bodyEl; document.contentType = 'text/html';"
     }
 
-    /** Evaluates each (setup, script) pair in a fresh context; "THROWS …" on an exception. */
     private fun runJs(cases: List<Pair<String, String>>): List<String> {
         val bin = node
         assumeTrue("node is not installed", bin != null)
@@ -88,10 +73,8 @@ class BrowserJSErrorDetailTest {
 
     private fun one(script: String, setup: String = ""): String = runJs(listOf(setup to script)).single()
 
-    // [1] The scripts as shipped
 
     @Test fun `the unguarded body read throws, which WebView turned into null`() {
-        // What get_text was before the guard.
         assertTrue(one("(function(){ return document.body.innerText; })()").startsWith("THROWS TypeError"))
     }
 
@@ -143,10 +126,8 @@ class BrowserJSErrorDetailTest {
     }
 
     @Test fun `write actions get the try-catch but no body requirement`() {
-        // scroll walks document.body: it now says why instead of returning null.
         val scroll = one(BrowserUseJS.scroll(ScrollDirection.DOWN, 300, null))
         assertTrue(scroll, scroll.startsWith("{\"error\":\"Script threw: TypeError: "))
-        // click needs no body: an element-not-found answer is unchanged.
         assertEquals("{\"error\":\"Element not found: #b\"}", one(BrowserUseJS.click("#b")))
     }
 
@@ -164,7 +145,6 @@ class BrowserJSErrorDetailTest {
         assertTrue("compiles alone → not called a syntax error", BrowserJSResult.syntaxErrorMessage("").contains("the script did not run. It compiles on its own"))
     }
 
-    // [2] Result classification
 
     @Test fun `decode unquotes strings and keeps JS null apart from the string null`() {
         assertEquals(null, BrowserJSResult.decode(null))
@@ -185,7 +165,6 @@ class BrowserJSErrorDetailTest {
         assertTrue(BrowserJSResult.NO_RESULT_ERROR.startsWith("JavaScript error: the page script stopped without returning a result."))
     }
 
-    // [3] Call sites
 
     private val manager = ProductionSources.read("browser/BrowserUseManager.kt")
 
@@ -200,7 +179,6 @@ class BrowserJSErrorDetailTest {
 
     @Test fun `every read script is guarded, page info without the body requirement`() {
         val js = ProductionSources.read("browser/BrowserUseJS.kt")
-        // click, clickCoordinate, type, get_text x2, get_readable, scroll, hover, find_elements, get_page_info, get_backbone
         assertEquals(11, Regex("guardedRead\\(\"\"\"").findAll(js).count())
         assertTrue(js.contains("fun getPageInfo(): String = guardedRead(\"\"\""))
         assertTrue(js.substringAfter("fun getPageInfo()").substringBefore("// -- Get Backbone --").contains("\"\"\".trimIndent(), requiresBody = false)"))

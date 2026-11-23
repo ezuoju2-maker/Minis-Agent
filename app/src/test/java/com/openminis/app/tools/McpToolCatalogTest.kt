@@ -4,10 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [plugin-ecosystem / MCP] Parsing, cross-server collision detection, compact
- * manifest and unambiguous reference resolution for MCP plugin tools.
- */
 class McpToolCatalogTest {
 
     private val envelope = """
@@ -58,7 +54,6 @@ class McpToolCatalogTest {
         val m = McpToolCatalog.manifest(tools)
         assertTrue(m.contains("notion.search"))
         assertTrue(m.contains("github.search"))
-        // Non-colliding tool needs no qualification.
         assertTrue(m.contains("create_page:"))
         assertTrue(!m.contains("notion.create_page"))
     }

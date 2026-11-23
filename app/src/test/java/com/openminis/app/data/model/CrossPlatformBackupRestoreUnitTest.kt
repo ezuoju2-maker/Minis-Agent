@@ -14,22 +14,10 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
-/**
- * An iOS backup carrying a model's custom parameters (temperature, top-p,
- * headers, extra body) restores on Android, survives the Room round trip and a
- * model-list refresh.
- *
- * The package used to be a hand-made file at /tmp/cross_platform_test.minisbak
- * that existed only on one machine, so the test failed everywhere else. It is
- * built here instead: a zip with `data/provider_config.json` written in iOS's
- * wire shape (Swift Codable names, ISO-8601 dates, `extraBodyParams` as iOS's
- * `[String: String]`), read back through the same zip path as before.
- */
 class CrossPlatformBackupRestoreUnitTest {
 
     @get:Rule val tmp = TemporaryFolder()
 
-    /** provider_config.json as iOS ProviderConfig / ModelEntry / ModelOverrides encode it. */
     private val iosProviderConfig = """
         {
           "instances": [
@@ -83,7 +71,6 @@ class CrossPlatformBackupRestoreUnitTest {
             isLenient = true
         }
 
-        // 1. Deserialization
         val config = jsonParser.decodeFromString<ProviderConfig>(extractedJson!!)
         assertNotNull(config)
         assertEquals(1, config.instances.size)
@@ -93,7 +80,6 @@ class CrossPlatformBackupRestoreUnitTest {
         val overrides = modelEntry.overrides
         assertNotNull("Overrides must be parsed", overrides)
 
-        // Every newly added custom parameter must parse intact
         assertEquals(0.7, overrides.temperature ?: 0.0, 0.0001)
         assertEquals(0.9, overrides.topP ?: 0.0, 0.0001)
         assertNotNull("customHeaders must not be null", overrides.customHeaders)
@@ -101,7 +87,6 @@ class CrossPlatformBackupRestoreUnitTest {
         assertEquals("https://openminis.app", overrides.customHeaders?.get("HTTP-Referer"))
         assertNotNull("extraBodyParams must not be null", overrides.extraBodyParams)
 
-        // 2. Simulate writing the local Room entity's overrides_json column
         val serializedOverrides = jsonParser.encodeToString(overrides)
         val entity = ProviderModelEntryEntity(
             id = modelEntry.uuid,
@@ -115,12 +100,10 @@ class CrossPlatformBackupRestoreUnitTest {
         )
         assertNotNull(entity.overridesJson)
 
-        // 3. Simulate reading it back from the Room entity
         val restoredOverrides = jsonParser.decodeFromString<ModelOverrides>(entity.overridesJson!!)
         assertEquals(0.7, restoredOverrides.temperature ?: 0.0, 0.0001)
         assertEquals("Token-ABC-123", restoredOverrides.customHeaders?.get("X-Custom-Auth"))
 
-        // 4. Simulate a model-list refresh (Refresh Models); the overrides must not be wiped
         val remoteNewBaseModel = LLMModel(
             id = "test-gpt-custom",
             displayName = "Remote Updated GPT Name",
@@ -135,7 +118,6 @@ class CrossPlatformBackupRestoreUnitTest {
             uuid = entity.id,
             userModifiedAt = entity.userModifiedAt
         )
-        // The custom parameters must survive the refresh intact
         assertEquals(0.7, refreshedModelEntry.overrides.temperature ?: 0.0, 0.0001)
         assertEquals(0.9, refreshedModelEntry.overrides.topP ?: 0.0, 0.0001)
         assertEquals("Token-ABC-123", refreshedModelEntry.overrides.customHeaders?.get("X-Custom-Auth"))

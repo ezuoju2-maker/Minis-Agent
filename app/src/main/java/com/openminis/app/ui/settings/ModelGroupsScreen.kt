@@ -90,35 +90,19 @@ fun ModelGroupsScreen(
     providerRepository: ProviderRepository,
     onBack: () -> Unit,
     onGroupClick: (String) -> Unit,
-    /** T185: navigate to the entries picker for the agent-loop set.
-     *  Replaces T182's in-screen ModalBottomSheet so the picker shape
-     *  matches AddModelsToGroupScreen (shared composable). */
     onAddAgentLoopModels: () -> Unit = {},
-    /** T185: navigate to the groups picker for the agent-loop set. */
     onAddAgentLoopGroups: () -> Unit = {},
 ) {
     val config by providerRepository.config.collectAsState()
     val groups = config.modelGroups
     var showNewGroupDialog by remember { mutableStateOf(false) }
     var newGroupName by remember { mutableStateOf("") }
-    // [T-android-swipe-row-actions] Pending swipe-delete target, hoisted out of
-    // the row so the confirmation survives recomposition/reorder.
     var groupToDelete by remember { mutableStateOf<ModelGroup?>(null) }
 
-    // T186: parent LazyListState shared with rememberReorderableLazyListState
-    // so each agent-loop pinned row (rendered as its own LazyColumn item)
-    // can carry a Modifier.draggableHandle and reorder live. The reorder
-    // callback resolves the dragged row by its key (entry id / group id),
-    // permutes our local copy, then commits via ProviderRepository.
     val lazyListState = rememberLazyListState()
     val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
         val fromKey = from.key as? String ?: return@rememberReorderableLazyListState
         val toKey = to.key as? String ?: return@rememberReorderableLazyListState
-        // Two reorder zones share the same lazyListState — entries
-        // (key prefix "agent_entry:") and groups ("agent_group:").
-        // Refuse cross-zone drags so a user can't accidentally drop an
-        // entry into the groups zone (the data shape would reject it
-        // anyway, but a no-op is friendlier than a snap-back).
         when {
             fromKey.startsWith("agent_entry:") && toKey.startsWith("agent_entry:") -> {
                 val fromId = fromKey.removePrefix("agent_entry:")
@@ -140,10 +124,6 @@ fun ModelGroupsScreen(
                 val newOrder = cur.toMutableList().apply { add(toIdx, removeAt(fromIdx)) }
                 providerRepository.reorderAgentLoopGroups(newOrder)
             }
-            // [T-android-modelgroup-reorder] Third zone: the user's Model
-            // Groups themselves ("日常/编程/翻译"…). NOTE the prefix check
-            // order is safe: "agent_group:" does not start with "group:", so
-            // the zones cannot cross-match.
             fromKey.startsWith("group:") && toKey.startsWith("group:") -> {
                 val fromId = fromKey.removePrefix("group:")
                 val toId = toKey.removePrefix("group:")
@@ -174,9 +154,6 @@ fun ModelGroupsScreen(
             )
         },
     ) { padding ->
-        // T313: page background uses SectionDesign.screenBackgroundColor()
-        // (= surfaceContainerLow), so the section cards painted in `surface`
-        // visibly stand out as iOS-style inset-grouped panels.
         LazyColumn(
             state = lazyListState,
             modifier = Modifier
@@ -215,18 +192,6 @@ fun ModelGroupsScreen(
                     }
                 }
             } else {
-                // T313 — Section 1 (Groups).
-                //
-                // [T-android-modelgroup-reorder] The section used to be ONE
-                // LazyColumn item wrapping a SectionCard with a forEach inside
-                // — which is exactly why the groups could not be reordered:
-                // ReorderableLazyListState only sees direct LazyColumn items.
-                // Rows are now individual items keyed "group:<id>" with the
-                // per-row cardRow(first/last) treatment, the same composition
-                // the agent-loop section below has used since T186. Swipe-to-
-                // delete and tap-to-open are unchanged; dragging lives on the
-                // explicit leading handle (consistent with AgentLoopRow, and
-                // it keeps clickable/swipe gestures conflict-free).
                 item("groups_section_header") {
                     SectionHeader(text = stringResource(R.string.agent_loop_models_groups))
                 }
@@ -243,18 +208,6 @@ fun ModelGroupsScreen(
                                     isLast = index == groups.lastIndex,
                                 ),
                             ) {
-                                // [T-android-swipe-row-actions] Swipe left for
-                                // Edit / Delete.
-                                //
-                                // This REPLACES a SwipeToDismissBox that called
-                                // removeGroup() the instant the swipe crossed its
-                                // threshold — no confirmation and no undo, so a
-                                // stray horizontal gesture silently destroyed a
-                                // group (and, via removeGroup, cleared it from
-                                // every default slot that referenced it). Delete
-                                // now routes through the SAME dialog copy and the
-                                // same repository call as ModelGroupDetailScreen's
-                                // "Delete Group" button; Edit opens that screen.
                                 SwipeRowActions(
                                     actions = listOf(
                                         SwipeRowAction(
@@ -287,8 +240,6 @@ fun ModelGroupsScreen(
                     }
                 }
 
-                // T313 — Section 2 (Defaults). Two dropdown rows in one card
-                // with SectionDivider between them, footer caption outside.
                 item("defaults_section_spacer") {
                     Spacer(modifier = Modifier.height(SectionDesign.SectionTopGap))
                 }
@@ -310,8 +261,6 @@ fun ModelGroupsScreen(
                             selectedId = config.defaultSubGroupId,
                             onSelect = { providerRepository.defaultSubGroupId = it },
                         )
-                        // [T-android-provider-voice] Voice group bindings —
-                        // mirrors iOS voiceInputGroupId / voiceOutputGroupId.
                         SectionDivider()
                         GroupDropdown(
                             label = stringResource(R.string.model_groups_voice_input),
@@ -326,9 +275,6 @@ fun ModelGroupsScreen(
                             selectedId = config.voiceOutputGroupId,
                             onSelect = { providerRepository.voiceOutputGroupId = it },
                         )
-                        // [T-android-vision-group / GH#182] Vision Group — the
-                        // group whose vision-capable members read images for a
-                        // main model that cannot natively see them.
                         SectionDivider()
                         GroupDropdown(
                             label = stringResource(R.string.model_groups_vision),
@@ -345,11 +291,6 @@ fun ModelGroupsScreen(
                 }
             }
 
-            // T182 / T185 / T186: Agent Loop Models section. Mirrors iOS
-            // ModelGroupsView.swift L77-79's inline AgentLoopModelsSection
-            // — header + curated rows + add-row + footer all directly in
-            // this LazyColumn so the rows can participate in the parent's
-            // ReorderableLazyListState (T186 drag-to-reorder).
             agentLoopModelsSectionItems(
                 providerRepository = providerRepository,
                 config = config,
@@ -360,12 +301,6 @@ fun ModelGroupsScreen(
         }
     }
 
-    // T185: the in-screen ModalBottomSheet was replaced by full-screen
-    // navigated picker screens (AddAgentLoopModelsScreen /
-    // AddAgentLoopGroupsScreen). The "Add Models" / "Add Groups"
-    // buttons inside AgentLoopModelsSection now invoke
-    // onAddAgentLoopModels / onAddAgentLoopGroups passed from
-    // AppNavigation, mirroring how AddModelsToGroupScreen is reached.
 
     if (showNewGroupDialog) {
         AlertDialog(
@@ -397,7 +332,6 @@ fun ModelGroupsScreen(
                         if (newGroupName.isNotBlank()) {
                             val newGroup = ModelGroup(name = newGroupName.trim())
                             providerRepository.addGroup(newGroup)
-                            // Auto-set as primary default if it's the first group
                             if (config.modelGroups.size == 1 && config.defaultPrimaryGroupId == null) {
                                 providerRepository.defaultPrimaryGroupId = newGroup.id
                             }
@@ -421,9 +355,6 @@ fun ModelGroupsScreen(
         )
     }
 
-    // [T-android-swipe-row-actions] Swipe-delete confirmation. Same title/body
-    // strings and same removeGroup() call as ModelGroupDetailScreen's Delete
-    // Group button — the swipe is a shortcut to that flow, not a second one.
     groupToDelete?.let { target ->
         AlertDialog(
             onDismissRequest = { groupToDelete = null },
@@ -458,7 +389,6 @@ fun ModelGroupsScreen(
     }
 }
 
-/** Small colored badge label (e.g. "Primary", "Sub"). */
 @Composable
 private fun BadgeLabel(text: String, color: androidx.compose.ui.graphics.Color) {
     Box(
@@ -524,21 +454,6 @@ private fun GroupDropdown(
     }
 }
 
-/**
- * T182 — inline section embedded at the bottom of ModelGroupsScreen.
- * Mirrors iOS `AgentLoopModelsSection` from
- * `src/ios/Views/Providers/AgentLoopModelsView.swift` L1-72. Renders
- * the user's curated agent-loop usable set: pinned groups (rendered
- * first, since picking a group implicitly pins all its members) then
- * pinned individual entries. Each row carries a × icon to remove the
- * pin; the section footer hosts two add-sheet trigger buttons.
- *
- * The picker layouts behind those triggers live in
- * `AgentLoopAddSheets.kt` and use `LazyColumn` so a user with a 369-
- * entry OpenRouter instance doesn't freeze Compose the way the pre-
- * T182 `AgentLoopModelsScreen` did when it materialised every entry
- * in a single `Column`.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 private fun LazyListScope.agentLoopModelsSectionItems(
     providerRepository: ProviderRepository,
@@ -547,14 +462,6 @@ private fun LazyListScope.agentLoopModelsSectionItems(
     onAddModelsTap: () -> Unit,
     onAddGroupsTap: () -> Unit,
 ) {
-    // [T-android-agentloop-dup-key-crash] distinctBy id (belt-and-suspenders
-    // alongside the data-layer sink dedup). A config that's ALREADY corrupted
-    // with a duplicate id (persisted before the sink fix) would otherwise yield
-    // two rows sharing the same LazyColumn/Reorderable key and crash on scroll
-    // (IllegalArgumentException: Key "..." was already used). Deduping here
-    // makes the screen render so the user can even reach a state where the
-    // persisted list gets rewritten clean. totalRows / absIndex below derive
-    // from these deduped lists, so the row math stays consistent.
     val pinnedGroups = config.agentLoopGroupIds
         .mapNotNull { gid -> config.modelGroups.find { it.id == gid } }
         .distinctBy { it.id }
@@ -563,13 +470,6 @@ private fun LazyListScope.agentLoopModelsSectionItems(
         .distinctBy { it.id }
     val isEmpty = pinnedGroups.isEmpty() && pinnedEntries.isEmpty()
 
-    // T313 — agent-loop section. Reorder rows MUST stay as top-level
-    // LazyColumn items (ReorderableLazyListState only sees direct child
-    // items), so the card visual is built per-row via SectionDesign
-    // tokens: every row is wrapped with cardRow(isFirst, isLast) which
-    // applies horizontal insets, surface fill, and rounded corners only
-    // on the first/last row. SectionDivider is emitted as its own item
-    // between rows so the inner card reads as one continuous panel.
     item("agent_loop_section_spacer") {
         Spacer(modifier = Modifier.height(SectionDesign.SectionTopGap))
     }
@@ -706,12 +606,6 @@ private fun LazyListScope.agentLoopModelsSectionItems(
     item("bottom_gap") { Spacer(modifier = Modifier.height(SectionDesign.SectionTopGap)) }
 }
 
-/** Single row inside the agent-loop section. Drag handle on the left
- *  (T186), title + optional subtitle + optional "Group" badge in the
- *  middle, × to unpin on the right. The drag-handle modifier is built
- *  by the parent (since ReorderableItemScope.draggableHandle() is
- *  scope-bound) and threaded in here to keep the row composable
- *  scope-agnostic. */
 @Composable
 private fun AgentLoopRow(
     title: String,
@@ -726,11 +620,6 @@ private fun AgentLoopRow(
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // T198: drag handle must be wrapped in IconButton — Icon is raw
-        // vector graphics with no pointer consumer, so reorderable v2.4.0's
-        // draggableHandle() never sees ACTION_DOWN/MOVE on a bare Icon.
-        // IconButton is Compose's clickable container and consumes pointer
-        // events, letting the dragHandleModifier route gestures correctly.
         IconButton(
             onClick = {},
             modifier = dragHandleModifier.size(36.dp),
@@ -777,15 +666,6 @@ private fun AgentLoopRow(
     }
 }
 
-// ── T313 LazyList card helpers ────────────────────────────────────────────
-//
-// SectionCard / SectionDivider from SectionDesign are designed for
-// Column-scoped sections, but the agent-loop section needs each row to
-// stay a top-level LazyColumn item so ReorderableLazyListState (T186) can
-// see it. These helpers paint the SectionDesign card visual on a per-row
-// basis: cardRow() applies horizontal insets + surface fill + per-row
-// corner clipping; SectionDividerInsetCard() draws the inner divider
-// between consecutive rows so the painted run reads as one panel.
 
 @Composable
 private fun Modifier.cardRow(isFirst: Boolean, isLast: Boolean): Modifier {
@@ -795,8 +675,6 @@ private fun Modifier.cardRow(isFirst: Boolean, isLast: Boolean): Modifier {
         isLast -> RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
         else -> RectangleShape
     }
-    // Match SectionCard's inner Column vertical padding so first/last rows
-    // get the same breathing room from the card edge as Sections 1 & 2.
     return this
         .padding(horizontal = SectionDesign.ScreenHorizontalPadding)
         .clip(shape)
@@ -807,9 +685,6 @@ private fun Modifier.cardRow(isFirst: Boolean, isLast: Boolean): Modifier {
         )
 }
 
-/** Divider between two cardRow rows. Painted on the same surface fill so
- *  it reads as an inset divider inside the card panel rather than a hard
- *  line floating on the page background. */
 @Composable
 private fun SectionDividerInsetCard() {
     Box(
@@ -826,22 +701,8 @@ private fun SectionDividerInsetCard() {
     }
 }
 
-/**
- * [T-android-modelgroup-modality-icons] One modality marker shown after a Model
- * Group title. `kind` is the modality string ("image"/"audio"/"video"/"pdf"/
- * "text") and `isOutput` distinguishes a generation output from an accepted
- * input. Ports iOS ModelGroupsView.GroupRow.topModalities /
- * modalityIcon (commits 7caa580a + e0a7cd5f).
- */
 private data class GroupModalityMarker(val kind: String, val isOutput: Boolean)
 
-/**
- * Distinctiveness ranking, most distinctive first — mirrors iOS
- * `modalityPriority`. `text` input is intentionally absent (universal noise);
- * `text` output ranks last (implied for every model, only surfaces when a group
- * has nothing more distinctive). Transcription (audio-in) outranks other inputs
- * so Whisper-style groups get flagged even though their output is plain text.
- */
 private val GROUP_MODALITY_PRIORITY: List<GroupModalityMarker> = listOf(
     GroupModalityMarker("video", isOutput = true),
     GroupModalityMarker("image", isOutput = true),
@@ -853,13 +714,6 @@ private val GROUP_MODALITY_PRIORITY: List<GroupModalityMarker> = listOf(
     GroupModalityMarker("text", isOutput = true),
 )
 
-/**
- * The group's top-2 most distinctive modalities across every member model's
- * inputs AND outputs, in priority order. Aggregates raw model modality lists
- * (Android convention — no capability inference); a null/empty outputModalities
- * counts as text output (iOS treats text-out as universal). Mirrors iOS
- * `GroupRow.topModalities`.
- */
 private fun groupTopModalities(
     group: ModelGroup,
     config: com.openminis.app.data.model.ProviderConfig,
@@ -877,12 +731,6 @@ private fun groupTopModalities(
     }.take(2)
 }
 
-/**
- * Icon + tint + a11y label for one [GroupModalityMarker], reusing the glyph
- * convention from ProviderDetailScreen.ModalityIconsRow: output/generation
- * modalities use the primary tint + "generate"-style glyph; input modalities
- * use the muted onSurfaceVariant tint. Renders nothing for unknown combos.
- */
 @Composable
 private fun GroupModalityIcon(marker: GroupModalityMarker) {
     val outputTint = MaterialTheme.colorScheme.primary
@@ -902,22 +750,12 @@ private fun GroupModalityIcon(marker: GroupModalityMarker) {
     Icon(imageVector = vector, contentDescription = stringResource(labelRes), modifier = size, tint = tint)
 }
 
-/** A single group row inside the Groups section card. Built as a plain
- *  Composable (not a ListItem) so it inherits the card's surface color
- *  cleanly without ListItem's container override. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GroupRow(
     group: ModelGroup,
     config: com.openminis.app.data.model.ProviderConfig,
     onClick: () -> Unit,
-    /**
-     * [T-android-modelgroup-reorder] When non-null, a leading drag handle is
-     * rendered carrying this modifier (ReorderableItem.draggableHandle).
-     * Explicit handle rather than long-press-anywhere: the row already owns
-     * tap (open detail) and horizontal swipe (delete), and this matches
-     * AgentLoopRow's affordance in the section below.
-     */
     dragHandleModifier: Modifier? = null,
 ) {
     val memberNames = group.memberEntryIds.mapNotNull { entryId ->
@@ -934,11 +772,6 @@ private fun GroupRow(
         RoutingStrategy.fallback -> stringResource(R.string.model_group_detail_fallback)
         RoutingStrategy.loadBalance -> stringResource(R.string.model_group_detail_load_balance)
     }
-    // [T-disabled-provider-via-group-android] Count members whose provider
-    // instance is currently enabled — that's what the runtime resolver
-    // will actually consider. When every member sits behind a disabled
-    // provider, surface a warning so the user understands why the group
-    // appears empty in chat.
     val enabledInstanceIds = config.instances.filter { it.isEnabled }.map { it.id }.toSet()
     val totalMembers = group.memberEntryIds.size
     val enabledMembers = group.memberEntryIds.count { entryId ->
@@ -957,9 +790,6 @@ private fun GroupRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (dragHandleModifier != null) {
-            // T198 (same as AgentLoopRow): the handle must be an IconButton —
-            // a bare Icon has no pointer consumer, so draggableHandle() would
-            // never receive ACTION_DOWN/MOVE.
             IconButton(
                 onClick = {},
                 modifier = dragHandleModifier.size(36.dp),
@@ -984,10 +814,6 @@ private fun GroupRow(
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                // [T-android-modelgroup-modality-icons] Mark the group's top-2
-                // most distinctive modalities (inputs + outputs) right after the
-                // title, in priority order, for at-a-glance "what is this group
-                // for". Ports iOS ModelGroupsView (7caa580a + e0a7cd5f).
                 groupTopModalities(group, config).forEach { marker ->
                     GroupModalityIcon(marker)
                 }
@@ -1000,12 +826,6 @@ private fun GroupRow(
                     )
                 }
             }
-            // [T-disabled-provider-via-group-android] Surface "M of N
-            // disabled" when any member's provider is off so the user
-            // doesn't have to drill into the detail page to learn that
-            // the group isn't fully usable. Total count stays prominent
-            // because it's still the source of truth for what's in the
-            // group; the parenthetical reports disabled count.
             val disabledCount = totalMembers - enabledMembers
             val subtitleText = if (disabledCount > 0) {
                 "$strategyLabel · $totalMembers models ($disabledCount disabled)"

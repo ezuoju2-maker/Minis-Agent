@@ -10,7 +10,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** [UI-261025-11] The time under a reply gains its date on any other day. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class ReplyClockTest {

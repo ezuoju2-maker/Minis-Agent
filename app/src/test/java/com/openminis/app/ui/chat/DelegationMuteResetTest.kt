@@ -4,11 +4,6 @@ import com.openminis.app.ProductionSources
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-mute-reset-on-drain] Port of iOS f1f4f23ba sub-issue 3: every
- * way a new turn starts lifts a sub-agent stop's delegation mute, not only
- * the public sendMessage.
- */
 class DelegationMuteResetTest {
 
     private val vm by lazy { ProductionSources.read("ui/chat/ChatViewModel.kt") }

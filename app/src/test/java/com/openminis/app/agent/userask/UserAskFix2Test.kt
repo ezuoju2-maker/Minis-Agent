@@ -9,12 +9,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-port-user-ask-fix2] Pixel 4a round 3: a single-choice question with the
- * recommended option preselected, Other -> "Green", then Submit, answered
- * "Red, Green". Last action wins now: typed text replaces a pick, a pick
- * replaces typed text; multi-select still combines them.
- */
 class UserAskFix2Test {
 
     @Before fun setUp() = UserAskCenter.resetForTest()
@@ -36,14 +30,12 @@ class UserAskFix2Test {
 
     private fun answer(rid: String) = UserAskCenter.asks.value[rid]!!.answers[0]
 
-    /** What the card's Other dialog does on every keystroke (draft), commit or not. */
     private fun type(rid: String, q: UserAskQuestion, text: String) =
         UserAskCenter.updateAnswer(rid, 0, answer(rid).withOtherText(text, q))
 
     @Test fun `the device repro - typed Other replaces the preselected option even without Done`() {
         val rid = begin(single)
         assertEquals("Red starts preselected", listOf(0), answer(rid).selected)
-        // Keystrokes only; the dialog is closed by back / tapping outside (no commit).
         for (t in listOf("G", "Gr", "Green")) type(rid, single, t)
         assertTrue("the pick is gone from the first keystroke", answer(rid).selected.isEmpty())
         UserAskCenter.submitQuestion(rid, 0)
@@ -88,7 +80,6 @@ class UserAskFix2Test {
         assertEquals(listOf("Green"), e.answer)
     }
 
-    // ── UI source guards ────────────────────────────────────────────────────
 
     private val card = ProductionSources.read("ui/chat/UserAskCard.kt")
 

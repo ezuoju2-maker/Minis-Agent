@@ -5,15 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-restore-browse-swipe-delete] Swipe-to-delete in the restore browser.
- *
- * The browser walks subfolders, so a package's address is its full path
- * (`RemoteEntry.path`). The package-level delete used to rebuild the address
- * as `<remote root>/<name>`, which for a package in a subfolder points at a
- * file that does not exist — rclone's deletefile then fails, or worse, removes
- * a same-named package at the root.
- */
 class RestoreBrowseDeleteWiringTest {
 
     private val uploader =

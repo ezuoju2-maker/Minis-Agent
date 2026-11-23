@@ -2,13 +2,7 @@ package com.openminis.app.diagnostics
 
 import kotlin.math.max
 
-/**
- * [T-android-jankdiag] Pure aggregation behind [JankDiag]: no Android types, so
- * JankDiagStatsTest runs it on the JVM. Everything here is fed from the
- * JankDiag background thread and read back once per summary window.
- */
 
-/** Frame durations for one window, in nanoseconds, stage by stage. */
 internal class JankFrameWindow(initialCapacity: Int = 1024) {
     enum class Stage { TOTAL, INPUT, ANIMATION, LAYOUT_MEASURE, DRAW, SYNC, COMMAND_ISSUE, SWAP, GPU }
 
@@ -27,11 +21,6 @@ internal class JankFrameWindow(initialCapacity: Int = 1024) {
 
     val count: Int get() = size
 
-    /**
-     * One frame. [deadlineNs] is the frame's budget (FrameMetrics.DEADLINE on
-     * API 31+, else the display's vsync period); a frame whose total passes it
-     * counts as janky.
-     */
     fun add(stages: LongArray, deadlineNs: Long, intendedVsyncNs: Long) {
         if (size == data[0].size) data = Array(data.size) { data[it].copyOf(size * 2) }
         for (i in data.indices) data[i][size] = stages.getOrElse(i) { 0L }
@@ -45,7 +34,6 @@ internal class JankFrameWindow(initialCapacity: Int = 1024) {
         }
     }
 
-    /** The [q] quantile (0..1) of a stage, in ms; 0 when empty. */
     fun percentileMs(stage: Stage, q: Double): Double {
         if (size == 0) return 0.0
         val sorted = data[stage.ordinal].copyOf(size).also { it.sort() }
@@ -59,16 +47,11 @@ internal class JankFrameWindow(initialCapacity: Int = 1024) {
         return m / 1_000_000.0
     }
 
-    /** Frames per second over the window's own vsync span (0 below two frames). */
     fun fps(): Double {
         if (size < 2 || lastVsyncNs <= firstVsyncNs) return 0.0
         return (size - 1) * 1e9 / (lastVsyncNs - firstVsyncNs)
     }
 
-    /**
-     * Whether the window is worth a line: a few janky frames, or one frame long
-     * enough to be a visible hitch. Quiet windows print nothing.
-     */
     fun worthReporting(minJanky: Int = 3): Boolean = janky >= minJanky || over100ms > 0
 
     fun summary(): String {
@@ -87,7 +70,6 @@ internal class JankFrameWindow(initialCapacity: Int = 1024) {
     }
 }
 
-/** A small reservoir of millisecond samples (parse times, log call times): p50/p90/max. */
 internal class JankMsSamples(private val capacity: Int = 512) {
     private val values = DoubleArray(capacity)
     private var n = 0
@@ -114,12 +96,10 @@ internal class JankMsSamples(private val capacity: Int = 512) {
     fun reset() { n = 0; total = 0; sumMs = 0.0; maxMs = 0.0 }
 }
 
-/** Readable page label from a navigation route: "chat/{sessionId}" -> "chat". */
 internal fun jankScreenLabel(route: String?): String {
     if (route.isNullOrBlank()) return "none"
     return route.substringBefore("/{").substringBefore("?").take(40)
 }
 
-/** "a.b.C.m:12 <- d.E.n:3 ..." — the first [depth] frames of a stack, one line. */
 internal fun jankStackLine(stack: Array<StackTraceElement>, depth: Int = 18): String =
     stack.take(depth).joinToString(" <- ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }

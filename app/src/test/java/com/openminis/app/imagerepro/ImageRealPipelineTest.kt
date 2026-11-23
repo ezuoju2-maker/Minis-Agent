@@ -21,42 +21,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Ignore
 import org.junit.Test
 
-/**
- * Image-pipeline repro on the REAL production functions (round 2 of the
- * image-pipeline repro suite).
- *
- * Every scenario runs through the functions production calls:
- *  - user attachment: ChatAttachmentIngest.ingestImage (real MediaStore, real
- *    uploads dir) → ChatAttachmentIngest.liveUserTurn (what sendMessage appends)
- *    → ChatPartsJson.buildUserPartsJson (what is persisted) → MessageEntity →
- *    ChatHistoryRebuild.toLLMMessage (what a reload sends);
- *  - tool image: ImageBudget.resizeJpegToMaxEdge (browser_use) /
- *    ReadImageTool.imageResult (read_image) → ToolResult → ChatPartsJson
- *    .toolResultPartsJson (persisted) → ChatHistoryRebuild.toLLMMessage;
- *  - then all four real serializers (ImageRealWire).
- * Pixel work runs on [ImageRealJvmCodec] plugged into the production seam
- * ImageBudget.codec, so the production sizing / format / quality code runs; the
- * decoder itself is the JDK's (see that class for what that does NOT prove).
- *
- * (A) characterization tests pass on today's code; (B) desired tests are
- * @Ignore("known gap …"). Rows are printed as `[REAL] …` and compared with the
- * previous round's `[REPRO] …` rows.
- */
 class ImageRealPipelineTest {
 
     private val F = ImageRealFixtures
     private val files = F.tempDir("imgreal")
     private val mediaStore = MediaStore(F.context(files))
     private val uploads = java.io.File(files, "minis-sessions/sess-1/attachments/uploads").apply { mkdirs() }
-    private val noVision: (String?) -> String? = { null } // a native-vision main model
+    private val noVision: (String?) -> String? = { null }
 
     @After fun cleanup() { files.deleteRecursively() }
 
-    // ── helpers on the real functions ───────────────────────────────────────
 
     private class UserTurn(val ingested: ChatAttachmentIngest.IngestedImage, val live: LLMMessage, val rebuilt: LLMMessage, val persisted: String)
 
-    /** Attach [raw] as the user would; return the live turn and the turn after persist → reload. */
     private fun userTurn(body: String, raw: ByteArray, mime: String, name: String): UserTurn {
         val ing = ChatAttachmentIngest.ingestImage(raw, mime, name, "sess-1", mediaStore, uploads)!!
         val live = ChatAttachmentIngest.liveUserTurn(
@@ -72,7 +49,6 @@ class ImageRealPipelineTest {
 
     private class ToolRound(val live: List<LLMMessage>, val rebuilt: List<LLMMessage>, val persisted: String)
 
-    /** A tool call whose result carries [image]; persisted and reloaded through the real functions. */
     private fun toolRound(tool: String, output: String, image: ByteArray?, path: String?): ToolRound {
         val use = LLMMessage(LLMMessage.Role.ASSISTANT, "", contentParts = listOf(AgentContentPart.ToolUse("t1", tool, org.json.JSONObject().put("a", 1))))
         val result = AgentContentPart.ToolResult("t1", tool, output, imageData = image, imageMimeType = image?.let { "image/jpeg" }, imageLinuxPath = path)
@@ -120,9 +96,7 @@ class ImageRealPipelineTest {
         .map { it.relativeTo(files).path.replace(Regex("\\d{4}/\\d{2}/\\d{2}"), "<date>").replace(Regex("[0-9a-f-]{36}"), "<uuid>") + " " + it.length() + "B" }
         .sorted().toList()
 
-    // ── S1' / S3 / S4: user attachments ─────────────────────────────────────
 
-    /** (A) S1′ 2760×21891 PNG attached: real ingest → 252×2000 PNG + note; two original copies; reload sends the same bytes. */
     @Test fun `S1 attached 2760x21891 png - real ingest, live and reload identical bytes, caption only live (N1)`() = ImageRealJvmCodec.with { codec ->
         val raw = F.png(2760, 21891)
         val t = userTurn("read this", raw, "image/png", "long.png")
@@ -132,18 +106,15 @@ class ImageRealPipelineTest {
         assertEquals("image/png", part.mimeType)
         assertEquals("/var/minis/attachments/uploads/long.png", t.ingested.linuxPath)
         assertTrue(t.ingested.modelNote!!.contains("the original is 2760×21891 px, shown here at 252×2000 px"))
-        // Disk: the ORIGINAL twice (MediaStore + uploads), never the model copy.
         val disk = onDisk()
         println("[REAL] S1' disk $disk")
         assertEquals(listOf("media/<date>/sess-1/<uuid>.png ${raw.size}B", "minis-sessions/sess-1/attachments/uploads/long.png ${raw.size}B"), disk)
-        // Reload rebuilds the same model copy (same function, same original, same codec).
         val livePart = t.live.imageParts.single(); val rePart = t.rebuilt.imageParts.single()
         assertTrue(livePart.data.contentEquals(rePart.data))
         assertEquals(livePart.mimeType, rePart.mimeType)
         val live = row("S1 attached 2760x21891", "live", listOf(t.live))
         val re = row("S1 attached 2760x21891", "after-reload", listOf(t.rebuilt))
         assertAll(live, 1, 252, 2000, "image/png"); assertAll(re, 1, 252, 2000, "image/png")
-        // N1: the caption is on the live turn only.
         val liveText = t.live.contentParts.filterIsInstance<AgentContentPart.Text>().map { it.text }
         val reText = t.rebuilt.contentParts.filterIsInstance<AgentContentPart.Text>().map { it.text }
         println("[REAL] N1 live text parts=${liveText.size} reload text parts=${reText.size}")
@@ -152,7 +123,6 @@ class ImageRealPipelineTest {
         assertEquals(liveText - "[attached image: /var/minis/attachments/uploads/long.png]", reText)
     }
 
-    /** (A) S3 camera 4032×3024 / S4 gallery 4000×6000 JPEG: real ingest fits with rounding; reload identical. */
     @Test fun `S3 camera and S4 gallery jpeg - real ingest 2000x1500 and 1333x2000, identical after reload`() = ImageRealJvmCodec.with {
         for ((name, size) in listOf("S3 camera 4032x3024" to (4032 to 3024), "S4 gallery 4000x6000" to (4000 to 6000))) {
             val t = userTurn("what is this", F.jpeg(size.first, size.second), "image/jpeg", "photo.jpg")
@@ -163,7 +133,6 @@ class ImageRealPipelineTest {
         }
     }
 
-    /** (A) S4 EXIF-6 400×200 and RGBA 200×200 PNG: real ingest keeps the original bytes (no downscale), EXIF/alpha intact on every wire. */
     @Test fun `S4 small exif-6 jpeg and rgba png - real ingest passes the original bytes through`() = ImageRealJvmCodec.with {
         val exif = F.jpegWithExifOrientation(400, 200, 6)
         val rgba = F.png(200, 200, alpha = true)
@@ -177,12 +146,6 @@ class ImageRealPipelineTest {
         assertEquals(6, F.dims(F.wireImages(ImageRealWire.openAIChat(listOf(userTurn("x", exif, "image/jpeg", "e.jpg").rebuilt))).single().bytes)!!.exifOrientation)
     }
 
-    /**
-     * (A) S4 EXIF-6 camera photo 4032×3024: real ingest re-encodes it, and the
-     * stored (landscape) orientation is what gets sized: 2000×1500 with no EXIF.
-     * On the JVM that is this codec's doing; that BitmapFactory ALSO ignores
-     * orientation is device-only (P-a6, androidTest ImageRealDeviceTest).
-     */
     @Test fun `S4 big exif-6 photo - re-encoded at its stored orientation, EXIF gone (JVM codec)`() = ImageRealJvmCodec.with { codec ->
         val t = userTurn("x", F.jpegWithExifOrientation(4032, 3024, 6), "image/jpeg", "cam.jpg")
         val d = F.dims(t.ingested.imagePart.data)!!
@@ -191,7 +154,6 @@ class ImageRealPipelineTest {
         assertNull(d.exifOrientation)
     }
 
-    /** (A) S4 HEIC (header only; no JDK reader): real ingest keeps raw HEIC labelled image/heic; every wire gets the placeholder. */
     @Test fun `S4 heic - real ingest keeps image-heic, gate placeholders it on all four (JVM)`() = ImageRealJvmCodec.with {
         val heic = F.heicHeaderOnly()
         val t = userTurn("x", heic, "image/heic", "a.heic")
@@ -206,16 +168,13 @@ class ImageRealPipelineTest {
         }
     }
 
-    // ── S1 / S2: browser screenshots ────────────────────────────────────────
 
-    /** (A) S1 full page 1080×32768: real resizeJpegToMaxEdge → 65×2000 (floor); real persist/reload → 0 images (P-a2). */
     @Test fun `S1 browser full-page 1080x32768 - real resize 65x2000, gone after real reload (P-a2, N4)`() = ImageRealJvmCodec.with { codec ->
         val raw = F.jpeg(1080, 32768, gray = true)
         val sent = ImageBudget.resizeJpegToMaxEdge(raw, 2000)!!
         println("[REAL] S1 resize codec ${codec.log}")
         assertEquals(listOf("decode(full)", "recycle", "compress(jpeg q=85)", "recycle"), codec.log.filterNot { it.startsWith("scale") })
         assertEquals(ImageRealFixtures.Dim("jpeg", 65, 2000), F.dims(sent))
-        // N4: the attachment path rounds the same original to 66 wide.
         assertEquals(66 to 2000, ImageBudget.fitWithin(1080, 32768, 2000))
         val r = toolRound("browser_use", "[screenshot]\nminis_url: minis://browser/screenshot_1.jpg", sent, "/var/minis/browser/screenshot_1.jpg")
         assertAll(row("S1 fullpage 1080x32768", "live", r.live), 1, 65, 2000, "image/jpeg")
@@ -223,7 +182,6 @@ class ImageRealPipelineTest {
         for ((_, body) in ImageRealWire.all(r.rebuilt)) assertTrue(F.strings(body).any { "minis_url: minis://browser/" in it })
     }
 
-    /** (A) S2 viewports: real resize of each capture size; all gone after real reload. */
     @Test fun `S2 viewport screenshots - real resize, gone after real reload`() = ImageRealJvmCodec.with {
         for ((name, size, want) in listOf(
             Triple("S2 viewport mobile 1133x2516", 1133 to 2516, 900 to 2000),
@@ -238,9 +196,7 @@ class ImageRealPipelineTest {
         }
     }
 
-    // ── S5: read_image ──────────────────────────────────────────────────────
 
-    /** (A) S5 / P-a7: real ReadImageTool.imageResult on a 2760×21891 PNG — FULL decode, floor fit 252×2000 JPEG q85; twice = two arrays; gone after reload. */
     @Test fun `S5 read_image - real full decode, 252x2000 jpeg, twice is two copies, gone after reload (P-a7)`() = ImageRealJvmCodec.with { codec ->
         val file = java.io.File(files, "long.png").apply { writeBytes(F.png(2760, 21891)) }
         val first = ReadImageTool.imageResult(file, "/var/minis/workspace/long.png", "View")
@@ -261,9 +217,7 @@ class ImageRealPipelineTest {
         assertAll(row("S5 read_image 2760x21891", "after-reload", r.rebuilt), 0)
     }
 
-    // ── P-a1 / N5 ───────────────────────────────────────────────────────────
 
-    /** (A) P-a1 on the real live and rebuilt turns: one array in two holders, counted twice, sent once. */
     @Test fun `P-a1 real live and rebuilt turns hold the image twice, estimate counts it twice, wires send it once`() = ImageRealJvmCodec.with {
         val t = userTurn("look", F.jpeg(4032, 3024), "image/jpeg", "a.jpg")
         for ((label, m) in listOf("live" to t.live, "rebuilt" to t.rebuilt)) {
@@ -277,9 +231,7 @@ class ImageRealPipelineTest {
         }
     }
 
-    // ── P-a2 / P-a3: persistence and rebuild ────────────────────────────────
 
-    /** (A) P-a2: the real persisted toolResult JSON carries no image; the real rebuild returns a text-only ToolResult. */
     @Test fun `P-a2 real persisted tool result has no image and rebuilds text-only`() {
         val r = toolRound("browser_use", "shot", F.jpeg(64, 32), "/var/minis/browser/s.jpg")
         println("[REAL] P-a2 persisted ${r.persisted}")
@@ -289,7 +241,6 @@ class ImageRealPipelineTest {
         assertNull(rebuilt.imageData); assertNull(rebuilt.imageMimeType); assertNull(rebuilt.imageLinuxPath)
     }
 
-    /** (A) P-a3: real rebuild with the media file gone drops the image with no trace; a missing pasted file gets a placeholder. */
     @Test fun `P-a3 real rebuild skips a missing image silently, unlike a missing pasted file`() {
         val parts = """[{"type":"text","value":"see"},{"type":"mediaRef","value":{"id":"x","relativePath":"gone/a.jpg","mimeType":"image/jpeg","linuxPath":"/var/minis/attachments/uploads/a.jpg"}},""" +
             """{"type":"mediaRef","value":{"id":"p","relativePath":"gone/p.txt","mimeType":"text/plain","originalFileName":"Pasted#1.txt"}}]"""
@@ -301,7 +252,6 @@ class ImageRealPipelineTest {
         assertTrue(m.contentParts.any { it is AgentContentPart.Text && it.text == com.openminis.app.ui.chat.PastedMedia.MISSING_PLACEHOLDER })
     }
 
-    /** (A) P-a3: a second rebuild of the same file is served by the (path,size,mtime) cache — no decode — though the file was read again. */
     @Test fun `P-a3 second rebuild of the same original hits the downscale cache`() = ImageRealJvmCodec.with { codec ->
         val t = userTurn("x", F.png(2760, 21891), "image/png", "l.png")
         codec.log.clear()
@@ -310,16 +260,7 @@ class ImageRealPipelineTest {
         assertTrue(again.imageParts.single().data.contentEquals(t.rebuilt.imageParts.single().data))
     }
 
-    // ── P-a5: request budget on real history ────────────────────────────────
 
-    /**
-     * (A) P-a5: real ImageBudget.applyRequestBudget measures what the gate sends
-     * ([T-request-budget-post-gate]) and only touches contentParts (the imageParts
-     * twin keeps its bytes). These header-only "PNGs" cannot be decoded, so the
-     * gate cannot shrink them: each goes out at ~8.4 MB base64 and three fit
-     * under 25 MB. (Before the fix the planner clamped each to 5 MB, kept five —
-     * ~42 MB actually on the wire — and dropped one.)
-     */
     @Test fun `P-a5 real applyRequestBudget - measured wire bytes, contentParts only, spillover for path-less images`() {
         val header = F.png(2760, 21891).copyOf(64)
         val big = (0 until 6).map { header + ByteArray(6 * 1024 * 1024 + it) }
@@ -341,7 +282,6 @@ class ImageRealPipelineTest {
         assertEquals(1, java.io.File(root, "spillover").list()!!.size)
     }
 
-    // ── (B) desired behaviour, on the real functions ────────────────────────
 
     @Ignore("known gap #412 / P-a2: toolResultPartsJson persists text only; the real rebuild has no image")
     @Test fun `desired - a tool image survives the real persist and rebuild`() {
@@ -368,12 +308,6 @@ class ImageRealPipelineTest {
         assertTrue(m.contentParts.isNotEmpty())
     }
 
-    /**
-     * (B → fixed by [T-request-budget-post-gate]) Images the gate sends small are
-     * not elided. Six 1100×1100 BMPs: ~29 MB raw base64, small JPEGs on the wire.
-     * (The earlier fixture was header-only PNG bytes, which no decoder can shrink,
-     * so it could never have shown this; the claim is unchanged.)
-     */
     @Test fun `desired - images that gate small are not elided by the real request budget`() = ImageRealJvmCodec.with {
         val history = (0 until 6).map { LLMMessage(LLMMessage.Role.USER, "", contentParts = listOf(AgentContentPart.ImageData(F.bmp(1100, 1100), "image/bmp"))) }
         assertTrue(history.sumOf { ImageBudget.estimatedBase64Length((it.contentParts.single() as AgentContentPart.ImageData).data.size) } > ImageBudget.MAX_REQUEST_BYTES)

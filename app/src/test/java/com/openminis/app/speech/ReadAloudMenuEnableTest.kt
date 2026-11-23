@@ -6,13 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-readaloud-menu-enable] "Read Selection" / "Read from Start" were
- * silent with default settings: every utterance passes ReadAloudPlayer.enqueue,
- * which drops it unless VoiceOutputState.canPlay (read-replies ON, not muted),
- * and read-replies defaults to OFF. iOS switches it on and un-mutes before an
- * explicit read-aloud; Android now does the same.
- */
 class ReadAloudMenuEnableTest {
 
     @After
@@ -47,11 +40,8 @@ class ReadAloudMenuEnableTest {
 
     @Test
     fun `a long reply is split into pieces the system engine accepts`() {
-        // [T-android-readaloud-split] "Read from Start" hands over a whole
-        // reply. As one utterance, anything over getMaxSpeechInputLength()
-        // (~4000 chars) was refused and nothing played.
         val sentence = "这是一段用来测试朗读切分的句子，包含一些逗号和标点。"
-        val reply = sentence.repeat(600) // ~15k chars, far over the engine limit
+        val reply = sentence.repeat(600)
         val buf = StringBuilder(reply)
         val pieces = SpeechSentenceSplitter.extractCompleteSentences(buf, streaming = false) +
             listOfNotNull(buf.toString().trim().ifEmpty { null })
@@ -74,8 +64,6 @@ class ReadAloudMenuEnableTest {
 
     @Test
     fun `the menu speaker activates before it speaks`() {
-        // Source guard: the activation only helps if it runs BEFORE the player
-        // enqueues (and drops) the text.
         val src = ProductionSources.read("ui/chat/LazyReadAloudPlayer.kt")
         val body = src.substring(src.indexOf("fun speak(text: String)"))
         val activate = body.indexOf("VoiceOutputState.activateForExplicitReadAloud()")

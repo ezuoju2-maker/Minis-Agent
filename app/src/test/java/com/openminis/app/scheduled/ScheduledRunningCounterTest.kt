@@ -7,11 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-port-sched-running-counter] While a scheduled fire runs, the ongoing
- * notification's running status carries the run counter - iOS "Working… ·
- * 2/30" (ScheduledBannerModel.runCounter with running = true).
- */
 class ScheduledRunningCounterTest {
 
     private val chat = "chat-1"
@@ -28,14 +23,11 @@ class ScheduledRunningCounterTest {
     fun `count 3 - each running fire shows its own number, the last one too`() {
         var task = interval(3)
         for (n in 1..3) {
-            // The alarm counts the fire (and disables the task at the last one)
-            // before the run starts, exactly as rescheduleNext does.
             task = ScheduledTaskManager.afterAlarmFire(task, t0 + n * 60_000L)!!.first
             val firing = ScheduledWaitModel.firing(listOf(task), setOf(task.id))
             assertEquals("fire $n", ScheduledFiring(chat, "task", "$n/3"), firing)
         }
         assertEquals(false, task.enabled)
-        // Not running: nothing to show.
         assertNull(ScheduledWaitModel.firing(listOf(task), emptySet()))
     }
 
@@ -54,7 +46,6 @@ class ScheduledRunningCounterTest {
 
     @Test
     fun `running and waiting counters agree across a gap`() {
-        // After fire 1 the wait shows the NEXT run "2/3"; while fire 2 runs it shows "2/3".
         val afterFire1 = ScheduledTaskManager.afterAlarmFire(interval(3), t0 + 60_000)!!.first
         assertEquals("2/3", ScheduledWaitModel.runCounter(afterFire1))
         val runningFire2 = ScheduledTaskManager.afterAlarmFire(afterFire1, t0 + 120_000)!!.first

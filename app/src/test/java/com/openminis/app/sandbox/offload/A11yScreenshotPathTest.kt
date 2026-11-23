@@ -5,25 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-a11y-screenshot-mount] `ui screenshot` must land somewhere the
- * agent can actually read.
- *
- * Reported by a user driving a11y automation: every capture came back with a
- * path `read_image` answered "File not found" for, so visual analysis stopped
- * dead. The cause was not a permission setting — it was that
- * `getExternalFilesDir("a11y_screenshots")` is bind-mounted **nowhere**.
- * `ExecutionCoordinator.buildSessionBindMounts` exposes only
- * `/var/minis/{attachments,offloads,workspace,browser}` (per session) and
- * `/var/minis/{memory,skills,shared,mcp-servers}` (global), so the host path
- * the CLI returned fell through `PRootKernel.resolveHostPath`'s rootfs
- * fallback to a file that never existed. The misleading "not found" (rather
- * than "cannot resolve") is why this read as a flaky IO error.
- *
- * These are source-text assertions in the style of `ShellExecutionStrategyTest`:
- * the handler needs a live AccessibilityService and a booted PRoot to run, so
- * the contract is pinned where it can be checked without either.
- */
 class A11yScreenshotPathTest {
 
     private val handlerSrc: String by lazy {
@@ -32,23 +13,18 @@ class A11yScreenshotPathTest {
         f.readText()
     }
 
-    /** The handler source with comment lines removed — prose must not satisfy a code assertion. */
     private val handlerCode: String by lazy {
         handlerSrc.lineSequence()
             .filterNot { val t = it.trimStart(); t.startsWith("//") || t.startsWith("*") || t.startsWith("/*") }
             .joinToString("\n")
     }
 
-    /** Just the body of `uiScreenshot`, comments stripped. */
     private val screenshotBody: String by lazy {
         handlerCode.substringAfter("private fun uiScreenshot(").substringBefore("\n    private fun ")
     }
 
     @Test
     fun `the screenshot never writes to an unmounted private directory`() {
-        // The exact call that caused the bug. Its presence in a comment is
-        // fine (and deliberate — it documents the regression), but it must not
-        // survive in code.
         assertFalse(
             "getExternalFilesDir is mounted nowhere; the agent cannot read it back",
             handlerCode.contains("getExternalFilesDir"),

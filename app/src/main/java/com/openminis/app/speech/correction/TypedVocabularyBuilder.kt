@@ -9,15 +9,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 
-/**
- * [T-android-voice-correction] Mines the terms a user actually types into
- * personal vocabulary, so speech recognition of those same words can be
- * corrected later. Port of iOS `Agent/Speech/TypedVocabularyBuilder.swift`.
- *
- * Typed text is high-quality signal precisely because it is unambiguous — the
- * user spelled it out. That makes it the natural complement to the confusion
- * dictionary, which only learns from things that went wrong.
- */
 class TypedVocabularyBuilder(
     private val context: Context,
     private val db: VoiceCorrectionDb?,
@@ -29,10 +20,6 @@ class TypedVocabularyBuilder(
 
     private val buildLock = Mutex()
 
-    /**
-     * Build if enough time has passed. Cheap to call after every send — the
-     * throttle makes the common case a no-op.
-     */
     suspend fun buildIfNeeded(force: Boolean = false) {
         val database = db ?: return
         if (!force) {
@@ -43,16 +30,9 @@ class TypedVocabularyBuilder(
         build(force)
     }
 
-    /**
-     * Mine every user message newer than the stored watermark.
-     *
-     * @param force restart from the beginning of history instead of the cursor.
-     */
     suspend fun build(force: Boolean = false) {
-        // Consent gates even a forced build — "collect nothing" must mean it.
         if (!VoiceCorrectionConsent.isEnabled(context)) return
         val database = db ?: return
-        // Non-blocking: a build already running means this one has nothing to add.
         if (!buildLock.tryLock()) return
 
         try {
@@ -90,9 +70,6 @@ class TypedVocabularyBuilder(
                                 database.upsertVocabulary(
                                     term = term,
                                     phoneticKey = key,
-                                    // Only zh is supported today; the column
-                                    // exists so adding a language is a data
-                                    // change, not a migration.
                                     locale = "zh",
                                     posTag = tag,
                                     backgroundRank = rank(term),
@@ -126,12 +103,6 @@ class TypedVocabularyBuilder(
         }
     }
 
-    /**
-     * Pull the plain text out of a stored parts JSON blob.
-     *
-     * Only text parts are read: tool calls and media references would otherwise
-     * push filenames, tool ids and base64 into the user's "vocabulary".
-     */
     internal fun extractText(partsJson: String): String = runCatching {
         val arr = JSONArray(partsJson)
         val sb = StringBuilder()
@@ -147,21 +118,14 @@ class TypedVocabularyBuilder(
     companion object {
         private const val TAG = "TypedVocabulary"
 
-        /** Watermark of the newest message already mined (epoch ms). */
         private const val KEY_CURSOR = "vocab_last_built_at"
 
-        /** When the last build ran (epoch seconds), for the throttle. */
         private const val KEY_LAST_BUILD_TIME = "vocab_last_build_time"
 
         private const val MIN_INTERVAL_SECONDS = 3600.0
 
-        /** Bounds a first run over a long history. */
         private const val MAX_MESSAGES_PER_BUILD = 500
 
-        /**
-         * Remove the attachment envelope the composer wraps around files, so
-         * filenames don't become vocabulary.
-         */
         internal fun stripAttachmentMarkup(text: String): String {
             val start = text.indexOf("<user-attached-files>")
             if (start < 0) return text.trim()

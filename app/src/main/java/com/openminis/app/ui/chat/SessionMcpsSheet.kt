@@ -57,23 +57,6 @@ import com.openminis.app.ui.settings.SettingsSwitch
 
 private const val MCP_NOTE_TRUNC = 200
 
-/**
- * Bottom sheet showing all configured MCP servers with per-session
- * enable/disable toggles. Mirrors [SessionSkillsSheet]: [StandardChatSheet]
- * shell + shared [SettingsSection] / [SettingsRow] primitives. Each row shows
- * the server name + truncated note, with a Switch writing a session override
- * via [MCPRepository.setSessionOverride].
- *
- * [T-android-session-mcp-detail] Like the Skills sheet (and iOS
- * SessionMCPsView), the list has a search field (name + note) and Enable All /
- * Disable All acting on the filtered rows. Tapping a row opens a read-only
- * detail page inside the sheet: transport, URL or command + args, startup
- * timeout, OAuth state, the note, and the NAMES of headers and env vars. Their
- * values are never shown: they routinely hold API keys, and this sheet sits
- * over a chat that may be screen-shared. Long-pressing the URL copies it.
- * The list's state is held above the page switch, so it is unchanged on
- * return; system back pops the detail page via [StandardChatSheet]'s onBack.
- */
 @Composable
 fun SessionMcpsSheet(
     sessionId: String,
@@ -82,10 +65,6 @@ fun SessionMcpsSheet(
 ) {
     val servers by mcpRepository.servers.collectAsState()
 
-    // [T-mcp-review-fixes-android] Key the seed on `servers` so the override map
-    // re-derives when the live server list arrives. A keyless remember{} seeds
-    // once from a possibly-empty first-composition list and then never re-runs,
-    // leaving every toggle stuck at its default (the review's stale-override race).
     val overrides = remember(servers) {
         mutableStateMapOf<String, Boolean>().apply {
             for (server in servers) {
@@ -99,12 +78,9 @@ fun SessionMcpsSheet(
         derivedStateOf { filterMcpServers(servers, searchQuery) }
     }
 
-    // Held here, above the page switch, so returning from a detail page finds
-    // the list exactly as it was left.
     val listScroll = rememberScrollState()
     var detailId by remember { mutableStateOf<String?>(null) }
 
-    // A server removed while its page is open: fall back to the list.
     val detailServer = detailId?.let { id -> servers.find { it.id == id } }
     val detailGone = detailId != null && detailServer == null
     LaunchedEffect(detailGone) {
@@ -121,7 +97,6 @@ fun SessionMcpsSheet(
     StandardChatSheet(
         title = detailServer?.id ?: stringResource(R.string.session_mcps_title),
         onDismiss = onDismiss,
-        // System back closes the detail page; on the list it closes the sheet.
         onBack = {
             if (detailId == null) false else {
                 detailId = null
@@ -161,9 +136,6 @@ fun SessionMcpsSheet(
                         .padding(horizontal = 16.dp)
                         .padding(top = 12.dp),
                 )
-                // Same header row as the Skills sheet: section label on the
-                // left, Enable All / Disable All (on the filtered rows) on the
-                // right.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -239,7 +211,6 @@ fun SessionMcpsSheet(
     }
 }
 
-/** Servers whose name or note contains [query] (trimmed, case-insensitive), like iOS. */
 internal fun filterMcpServers(
     servers: List<MCPRepository.MCPServerConfig>,
     query: String,
@@ -249,13 +220,8 @@ internal fun filterMcpServers(
     return servers.filter { it.id.lowercase().contains(q) || it.note.orEmpty().lowercase().contains(q) }
 }
 
-/**
- * Header / env names for the detail page, sorted. Only the names: the values
- * are never handed to the UI.
- */
 internal fun mcpSecretNames(map: Map<String, String>): List<String> = map.keys.sorted()
 
-/** Read-only detail of one server. Nothing here writes to the config. */
 @Composable
 private fun SessionMcpDetail(server: MCPRepository.MCPServerConfig) {
     val context = LocalContext.current
@@ -292,7 +258,6 @@ private fun SessionMcpDetail(server: MCPRepository.MCPServerConfig) {
             } else {
                 val url = server.url.orEmpty()
                 McpDetailDivider()
-                // Long-press copies the URL, like a skill's Source row.
                 McpDetailRow(
                     label = stringResource(R.string.mcp_form_url),
                     value = url,
@@ -346,7 +311,6 @@ private fun SessionMcpDetail(server: MCPRepository.MCPServerConfig) {
     }
 }
 
-/** Label above a full-width value; selectable unless the row takes a long-press. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun McpDetailRow(
@@ -382,7 +346,6 @@ private fun McpDetailRow(
                 color = MaterialTheme.colorScheme.onSurface,
             )
         }
-        // A SelectionContainer would take the long-press for itself.
         if (onLongClick != null) text() else SelectionContainer { text() }
     }
 }
@@ -417,7 +380,6 @@ private fun McpDetailDivider() {
 private fun copyMcpUrl(context: Context, url: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("url", url))
-    // Android 13+ shows its own clipboard chip; the Toast covers < 13.
     Toast.makeText(context, context.getString(R.string.session_mcp_url_copied), Toast.LENGTH_SHORT).show()
 }
 

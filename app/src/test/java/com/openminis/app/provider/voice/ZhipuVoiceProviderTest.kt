@@ -8,16 +8,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-zhipu-tts] + [T-android-tts-engine-visibility] +
- * [T-android-tts-init-timeout] — Android read-aloud silent on OPPO PEHM00 with a
- * Zhipu `glm-tts` entry: the Zhipu request 404'd, and the system fallback could
- * not see the user's TTS engine.
- *
- * The Zhipu wire details are UNVERIFIED against a real key (see the provider's
- * KDoc); these tests pin the request this code builds, not Zhipu's acceptance
- * of it.
- */
 class ZhipuVoiceProviderTest {
 
     private fun body(req: okhttp3.Request): JSONObject {
@@ -33,7 +23,6 @@ class ZhipuVoiceProviderTest {
     fun `the reported base no longer composes the 404 path`() {
         val req = speech("https://open.bigmodel.cn/api/paas/v4", VoiceOutputRequest(input = "你好", model = "glm-tts"))
         assertEquals("https://open.bigmodel.cn/api/paas/v4/audio/speech", req.url.toString())
-        // What the generic provider built for the same base.
         assertEquals(
             "https://open.bigmodel.cn/api/paas/v4/v1/audio/speech",
             VoiceProvider("g", "https://open.bigmodel.cn/api/paas/v4", "sk").composedUrlString("/v1/audio/speech"),
@@ -64,7 +53,6 @@ class ZhipuVoiceProviderTest {
 
     @Test
     fun `the model id passed as voice falls back to the default voice`() {
-        // Read-aloud and Quick Test send voice = model id.
         val b = body(speech("https://open.bigmodel.cn/api/paas/v4", VoiceOutputRequest(input = "hi", model = "glm-tts", voice = "glm-tts")))
         assertEquals("glm-tts", b.getString("model"))
         assertEquals("tongtong", b.getString("voice"))
@@ -98,7 +86,6 @@ class ZhipuVoiceProviderTest {
         for (b in listOf("https://open.bigmodel.cn/api/paas/v4", "https://api.z.ai/api/paas/v4", "https://zhipu.example.com/v1")) {
             assertTrue(b, ZhipuVoiceProvider.matches(b))
         }
-        // Doubao's ASR MODEL is named "bigmodel", but its base is bytedance.
         for (b in listOf("https://openspeech.bytedance.com", "https://dashscope.aliyuncs.com/compatible-mode", "https://api.openai.com")) {
             assertFalse(b, ZhipuVoiceProvider.matches(b))
         }
@@ -106,7 +93,6 @@ class ZhipuVoiceProviderTest {
         assertTrue(factory.contains("ZhipuVoiceProvider.matches(normalizedBase) ->"))
     }
 
-    // ---- system engine (P0) --------------------------------------------------
 
     @Test
     fun `the manifest can see TTS engines`() {

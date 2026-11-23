@@ -86,35 +86,14 @@ import com.openminis.app.agent.userask.UserAskRisk
 import com.openminis.app.ui.theme.ChatColors
 import kotlinx.coroutines.delay
 
-/**
- * [T-port-user-ask] The user_ask card in the chat (iOS `UserAskCardView`, final
- * state).
- *
- * Pending: blue for questions, orange / red for confirms; header with icon,
- * title, chip, i/N and the countdown; a body capped at about half the screen
- * with its own scroll; a fixed action bar. Options questions are a wizard with
- * Previous / Next / Submit; a confirm shows the exact action in monospace plus
- * the impact, with Previous on the left and Cancel / Allow on the right. There
- * is no "Always allow".
- *
- * Answered: collapses to the sub-agent card's shape (TaskCardFrame: round
- * icon, topic line, status + answer digest) and expands to the full Q&A.
- *
- * Text follows the chat font scale (LocalMarkdownFontScale); every button is
- * at least 44dp tall.
- */
 
-// ── Pure rules (unit-tested) ───────────────────────────────────────────────
 
 internal enum class UserAskCardPhase {
     PENDING,
     RESOLVED_LIVE,
     RESOLVED_STORED,
-    /** Stopped while it waited: the stored result is Stop's cancel marker, not a user_ask result. */
     STOPPED_STORED,
-    /** Not a question that reached the user (rejected or unparseable): the plain tool pill shows instead. */
     NOT_ASKED,
-    /** No live state yet (arguments still streaming, or recovery has not run). */
     WAITING;
 
     companion object {
@@ -140,11 +119,6 @@ internal enum class UserAskCardPhase {
     }
 }
 
-/**
- * Every text size on the card, derived from the chat body size with iOS's
- * ratios and floors (UserAskTypography), so the card follows the user's font
- * setting instead of fixed sizes.
- */
 internal data class UserAskTypography(val body: Float) {
     private fun size(ratio: Float, floor: Float): Float = maxOf(floor, Math.round(body * ratio * 2) / 2f)
     val question get() = size(1.0f, 13f)
@@ -155,19 +129,11 @@ internal data class UserAskTypography(val body: Float) {
     val meta get() = size(0.76f, 11f)
     val chip get() = size(0.66f, 10f)
 
-    /**
-     * [T-user-ask-chip-height] The chip's own compact line height, in
-     * TaskCardChip's proportion (11sp over 10sp). Without it the chip inherited
-     * the chat body's tall line height and its tint block came out far taller
-     * than the text. Never below the font size, so glyphs keep their room; a
-     * CJK line still grows to its fallback font's metrics, as TaskCardChip's does.
-     */
     val chipLineHeight get() = chip * CHIP_LINE_RATIO
     val button get() = size(0.97f, 14f)
     val icon get() = size(1.03f, 15f)
 
     companion object {
-        /** Chat body size at the default scale. */
         const val BODY_REFERENCE = 16.5f
         val MIN_TAP_HEIGHT = 44.dp
         val CHIP_LINE_RATIO = TaskCardMetrics.chipLineHeight.value / TaskCardMetrics.chipSize.value
@@ -190,12 +156,7 @@ internal object UserAskTint {
 
 private val Float.tsp: TextUnit get() = this.sp
 
-// ── Entry point ───────────────────────────────────────────────────────────
 
-/**
- * The card for one user_ask tool block. [fallback] renders the ordinary tool
- * pill for a call that never became a question.
- */
 @Composable
 internal fun UserAskBlock(block: AssistantBlock, fallback: @Composable () -> Unit) {
     val asks by UserAskCenter.asks.collectAsState()
@@ -246,22 +207,12 @@ private fun UserAskWaiting(t: UserAskTypography) {
     }
 }
 
-// ── Pending ───────────────────────────────────────────────────────────────
 
 private enum class InputKind { OTHER, NOTE, DENY_REASON }
 
-/**
- * [T-user-ask-fold-by-layout] When a pending question gets its "Show more" /
- * "Show less" toggle. Decided from the text layout, never from its length.
- */
 internal object UserAskQuestionFold {
     const val FOLDED_LINES = 3
 
-    /**
-     * Folded: the layout says the text was cut. Open: the full text takes more
-     * lines than the folded box holds, so there is something to fold back
-     * (and after a rotation that makes it fit, the toggle goes away).
-     */
     fun isFoldable(expanded: Boolean, hasVisualOverflow: Boolean, lineCount: Int): Boolean =
         if (expanded) lineCount > FOLDED_LINES else hasVisualOverflow
 }
@@ -276,8 +227,6 @@ private fun UserAskPendingCard(ask: PendingAsk, t: UserAskTypography) {
     val shape = RoundedCornerShape(12.dp)
     var input by remember(ask.requestId, index) { mutableStateOf<InputKind?>(null) }
     var expanded by rememberSaveable(ask.requestId, index) { mutableStateOf(false) }
-    // [T-user-ask-fold-by-layout] Whether the question does not fit the folded
-    // box, as the text layout reports it. See UserAskQuestionFold.
     var foldable by remember(ask.requestId, index) { mutableStateOf(false) }
     val toggleFold = {
         expanded = !expanded
@@ -303,12 +252,8 @@ private fun UserAskPendingCard(ask: PendingAsk, t: UserAskTypography) {
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = bodyCap)
-                // [T-android-userask-edge-bounce] A fling in the body stops at
-                // the body's edge instead of flinging the chat behind it.
                 .nestedScroll(StopFlingAtEdgeConnection)
                 .verticalScroll(bodyScroll)
-                // [T-port-user-ask-fix2] Room under the last row (the note), so
-                // a scrolled-to-end body does not end flush on it.
                 .padding(bottom = 6.dp),
         ) {
             val isConfirm = q.type == UserAskQuestionType.CONFIRM
@@ -317,9 +262,6 @@ private fun UserAskPendingCard(ask: PendingAsk, t: UserAskTypography) {
                 fontSize = (if (isConfirm) t.secondary else t.question).tsp,
                 fontWeight = if (isConfirm) FontWeight.Normal else FontWeight.Medium,
                 fontFamily = if (isConfirm) FontFamily.Monospace else FontFamily.Default,
-                // [T-port-user-ask-fix2] The command box is a code block: its
-                // own foreground on its own background, as markdown code blocks
-                // draw it. primaryText on codeBlockBg was dark on black.
                 color = if (isConfirm) ChatColors.codeBlockText else ChatColors.primaryText,
                 maxLines = if (expanded) Int.MAX_VALUE else UserAskQuestionFold.FOLDED_LINES,
                 overflow = TextOverflow.Ellipsis,
@@ -327,26 +269,16 @@ private fun UserAskPendingCard(ask: PendingAsk, t: UserAskTypography) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .then(if (isConfirm) Modifier.clip(RoundedCornerShape(8.dp)).background(ChatColors.codeBlockBg) else Modifier)
-                    // A cut-off question opens on a tap anywhere on it, not
-                    // only on the small "Show more" below.
                     .then(if (foldable && !expanded) Modifier.expandToggleClickable(pressedShape = RectangleShape, onClick = toggleFold) else Modifier)
                     .then(if (isConfirm) Modifier.padding(8.dp) else Modifier)
                     .padding(bottom = 6.dp),
             )
-            // [T-user-ask-fold-by-layout] Shown when the text is actually cut
-            // (or was, and is now open) - not by character count: 140 chars
-            // never came for a 60-character CJK question that already filled
-            // three lines, which then could not be opened at all. The row is a
-            // full-height tap target; the negative offset keeps the label
-            // aligned with the text above while the padding widens the target.
             if (foldable) {
                 Box(
                     modifier = Modifier
                         .offset(x = (-8).dp)
                         .clip(RoundedCornerShape(8.dp))
                         .heightIn(min = UserAskTypography.MIN_TAP_HEIGHT)
-                        // [ISS-017] An in-place expansion: flat pressed tint,
-                        // no ripple, like every other expand toggle in the list.
                         .expandToggleClickable(pressedShape = RectangleShape, onClick = toggleFold)
                         .padding(horizontal = 8.dp),
                     contentAlignment = Alignment.CenterStart,
@@ -366,9 +298,6 @@ private fun UserAskPendingCard(ask: PendingAsk, t: UserAskTypography) {
                 UserAskQuestionType.CONFIRM -> ConfirmBody(q, answer, tint, t, onInput = { input = it })
             }
         }
-        // [T-port-user-ask-fix2] The body is capped at about half the screen;
-        // a fade on its lower edge says there is more to scroll, so a row cut
-        // by the cap reads as "scroll", not as broken layout.
         if (bodyScroll.canScrollForward) {
             Box(
                 Modifier
@@ -396,14 +325,10 @@ private fun UserAskPendingCard(ask: PendingAsk, t: UserAskTypography) {
     }
 }
 
-/** Drafts are saved as typed (they survive a restart); Done commits. */
 private fun saveInput(ask: PendingAsk, index: Int, q: UserAskQuestion, kind: InputKind, raw: String, commit: Boolean) {
     val text = raw.take(UserAskParser.MAX_INPUT_LENGTH)
     val cur = UserAskCenter.asks.value[ask.requestId]?.answers?.getOrNull(index) ?: return
     val next = when (kind) {
-        // [T-port-user-ask-fix2] Applied to every keystroke, not only Done:
-        // the dialog can also close by back or a tap outside, which used to
-        // keep the preselected option next to the typed answer ("Red, Green").
         InputKind.OTHER -> cur.withOtherText(text, q)
         InputKind.NOTE, InputKind.DENY_REASON -> cur.copy(note = text)
     }
@@ -412,11 +337,6 @@ private fun saveInput(ask: PendingAsk, index: Int, q: UserAskQuestion, kind: Inp
 
 @Composable
 private fun PendingHeader(ask: PendingAsk, index: Int, q: UserAskQuestion, tint: Color, t: UserAskTypography) {
-    // [T-user-ask-header-right-align] Two groups: the leading one (icon, title,
-    // chip) takes all the spare width and ellipsizes the title inside it; i/N
-    // and the countdown stay pinned to the right edge. A title with
-    // weight(fill = false) next to a weight(1f) Spacer split the spare width
-    // 1:1, so on a wide screen the trailing group stopped mid-row.
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -645,8 +565,6 @@ private fun ActionBar(
             }
         }
         UserAskQuestionType.CONFIRM -> {
-            // Cancel first: the safe choice sits where the thumb lands. Allow
-            // acts on one tap, so Previous is kept apart on the left.
             val cancel: @Composable () -> Unit = {
                 CapsuleButton(stringResource(R.string.user_ask_cancel), UserAskTint.muted, primary = true, t = t) {
                     UserAskCenter.confirm(ask.requestId, index, UserAskConfirmChoice.DENY, answer.note)
@@ -668,7 +586,6 @@ private fun ActionBar(
                         allow()
                     }
                 } else {
-                    // Narrow: the pair on its own right-aligned row, Previous below on the left.
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                             cancel()
@@ -757,16 +674,12 @@ private fun InputDialog(
     )
 }
 
-// ── Resolved ──────────────────────────────────────────────────────────────
 
-/** iOS UserAskResolvedCard text rules, pure for tests. */
 internal object UserAskResolvedText {
-    /** The topic line: the question (the command, for a confirm), or the header tags when there are several. */
     fun topic(questions: List<UserAskQuestion>): String =
         if (questions.size == 1) questions[0].question
         else questions.joinToString(" · ") { q -> q.header?.takeIf { it.isNotEmpty() } ?: q.question }
 
-    /** The answer digest: chosen labels or typed text, "Left to Minis" when delegated (several only), a cancel reason. */
     fun digest(results: List<UserAskResolver.Parsed>, dismissed: Boolean, leftToMinis: String): String {
         if (dismissed) return ""
         return results.mapNotNull { r ->
@@ -827,7 +740,6 @@ private fun UserAskResolvedCard(
         else -> Icons.Default.Done
     }
     val statusColor = if (dismissReason != null || anyTimeout || anyDenied) ChatColors.secondaryText else tint
-    // HOOK(notification, P2): iOS appends "(from notification)" when source == NOTIFICATION.
     val status = when (dismissReason) {
         UserAskDismissReason.SUPERSEDED_BY_USER_MESSAGE -> stringResource(R.string.user_ask_replaced_by_message)
         UserAskDismissReason.STOPPED -> stringResource(R.string.user_ask_stopped)
@@ -842,10 +754,6 @@ private fun UserAskResolvedCard(
     val digest = UserAskResolvedText.digest(results, dismissReason != null, stringResource(R.string.user_ask_left_to_minis))
     val isConfirm = questions.firstOrNull()?.type == UserAskQuestionType.CONFIRM
 
-    // [T-user-ask-resolved-expand] Opening / shutting keeps the card's top in
-    // place (iOS e563158e2): the reverseLayout list would otherwise pin its
-    // bottom and grow it upward. The extra rows sit below the head row, so the
-    // icon and chevron stay on the title and status lines.
     val anchor = LocalChatToggleAnchor.current
     val resize = remember { TopAnchoredResize() }
     val scope = rememberCoroutineScope()
@@ -904,12 +812,6 @@ private fun UserAskResolvedCard(
     }
 }
 
-/**
- * [T-port-user-ask-fix2] A tool block's display title. The stored fallback
- * titles are English by design ("Execute Shell", …); user_ask's "Question for
- * you" is shown in the user's language wherever the title is drawn (floating
- * tool bar, tool sheet, the plain pill of a call that was not asked).
- */
 @Composable
 internal fun displayToolTitle(block: AssistantBlock): String =
     if (block.toolName == com.openminis.app.agent.userask.UserAskPromptText.TOOL_NAME) {

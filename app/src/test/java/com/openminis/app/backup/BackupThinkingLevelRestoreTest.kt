@@ -10,21 +10,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-restore-thinking-level] A group restored from a backup kept its
- * members but lost its thinking level, and so did per-model ceilings and sub
- * agent overrides.
- *
- * Root cause: both platforms define the same seven levels, but iOS writes them
- * as its `String` raw values (`"high"`) while Android's enum serialized by
- * NAME (`"HIGH"`). `BackupFormat.json` runs with `coerceInputValues = true`,
- * which turns an enum string it does not recognize on a nullable property into
- * `null` — silently, with no exception and no log. Every iOS-written level
- * therefore restored as "no level".
- */
 class BackupThinkingLevelRestoreTest {
 
-    /** provider_config.json as iOS writes it: lowercase raw values. */
     private val iosProviderConfig = """
         {
           "instances": [],
@@ -66,10 +53,6 @@ class BackupThinkingLevelRestoreTest {
 
     @Test
     fun androidEncoding_isUnchanged() {
-        // The level is also persisted in Room blobs (ModelOverrides,
-        // SubAgentDefinition) and the ProviderConfig JSON mirror. Changing what
-        // is WRITTEN would make an older build (a downgrade) misread them, so
-        // the fix is read-side only: the written form stays the enum name.
         val text = BackupFormat.json.encodeToString(
             ModelGroup.serializer(),
             ModelGroup(id = "g1", name = "G", defaultThinkingLevel = ThinkingLevel.HIGH),
@@ -83,11 +66,6 @@ class BackupThinkingLevelRestoreTest {
         assertNull(BackupFormat.json.decodeFromString(ModelGroup.serializer(), wire).defaultThinkingLevel)
     }
 
-    /**
-     * Every raw value of the Swift enum must decode to the level of the same
-     * name, so either platform adding or respelling a level breaks here rather
-     * than silently in a user's restore.
-     */
     @Test
     fun everyIosRawValue_decodesToTheSameLevel() {
         val iosCases = swiftThinkingLevelCases()

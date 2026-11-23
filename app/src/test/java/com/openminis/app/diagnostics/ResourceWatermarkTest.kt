@@ -10,11 +10,6 @@ import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
 import java.io.File
 
-/**
- * [GH #453] The resource water mark: what it reads, how it groups thread
- * names, when it prints a breakdown, and the per-pid file the next launch
- * attaches to the exit report. /proc is faked with a temp directory.
- */
 class ResourceWatermarkTest {
     @get:Rule val tmp = TemporaryFolder()
 
@@ -50,7 +45,7 @@ class ResourceWatermarkTest {
     }
 
     @Test fun `the mapping count stops at its cap and says so`() {
-        val big = ByteArray(200_000) { if (it % 2 == 1) '\n'.code.toByte() else 'x'.code.toByte() } // 100k lines
+        val big = ByteArray(200_000) { if (it % 2 == 1) '\n'.code.toByte() else 'x'.code.toByte() }
         assertEquals(70_000, ResourceWatermark.countLines(ByteArrayInputStream(big), 70_000))
         assertEquals(100_000, ResourceWatermark.countLines(ByteArrayInputStream(big), 1_000_000))
         val s = ResourceWatermark.Sample(threads = 900, maps = 70_000, fds = 1, vmSizeKb = 1, vmRssKb = 1)
@@ -96,7 +91,6 @@ class ResourceWatermarkTest {
     }
 
     @Test fun `the default thresholds sit well above our observed range and below the kernel limit`() {
-        // Observed [JankDiag] tick threads= in our own long sessions: 40-121.
         assertTrue(ResourceWatermark.THREAD_ALERT >= 3 * 121)
         assertTrue(ResourceWatermark.MAPS_ALERT < 65_530 / 2 + 1)
         assertTrue(ResourceWatermark.MAPS_COUNT_CAP > 65_530)
@@ -126,7 +120,6 @@ class ResourceWatermarkTest {
         assertFalse(ThreadNames.of("offload-wk").contains('.'))
     }
 
-    // --- [INV-261024-05] which mappings -------------------------------------
 
     @Test
     fun `mapName takes the name column, folds numbers and the app data dir`() {

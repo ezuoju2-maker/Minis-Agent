@@ -4,21 +4,8 @@ import android.content.Context
 import android.util.Log
 import com.openminis.app.R
 
-/**
- * [T-android-voice-correction] Decides which mined terms are worth storing as
- * personal vocabulary. Port of iOS `Agent/Speech/VocabularyFilter.swift`.
- *
- * Absolute rejects first, then positive evidence scored to a threshold — a term
- * has to EARN its way in, because everything admitted here becomes prompt
- * budget later.
- */
 object VocabularyFilter {
 
-    /**
-     * Why a term scored what it did. Returned alongside the decision so a debug
-     * surface never has to recompute scoring — on iOS two copies of the formula
-     * had already drifted apart.
-     */
     data class ScoreBreakdown(
         var backgroundRank: Int = 0,
         var posTag: Int = 0,
@@ -33,13 +20,8 @@ object VocabularyFilter {
         data class Rejected(val reason: String) : Decision
     }
 
-    /** jieba tags that mark a proper noun: person, place, other proper, org. */
     private val PROPER_NOUN_TAGS = setOf("nr", "ns", "nz", "nt")
 
-    /**
-     * @param rank background-frequency lookup; injected so tests need no asset.
-     *   Returning non-null means "ordinary word" and SUPPRESSES the rare bonus.
-     */
     fun evaluate(
         term: String,
         posTag: String?,
@@ -59,12 +41,6 @@ object VocabularyFilter {
         }
         if (posTag != null && posTag in PROPER_NOUN_TAGS) b.posTag = 2
 
-        // ⚠️ The ASCII guards below are LOAD-BEARING, not defensive noise.
-        // Java's Character.isLetter() is true for Han, so an unguarded check
-        // scores every Chinese term as "contains Latin"; Character.isDigit() is
-        // true for CJK numerals 一/二/三, so "张三" would collect a phantom digit
-        // point and "三星" would be rejected as no_lexical_content. Both were
-        // real on-device bugs on iOS.
         val hasLatin = term.any { it.isAsciiLetter() }
         val hasDigit = term.any { it.isAsciiDigit() }
         if (hasLatin || hasDigit) b.hasLatinOrDigit = 1
@@ -77,11 +53,6 @@ object VocabularyFilter {
         }
     }
 
-    /**
-     * Candidate `(term, occurrences, posTag)` triples from [text]. Falls back to
-     * plain segmentation with null tags when POS tagging yields nothing
-     * (non-Chinese text, or jieba unavailable).
-     */
     fun candidates(
         text: String,
         posTag: (String) -> List<Pair<String, String>>,
@@ -93,7 +64,7 @@ object VocabularyFilter {
             val tags = HashMap<String, String>()
             for ((token, tag) in tagged) {
                 counts[token] = (counts[token] ?: 0) + 1
-                tags[token] = tag   // last tag wins on a repeated token
+                tags[token] = tag
             }
             return counts.map { (t, n) -> Triple(t, n, tags[t]) }
         }
@@ -110,14 +81,6 @@ object VocabularyFilter {
         !isLetterOrDigit() && !isWhitespace()
 }
 
-/**
- * Function words that would otherwise dominate mined vocabulary.
- *
- * The English list is not hypothetical: measured on device, the top learned
- * entries by frequency were `the`(×31), `and`(×18), `to`, `with`, `of`, `me`,
- * `for`, `from` — each scoring 4 (rare +2, length +1, ASCII letters +1), which
- * outranks genuine domain terms.
- */
 object StopWords {
 
     val chinese: Set<String> = setOf(
@@ -145,23 +108,12 @@ object StopWords {
         "please", "thanks", "thank", "hi", "hello", "now", "still", "even", "up", "out", "over",
     )
 
-    /** Chinese matched exactly; English matched case-insensitively. */
     fun contains(term: String): Boolean =
         chinese.contains(term) || english.contains(term.lowercase())
 }
 
-/**
- * Background word-frequency list, loaded from `res/raw/zh_background_wordfreq.txt`
- * (the identical 204-line file iOS bundles, so both platforms score alike).
- *
- * A term's PRESENCE means "ordinary word" and suppresses the rare bonus;
- * absence proves nothing (the list is short by design), which is why rank is
- * only ever used as a NEGATIVE signal. A missing file degrades to an empty map
- * — everything then scores as rare, which is conservative, never reckless.
- */
 class BackgroundWordFrequency private constructor(private val ranks: Map<String, Int>) {
 
-    /** Null = not in the list = treat as rare. */
     fun rank(of: String): Int? = ranks[of]
 
     val size: Int get() = ranks.size
@@ -191,7 +143,6 @@ class BackgroundWordFrequency private constructor(private val ranks: Map<String,
             return BackgroundWordFrequency(map)
         }
 
-        /** `<term> <rank>` per line; `#` comments and malformed lines skipped. */
         internal fun parse(lines: Sequence<String>): Map<String, Int> {
             val out = HashMap<String, Int>()
             for (raw in lines) {

@@ -16,19 +16,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-android-provider-entry-rules] Every request a provider sends carries the
- * provider's custom rules - not only chat. Audit 2026-10-07: image generation,
- * image edit and the model-use passthrough built their requests by hand and
- * skipped the OpenCode session header, Copilot's per-request headers and the
- * user's per-model headers (the passthrough also the User-Agent); folder
- * suggestions, vision and voice correction built providers with no session id.
- *
- * The OpenCode header itself cannot reach MockWebServer (127.0.0.1 fails the
- * host gate by design); it shares [OpenAIProvider.applyProviderHeaders] with
- * the headers asserted here, and the source scans below pin that every
- * endpoint goes through it.
- */
 class ProviderEntryRulesTest {
 
     private lateinit var server: MockWebServer
@@ -41,7 +28,6 @@ class ProviderEntryRulesTest {
 
     private val pngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 
-    /** A provider carrying every rule that applies on a local server. */
     private fun provider(extra: Map<String, String> = emptyMap()) = OpenAIProvider(
         apiKey = "test-key",
         model = LLMModel.gpt4oMini,
@@ -62,7 +48,6 @@ class ProviderEntryRulesTest {
     @Test
     fun `image generation carries the provider rules`() = runBlocking {
         server.enqueue(MockResponse().setBody("""{"data":[{"b64_json":"$pngB64"}]}"""))
-        // Parsing the image needs Android APIs; the request has gone out by then.
         runCatching { provider().generateImage("a cat") }
         assertRules(server.takeRequest(), derived = "image")
     }
@@ -110,7 +95,6 @@ class ProviderEntryRulesTest {
         assertEquals("GitHubCopilotChat/0.30", server.takeRequest().getHeader("User-Agent"))
     }
 
-    // ── source scans: no endpoint and no entry can skip the rules ──────────
 
     private val openAI = ProductionSources.read("provider/openai/OpenAIProvider.kt")
 
@@ -140,8 +124,6 @@ class ProviderEntryRulesTest {
     fun `every provider entry says which conversation it serves`() {
         val factory = ProductionSources.read("provider/ProviderFactory.kt")
         assertTrue("sessionId has no default", factory.contains("        sessionId: String?,\n"))
-        // Entry -> the session id it passes. A new entry must be added here
-        // with its reason, so none can default to "no header" unnoticed.
         val expected = mapOf(
             "ui/chat/ChatViewModel.kt" to "sessionId = activeSessionId",
             "ui/chat/TitleCandidates.kt" to "sessionId = sessionId",

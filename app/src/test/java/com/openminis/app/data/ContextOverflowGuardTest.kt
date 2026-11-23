@@ -4,14 +4,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-context-overflow-selfheal] (GH#352) Which failures may mutate a
- * user's history, and — far more importantly — which may not.
- *
- * The self-heal rewrites a persisted conversation, so every negative case here
- * is load-bearing: a false positive would offload a part over an error that
- * offloading cannot fix.
- */
 class ContextOverflowGuardTest {
 
     private fun check(status: Int?, detail: String?) =
@@ -58,7 +50,6 @@ class ContextOverflowGuardTest {
 
     @Test
     fun `an unrelated 400 never triggers a history mutation`() {
-        // These are the dangerous ones: same status, nothing to do with size.
         assertFalse(check(400, "Malformed JSON in request body"))
         assertFalse(check(400, "content policy violation"))
         assertFalse(check(400, "Invalid reasoning_effort: xhigh"))

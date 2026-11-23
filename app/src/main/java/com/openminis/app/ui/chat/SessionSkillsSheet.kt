@@ -55,24 +55,6 @@ import com.openminis.app.ui.settings.SkillRowItem
 import com.openminis.app.ui.settings.SkillSourceUrl
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * Bottom sheet showing all skills with per-session enable/disable toggles.
- * Mirrors iOS SessionSkillsView. Uses the [StandardChatSheet] shell plus the
- * shared [SettingsSection] / [SkillRowItem] primitives so each skill row
- * looks identical to the Settings → Skills screen.
- *
- * The "Enable All / Disable All" controls live to the right of the section
- * header (mirroring iOS section-actions), keeping the sheet's standard top
- * header reserved for the title + close button.
- *
- * [T-android-session-skill-detail] Tapping a row opens that skill's detail
- * (SKILL.md in full, then its other files; a file opens a text / image
- * preview), like iOS SessionSkillDetailView. The pages are swapped inside the
- * sheet rather than navigated to, so the chat stays underneath; the list's
- * state (overrides, search, scroll) is held above the page switch and is
- * unchanged on return. Long-pressing a skill installed from a URL offers
- * "Copy Source URL", the same menu as Settings -> Skills.
- */
 @Composable
 fun SessionSkillsSheet(
     sessionId: String,
@@ -81,17 +63,6 @@ fun SessionSkillsSheet(
 ) {
     val skills by skillRepository.skills.collectAsState()
 
-    // [T-android-session-skill-override-init-timing] Key the seed on `skills`
-    // so the override map re-derives when the live skills list arrives.
-    // A keyless `remember {}` seeds once from the possibly-empty first-
-    // composition list and then never re-runs, so every row's switch is stuck
-    // at the global default (the same stale-override race already fixed in
-    // SessionMcpsSheet — keeping the two sheets symmetric). Mirrors iOS
-    // ed861471 (T-ios-session-skill-override-init-timing) for the
-    // initial-state half of that fix; the per-draft id binding half is
-    // already covered on Android by the `__new__<uuid>` route arg (every
-    // draft has its own stable session id), unlike iOS which previously
-    // coerced nil to "" and bled overrides across drafts.
     val overrides = remember(skills) {
         mutableStateMapOf<String, Boolean>().apply {
             for (skill in skills) {
@@ -113,12 +84,9 @@ fun SessionSkillsSheet(
         }
     }
 
-    // Held here, above the page switch, so returning from a detail page finds
-    // the list exactly as it was left.
     val listScroll = rememberScrollState()
     var page by remember { mutableStateOf<SessionSkillsPage>(SessionSkillsPage.List) }
 
-    // A skill deleted while its page is open: fall back to the list.
     val pageSkill = page.skillId?.let { id -> skills.find { it.id == id } }
     val pageSkillGone = page.skillId != null && pageSkill == null
     LaunchedEffect(pageSkillGone) {
@@ -133,7 +101,6 @@ fun SessionSkillsSheet(
             is SessionSkillsPage.File -> currentPage.relativePath.substringAfterLast('/')
         },
         onDismiss = onDismiss,
-        // System back pops one page; on the list it closes the sheet.
         onBack = {
             if (page == SessionSkillsPage.List) false else {
                 page = page.back()
@@ -176,7 +143,6 @@ fun SessionSkillsSheet(
             if (skills.isEmpty()) {
                 EmptySkillsCard()
             } else {
-                // Search field — filters by skill name + description.
                 DialogTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
@@ -187,10 +153,6 @@ fun SessionSkillsSheet(
                         .padding(horizontal = 16.dp)
                         .padding(top = 12.dp),
                 )
-                // Header row: small-caps "INSTALLED" label on the left,
-                // Enable-All / Disable-All TextButtons on the right. Echoes
-                // the SettingsSection header exactly so visual rhythm carries
-                // over from Settings.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -206,8 +168,6 @@ fun SessionSkillsSheet(
                         letterSpacing = 0.5.sp,
                     )
                     Spacer(modifier = Modifier.weight(1f))
-                    // Enable/Disable All operate on the FILTERED subset so a
-                    // user can bulk-toggle the result of a search.
                     MinisTextButton(
                         onClick = {
                             for (skill in filteredSkills) {
@@ -250,8 +210,6 @@ fun SessionSkillsSheet(
                         footer = stringResource(R.string.session_skills_footer),
                     ) {
                         filteredSkills.forEachIndexed { index, skill ->
-                            // Long-press offers "Copy Source URL" only for a
-                            // skill installed from one, as in Settings -> Skills.
                             val sourceUrl = SkillSourceUrl.copyable(skill)
                             var menuExpanded by remember(skill.id) { mutableStateOf(false) }
                             Box {
@@ -334,7 +292,6 @@ private fun EmptySkillsCard() {
     }
 }
 
-/** Which page the sheet shows. Detail and File pages name their skill. */
 internal sealed interface SessionSkillsPage {
     data object List : SessionSkillsPage
     data class Detail(val id: String) : SessionSkillsPage
@@ -347,30 +304,21 @@ internal sealed interface SessionSkillsPage {
             is File -> id
         }
 
-    /** The page the back arrow / system back returns to. */
     fun back(): SessionSkillsPage = when (this) {
         List, is Detail -> List
         is File -> Detail(id)
     }
 }
 
-/** Files listed under "Other Files": everything except SKILL.md itself. */
 internal fun sessionSkillOtherFiles(all: List<String>): List<String> =
     all.filterNot { it.equals("SKILL.md", ignoreCase = true) }
 
-/**
- * One skill's detail page: SKILL.md as it is on disk (front matter included,
- * like iOS readSkillContent; the stored body if the file is unreadable), then
- * the skill's other files.
- */
 @Composable
 private fun SessionSkillDetail(
     skill: SkillRepository.Skill,
     skillRepository: SkillRepository,
     onFileClick: (String) -> Unit,
 ) {
-    // Re-read when the skill record changes (an update or rescan bumps
-    // updatedAt), like the Settings detail page.
     val skillMd = remember(skill.id, skill.updatedAt) {
         skillRepository.readSkillFile(skill.id, "SKILL.md") ?: skill.body
     }
@@ -421,7 +369,6 @@ private fun SessionSkillDetail(
     }
 }
 
-/** Images are scaled to the sheet width; everything else is monospaced text. */
 @Composable
 private fun SessionSkillFilePreview(
     skillRepository: SkillRepository,

@@ -9,13 +9,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-preview-scheduled-tag-leak] The session list's last-message preview never
- * shows an app-authored envelope: a scheduled fire reads "Scheduled task ·
- * <label>" (user report: the raw "<scheduled_task id=… label=…>" showed when a
- * task fired), and reminders / attached-file listings / attachment captions
- * are stripped whatever their case and even when never closed.
- */
 class PreviewInternalTagsTest {
 
     private fun textRow(vararg texts: String): String =
@@ -29,7 +22,6 @@ class PreviewInternalTagsTest {
         triggerLabel = "loop(60s×3)", insertedMidTask = inserted,
     ).xml
 
-    // --- Scheduled fires ------------------------------------------------------------
 
     @Test
     fun `a scheduled fire previews as the task label, never the envelope`() {
@@ -57,7 +49,6 @@ class PreviewInternalTagsTest {
         assertEquals("Scheduled task", InternalTags.scheduledPreviewLine("<scheduled_task", "Scheduled task") { it })
     }
 
-    // --- Other envelopes --------------------------------------------------------------
 
     @Test
     fun `system reminders go whatever their case, closed or not`() {

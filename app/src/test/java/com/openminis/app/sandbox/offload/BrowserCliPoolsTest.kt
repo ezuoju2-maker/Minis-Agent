@@ -9,14 +9,8 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-browser-cli-own-pool] minis-browser-use runs on the calling
- * chat's own tab pool (iOS BrowserUseOffloadBridge.pool(for:)), not on one
- * process-wide pool that concurrent chats drove at the same time.
- */
 class BrowserCliPoolsTest {
 
-    /** Stand-in for a tab pool; identity is what matters. */
     private class Pool(val name: String)
 
     private val shared = Pool("shared")
@@ -92,7 +86,6 @@ class BrowserCliPoolsTest {
         assertEquals("shared(no-session)", r.via())
     }
 
-    // ── Wiring ────────────────────────────────────────────────────────────
 
     private fun src(path: String): String {
         val f = File(path)

@@ -1,4 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Minis</string>
     <string name="new_chat">Yeni Sohbet</string>
@@ -1898,7 +1897,6 @@
     <string name="chat_share_n_selected">Seçildi: %1$d</string>
     <string name="chat_share_select_all">Tümünü Seç</string>
     <string name="chat_share_deselect_all">Seçimi Kaldır</string>
-    <!-- [T-port-user-ask] user_ask card and settings; text from the iOS string catalog. -->
     <string name="user_ask_needs_answer">Yanıtın gerekiyor</string>
     <string name="user_ask_needs_approval">Onayın gerekiyor</string>
     <string name="user_ask_high_risk">Yüksek riskli işlem</string>
@@ -1941,17 +1939,14 @@
     <string name="user_ask_setting_indefinitely">Süresiz</string>
     <string name="user_ask_setting_minutes">%1$d dk</string>
     <string name="user_ask_setting_footer">Asistanın sohbetteki bir kartla senden seçenekler arasında seçim yapmanı ya da riskli bir işlemi yapmadan önce onaylamanı istemesini sağlar. Yalnızca içinde olduğun sohbetlerde — alt ajanlar, Kestirmeler veya zamanlanmış görevler için asla. Kapalıyken asistan kendisi karar verir ve onayın olmadan riskli işlem yapmaz.</string>
-    <!-- [T-android-user-ask-notify] user_ask background notification. -->
     <string name="user_ask_setting_notify">Arka planda bildir</string>
     <string name="user_ask_notif_high_risk">Onay gerekli · Yüksek risk</string>
     <string name="user_ask_notif_open_app">Uygulamayı aç</string>
     <string name="user_ask_notif_hidden_body">Yanıtını bekleyen bir soru var</string>
     <string name="user_ask_notif_channel_name">Sana sorular</string>
     <string name="user_ask_notif_channel_description">Minis arka plandayken asistanın sorduğu sorular; bildirimden yanıtlayabilirsin</string>
-    <!-- [T-tool-preview-longpress-close] Long-press the tool status bar preview -->
     <string name="tool_preview_close_menu">Önizleme penceresini kapat</string>
     <string name="tool_preview_closed_toast">Önizleme penceresi kapatıldı. Ayarlar &gt; Görünüm bölümünden yeniden açabilirsiniz.</string>
-    <!-- [T-mcp-oauth-signin-android] MCP browser sign-in (iOS #432) -->
     <string name="mcp_form_auth_mode">Yetkilendirme</string>
     <string name="mcp_form_auth_none">Yok</string>
     <string name="mcp_signin_not_signed_in">Oturum açılmadı</string>

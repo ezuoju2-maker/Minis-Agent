@@ -16,12 +16,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/**
- * [T-android-codex-prompt-cache-headers] A Codex OAuth (ChatGPT backend)
- * request names its conversation in the headers, with the same id the body
- * carries as `prompt_cache_key` - the backend keys its prompt cache on the
- * headers.
- */
 @RunWith(RobolectricTestRunner::class)
 class CodexPromptCacheHeadersTest {
 
@@ -33,7 +27,6 @@ class CodexPromptCacheHeadersTest {
     private fun user(text: String) = LLMMessage(LLMMessage.Role.USER, text)
     private fun assistant(text: String) = LLMMessage(LLMMessage.Role.ASSISTANT, text)
 
-    /** The body the provider builds for [messages], and the request built from that body, as streamMessage does. */
     private fun send(provider: OpenAIProvider, messages: List<LLMMessage>): Pair<JSONObject, Request> {
         val body = provider.buildResponsesAPIBody(messages, "system", 1024, true, emptyList())
         val request = runBlocking {
@@ -50,7 +43,6 @@ class CodexPromptCacheHeadersTest {
         assertEquals("https://chatgpt.com/backend-api/codex/responses", request.url.toString())
         assertEquals(key, request.header("Session_id"))
         assertEquals(key, request.header("Conversation_id"))
-        // What the "[T321] → REQ ... headerKeys=" log line prints.
         assertTrue(request.headers.names().containsAll(listOf("Session_id", "Conversation_id")))
     }
 
@@ -109,7 +101,6 @@ class CodexPromptCacheHeadersTest {
         val set = build.indexOf("for ((name, value) in codexConversationHeaders(promptCacheKey)) builder.header(name, value)")
         assertTrue(set in oauthStart until oauthEnd)
         assertEquals("set in one place", 1, src.split("in codexConversationHeaders(").size - 1)
-        // The request log prints header names only.
         assertTrue(src.contains("\"headerKeys=\${request.headers.names()} authPresent=\$authPresent \" +"))
     }
 

@@ -4,11 +4,6 @@ import com.openminis.app.ProductionSources
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-voice-send-busy] Send tapped while voice is still recording: the button
- * is busy and takes no taps until the message has gone out, and any user
- * change takes the pending send back (port of iOS b48cfdbfe).
- */
 class VoiceSendBusyTest {
 
     private val gate = ProductionSources.read("ui/chat/voice/VoiceSendGate.kt")

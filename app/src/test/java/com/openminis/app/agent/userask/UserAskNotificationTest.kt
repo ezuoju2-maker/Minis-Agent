@@ -16,12 +16,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-android-user-ask-notify] The background notification for a user_ask
- * question: which controls each question shape gets (Android shows at most
- * three actions), the one-notification-per-question rule, and answers from the
- * notification racing the card, the timeout and Stop.
- */
 class UserAskNotificationTest {
 
     private var now = 1_000_000_000L
@@ -43,7 +37,6 @@ class UserAskNotificationTest {
     private fun ask(vararg qs: UserAskQuestion, rid: String = "req-1", minutes: Int = 5) =
         PendingAsk.create(rid, "sess-1", "tc-$rid", qs.toList(), now, minutes)
 
-    // ── Plan: controls per question shape ──────────────────────────────────
 
     @Test fun `two options get both buttons and an Other reply`() {
         val c = UserAskNotificationPlan.content(ask(pick(2)))!!
@@ -95,7 +88,6 @@ class UserAskNotificationTest {
         assertEquals(listOf("user-ask-r-q0", "user-ask-r-q1", "user-ask-r-q2"), UserAskNotificationPlan.allTags("r", 3))
     }
 
-    // ── One notification per question ──────────────────────────────────────
 
     @Test fun `posts only while away, enabled and pending`() {
         val a = ask(pick(2))
@@ -129,7 +121,6 @@ class UserAskNotificationTest {
         assertNull("older records decode", UserAskCodec.fromJson(JSONObject(json.toString()).apply { remove("notifiedIndex") })!!.notifiedIndex)
     }
 
-    // ── Applying an answer ──────────────────────────────────────────────────
 
     @Test fun `an option button answers by index`() {
         val (a, o) = UserAskNotificationPlan.apply(ask(pick(3)), 0, "opt:2", null, now)
@@ -164,7 +155,6 @@ class UserAskNotificationTest {
         assertEquals(Outcome.STALE, UserAskNotificationPlan.apply(a, 0, "opt:0", null, now + 5 * 60_000L).second)
     }
 
-    // ── Races through the center ───────────────────────────────────────────
 
     private fun start(scope: kotlinx.coroutines.CoroutineScope, args: String) =
         scope.async(start = CoroutineStart.UNDISPATCHED) {
@@ -223,8 +213,6 @@ class UserAskNotificationTest {
     }
 
     @Test fun `a direct reply is ended by an update before its notification is cancelled`() {
-        // Android 15+ ignores cancelling a notification answered through
-        // RemoteInput (FLAG_LIFETIME_EXTENDED_BY_DIRECT_REPLY) - seen on the Pixel 6.
         val recv = ProductionSources.read("notification/UserAskNotificationReceiver.kt")
         assertTrue(recv.contains("if (action == UserAskNotificationPlan.ACTION_OTHER) {"))
         assertTrue(recv.contains("UserAskNotifier.endReply(UserAskNotificationPlan.tag(requestId, index))"))

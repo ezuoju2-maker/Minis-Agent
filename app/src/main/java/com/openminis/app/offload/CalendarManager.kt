@@ -10,10 +10,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.TimeZone
 
-/**
- * Calendar read/write bridge using CalendarProvider.
- * Requires READ_CALENDAR and WRITE_CALENDAR permissions.
- */
 object CalendarManager {
 
     fun hasPermission(context: Context): Boolean {
@@ -26,9 +22,6 @@ object CalendarManager {
             PackageManager.PERMISSION_GRANTED
     }
 
-    /**
-     * List upcoming events within the given time range (millis).
-     */
     fun listEvents(context: Context, startMs: Long, endMs: Long, maxResults: Int = 50): String {
         if (!hasPermission(context)) return "Error: READ_CALENDAR permission not granted"
 
@@ -72,9 +65,6 @@ object CalendarManager {
         else events.toString(2)
     }
 
-    /**
-     * Create a calendar event.
-     */
     fun createEvent(
         context: Context,
         title: String,
@@ -86,7 +76,6 @@ object CalendarManager {
     ): String {
         if (!hasWritePermission(context)) return "Error: WRITE_CALENDAR permission not granted"
 
-        // Get the primary calendar ID
         val calendarId = getPrimaryCalendarId(context)
             ?: return "Error: no calendar found on device"
 
@@ -120,7 +109,6 @@ object CalendarManager {
         cursor?.use {
             if (it.moveToFirst()) return it.getLong(0)
         }
-        // Fallback: first writable calendar
         val fallbackCursor = context.contentResolver.query(
             CalendarContract.Calendars.CONTENT_URI,
             projection, null, null, null

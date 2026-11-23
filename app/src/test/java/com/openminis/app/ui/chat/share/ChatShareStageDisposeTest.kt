@@ -5,13 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-share-preview-close-crash] Closing the Share Chat… preview crashed (Pixel 6,
- * NPE in ViewGroup.dispatchDetachedFromWindow under Dialog.dismiss). The render
- * stage's layer sits on the dialog window's decor view, and the stage is disposed
- * from inside that decor view's detach loop (the Compose dialog content disposes
- * on detach), so it must not take the layer out of the host synchronously.
- */
 class ChatShareStageDisposeTest {
     private val renderer = ProductionSources.read("ui/chat/share/ChatExportRenderer.kt")
     private val preview = ProductionSources.read("ui/chat/share/ChatSharePreviewScreen.kt")

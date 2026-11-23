@@ -8,14 +8,6 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 
-/**
- * The §8.1 pre-flight order: manifest → verifier → integrity → MAC → decrypt.
- *
- * The order is the point. Integrity must be checkable without the passphrase
- * (the hashes are over ciphertext), and a wrong passphrase must fail against
- * the 16-byte verifier rather than surfacing as a decrypt error partway through
- * a multi-GB restore.
- */
 class BackupPackageReaderTest {
 
     private lateinit var root: File
@@ -70,11 +62,6 @@ class BackupPackageReaderTest {
         assertEquals(setOf("data/bad.jsonl", "data/missing.jsonl"), failures.toSet())
     }
 
-    /**
-     * A wrong passphrase must be caught by the verifier before any payload is
-     * touched. Uses a low iteration count — the KDF's cost is not what is under
-     * test here.
-     */
     @Test
     fun `a wrong passphrase fails against the verifier before touching payload`() {
         val kdf = BackupManifest.Encryption.KDF(
@@ -98,7 +85,6 @@ class BackupPackageReaderTest {
         }
         assertTrue("a wrong passphrase must be rejected by the verifier", threw)
 
-        // The right one must succeed and yield usable keys.
         val keys = reader.unlock("right passphrase")
         assertEquals(right.verifier, keys.verifier)
     }
@@ -120,11 +106,6 @@ class BackupPackageReaderTest {
         assertTrue("got: $message", message?.contains("unsupported encryption scheme") == true)
     }
 
-    /**
-     * A tampered plaintext manifest must fail the sidecar MAC — that is what
-     * stops an attacker deleting the `providers` entry to hide that credentials
-     * are present, or downgrading the KDF parameters.
-     */
     @Test
     fun `an edited manifest fails the sidecar MAC`() {
         val kdf = BackupManifest.Encryption.KDF(
@@ -137,11 +118,9 @@ class BackupPackageReaderTest {
              "verifier":"${keys.verifier}"}}
         """.trimIndent()
         writeManifest(body)
-        // Sidecar MAC computed over the ORIGINAL bytes…
         File(root, "manifest.mac").writeText(
             BackupCrypto.manifestMac(body.toByteArray(Charsets.UTF_8), keys.macKey)
         )
-        // …then the manifest is edited underneath it.
         writeManifest(body.replace("minisbak/1\"", "minisbak/1\",\"device_name\":\"forged\""))
 
         var threw = false
@@ -153,12 +132,6 @@ class BackupPackageReaderTest {
         assertTrue("an edited manifest must fail authentication", threw)
     }
 
-    /**
-     * The manifest is plaintext, so its `encryption` block can be stripped.
-     * Without this guard the reader skips decryption, nothing parses, and every
-     * category reports zero imported with no error — a silent empty restore
-     * that reads as success (iOS review S4).
-     */
     @Test
     fun `a stripped encryption block is caught when encrypted members remain`() {
         writeManifest("""{"format":"minisbak/1"}""")
@@ -179,7 +152,6 @@ class BackupPackageReaderTest {
         writeManifest("""{"format":"minisbak/1"}""")
         File(root, "data").mkdirs()
         File(root, "data/sessions.jsonl").writeText("{}")
-        // Must not throw.
         BackupPackageReader(root).assertNoUndeclaredEncryption()
     }
 
@@ -198,7 +170,6 @@ class BackupPackageReaderTest {
         val keys = BackupCrypto.deriveKeys("pass", kdf)
         writeManifest("""{"format":"minisbak/1"}""")
 
-        // A plaintext member comes back as-is.
         File(root, "data").mkdirs()
         File(root, "data/plain.jsonl").writeText("plain content")
         val scratch = File(root, "scratch").apply { mkdirs() }
@@ -208,8 +179,6 @@ class BackupPackageReaderTest {
             reader.materialize("data/plain.jsonl", keys, scratch)?.readText(),
         )
 
-        // An encrypted one is decrypted under the name it ships as, `.enc`
-        // included — that suffix is part of the authenticated AAD path.
         val source = File(root, "src.tmp").apply { writeText("secret content") }
         BackupCrypto.encryptFile(
             source, File(root, "data/enc.jsonl.enc"), keys.dataKey, "data/enc.jsonl.enc"
@@ -220,7 +189,6 @@ class BackupPackageReaderTest {
         )
     }
 
-    /** secrets.json uses its own subkey, which is what makes "strip credentials" a file deletion. */
     @Test
     fun `secrets use the secrets subkey, not the data key`() {
         val kdf = BackupManifest.Encryption.KDF(

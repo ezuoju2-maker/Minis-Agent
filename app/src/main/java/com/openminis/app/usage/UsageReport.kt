@@ -7,13 +7,6 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 
-/**
- * [T-usage-step1] Pure aggregation for the Usage page: stored rows in, one
- * report out. No Android, no database, no clock - everything comes in through
- * [UsageQuery], so src/shared/usage/usage_test_vectors.json can drive it on
- * the JVM. Rules are those of USAGE_METRICS_SPEC.md; the section numbers in
- * the comments below point there.
- */
 
 enum class UsageRange { TODAY, LAST_7_DAYS, LAST_30_DAYS, ALL }
 
@@ -21,19 +14,14 @@ enum class UsageGroupBy { PROVIDER, MODEL }
 
 enum class UsageGranularity { HOUR, DAY, WEEK, MONTH }
 
-/** One `messages` row with its stored usage, as the data layer hands it over. */
 data class UsageRow(
     val atMs: Long,
     val sessionId: String,
-    /** Per-message snapshot model id; null on rows written before snapshots. */
     val modelId: String?,
-    /** The session's current model, the COALESCE fallback for [modelId]. */
     val sessionModelId: String? = null,
     val modelDisplayName: String? = null,
-    /** ProviderType rawValue snapshot; blank is treated as absent (spec 8.1). */
     val providerType: String? = null,
     val providerInstanceId: String? = null,
-    /** messages.token_usage text. */
     val usageJson: String?,
 )
 
@@ -59,26 +47,22 @@ data class Tokens(
     val output: Long = 0,
 ) {
     val total: Long get() = input + cacheRead + cacheWrite + output
-    /** The "excluding cache reads" secondary figure (spec 1.2). */
     val nonCached: Long get() = input + cacheWrite + output
     val inputInclCache: Long get() = input + cacheRead + cacheWrite
 
     operator fun plus(u: StoredUsage) = Tokens(input + u.input, cacheRead + u.cacheRead, cacheWrite + u.cacheWrite, output + u.output)
 }
 
-/** Null when nothing in scope can report a cache: the UI shows an em dash, not 0%. */
 private fun hitRate(num: Long, den: Long): Double? = if (den > 0) num.toDouble() / den else null
 
 data class UsageTotals(
     val tokens: Tokens,
-    /** Sum over rows that recorded reasoning; null when none did. Never part of [Tokens.total]. */
     val reasoning: Long?,
     val reasoningComplete: Boolean,
     val hitNum: Long,
     val hitDen: Long,
 ) {
     val hitRate: Double? get() = hitRate(hitNum, hitDen)
-    /** Share of the input (incl. cache) the hit rate is based on; null when there is no input. */
     val cacheBasis: Double? get() = tokens.inputInclCache.takeIf { it > 0 }?.let { hitDen.toDouble() / it }
 }
 
@@ -86,18 +70,13 @@ data class UsageBucket(val startMs: Long, val endMs: Long, val tokens: Tokens)
 
 data class UsageGroup(
     val key: String,
-    /** Display label; null for the synthetic keys the UI names itself (unknown, removed, unrecorded). */
     val label: String?,
     val tokens: Tokens,
     val hitNum: Long,
     val hitDen: Long,
-    /** Model view only: the raw ids folded into this group, sorted. */
     val rawIds: List<String> = emptyList(),
-    /** Present only when there are 2 or more child keys. */
     val children: List<UsageGroup> = emptyList(),
-    /** Distinct merged model keys in this group (list subtitles). */
     val modelCount: Int = 0,
-    /** Distinct provider types in this group. */
     val providerCount: Int = 0,
 ) {
     val hitRate: Double? get() = hitRate(hitNum, hitDen)
@@ -107,7 +86,6 @@ data class UsageSkipped(val copied: Int = 0, val invalid: Int = 0, val noUsage: 
 
 data class UsageReport(
     val query: UsageQuery,
-    /** Null only for ALL with no counted row. */
     val rangeStartMs: Long?,
     val rangeEndMs: Long?,
     val granularity: UsageGranularity?,
@@ -127,7 +105,6 @@ object UsageReportBuilder {
     const val REMOVED_INSTANCE = "removed"
     const val UNRECORDED_INSTANCE = "unrecorded"
 
-    /** Calendar days above which ALL switches from days to weeks, and weeks above which to months (spec 7.3). */
     private const val MAX_DAY_BUCKETS = 60
     private const val MAX_WEEK_BUCKETS = 26
 
@@ -136,7 +113,6 @@ object UsageReportBuilder {
     }
 
     fun build(rows: List<UsageRow>, q: UsageQuery): UsageReport {
-        // 1. Parse; copied, invalid and NULL rows never reach any figure (spec 4.2, 5).
         var copied = 0; var invalid = 0; var noUsage = 0
         val counted = ArrayList<Counted>(rows.size)
         val liveById = q.liveInstances.associateBy { it.id }
@@ -151,7 +127,6 @@ object UsageReportBuilder {
             }
         }
 
-        // 2. Range: local midnights, right edge = tomorrow 00:00 (spec 7.2).
         val today = Instant.ofEpochMilli(q.nowMs).atZone(q.zone).toLocalDate()
         val endMs = startOf(today.plusDays(1), q.zone)
         val startDate: LocalDate? = when (q.range) {
@@ -165,7 +140,6 @@ object UsageReportBuilder {
         val included = if (startMs == null) emptyList() else counted.filter { it.row.atMs in startMs until endMs }
         val calendarDays = startDate?.let { (ChronoUnit.DAYS.between(it, today) + 1).toInt() } ?: 0
 
-        // 3. Buckets.
         val granularity = startDate?.let { granularityFor(q.range, it, today, q.firstWeekday) }
         val bounds = if (startDate == null || granularity == null) emptyList()
         else bucketBounds(granularity, startDate, today, q)
@@ -178,7 +152,6 @@ object UsageReportBuilder {
             sums.mapIndexed { i, t -> UsageBucket(bounds[i], bounds[i + 1], t) }
         }
 
-        // 4. Totals, cache capability (spec 4.4), activity.
         val cohortsWithCache = included.filter { it.usage.cacheRead + it.usage.cacheWrite > 0 }.mapTo(HashSet()) { it.cohort }
         val capable: (Counted) -> Boolean = { c ->
             c.usage.cacheReported == true || c.usage.cacheRead + c.usage.cacheWrite > 0 ||
@@ -190,7 +163,6 @@ object UsageReportBuilder {
         val sessions = nonZero.mapTo(HashSet()) { it.row.sessionId }.size
         val dailyAvg = if (calendarDays > 0) totals.tokens.total.toDouble() / calendarDays else null
 
-        // 5. Groups (spec 8).
         val groups = when (q.groupBy) {
             UsageGroupBy.PROVIDER -> providerGroups(included, capable, liveById)
             UsageGroupBy.MODEL -> modelGroups(included, capable, q.exactModelId)
@@ -212,7 +184,6 @@ object UsageReportBuilder {
         )
     }
 
-    /** Snapshot type, else the live instance's type, else the live model list, else unknown (spec 8.1). */
     private fun resolveProvider(row: UsageRow, model: String?, liveById: Map<String, LiveInstance>, liveModels: List<LiveModel>): String {
         row.providerType?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
         row.providerInstanceId?.trim()?.takeIf { it.isNotEmpty() }?.let { liveById[it] }?.let { return it.providerType }
@@ -234,11 +205,6 @@ object UsageReportBuilder {
         }
     }
 
-    /**
-     * Bucket edges, last one included. Built with java.time, never with fixed
-     * 3600/86400 steps: a DST day has 23 or 25 hours, and on fall-back day the
-     * two 01:00 hours are different buckets (spec 7.3).
-     */
     private fun bucketBounds(g: UsageGranularity, start: LocalDate, today: LocalDate, q: UsageQuery): List<Long> {
         val out = ArrayList<Long>()
         when (g) {
@@ -288,7 +254,6 @@ object UsageReportBuilder {
         )
     }
 
-    /** Total descending, key ascending; the [pinnedLast] keys keep their given order at the end. */
     private fun sorted(groups: List<UsageGroup>, pinnedLast: List<String>): List<UsageGroup> =
         groups.filter { it.key !in pinnedLast }.sortedWith(compareByDescending<UsageGroup> { it.tokens.total }.thenBy { it.key }) +
             pinnedLast.mapNotNull { k -> groups.firstOrNull { it.key == k } }
@@ -311,7 +276,6 @@ object UsageReportBuilder {
 
     private fun modelGroups(rows: List<Counted>, capable: (Counted) -> Boolean, exact: Boolean): List<UsageGroup> {
         val groups = rows.groupBy { c -> c.model?.let { ModelKey.of(it, exact) } ?: UNKNOWN_MODEL }.map { (key, inGroup) ->
-            // Label: the latest row's display name, else its raw id (spec 6.3). Ties go to the later row.
             val latest = inGroup.maxWithOrNull(compareBy<Counted> { it.row.atMs }.thenBy { it.index })
             val label = latest?.row?.modelDisplayName?.trim()?.takeIf { it.isNotEmpty() }
                 ?: latest?.model?.trim()?.takeIf { it.isNotEmpty() }

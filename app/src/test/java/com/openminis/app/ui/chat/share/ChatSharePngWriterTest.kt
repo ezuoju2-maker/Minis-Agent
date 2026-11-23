@@ -11,7 +11,6 @@ import java.util.zip.CRC32
 import java.util.zip.Inflater
 import kotlin.math.abs
 
-/** [T-multi-select-share] The streamed long-image PNG decodes to exactly the rows written, across strips. */
 class ChatSharePngWriterTest {
 
     private fun pixel(x: Int, y: Int): Int =
@@ -25,7 +24,6 @@ class ChatSharePngWriterTest {
             val h = 150
             val writer = ChatSharePngWriter(w, File(dir, "idat.tmp"))
             var y = 0
-            // Uneven strips, as the renderer produces at a part's end.
             for (strip in listOf(64, 50, 36)) {
                 val px = IntArray(w * strip) { i -> pixel(i % w, y + i / w) }
                 writer.writeRows(px, 0, strip)
@@ -50,7 +48,6 @@ class ChatSharePngWriterTest {
         }
     }
 
-    /** A minimal PNG reader for 8-bit RGB: checks every chunk CRC, inflates IDAT, undoes the filters. */
     private fun decode(bytes: ByteArray): Pair<Pair<Int, Int>, ByteArray> {
         val input = DataInputStream(bytes.inputStream())
         val sig = ByteArray(8).also { input.readFully(it) }

@@ -11,17 +11,6 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.json.JSONObject
 
-/**
- * The four Android serializers, each returning the request body it really
- * builds for a history. Anthropic and Gemini keep their builders private, so
- * their bodies are captured off a MockWebServer (no network leaves the
- * machine); OpenAI Chat Completions and Responses expose internal builders.
- *
- * Plus the message SHAPES ChatViewModel builds. ChatViewModel cannot be
- * constructed in a JVM test (Room + Context), so these are rebuilt here from
- * the source; ImageReproHistoryFactsTest pins every line they mirror, so a
- * production change that alters the shape turns that test red.
- */
 object ImageReproWire {
 
     val visionModel = LLMModel("vision-test", "Vision Test", "test", inputModalities = listOf("text", "image"))
@@ -48,7 +37,6 @@ object ImageReproWire {
         OpenAIProvider(apiKey = "k", model = visionModel, basePath = "https://example.invalid/v1", useResponsesAPI = true)
             .buildResponsesAPIBody(messages, null, 256, false, imageParts)
 
-    /** All four bodies, keyed by serializer name. */
     fun all(messages: List<LLMMessage>, imageParts: List<LLMMessage.ImagePart> = emptyList()): Map<String, JSONObject> =
         linkedMapOf(
             "anthropic" to anthropic(messages, imageParts),
@@ -69,14 +57,7 @@ object ImageReproWire {
         }
     }
 
-    // ── ChatViewModel message shapes (pinned by ImageReproHistoryFactsTest) ──
 
-    /**
-     * Live user turn, as the send path builds it (CVM `addModelImage` +
-     * `agentHistory.add(LLMMessage(… imageParts = imageParts, contentParts =
-     * userContentParts …))`): the SAME array sits in imageParts and in
-     * contentParts.ImageData, after an "[attached image: <path>]" caption.
-     */
     fun liveUserTurn(body: String, image: ByteArray, mime: String, path: String?, note: String? = null): LLMMessage {
         val part = LLMMessage.ImagePart(image, mime, linuxPath = path)
         val parts = mutableListOf<AgentContentPart>()
@@ -87,11 +68,6 @@ object ImageReproWire {
         return LLMMessage(LLMMessage.Role.USER, body, imageParts = listOf(part), contentParts = parts)
     }
 
-    /**
-     * The same turn after persist → reload, as `toLLMMessage` rebuilds it from
-     * `buildUserPartsJson` (text part, then mediaRef parts): no caption, a NEW
-     * array shared again by imageParts and contentParts.ImageData.
-     */
     fun rebuiltUserTurn(body: String, image: ByteArray, mime: String, path: String?, note: String? = null): LLMMessage {
         val parts = mutableListOf<AgentContentPart>()
         if (body.isNotEmpty()) parts += AgentContentPart.Text(body)
@@ -106,7 +82,6 @@ object ImageReproWire {
 
     private val toolInput = JSONObject().put("action", "screenshot")
 
-    /** Assistant tool call + the tool-result turn carrying an image (live). */
     fun liveToolRound(id: String, tool: String, output: String, image: ByteArray?, mime: String?, path: String?): List<LLMMessage> = listOf(
         LLMMessage(LLMMessage.Role.ASSISTANT, "", contentParts = listOf(AgentContentPart.ToolUse(id, tool, toolInput))),
         LLMMessage(
@@ -115,7 +90,6 @@ object ImageReproWire {
         ),
     )
 
-    /** The same round after reload: `toLLMMessage`'s "toolResult" branch keeps text only. */
     fun rebuiltToolRound(id: String, tool: String, output: String): List<LLMMessage> =
         liveToolRound(id, tool, output, image = null, mime = null, path = null)
 

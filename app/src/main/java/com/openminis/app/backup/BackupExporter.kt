@@ -19,22 +19,6 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 
-/**
- * Builds a `.minisbak` package on Android (docs/backup-restore-design.md §2,
- * §9 stage 4), mirroring `src/ios/Agent/Backup/BackupExporter.swift`.
- *
- * Shape: stage everything into a scratch directory, then zip that directory
- * once. Staging rather than streaming straight into an archive means a failure
- * part-way leaves no half-written package at the destination — the same
- * approach ChatExporter already uses here, and BackupExporter uses on iOS.
- *
- * Record field names are the cross-platform contract. iOS writes its Swift
- * models with the synthesized Codable encoder, so they are camelCase with
- * ISO-8601 dates, and this reproduces that exactly — the manifest's snake_case
- * (§2.1) applies to the manifest alone, not to the JSONL records inside it.
- * Deviating in either direction makes packages mutually unreadable, which §5.4
- * explicitly forbids.
- */
 class BackupExporter(
     private val context: Context,
     private val db: AppDatabase,
@@ -42,24 +26,9 @@ class BackupExporter(
 
     data class Options(
         val categories: Set<BackupCategory> = BackupCategory.backupable.toSet(),
-        /** §3.4 — null means unlimited, which is the DEFAULT. */
         val maxFileBytes: Long? = null,
-        /**
-         * §3.3: credentials ship WITH the Providers category by default, so a
-         * restored provider actually works. False produces the "export copy
-         * without credentials" share package.
-         */
         val includeCredentials: Boolean = true,
-        /** null/empty = unencrypted package. */
         val passphrase: String? = null,
-        /**
-         * Data cut-off for this export. Everything the package contains is the
-         * state as of this instant; rows updated after it, and files modified
-         * after it, are excluded. Without a cut-off the export is not a
-         * snapshot — a session written between the index pass and the blob copy
-         * lands in files.index while its content never gets stored, producing a
-         * package that references content it does not contain.
-         */
         val snapshotAtMillis: Long = System.currentTimeMillis(),
     )
 
@@ -74,48 +43,16 @@ class BackupExporter(
         val durationMillis: Long,
     )
 
-    /**
-     * Export a package.
-     *
-     * Serialised process-wide: a second export (or an export racing a restore)
-     * would read the same stores while the other mutates them, so the two are
-     * refused rather than interleaved — the same rule as iOS's
-     * BackupActivityLock (review I3).
-     */
     suspend fun export(
         options: Options = Options(),
         onProgress: ((String) -> Unit)? = null,
     ): Summary = activityLock.withLock { exportBody(options, onProgress) }
 
     private suspend fun exportBody(options: Options, onProgress: ((String) -> Unit)?): Summary {
-        // [T-backup-credentials-without-encryption] There is deliberately NO
-        // "refuse to export credentials without a passphrase" guard here.
-        //
-        // §3.3/§5.4 used to require encryption for any package carrying
-        // secrets, and this threw otherwise. In practice that turned the
-        // default export into one that silently restores a HALF-WORKING
-        // device: a user moving from iOS landed with 19 providers holding no
-        // key and 38 environment variables holding no value, with nothing in
-        // the package or the UI saying so. A backup whose whole purpose is to
-        // reconstitute a device must reconstitute it.
-        //
-        // The risk is now handled by TELLING the user rather than by quietly
-        // dropping their data: the encryption toggle's footer states plainly
-        // that an unencrypted package contains readable API keys, OAuth
-        // tokens and env-var values (backup_encrypt_footer_off_creds).
-        //
-        // Matches iOS BackupExporter.swift, same tag — the two must agree or
-        // packages stop being interchangeable, which is the thing this whole
-        // format exists for.
         val started = System.currentTimeMillis()
         val backupId = UUID.randomUUID().toString()
-        // Read once, so the filename and the manifest cannot disagree if the
-        // user renames the device mid-run.
         val deviceName = com.openminis.app.data.DeviceIdentity.displayName(context)
 
-        // Staging lives in filesDir, not cacheDir: the system may evict the
-        // cache mid-export, and a multi-GB staging tree disappearing underneath
-        // the writer is a failure mode worth designing out.
         val staging = File(context.filesDir, "backup-staging/$backupId")
         staging.mkdirs()
         try {
@@ -124,9 +61,6 @@ class BackupExporter(
             val stats = mutableMapOf<String, BackupManifest.CategoryStat>()
 
             BackupFileIndexWriter(File(staging, "files.index.jsonl")).use { fileIndex ->
-                // [T-android-backup-webdav-deadline] The tree walk is plain
-                // blocking code: without this hook Stop waited for a whole
-                // category (every session's files) to finish.
                 val runJob = kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]
                 val trees = BackupFileTreeExporter(
                     blobStore, fileIndex, options.snapshotAtMillis,
@@ -167,25 +101,13 @@ class BackupExporter(
                 }
             }
 
-            // secrets.json aggregates credentials for BOTH providers and
-            // env-vars into one member, staged next to `data/` (NOT inside it)
-            // so the credential policy is a single-file concern. The
-            // encryption pass routes it through `secretsKey`; a share copy
-            // (includeCredentials=false) simply never writes it. Collected
-            // once, AFTER the category exports, because it spans two
-            // categories. Mirrors iOS exportProviders/BackupSecretsCollector.
             if (options.includeCredentials) {
                 onProgress?.invoke("Collecting credentials…")
                 exportSecrets(staging, options.categories)
             }
 
-            // Blob index last — it is only complete once every category has
-            // offered its files.
             writeBlobIndex(blobStore.blobIndex, staging)
 
-            // Encryption happens BEFORE the manifest is built, because §5.3
-            // says `integrity` records the CIPHERTEXT hash — that is what lets
-            // a reader verify completeness without holding the passphrase.
             var encryption: BackupManifest.Encryption? = null
             var keys: BackupCrypto.Keys? = null
             if (!options.passphrase.isNullOrEmpty()) {
@@ -196,8 +118,6 @@ class BackupExporter(
                 encryptStagedMembers(staging, derived)
                 encryption = BackupManifest.Encryption(BackupCrypto.SCHEME, kdf, derived.verifier)
                 keys = derived
-                // Every category's bytes are now ciphertext, so the per-category
-                // flag must say so rather than keeping the plaintext `false`.
                 stats.replaceAll { _, v -> v.copy(encrypted = true) }
             }
 
@@ -208,12 +128,6 @@ class BackupExporter(
                 BackupFormat.json.encodeToString(BackupManifest.serializer(), manifest)
             )
             if (keys != null) {
-                // Sidecar MAC over the file's exact bytes. Android does not
-                // write the embedded `manifest_mac`: that field authenticates a
-                // Swift re-encoding of the decoded struct, which cannot be
-                // reproduced byte-exactly here, and a MAC that only one
-                // platform can compute is worse than none. Both importers
-                // prefer this sidecar.
                 File(staging, "manifest.mac")
                     .writeText(BackupCrypto.manifestMac(manifestFile.readBytes(), keys.macKey))
                 keys.destroy()
@@ -239,8 +153,6 @@ class BackupExporter(
                 durationMillis = duration,
             )
         } finally {
-            // The archive is the deliverable; the staging tree is scratch and
-            // can be several GB. Always clear it, including on failure.
             staging.deleteRecursively()
             File(context.filesDir, "backup-staging").takeIf {
                 it.listFiles()?.isEmpty() == true
@@ -248,7 +160,6 @@ class BackupExporter(
         }
     }
 
-    // MARK: - Chats
 
     private suspend fun exportChats(
         dataDir: File,
@@ -266,12 +177,6 @@ class BackupExporter(
                 BackupJsonlWriter(dataDir, "compact_markers").use { markers ->
                     BackupJsonlWriter(dataDir, "folders").use { folders ->
                         for (session in dao.listSessions()) {
-                            // Snapshot cut-off: a session updated after the user
-                            // pressed Create Backup is not part of this backup's
-                            // view. Excluding the WHOLE session rather than
-                            // trimming its messages keeps the package internally
-                            // consistent — a session row is never written without
-                            // the messages that belong to it.
                             if (session.updatedAt > snapshotAtMillis) {
                                 AppLogger.info(
                                     TAG, "[Backup] skip session newer than snapshot: ${session.id}"
@@ -289,8 +194,6 @@ class BackupExporter(
                                 markers.write("CompactMarkerV2", 1, markerRecord(marker))
                             }
 
-                            // The session's whole on-disk tree: attachments /
-                            // offloads / workspace / browser.
                             val dir = File(context.filesDir, "minis-sessions/${session.id}")
                             val r = trees.export(
                                 dir, "chats/${session.id}", BackupCategory.CHATS, session.id
@@ -318,29 +221,8 @@ class BackupExporter(
         )
     }
 
-    /**
-     * The message row as iOS writes it.
-     *
-     * `parts` is spliced in as pre-parsed JSON rather than re-encoded: the
-     * column already holds the exact `[ContentPart]` array iOS's ContentPart
-     * encoder produces (`{"type":…,"value":…}`), so passing it through keeps
-     * MediaRef paths and tool payloads byte-identical. Re-encoding through a
-     * Kotlin model would risk reordering or dropping a field the Android model
-     * doesn't know about.
-     *
-     * `errorInfo` is NOT written. §0.2 lists it with `part_flags` as a
-     * device-local field the portable record excludes: an error sticker for a
-     * failed turn on the old device is meaningless on the new one, and
-     * restoring it would resurrect a red error badge against a message that
-     * never failed for this install.
-     */
 
-    // MARK: - Shared files / Skills / Memory
 
-    /**
-     * §3.2 — the cross-session `/var/minis/shared` bucket. Host-side this is
-     * `<filesDir>/minis-global/shared`, NOT anything inside the rootfs.
-     */
     private fun exportSharedFiles(trees: BackupFileTreeExporter): BackupManifest.CategoryStat {
         val r = trees.export(
             File(context.filesDir, "minis-global/shared"), "shared", BackupCategory.SHARED_FILES
@@ -348,21 +230,6 @@ class BackupExporter(
         return BackupManifest.CategoryStat(r.filesIncluded, r.bytesIncluded, encrypted = false)
     }
 
-    /**
-     * Skills, counted in SKILLS — not files.
-     *
-     * `filesIncluded` is every file under every skill directory, which for a
-     * skill carrying scripts and assets runs into the hundreds: a user with a
-     * dozen skills was shown "569 items" and reasonably read it as corruption.
-     * iOS has always reported `rows.count` here (BackupExporter.swift:625), so
-     * this is Android matching the established semantics rather than a new
-     * convention.
-     *
-     * The count comes from the on-disk layout (`skills/<skillId>/…`, one
-     * directory per skill — the same layout SkillRepository writes and the
-     * importer restores into) rather than from the repository, so it stays
-     * correct when the export runs before subsystems are ready.
-     */
     private fun exportSkills(trees: BackupFileTreeExporter): BackupManifest.CategoryStat {
         val root = File(context.filesDir, "minis-global/skills")
         val r = trees.export(root, "skills", BackupCategory.SKILLS)
@@ -374,7 +241,6 @@ class BackupExporter(
         )
     }
 
-    /** `GLOBAL.md` / `SOUL.md` / daily notes, copied verbatim into `data/memory/`. */
     private fun exportMemory(dataDir: File): BackupManifest.CategoryStat {
         val source = File(context.filesDir, "minis-global/memory")
         val dest = File(dataDir, "memory").apply { mkdirs() }
@@ -392,40 +258,20 @@ class BackupExporter(
         return BackupManifest.CategoryStat(entries, bytes, encrypted = false)
     }
 
-    /**
-     * `servers.json` verbatim. Returns null when there is nothing to write, so
-     * an absent MCP config contributes no category rather than an empty one.
-     */
     private fun exportMcpServers(dataDir: File): BackupManifest.CategoryStat? {
         val source = File(context.filesDir, "minis-global/mcp-servers/servers.json")
         if (!source.isFile) return null
         val dest = File(dataDir, "mcp_servers.json")
         source.copyTo(dest, overwrite = true)
-        // Count SERVERS, not files. This used to report a hard-coded 1 — the
-        // number of files copied — so a user with two MCP servers saw "1" and
-        // concluded the backup had dropped one. The file is copied verbatim
-        // either way; only the reported number changes.
         return BackupManifest.CategoryStat(mcpServerCount(source), source.length(), encrypted = false)
     }
 
     private fun mcpServerCount(source: File): Int = Companion.mcpServerCount(source)
 
-    // MARK: - Providers / thinking rules / environment variables
-    //
-    // Credential VALUES are NOT written here — provider keys and env-var values
-    // both go into secrets.json (see exportSecrets), staged under the credential
-    // policy. These three write only the non-secret structure so a share copy
-    // (includeCredentials=false) still carries the provider/model/rule layout.
 
     private val app: com.openminis.app.MinisApp?
         get() = context.applicationContext as? com.openminis.app.MinisApp
 
-    /**
-     * `data/provider_config.json` (the whole [ProviderConfig], array order = the
-     * user's drag arrangement) plus custom thinking rules in
-     * `data/thinking_rules.jsonl`. Mirrors iOS `exportProviders`. `entries`
-     * counts instances + custom rules (matching iOS).
-     */
     private suspend fun exportProviders(
         dataDir: File,
         includeCredentials: Boolean,
@@ -440,18 +286,9 @@ class BackupExporter(
         if (ruleCount > 0) {
             bytes += File(dataDir, "thinking_rules.jsonl").length()
         }
-        // [T-android-backup-subagents] Custom sub agents ALSO go to
-        // data/sub_agents.jsonl, the only place iOS reads them from (they left
-        // its ProviderConfig). They stay in provider_config.json too, which is
-        // what older Android builds restore from.
         if (exportSubAgents(dataDir, config.subAgents) > 0) {
             bytes += File(dataDir, "${BackupSubAgentMapping.FILE_BASE}.jsonl").length()
         }
-        // `entries` is PROVIDERS only. Custom thinking rules ride in this
-        // category (they have no category of their own, and giving them one
-        // would change the cross-platform category set), but adding them to
-        // `entries` made 8 providers + 1 rule read as "9 providers". They are
-        // reported separately instead; the exported DATA is unchanged.
         return BackupManifest.CategoryStat(
             entries = config.instances.size,
             bytes = bytes,
@@ -461,16 +298,6 @@ class BackupExporter(
         )
     }
 
-    /**
-     * Every persisted (== custom) thinking rule → `data/thinking_rules.jsonl`,
-     * one `{t:"ThinkingRuleV1",…,d:record}` line each. Android only stores
-     * custom rules (built-ins are compile-time constants), so the whole table
-     * is the export set — the analog of iOS's `WHERE is_builtin = 0`. Times are
-     * carried as ISO-8601 strings for round-trip; Android's table has no time
-     * columns so they are synthesized as epoch-0 on export and ignored on
-     * import. Returns the count written.
-     */
-    /** [T-android-backup-subagents] Custom sub agents -> `data/sub_agents.jsonl`. */
     private fun exportSubAgents(
         dataDir: File,
         roster: List<com.openminis.app.data.model.SubAgentDefinition>,
@@ -523,12 +350,6 @@ class BackupExporter(
         }
     }
 
-    /**
-     * Env-var METADATA only → `data/env_vars.json` (a JSON array of
-     * id/key/note/createdAt, plus enabled=false for a disabled one). VALUES ride in secrets.json under the credential
-     * policy. Returns null when there are no variables, so an empty list adds
-     * no category. Mirrors iOS `exportEnvironmentVariables`.
-     */
     private fun exportEnvironmentVariables(dataDir: File): BackupManifest.CategoryStat? {
         val repo = app?.let { if (it.subsystemsReady()) it.envVarRepository else null }
         val entries = repo?.entries?.value ?: emptyList()
@@ -545,14 +366,6 @@ class BackupExporter(
         return BackupManifest.CategoryStat(entries.size, url.length(), encrypted = false)
     }
 
-    /**
-     * Collect provider credentials + env-var values into `staging/secrets.json`
-     * (NOT `data/`), base64 per value. The encryption pass seals it with
-     * `secretsKey`. Only the selected categories contribute: PROVIDERS →
-     * provider keys, ENVIRONMENT_VARIABLES → env-var values. Writes nothing
-     * when neither yields a secret, so a share copy carries no secrets member.
-     * Mirrors iOS `BackupSecretsCollector.collect`.
-     */
     private fun exportSecrets(staging: File, categories: Set<BackupCategory>) {
         val providerSecrets =
             if (BackupCategory.PROVIDERS in categories) {
@@ -579,8 +392,6 @@ class BackupExporter(
         if (providerSecrets.isEmpty() && envSecrets.isEmpty()) return
 
         val secrets = BackupSecrets(providers = providerSecrets, envVars = envSecrets)
-        // [T-port-backup-secrets-defaults] Written with defaults, so older
-        // iOS builds that require every section can read it (see encodeSecrets).
         File(staging, "secrets.json").writeText(BackupFormat.encodeSecrets(secrets))
         AppLogger.warning(
             TAG,
@@ -589,17 +400,7 @@ class BackupExporter(
         )
     }
 
-    // MARK: - Package assembly
 
-    /**
-     * Encrypt every staged member in place, appending `.enc` to its name (§5.3).
-     *
-     * `manifest.json` is excluded — §2.1 requires it plaintext so the user can
-     * see what a package holds before being asked for a passphrase.
-     * `secrets.json` gets `K_secrets` rather than `K_data`; that separate
-     * subkey is what makes "strip the credentials" a file deletion instead of a
-     * re-encrypt of everything else (§5.4).
-     */
     private fun encryptStagedMembers(staging: File, keys: BackupCrypto.Keys) {
         val base = staging.canonicalFile
         val members = base.walkTopDown()
@@ -609,9 +410,6 @@ class BackupExporter(
             val rel = file.relativeTo(base).path.replace(File.separatorChar, '/')
             val key = if (rel == "secrets.json") keys.secretsKey else keys.dataKey
             val dest = File(file.parentFile, "${file.name}.enc")
-            // The AAD is the member's path INCLUDING the .enc suffix, i.e. the
-            // name it actually ships under, so the importer binds to exactly
-            // what it reads off disk.
             BackupCrypto.encryptFile(file, dest, key, "$rel.enc")
             file.delete()
         }
@@ -637,11 +435,9 @@ class BackupExporter(
         options: Options,
         deviceName: String,
     ): BackupManifest {
-        // Integrity covers every packaged file, hashed over whatever bytes
-        // actually ship — ciphertext once encryption has run (§5.3).
         val base = staging.canonicalFile
         val integrity = base.walkTopDown()
-            .filter { it.isFile && it.name != "manifest.json" } // can't hash itself
+            .filter { it.isFile && it.name != "manifest.json" }
             .associate { file ->
                 file.relativeTo(base).path.replace(File.separatorChar, '/') to
                     BackupBlobStore.sha256OfFile(file)
@@ -655,8 +451,6 @@ class BackupExporter(
                 version = appVersion(),
                 build = appBuild(),
             ),
-            // The same name the filename leads with, so what the restore
-            // screen shows under "From" matches the file the user picked.
             deviceName = deviceName,
             backupId = backupId,
             categories = categories,
@@ -667,7 +461,6 @@ class BackupExporter(
             ),
             encryption = encryption,
             integrity = integrity,
-            // Deliberately null — see the sidecar note in exportBody.
             manifestMac = null,
         )
     }
@@ -679,19 +472,11 @@ class BackupExporter(
         deviceName: String,
         encrypted: Boolean,
     ): File {
-        // [T-android-backup-package-name-parity] iOS's naming scheme; the id
-        // part is millisecond-sortable plus a hash of the backup id, so two
-        // exports in the same minute no longer collide either.
         val name = BackupPackageName.packageFileName(backupId, snapshotAtMillis, deviceName, encrypted)
         val out = File(backupsDirectory(context), name)
         out.parentFile?.mkdirs()
         out.delete()
 
-        // Write to a `.partial` sibling and rename on success. A kill or a full
-        // disk mid-write would otherwise leave a TRUNCATED file carrying a
-        // perfectly valid `.minisbak` name, which then shows up in the restore
-        // picker with a plausible size and date — discovered only when the
-        // restore fails, plausibly on a new device after wiping the old one.
         val partial = File(out.parentFile, ".${out.name}.partial")
         partial.delete()
         try {
@@ -706,7 +491,6 @@ class BackupExporter(
         return out
     }
 
-    // MARK: - Helpers
 
     private fun appVersion(): String = runCatching {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?"
@@ -720,40 +504,14 @@ class BackupExporter(
     companion object {
         private const val TAG = "Backup"
 
-        /**
-         * Process-wide export/restore lock. Both read the same stores, and a
-         * restore mutates them, so they must never overlap (iOS review I3).
-         */
         private val activityLock = Mutex()
 
-        /**
-         * Where finished packages live. A sibling of the agent-visible
-         * directories, NOT inside `minis-global/shared` — that path is
-         * bind-mounted into the guest at `/var/minis/shared`, so a package
-         * (possibly holding API keys) would be readable and deletable by the
-         * agent from a shell, and the next backup would sweep the previous one
-         * in as user data, nesting packages without bound (§6.2.4).
-         */
         fun backupsDirectory(context: Context): File =
             File(context.filesDir, BackupFileTreeExporter.BACKUPS_DIR_NAME).apply { mkdirs() }
 
-        /**
-         * Skills under a skills root: one directory per skill
-         * (`skills/<skillId>/…`), which is the layout SkillRepository writes
-         * and the importer restores into. Loose files at the root are not
-         * skills and are not counted.
-         */
         fun skillCount(skillsRoot: File): Int =
             skillsRoot.listFiles()?.count { it.isDirectory } ?: 0
 
-        /**
-         * Servers declared in `servers.json`, which is
-         * `{ "mcpServers": { "<id>": … } }` (see MCPRepository).
-         *
-         * Returns 1 on unreadable/unexpected JSON rather than 0: the file
-         * exists and is being backed up, so "0 servers" would be a worse lie
-         * than the fixed 1 this replaces.
-         */
         fun mcpServerCount(source: File): Int = runCatching {
             org.json.JSONObject(source.readText()).optJSONObject("mcpServers")?.length() ?: 1
         }.getOrDefault(1)
@@ -768,16 +526,6 @@ class BackupExporter(
             put("reasoningContent", m.reasoningContent?.let(::JsonPrimitive) ?: JsonNull)
             put("streamInterruptCount", JsonPrimitive(m.streamInterruptCount))
             put("sortOrder", JsonPrimitive(m.sortOrder))
-            // [T-token-attribution-snapshot] Per-message model attribution. Emitted
-            // only when present, so a package from a device with no snapshots keeps
-            // its previous shape and older importers see nothing new.
-            //
-            // camelCase, NOT snake_case: iOS serializes `RawMessage` straight
-            // through Codable with no CodingKeys, so its wire keys are the Swift
-            // property names — the rest of this record already matches that
-            // (`tokenUsage`, `streamInterruptCount`, `sortOrder`). A snake_case key
-            // here would simply not decode on iOS, which is the same silent
-            // cross-platform drop we hit with the env-var `createdAt` format.
             m.modelId?.let { put("modelId", JsonPrimitive(it)) }
             m.modelDisplayName?.let { put("modelDisplayName", JsonPrimitive(it)) }
             m.providerType?.let { put("providerType", JsonPrimitive(it)) }
@@ -795,9 +543,6 @@ class BackupExporter(
             put("boundaryMessageId", c.boundaryMessageId?.let(::JsonPrimitive) ?: JsonNull)
             put("firstKeptMessageId", c.firstKeptMessageId?.let(::JsonPrimitive) ?: JsonNull)
             put("lastCompactedMessageId", c.lastCompactedMessageId?.let(::JsonPrimitive) ?: JsonNull)
-            // [T-backup-marker-version] iOS CompactMarker.version is a non-optional
-            // stored property, so its synthesized Decodable REQUIRES the key: without
-            // it every Android marker line failed decode on iPhone and was dropped.
             put("version", JsonPrimitive(c.version))
         }
 
@@ -807,29 +552,6 @@ class BackupExporter(
         private fun parseJsonOrNull(raw: String): JsonElement? =
             runCatching { BackupFormat.json.parseToJsonElement(raw) }.getOrNull()
 
-        /**
-         * The session row in iOS's exact wire shape (GH: Android -> iOS restore).
-         *
-         * iOS writes, and DECODES, a session as its `SessionRecord` wrapper:
-         * `{"session": {<ChatSession>}, "memoryEnabled": …, "modelBinding": …}`
-         * (BackupExporter.swift / BackupImporter+Categories.swift). Its reader
-         * is a synthesized `Codable`, so the `session` key is required. This
-         * used to write every field flat at the top level: iOS failed to decode
-         * every line, `readJSONL` dropped each one silently (`try?`), messages
-         * went with their missing parents, and an Android backup restored on an
-         * iPhone brought back empty groups and no chats while reporting success.
-         *
-         * Inner object = iOS `ChatSession` fields only (camelCase, ISO-8601).
-         * Outer object = the wrapper's fields, plus the Android-only columns
-         * (`editCount`, `thinkingOverride`): §2.2 rule 4 keeps platform data,
-         * and iOS ignores unknown keys at either level.
-         *
-         * Android's own importer reads both this shape and the old flat one
-         * (BackupImporter `unwrapNested("session")`, since a1509b43c / 1.13),
-         * so Android -> Android restores of new AND old packages are unaffected.
-         *
-         * Device-local fields are deliberately absent — see [messageRecord].
-         */
         internal fun sessionRecord(s: ChatSessionEntity): JsonElement = buildJsonObject {
             put("session", buildJsonObject {
                 put("id", JsonPrimitive(s.id))
@@ -842,26 +564,15 @@ class BackupExporter(
                 put("source", s.source?.let(::JsonPrimitive) ?: JsonNull)
                 put("pinnedAt", s.pinnedAt?.let { JsonPrimitive(iso8601(it)) } ?: JsonNull)
                 put("folderId", s.folderId?.let(::JsonPrimitive) ?: JsonNull)
-                // [T-p1-delegate-task] iOS wire names verbatim (design §3.1).
                 put("parentSessionId", s.parentSessionId?.let(::JsonPrimitive) ?: JsonNull)
                 put("parentToolUseId", s.parentToolUseId?.let(::JsonPrimitive) ?: JsonNull)
             })
-            // iOS's SessionRecord wrapper fields, siblings of `session`.
             put("memoryEnabled", JsonPrimitive(s.memoryEnabled != 0))
             put("modelBinding", s.modelBinding?.let(::JsonPrimitive) ?: JsonNull)
-            // Android-only, preserved per §2.2 rule 4.
             put("editCount", JsonPrimitive(s.editCount))
             put("thinkingOverride", s.thinkingOverride?.let(::JsonPrimitive) ?: JsonNull)
         }
 
-        /**
-         * A group record. iOS's `ChatFolder` names the one-line description
-         * `desc`; this used to write only `description`, so a group restored on
-         * an iPhone lost it. Both names are written: `desc` for iOS, and
-         * `description` so an Android build older than the importer's
-         * `description ?: desc` fallback still reads it. Both importers ignore
-         * the name they do not use.
-         */
         internal fun folderRecord(f: FolderEntity): JsonElement = buildJsonObject {
             put("id", JsonPrimitive(f.id))
             put("name", JsonPrimitive(f.name))
@@ -873,12 +584,9 @@ class BackupExporter(
             put("desc", f.description?.let(::JsonPrimitive) ?: JsonNull)
             put("description", f.description?.let(::JsonPrimitive) ?: JsonNull)
             put("createdAt", JsonPrimitive(iso8601(f.createdAt)))
-            // Record edits only (rename / pin / icon) — a session moving in or out
-            // of the group must not touch it, so this is a stable merge key.
             put("updatedAt", JsonPrimitive(iso8601(f.updatedAt)))
         }
 
-        /** ISO-8601 in UTC, matching Swift's `.iso8601` date encoding strategy. */
         fun iso8601(millis: Long): String = SimpleDateFormat(
             "yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US
         ).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(millis)

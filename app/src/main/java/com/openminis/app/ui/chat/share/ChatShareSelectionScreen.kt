@@ -98,23 +98,15 @@ import com.openminis.app.ui.theme.LocalChatPalette
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-/**
- * [T-multi-select-share] What the picker opens with: the chat's cells, its messages
- * when the picker opened (a snapshot: a reply still streaming is shared as it was
- * then), the round to preselect, and the header's title / model / date.
- */
 internal class ChatShareRequest(
     val cells: List<ChatShareCell>,
     val messages: List<ChatMessage>,
     val initialSelection: Set<String>,
     val title: String,
-    /** The concrete model the session resolves to, for the export header; null when none. */
     val modelName: String?,
-    /** Loads when the first covered message was written (epoch ms), for the export header. */
     val loadDate: suspend (List<ChatMessage>) -> Long?,
 )
 
-/** Picker preferences that outlive one share (iOS @AppStorage "chatShare.*"). */
 internal object ChatSharePrefs {
     private fun prefs(context: Context) = context.getSharedPreferences("chat_share", Context.MODE_PRIVATE)
     fun hideTools(context: Context) = prefs(context).getBoolean("hideTools", false)
@@ -127,20 +119,6 @@ internal object ChatSharePrefs {
     fun setFormat(context: Context, value: ChatExportOptions.Format) = prefs(context).edit().putString("format", value.name).apply()
 }
 
-/**
- * [T-multi-select-share] The share picker: the chat drawn exactly as the session draws
- * it (ChatShareCellContent — the same rows the export renders), one selectable row per
- * cell: a user message, each text block of a reply, each tool call, thinking, callback
- * cards — so a long tool log can be left out. A selected row gets a tint and a check
- * badge floating at its leading edge, vertically centred, so every row keeps the
- * chat's layout. Rows are display-only: none of the chat's long-press actions exist.
- *
- * Selecting: tap a row; drag down the leading edge to select or deselect a run; long-
- * press a row for "Select All Below" / "Deselect All Below"; Select All in the top
- * bar; floating chips for Select Below (from the first row on screen), Hide Tools,
- * Hide Thinking and Clear Selection. Then "Share (N)" opens the preview. Port of iOS
- * ChatShareSelectionView.
- */
 @Composable
 internal fun ChatShareSelectionDialog(request: ChatShareRequest, onDismiss: () -> Unit) {
     Dialog(
@@ -149,7 +127,6 @@ internal fun ChatShareSelectionDialog(request: ChatShareRequest, onDismiss: () -
     ) {
         ChatShareDialogSystemBars()
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            // Nothing in here takes part in the chat's text selection.
             CompositionLocalProvider(LocalMinisSelectionController provides null) {
                 ChatShareSelectionContent(request, onDismiss)
             }
@@ -168,7 +145,6 @@ private fun ChatShareSelectionContent(request: ChatShareRequest, onDismiss: () -
     fun isHidden(kind: ChatShareCell.Kind) =
         (hideTools && kind == ChatShareCell.Kind.TOOL) || (hideThinking && kind == ChatShareCell.Kind.THINKING)
 
-    /** The rows on show — everything but the kinds folded away. */
     val cells = remember(request, hideTools, hideThinking) { request.cells.filter { !isHidden(it.kind) } }
     val byId = remember(request) {
         LinkedHashMap<String, ChatMessage>().also { m -> request.messages.forEach { m.putIfAbsent(it.id, it) } }
@@ -180,13 +156,11 @@ private fun ChatShareSelectionContent(request: ChatShareRequest, onDismiss: () -
         selection = selection - request.cells.filter { isHidden(it.kind) }.map { it.id }.toSet()
     }
     var showPreview by remember { mutableStateOf(false) }
-    // A fresh preview state per opening, held here rather than in the preview.
     var previewState by remember { mutableStateOf(ChatSharePreviewState()) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val clearancePx = with(density) { FLOATING_BAR_CLEARANCE.toPx() }
 
-    // Open on the preselected round.
     LaunchedEffect(Unit) {
         val first = cells.indexOfFirst { it.id in selection }
         if (first > 0) {
@@ -194,8 +168,6 @@ private fun ChatShareSelectionContent(request: ChatShareRequest, onDismiss: () -
             val info = listState.layoutInfo
             val item = info.visibleItemsInfo.firstOrNull { it.index == first }
             val viewport = info.viewportEndOffset - info.viewportStartOffset
-            // scrollToItem leaves the row just below the 56dp top padding; move it
-            // to the centre of the whole list, as iOS scrollTo(anchor: .center).
             if (item != null) listState.scrollBy(-((viewport - item.size) / 2f - clearancePx).coerceAtLeast(0f))
         }
     }
@@ -211,8 +183,6 @@ private fun ChatShareSelectionContent(request: ChatShareRequest, onDismiss: () -
             onTrailing = { selection = if (allSelected) emptySet() else cells.map { it.id }.toSet() },
         )
         Box(modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds()) {
-          // The chat's own reading measure on a wide window (ChatScreen caps its list
-          // at 900dp), so the rows look as they do in the chat.
           Box(
               modifier = Modifier
                   .fillMaxHeight()
@@ -250,9 +220,6 @@ private fun ChatShareSelectionContent(request: ChatShareRequest, onDismiss: () -
                 hideTools = hideTools,
                 hideThinking = hideThinking,
                 onSelectBelow = {
-                    // Everything from the first row on screen (under the floating
-                    // buttons) down — "from what I am looking at". Anchoring on the
-                    // first SELECTED row did nothing after scrolling up past it.
                     val info = listState.layoutInfo
                     val visible = info.visibleItemsInfo.filter {
                         val top = it.offset - info.viewportStartOffset
@@ -323,7 +290,6 @@ private fun ChatShareSelectionContent(request: ChatShareRequest, onDismiss: () -
     }
 }
 
-/** An inline navigation bar: text action, centred title, text action. */
 @Composable
 internal fun ChatShareTopBar(
     title: String,
@@ -386,14 +352,10 @@ private fun ChatShareRow(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            // Selected: a tint plus a check badge floating at the leading edge (not a
-            // column, so the row keeps the chat's layout).
             .background(if (selected) accent.copy(alpha = 0.18f) else Color.Transparent),
     ) {
         ChatShareCellContent(cell, message, Modifier.padding(vertical = 4.dp))
         if (selected) {
-            // Small, tucked into the 16dp side margin and centred on the row's
-            // height, so it marks the row without covering the reply's text.
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -406,8 +368,6 @@ private fun ChatShareRow(
                 Icon(Icons.Filled.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(9.dp))
             }
         }
-        // The row's own touch layer, above the chat content: the chat's taps and
-        // long-presses (menus, detail sheets, links) never fire here.
         Box(
             modifier = Modifier
                 .matchParentSize()
@@ -433,11 +393,6 @@ private fun ChatShareRow(
     }
 }
 
-/**
- * The leading strip: a drag here selects (or, when it starts on a selected row,
- * deselects) every row between its start and the finger, like Photos; dragging back
- * undoes, and the list scrolls when the finger nears the top or bottom.
- */
 @Composable
 private fun ChatShareDragStrip(
     cells: List<ChatShareCell>,
@@ -507,16 +462,6 @@ private fun ChatShareDragStrip(
     )
 }
 
-/**
- * Actions floating over the top of the list, each its own compact floating chip (no
- * shared container), icon + short single-line label. The row is centred on its
- * current width, so it re-centres when "Clear Selection" comes and goes; a row wider
- * than the screen (long languages) scrolls sideways instead.
- *
- * The two visibility toggles share one visual rule: the icon shows the CURRENT state
- * — plain while the rows show, the same icon struck through while they are hidden —
- * and the label names the action.
- */
 @Composable
 private fun ChatShareFloatingActions(
     hasSelection: Boolean,
@@ -534,8 +479,6 @@ private fun ChatShareFloatingActions(
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
-                // At least as wide as the screen, contents centred: fits → centred on
-                // the row's own width; wider → scrolls from the leading edge.
                 modifier = Modifier.widthIn(min = fullWidth).padding(horizontal = 8.dp, vertical = 6.dp),
             ) {
                 ChatShareFloatingChip(stringResource(R.string.chat_share_select_below), Icons.Filled.VerticalAlignBottom, onClick = onSelectBelow)
@@ -559,11 +502,6 @@ private fun ChatShareFloatingActions(
     }
 }
 
-/**
- * The floating surface of the picker's chips and the preview's format switch: a
- * light see-through capsule with a hairline and a soft shadow (stronger in dark), the
- * weight of iOS's pre-26 material fallback for its glass buttons.
- */
 internal fun Modifier.chatShareFloatingSurface(dark: Boolean, surface: Color, onSurface: Color): Modifier =
     this
         .shadow(
@@ -599,11 +537,6 @@ private fun ChatShareFloatingChip(label: String, icon: ImageVector, struck: Bool
     }
 }
 
-/**
- * An icon that can be drawn struck through — a gap cut through the glyph, then a
- * diagonal line, how SF Symbols' `.slash` variants look — so "eye" and "brain" get the
- * same strike (iOS floatingLabel(struck:)).
- */
 @Composable
 private fun StruckIcon(icon: ImageVector, struck: Boolean, tint: Color, size: Dp) {
     Icon(
@@ -640,25 +573,12 @@ private fun StruckIcon(icon: ImageVector, struck: Boolean, tint: Color, size: Dp
     )
 }
 
-/** Height the floating buttons cover at the top of the list. */
 private val FLOATING_BAR_CLEARANCE = 56.dp
 
-/** ChatScreen's CHAT_MAX_CONTENT_WIDTH: the chat list's width cap on wide windows. */
 private val CHAT_READING_MAX_WIDTH = 900.dp
 
-/** Width of the leading strip that drag-selects. */
 private val DRAG_STRIP_WIDTH = 36.dp
 
-/**
- * [T7c-share-statusbar] A full-screen Compose Dialog runs in its OWN window, and
- * the system bars take their icon colour from the top window. Nothing set it
- * for the share dialogs, so they kept the default white icons, invisible over
- * the light top bar and bottom strip in the light app theme (Pixel 6 report).
- * Set the dialog window's status- and navigation-bar icons from the APP theme
- * the chrome is drawn in - never from the export's Appearance option, which
- * only themes the rendered image / PDF. Same fix as FilePreviewScreen
- * (95d4bc7a9) and WebPreviewBottomSheet. Call it inside the Dialog's content.
- */
 @Composable
 internal fun ChatShareDialogSystemBars() {
     val appDark = LocalChatPalette.current.isDark

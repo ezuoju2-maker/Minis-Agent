@@ -74,9 +74,6 @@ fun RootfsManagementScreen(
         viewModel.refresh(context)
     }
 
-    // T168: iOS-style inset-grouped background. surfaceContainerLowest sits
-    // a hair below `surface`, so the rounded section cards (which use
-    // `surface`) read as raised pads against the page bg.
     val groupedBg = MaterialTheme.colorScheme.surfaceContainerLowest
     Scaffold(
         topBar = {
@@ -101,7 +98,6 @@ fun RootfsManagementScreen(
         ) {
             Spacer(modifier = Modifier.height(8.dp))
 
-            // --- Status section ---
             SettingsSection(title = stringResource(R.string.rootfs_status_section)) {
                 ListItem(
                     headlineContent = { Text(stringResource(R.string.rootfs_installed_label)) },
@@ -150,7 +146,6 @@ fun RootfsManagementScreen(
             }
 
             if (state.isInstalled) {
-                // --- Browse section ---
                 SettingsSection(title = stringResource(R.string.rootfs_browse_section)) {
                     ListItem(
                         headlineContent = { Text(stringResource(R.string.rootfs_browse_files_label)) },
@@ -171,20 +166,15 @@ fun RootfsManagementScreen(
                     )
                 }
 
-                // --- Mirrors section ---
                 SettingsSection(title = stringResource(R.string.rootfs_mirrors_section)) {
                     MirrorsSectionView(onNavigate = onMirrorCategoryClick)
                 }
             }
 
-            // --- Container Network section ---
-            // [T-container-network-dns] (OpenMinis#396) Shown before install too:
-            // the install itself writes resolv.conf through the same setting.
             SettingsSection(title = stringResource(R.string.rootfs_network_section)) {
                 ContainerNetworkSection()
             }
 
-            // --- Actions section ---
             SettingsSection(title = stringResource(R.string.rootfs_actions_section)) {
                 if (!state.isInstalled) {
                     ListItem(
@@ -251,7 +241,6 @@ fun RootfsManagementScreen(
                 }
             }
 
-            // --- Progress / Result ---
             if (state.isProcessing) {
                 SettingsSection(title = stringResource(R.string.rootfs_progress_section)) {
                     ListItem(
@@ -286,7 +275,6 @@ fun RootfsManagementScreen(
                 }
             }
 
-            // --- Info section ---
             SettingsSection(title = stringResource(R.string.rootfs_info_section)) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
@@ -316,7 +304,6 @@ fun RootfsManagementScreen(
         }
     }
 
-    // --- Dialogs ---
     if (showResetDialog) {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
@@ -362,13 +349,6 @@ fun RootfsManagementScreen(
     }
 }
 
-/**
- * ListItem default `containerColor` is `colorScheme.surface`. Inside a
- * SettingsSection card we already supply `surface` as the section's
- * Surface bg, so the per-row default doubles up and breaks the rounded
- * card edges where ListItem extends past the curve. Force the ListItem
- * container transparent so the section card alone owns the visible bg.
- */
 @Composable
 private fun transparentListItemColors() =
     ListItemDefaults.colors(containerColor = Color.Transparent)

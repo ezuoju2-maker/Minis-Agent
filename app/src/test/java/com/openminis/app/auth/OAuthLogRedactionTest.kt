@@ -5,7 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [T-android-oauth-log-redaction] sanitizeBody masks credential values and truncates. */
 class OAuthLogRedactionTest {
 
     @Test
@@ -16,7 +15,6 @@ class OAuthLogRedactionTest {
         assertFalse(out.contains("rt-SECRET2"))
         assertTrue(out.contains("\"access_token\":\"***\""))
         assertTrue(out.contains("\"refresh_token\":\"***\""))
-        // Non-sensitive fields survive for diagnostics.
         assertTrue(out.contains("token_type"))
     }
 

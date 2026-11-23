@@ -18,12 +18,6 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.util.Collections
 
-/**
- * [T-batch-read-after-write] / [T-readimage-fail-visible] iOS 1eb3e2bef: a
- * shell that renders q-1.png and a read_image of q-1.png sent in one turn
- * started together, the read ran ~15 ms in, before the shell, and failed with
- * a message that gave no reason.
- */
 class BatchReadAfterWriteTest {
 
     @get:Rule
@@ -31,7 +25,6 @@ class BatchReadAfterWriteTest {
 
     @Test
     fun `batch order matches iOS and Windows`() {
-        // Windows minis-agent tools.rs batch_order_matches_ios, verbatim.
         val n = listOf("shell_execute", "file_read", "browser_use", "file_write", "read_image", "file_read")
         assertEquals(emptyList<Int>(), BatchToolOrder.writersBefore(0, n))
         assertEquals(listOf(0), BatchToolOrder.writersBefore(1, n))
@@ -40,18 +33,11 @@ class BatchReadAfterWriteTest {
         assertEquals(listOf(0, 3), BatchToolOrder.writersBefore(5, n))
         assertEquals(emptyList<Int>(), BatchToolOrder.writersBefore(9, n))
         assertEquals(emptyList<Int>(), BatchToolOrder.writersBefore(0, listOf("file_read")))
-        // A reader before the writer does not wait; writers never wait.
         assertEquals(emptyList<Int>(), BatchToolOrder.writersBefore(0, listOf("read_image", "shell_execute")))
         assertEquals(emptyList<Int>(), BatchToolOrder.writersBefore(1, listOf("file_edit", "file_write")))
         assertEquals(listOf(0), BatchToolOrder.writersBefore(1, listOf("file_edit", "read_image")))
     }
 
-    /**
-     * The dispatcher shape of ChatViewModel's tool batch, reduced to its
-     * ordering parts (guarded against production below): every call is an
-     * async, a reader joins the earlier writers' jobs BEFORE taking a slot,
-     * results land at their own index.
-     */
     private suspend fun runBatch(
         names: List<String>,
         slotsCount: Int,
@@ -76,7 +62,7 @@ class BatchReadAfterWriteTest {
         val png = File(tmp.root, "q-1.png")
         val out = runBatch(listOf("shell_execute", "read_image"), slotsCount = 10) { _, name ->
             if (name == "shell_execute") {
-                delay(200) // the render takes a while
+                delay(200)
                 png.writeText("pixels")
                 "rendered"
             } else {
@@ -92,7 +78,7 @@ class BatchReadAfterWriteTest {
         val peak = java.util.concurrent.atomic.AtomicInteger()
         val out = runBatch(listOf("shell_execute", "browser_use", "shell_execute", "file_write"), slotsCount = 10) { i, _ ->
             peak.accumulateAndGet(running.incrementAndGet(), ::maxOf)
-            delay(100L * (4 - i)) // finish in reverse order
+            delay(100L * (4 - i))
             running.decrementAndGet()
             "r$i"
         }
@@ -102,8 +88,6 @@ class BatchReadAfterWriteTest {
 
     @Test
     fun `a waiting reader never holds a slot a writer needs`() = runBlocking {
-        // One slot, reader queued behind two writers: if the reader took the
-        // slot first and then waited, this would deadlock.
         val order = Collections.synchronizedList(mutableListOf<String>())
         withTimeout(5_000) {
             runBatch(listOf("file_write", "file_read", "shell_execute", "read_image"), slotsCount = 1) { i, name ->
@@ -129,7 +113,6 @@ class BatchReadAfterWriteTest {
         assertTrue(batch.contains("}.also { slotJobs[slotIndex] = it }"))
     }
 
-    // ── failure text ───────────────────────────────────────────────────────
 
     @Test
     fun `read_image says which failure it was`() {

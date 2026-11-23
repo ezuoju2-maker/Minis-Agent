@@ -7,14 +7,6 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 
-/**
- * Content-addressed storage and the §3.4 size cap.
- *
- * The cap's boundary and its tombstone behaviour are called out explicitly in
- * the design doc's test plan, because both have a silent-data-loss failure mode:
- * an off-by-one at the threshold drops a file the user expected to keep, and a
- * skipped file with no tombstone vanishes without trace.
- */
 class BackupBlobStoreTest {
 
     private lateinit var tmp: File
@@ -47,7 +39,6 @@ class BackupBlobStoreTest {
             (a as BackupBlobStore.Outcome.Stored).sha256,
             (b as BackupBlobStore.Outcome.Duplicate).sha256,
         )
-        // One blob on disk, and the index carries one entry for it.
         assertEquals(1, store.blobIndex.size)
         assertEquals(content.size.toLong(), store.totalBytesStored)
     }
@@ -61,11 +52,6 @@ class BackupBlobStoreTest {
         assertTrue("blob should live at blobs/<2 hex>/<sha256>", expected.exists())
     }
 
-    /**
-     * The design doc pins this boundary: "a file exactly at the threshold must be
-     * included (the boundary is `>`, not `>=`)". A `>=` here would drop a file
-     * that is exactly at the limit.
-     */
     @Test
     fun `a file exactly at the cap is included, one byte over is not`() {
         val store = BackupBlobStore(staging, maxFileBytes = 100)
@@ -79,7 +65,6 @@ class BackupBlobStoreTest {
         assertEquals("chats/s1/over.bin", store.skippedPaths.single().path)
     }
 
-    /** Unlimited is the default, so nothing is dropped from a migration package. */
     @Test
     fun `an unlimited store keeps everything`() {
         val store = BackupBlobStore(staging, maxFileBytes = null)
@@ -88,19 +73,12 @@ class BackupBlobStoreTest {
         assertEquals(null, store.maxFileBytesForManifest)
     }
 
-    /**
-     * Resume: a digest whose blob is missing must NOT be re-registered, or the
-     * resumed package references content it does not contain — a package that
-     * passes its own integrity check and restores empty files.
-     */
     @Test
     fun `rehydrate skips index entries whose blob is gone`() {
         val first = BackupBlobStore(staging, maxFileBytes = null)
         val present = first.addFile(file("p.bin", byteArrayOf(9, 9, 9)), "chats/s1/p.bin")
         val presentSha = (present as BackupBlobStore.Outcome.Stored).sha256
 
-        // A files.index from an interrupted run: one entry whose blob landed,
-        // one whose blob never did.
         val index = File(staging, "files.index.jsonl")
         index.writeText(
             listOf(
@@ -120,7 +98,6 @@ class BackupBlobStoreTest {
         assertEquals("only the blob actually on disk may be re-registered", 1, resumed.blobIndex.size)
         assertEquals(presentSha, resumed.blobIndex.single().sha256)
 
-        // And the missing one must be re-stored rather than skipped as "seen".
         val again = resumed.addFile(file("lost.bin", ByteArray(42)), "chats/s1/lost.bin")
         assertTrue("a blob missing from disk must be stored again", again is BackupBlobStore.Outcome.Stored)
     }
@@ -148,7 +125,6 @@ class BackupBlobStoreTest {
 
     @Test
     fun `sha256 matches a known vector`() {
-        // Streaming digest must equal the standard SHA-256 of "abc".
         val f = file("abc.txt", "abc".toByteArray())
         assertEquals(
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",

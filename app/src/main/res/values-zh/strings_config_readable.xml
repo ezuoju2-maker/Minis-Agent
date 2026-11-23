@@ -1,8 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- [T-config-readable] Readable minis-config change descriptions (confirmation
-     dialog, Logs > Config Changes). Keys mirror iOS Localizable.xcstrings; cfgr_*
-     entries are looked up by their English text via ConfigReadableStrings.
-     Translations copied from iOS; locales iOS lacks fall back to English. -->
 <resources>
     <string name="cfgr_x_and_x_more">%1$s，另有 %2$s 项</string>
     <string name="cfgr_x_x">%1$s ×%2$s</string>
@@ -198,7 +193,6 @@
     <string name="cfgr_fast">快速</string>
     <string name="cfgr_ultrafast">Ultrafast</string>
     <string name="cfgr_show_hidden_files">显示隐藏文件</string>
-    <!-- [FEAT-261021-03] Settings > Network -->
     <string name="cfgr_network_routing">网络路由</string>
     <string name="cfgr_default_route">默认路由</string>
     <string name="cfgr_route_for_shell">Shell 的路由</string>

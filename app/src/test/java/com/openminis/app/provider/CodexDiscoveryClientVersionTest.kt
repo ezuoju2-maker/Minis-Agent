@@ -10,11 +10,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-codex-discovery-client-version] Codex OAuth discovery never listed
- * gpt-6.1-sol. CLIProxyAPI, which does, moved its Codex client to 0.159.0 in
- * the commit that added the model (c8a2bfe8f) and sends a smaller header set.
- */
 class CodexDiscoveryClientVersionTest {
 
     @Test
@@ -27,7 +22,6 @@ class CodexDiscoveryClientVersionTest {
         assertTrue(repo.contains("clientVersion = com.openminis.app.provider.openai.OpenAIProvider.CODEX_CLIENT_VERSION"))
         val quota = ProductionSources.read("quota/QuotaStore.kt")
         assertTrue(quota.contains("val version = com.openminis.app.provider.openai.OpenAIProvider.CODEX_CLIENT_VERSION"))
-        // No stray literal left behind anywhere a codex request is built.
         for (src in listOf(provider, repo, quota, ProductionSources.read("provider/openai/CodexModelsApi.kt"))) {
             assertFalse(src.contains("\"0.155.0\""))
         }
@@ -43,7 +37,6 @@ class CodexDiscoveryClientVersionTest {
         assertEquals("codex_cli_rs", req.header("Originator"))
         assertEquals("codex_cli_rs/0.159.0 (Android; arm64)", req.header("User-Agent"))
         assertEquals("acct-1", req.header("Chatgpt-Account-Id"))
-        // Responses-only headers are not part of the discovery request.
         assertNull(req.header("Version"))
         assertNull(req.header("Openai-Beta"))
         assertEquals(

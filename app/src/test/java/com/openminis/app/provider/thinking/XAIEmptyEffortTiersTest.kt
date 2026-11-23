@@ -7,18 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [OpenMinis#163] Android port of iOS 3ba3eb5c.
- *
- * Enabling thinking on xAI `grok-build-0.1` fails with "HTTP 400: Model
- * grok-build-0.1 does not support parameter reasoningEffort". models.dev
- * describes that state as `"reasoning": true` + `"reasoning_options": []` —
- * "reasons, but takes no effort parameter".
- *
- * The value of these tests is mostly in the CONTROLS: the same empty-tier shape
- * appears on 2090 bundled catalog entries, so the tests that must keep passing
- * are the ones proving the skip did NOT widen to them.
- */
 class XAIEmptyEffortTiersTest {
 
     private fun resolve(
@@ -53,7 +41,6 @@ class XAIEmptyEffortTiersTest {
 
     private fun JSONObject.sendsEffort() = has("reasoning_effort")
 
-    // ---- the reported failure --------------------------------------------
 
     @Test
     fun `grok-build-0-1 on first-party xAI omits reasoning_effort`() {
@@ -70,13 +57,9 @@ class XAIEmptyEffortTiersTest {
         assertFalse(body.sendsEffort())
     }
 
-    // ---- controls: the skip must stay narrow -----------------------------
 
     @Test
     fun `the same model on a NON-xAI endpoint is unchanged`() {
-        // 2090 catalog entries share the empty-tier shape (relay-hosted Claude,
-        // GPT-5, Qwen, and grok behind poe/fastrouter/anyapi). None of those
-        // routes was verified, so none may change behaviour.
         val body = resolve("grok-build-0.1", declaresNoEffortTiers = true, isXAI = false)
         assertTrue(
             "a relay serving the same model must keep its previous wire format",
@@ -86,15 +69,12 @@ class XAIEmptyEffortTiersTest {
 
     @Test
     fun `xAI model the catalog is SILENT about stays permissive`() {
-        // "catalog never heard of it" must not be confused with "catalog says
-        // there are none" — relays serve models models.dev does not list.
         val body = resolve("grok-some-future-model", declaresNoEffortTiers = false, isXAI = true)
         assertTrue(body.sendsEffort())
     }
 
     @Test
     fun `xAI model that DOES declare tiers still sends the field`() {
-        // grok-4.5 / grok-4.3 declare real effort tiers and must be untouched.
         val body = resolve(
             "grok-4.5",
             declaresNoEffortTiers = false,
@@ -107,8 +87,6 @@ class XAIEmptyEffortTiersTest {
 
     @Test
     fun `a declared tier list wins even if the flag is somehow also set`() {
-        // Defensive: the skip requires !declaresEffort, so a contradictory
-        // catalog entry resolves toward sending rather than silently dropping.
         val body = resolve(
             "grok-weird",
             declaresNoEffortTiers = true,
@@ -120,7 +98,6 @@ class XAIEmptyEffortTiersTest {
 
     @Test
     fun `unified-effort gateways stay exempt`() {
-        // Ark / Azure / Venice normalize the field and own their model list.
         val body = resolve(
             "grok-build-0.1",
             declaresNoEffortTiers = true,
@@ -132,8 +109,6 @@ class XAIEmptyEffortTiersTest {
 
     @Test
     fun `the legacy self-reasoning family skip still fires`() {
-        // The new check sits AFTER this one; it must not have displaced it for
-        // relay-hosted deepseek/glm/kimi/minimax ids the catalog is silent about.
         for (id in listOf("deepseek-chat", "glm-4.5-air", "kimi-k2", "minimax-m2")) {
             assertFalse("$id must still skip", resolve(id).sendsEffort())
         }

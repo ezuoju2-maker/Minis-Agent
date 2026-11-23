@@ -6,49 +6,20 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-backup-delete-files-feedback] "Delete Record and Files" did
- * nothing when tapped: no confirmation, no deletion, no error.
- *
- * Three defects stacked, and this suite pins the fix for each:
- *
- *  1. **The work was cancelled before it ran.** `AppNavigation` invoked
- *     `vm.removeHistoryRecordWithFiles(id)` and called `safePopBackStack()`
- *     on the same frame. The ViewModel is scoped to that nav entry, so
- *     popping cleared it and cancelled `viewModelScope` — the `withContext`
- *     block never executed. That is the reported "button does nothing".
- *  2. **Failures were swallowed.** A destination that refused the delete was
- *     only written to the log, so a network or permission failure was
- *     indistinguishable from success.
- *  3. **The record was dropped unconditionally**, which on failure threw away
- *     the only record naming the file now orphaned on the remote.
- *
- * The delete itself needs rclone and a real remote, so what is verifiable on
- * the JVM is the decision logic plus the source facts that encode the wiring.
- */
 class BackupDeleteWithFilesTest {
 
-    // ---- Outcome model ---------------------------------------------------
 
-    /** Mirrors `BackupViewModel.DeleteWithFilesResult`. */
     private sealed interface Result {
         data class Success(val destinations: Int) : Result
         data class Failed(val failures: List<String>) : Result
     }
 
-    /**
-     * The decision the ViewModel makes, extracted verbatim: attempt every
-     * destination that received the package, collect per-destination failures,
-     * and remove the record only when none failed.
-     */
     private fun runDelete(
         packageName: String?,
         destinations: List<String>,
         deleter: (String) -> kotlin.Result<Unit>,
     ): Pair<Result, Boolean> {
         if (packageName.isNullOrEmpty()) {
-            // Nothing nameable to delete remotely; dropping the record IS the
-            // whole operation, and it succeeded.
             return Result.Success(destinations = 0) to true
         }
         val failed = destinations.mapNotNull { name ->
@@ -72,8 +43,6 @@ class BackupDeleteWithFilesTest {
 
     @Test
     fun `a failing destination keeps the record and names the reason`() {
-        // The heart of defect 3: losing the record here would strand the file
-        // on the remote with nothing left pointing at it.
         val (result, removed) = runDelete("minis-2026.minisbak", listOf("s3", "webdav")) { name ->
             if (name == "webdav") kotlin.Result.failure(java.io.IOException("401 Unauthorized"))
             else kotlin.Result.success(Unit)
@@ -98,8 +67,6 @@ class BackupDeleteWithFilesTest {
 
     @Test
     fun `a record with no package name is a record-only delete`() {
-        // Older history rows predate packageName. There is no remote file to
-        // chase, so this must still succeed rather than report an error.
         val (result, removed) = runDelete(null, listOf("s3")) {
             throw AssertionError("must not attempt a delete without a package name")
         }
@@ -107,7 +74,6 @@ class BackupDeleteWithFilesTest {
         assertTrue(removed)
     }
 
-    // ---- Source facts: the wiring that actually broke ---------------------
 
     private fun src(path: String): String {
         val f = File(path)
@@ -127,15 +93,6 @@ class BackupDeleteWithFilesTest {
 
     @Test
     fun `the nav callback no longer pops on the same frame it starts the delete`() {
-        // Defect 1, pinned at its source. The old shape was:
-        //     onRemoveWithFiles = {
-        //         vm.removeHistoryRecordWithFiles(id)
-        //         navController.safePopBackStack()
-        //     }
-        // which cancelled the viewModelScope that was doing the deleting.
-        // Scope to the lambda itself: the very next line is `onRemoved =
-        // { ... safePopBackStack() }`, which is the CORRECT place to pop and
-        // would otherwise make this assertion fail against fixed code.
         val block = navSrc.substringAfter("onRemoveWithFiles = ").substringBefore("onRemoved")
         assertFalse(
             "popping inside onRemoveWithFiles cancels the ViewModel doing the work",
@@ -161,8 +118,6 @@ class BackupDeleteWithFilesTest {
 
     @Test
     fun `a destination failure is collected, not only logged`() {
-        // Defect 2: the old code was runCatching{...}.onFailure { AppLogger... }
-        // with no accumulation, so the caller could not tell.
         val body = vmSrc.substringAfter("suspend fun removeHistoryRecordWithFiles")
             .substringBefore("fun removeHistoryRecord(")
         assertTrue("failures must be accumulated", body.contains("failed +="))
@@ -187,8 +142,6 @@ class BackupDeleteWithFilesTest {
 
     @Test
     fun `the destructive branch asks a second time`() {
-        // The first sheet only picks WHICH kind of delete; agreeing there is
-        // not agreement to destroy a named package on N servers.
         assertTrue(
             "the 'record and files' button must open a second confirmation",
             screenSrc.contains("confirmRemove = false; confirmDeleteFiles = true"),
@@ -213,7 +166,6 @@ class BackupDeleteWithFilesTest {
 
     @Test
     fun `the progress dialog cannot be dismissed into a double delete`() {
-        // A second tap mid-delete must not start a second rclone run.
         val progress = screenSrc.substringAfter("if (deletingFiles) {").substringBefore("deleteFailure?.let")
         assertTrue(
             "the progress dialog's onDismissRequest must be inert",
@@ -221,27 +173,11 @@ class BackupDeleteWithFilesTest {
         )
     }
 
-    // ---- [T-android-backup-local-folder-delete] Issue #367 root cause B ----
-    //
-    // Root cause A (the nav-entry ViewModel being cleared mid-call) was fixed
-    // in d51dd8cdc. This second defect survived it: the delete path routed
-    // EVERY destination through rclone, and a local folder is a SAF
-    // `content://` tree that is never registered as an rclone remote. So for a
-    // folder on the phone the delete could not succeed — and because the
-    // failure surfaced as a no-op rather than an error, the record was dropped
-    // and the file was orphaned on disk.
 
-    /** Which transport a destination's delete must take. */
     private enum class Route { RCLONE, LOCAL_SAF }
 
     private data class Dest(val name: String, val isLocalFolder: Boolean, val treeUri: String = "")
 
-    /**
-     * Mirrors the branching `removeHistoryRecordWithFiles` now performs,
-     * verbatim: local folders go through LocalFolderDelivery, everything else
-     * through the rclone uploader, and the rclone config sync happens only when
-     * a non-local destination is actually present.
-     */
     private fun routeDelete(
         dests: List<Dest>,
         deleter: (Dest, Route) -> kotlin.Result<Unit>,
@@ -259,7 +195,6 @@ class BackupDeleteWithFilesTest {
 
     @Test
     fun `a local folder destination deletes through SAF, never rclone`() {
-        // The reported bug: this went to rclone, which has no such remote.
         val (result, taken, _) = routeDelete(
             listOf(Dest("Phone folder", isLocalFolder = true, treeUri = "content://tree/primary%3ABackups")),
         ) { _, _ -> kotlin.Result.success(Unit) }
@@ -284,8 +219,6 @@ class BackupDeleteWithFilesTest {
 
     @Test
     fun `an all-local record never starts rclone`() {
-        // Starting rclone to delete a file on this phone is pure cost, and it
-        // is what made the old path look like it "did nothing".
         val (_, _, synced) = routeDelete(
             listOf(
                 Dest("Phone folder", isLocalFolder = true, treeUri = "content://tree/x"),
@@ -302,13 +235,10 @@ class BackupDeleteWithFilesTest {
 
     @Test
     fun `a file already gone counts as deleted`() {
-        // Idempotency: the caller's goal is "no such package in this folder",
-        // and that already holds. Failing here would strand the record forever
-        // for anyone who had cleaned the folder by hand.
         val (result, _, _) = routeDelete(
             listOf(Dest("Phone folder", isLocalFolder = true, treeUri = "content://tree/x")),
         ) { _, route ->
-            if (route == Route.LOCAL_SAF) kotlin.Result.success(Unit) // missing == success
+            if (route == Route.LOCAL_SAF) kotlin.Result.success(Unit)
             else kotlin.Result.failure(IllegalStateException("unreachable"))
         }
         assertEquals(Result.Success(destinations = 1), result)
@@ -316,9 +246,6 @@ class BackupDeleteWithFilesTest {
 
     @Test
     fun `a revoked folder permission is reported, not swallowed`() {
-        // The whole point of not reusing deleteChild(): a SecurityException
-        // must keep the record and name the destination, because the file is
-        // still on disk.
         val (result, _, _) = routeDelete(
             listOf(
                 Dest("s3", isLocalFolder = false),
@@ -352,9 +279,6 @@ class BackupDeleteWithFilesTest {
 
     @Test
     fun `LocalFolderDelivery delete surfaces failure instead of swallowing it`() {
-        // deleteChild() swallows everything by design (it only clears the way
-        // for a write that reports its own errors). Reusing it would have
-        // recreated the silent success this fixes.
         val src = src("src/main/java/com/openminis/app/backup/remote/LocalFolderDelivery.kt")
         val body = src.substringAfter("fun delete(treeUri: String, name: String)")
             .substringBefore("private fun deleteChild(")

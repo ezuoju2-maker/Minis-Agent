@@ -5,11 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-stream-grow-reveal] A row of the streaming reply that appears
- * while following keeps the list pinned to the bottom, so it opens in place
- * instead of landing below the viewport.
- */
 class StreamGrowRevealTest {
 
     private fun row(key: String, owner: String? = "m2") = StreamGrowRevealTracker.Row(key, owner)

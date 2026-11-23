@@ -1,6 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- [T-usage-step2] Usage page strings. Kept in their own file so the page's
-     keys never collide with concurrent edits to strings.xml. -->
 <resources>
     <string name="usage_range_today">Today</string>
     <string name="usage_range_7d">7 Days</string>

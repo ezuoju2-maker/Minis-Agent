@@ -59,14 +59,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.io.File
 
-/**
- * [T-multi-select-share] Opens straight into the rendered result: the long image is
- * made as soon as the preview appears; switching format, the tablet-width layout, the
- * table width or the appearance renders that variant, and every render is kept so
- * switching back is instant. The result is shown at 1:1 and pinches down to fit. The
- * top bar's share button hands the current file to the system share sheet. Port of
- * iOS ChatSharePreviewSheet.
- */
 @Composable
 internal fun ChatSharePreviewDialog(
     groups: List<List<ChatShareCell>>,
@@ -95,24 +87,12 @@ internal data class RenderKey(
 
 internal class Rendered(val result: ChatExportRenderer.Result)
 
-/**
- * One preview's options and finished renders. Owned by the picker and created afresh
- * each time the preview opens (so every share starts at phone width, tables as in
- * the chat, appearance following the app - iOS's sheet @State), but NOT by the
- * preview's own composition: if the preview's subtree is ever recomposed from
- * scratch while it stays open (seen on a Pixel 4a after returning from the system
- * share sheet: the picked appearance fell back to Light and nothing was shown), the
- * options and the finished files survive instead of resetting underneath the user.
- */
 internal class ChatSharePreviewState {
     var wideLayout by mutableStateOf(false)
     var adaptiveTables by mutableStateOf(false)
-    /** null = follow the app's current appearance; set once the user picks one. */
     var darkChoice by mutableStateOf<Boolean?>(null)
-    /** The header's "<model> · <date>", resolved once. */
     var subtitle by mutableStateOf<List<String>?>(null)
     val rendered = androidx.compose.runtime.mutableStateMapOf<RenderKey, Rendered>()
-    /** Widths (phone / tablet) whose long image turned out too tall when rendered, in case the estimate was low. */
     val imageFailedWidths = androidx.compose.runtime.mutableStateMapOf<Boolean, Boolean>()
     val id = Integer.toHexString(System.identityHashCode(this))
 }
@@ -134,8 +114,6 @@ private fun ChatSharePreviewContent(
     DisposableEffect(stage) { onDispose { stage.dispose() } }
     val renderer = remember(stage) { ChatExportRenderer(stage, prewarm) }
 
-    // Options and renders live in [state] (see ChatSharePreviewState); width and
-    // tables are not remembered across shares, the format is.
     var wideLayout by state::wideLayout
     var adaptiveTables by state::adaptiveTables
     var darkChoice by state::darkChoice
@@ -148,7 +126,6 @@ private fun ChatSharePreviewContent(
         AppLogger.info("ChatExport", "[ChatShare] preview composed state=${state.id} cached=${rendered.size} dark=$darkChoice")
         onDispose { AppLogger.info("ChatExport", "[ChatShare] preview left composition state=${state.id}") }
     }
-    /** Per width: whether the selection is estimated taller than a long image may be. */
     val estimatedTooTall = remember(groups) {
         val byId = LinkedHashMap<String, com.openminis.app.ui.chat.ChatMessage>()
             .also { m -> request.messages.forEach { m.putIfAbsent(it.id, it) } }
@@ -159,16 +136,11 @@ private fun ChatSharePreviewContent(
             )
         }
     }
-    /** Too long for one image at the current width: only a PDF is offered. */
     val imageUnavailable = estimatedTooTall[wideLayout] == true || imageFailedWidths[wideLayout] == true
     val format = if (imageUnavailable) ChatExportOptions.Format.PDF else storedFormat
     var toast by remember { mutableStateOf<ChatShareToastMessage?>(null) }
     var progress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var errorRes by remember { mutableStateOf<Int?>(null) }
-    /**
-     * The render the progress overlay belongs to: a superseded render finishing its
-     * cancellation must not clear the progress of the one that replaced it.
-     */
     var activeKey by remember { mutableStateOf<RenderKey?>(null) }
     val key = RenderKey(format, wideLayout, dark, adaptiveTables)
 
@@ -179,7 +151,7 @@ private fun ChatSharePreviewContent(
             val date = try {
                 request.loadDate(covered)
             } catch (e: CancellationException) {
-                throw e // superseded: the next render looks the date up again
+                throw e
             } catch (e: Exception) {
                 null
             }
@@ -205,7 +177,6 @@ private fun ChatSharePreviewContent(
             AppLogger.info("ChatExport", "[ChatExport] superseded or cancelled")
             throw e
         } catch (e: ChatExportError.ImageTooLarge) {
-            // The estimate was low: offer the PDF for this width instead.
             AppLogger.info("ChatExport", "[ChatExport] image too tall at wide=${key.wideLayout} - switching to PDF")
             imageFailedWidths[key.wideLayout] = true
         } catch (e: ChatExportError) {
@@ -247,9 +218,6 @@ private fun ChatSharePreviewContent(
                 .background(LocalChatPalette.current.secondaryBg),
         ) {
             if (current != null) {
-                // One viewer per file: switching back to an option already rendered
-                // must show THAT file from 1:1 at the top, not keep the previous
-                // option's page bitmaps, zoom and scroll (iOS reloads on a new URL).
                 androidx.compose.runtime.key(current.result.file) {
                     if (key.format == ChatExportOptions.Format.PDF) ChatSharePdfPreview(current.result)
                     else ChatShareImagePreview(current.result)
@@ -339,7 +307,6 @@ private fun ChatSharePreviewContent(
     }
 }
 
-/** The long image at 1:1, strip by strip. */
 @Composable
 private fun ChatShareImagePreview(result: ChatExportRenderer.Result) {
     val strips = remember(result.file) { ChatShareImageStrips(result.file, result.width, result.height, result.scale) }
@@ -353,12 +320,10 @@ private fun ChatShareImagePreview(result: ChatExportRenderer.Result) {
     )
 }
 
-/** The PDF at 1:1 (one page point per dp), pages stacked, starting below the format switch. */
 @Composable
 private fun ChatSharePdfPreview(result: ChatExportRenderer.Result) {
     val pdf = remember(result.file) { runCatching { ChatSharePdfPages(result.file) }.getOrNull() } ?: return
     DisposableEffect(pdf) {
-        // Closing waits for a page render in flight; off the main thread.
         onDispose { kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { pdf.close() } }
     }
     ChatShareZoomViewer(
@@ -370,7 +335,6 @@ private fun ChatSharePdfPreview(result: ChatExportRenderer.Result) {
     )
 }
 
-/** Hands a finished export to the system share sheet. */
 internal fun shareExport(context: Context, file: File, format: ChatExportOptions.Format) {
     runCatching {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)

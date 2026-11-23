@@ -7,15 +7,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-kimi-oauth] Pure-logic coverage for the Kimi RFC 8628 device flow —
- * ports the iOS KimiOAuthTests cases: device-authorization parsing, poll
- * classification (pending / slow_down / denied / expired / fatal / success),
- * and the refresh compare-before-delete rule.
- */
 class KimiDeviceFlowTest {
 
-    // ── parseDeviceAuthorization ────────────────────────────────────────
 
     @Test
     fun `parse full device authorization response`() {
@@ -30,7 +23,6 @@ class KimiDeviceFlowTest {
         assertEquals("ABCD-1234", auth.userCode)
         assertEquals(600L, auth.expiresInSeconds)
         assertEquals(7L, auth.intervalSeconds)
-        // openUrl prefers the pre-filled complete URL.
         assertEquals("https://auth.kimi.com/device?code=ABCD-1234", auth.openUrl)
     }
 
@@ -41,9 +33,9 @@ class KimiDeviceFlowTest {
                 "verification_url":"https://auth.kimi.com/device"}""",
         )
         val auth = KimiDeviceFlow.parseDeviceAuthorization(json)!!
-        assertEquals(900L, auth.expiresInSeconds) // default
-        assertEquals(5L, auth.intervalSeconds) // default
-        assertEquals("https://auth.kimi.com/device", auth.openUrl) // no complete URL
+        assertEquals(900L, auth.expiresInSeconds)
+        assertEquals(5L, auth.intervalSeconds)
+        assertEquals("https://auth.kimi.com/device", auth.openUrl)
     }
 
     @Test
@@ -53,7 +45,6 @@ class KimiDeviceFlowTest {
         assertNull(KimiDeviceFlow.parseDeviceAuthorization(JSONObject("""{"device_code":"d","user_code":"X"}""")))
     }
 
-    // ── classifyPoll ────────────────────────────────────────────────────
 
     @Test
     fun `poll success carries tokens`() {
@@ -89,26 +80,20 @@ class KimiDeviceFlowTest {
             KimiDeviceFlow.classifyPoll(JSONObject("""{"error":"expired_token"}"""), false)
                 is KimiDeviceFlow.PollResult.Expired,
         )
-        // Unknown error → fatal, description falls back to the error code.
         val fatal = KimiDeviceFlow.classifyPoll(JSONObject("""{"error":"weird"}"""), false)
             as KimiDeviceFlow.PollResult.Fatal
         assertEquals("weird", fatal.description)
-        // 2xx without access_token is also not a success — falls to fatal/unknown.
         assertTrue(
             KimiDeviceFlow.classifyPoll(JSONObject("{}"), true)
                 is KimiDeviceFlow.PollResult.Fatal,
         )
     }
 
-    // ── compare-before-delete (iOS 36d506ca) ────────────────────────────
 
     @Test
     fun `delete only when stored refresh token still equals the failed one`() {
-        // Concurrent winner rotated the token → KEEP the new credentials.
         assertFalse(KimiDeviceFlow.shouldDeleteAfterInvalidGrant("old-rt", "new-rt"))
-        // No rotation happened → the failed token is genuinely invalid → delete.
         assertTrue(KimiDeviceFlow.shouldDeleteAfterInvalidGrant("old-rt", "old-rt"))
-        // Nothing stored anymore → deleting is a no-op-safe default.
         assertTrue(KimiDeviceFlow.shouldDeleteAfterInvalidGrant("old-rt", null))
     }
 }

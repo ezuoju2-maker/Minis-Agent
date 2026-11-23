@@ -1,21 +1,5 @@
 package com.openminis.app.tools
 
-/**
- * [code-ability / diff-preview] Pure, dependency-free line diff and change
- * summary used to tell the user *what* a file_write / file_edit actually
- * changed, and to let the agent self-verify an edit before moving on.
- *
- * Design goals:
- *  - Deterministic and side-effect free: given the same before/after text the
- *    output is byte-for-byte identical, so it is safe to unit test and to hash.
- *  - Bounded: a huge file must not produce a huge preview. [MAX_CONTEXT_LINES]
- *    keeps the LCS window small, and [MAX_PREVIEW_LINES] caps the rendered hunks.
- *  - Honest: when the input exceeds the LCS budget the summary says so instead
- *    of silently producing a misleading diff.
- *
- * This is deliberately NOT a git/diff library — no external dependency, works
- * on the JVM unit-test classpath as well as on device.
- */
 object ChangePreview {
 
     const val MAX_CONTEXT_LINES = 400
@@ -25,7 +9,6 @@ object ChangePreview {
         val added: Int,
         val removed: Int,
         val unchanged: Int,
-        /** True when inputs were truncated to [MAX_CONTEXT_LINES] for the LCS. */
         val approximate: Boolean,
     ) {
         val changed: Int get() = added + removed
@@ -40,7 +23,6 @@ object ChangePreview {
         }
     }
 
-    /** Split like a line-based diff: keep line content, ignore the final empty segment. */
     private fun lines(text: String): List<String> {
         if (text.isEmpty()) return emptyList()
         val raw = text.split('\n', '\r').toMutableList()
@@ -48,12 +30,6 @@ object ChangePreview {
         return raw
     }
 
-    /**
-     * Longest-common-subsequence diff over the two line lists. O(n*m) time and
-     * O(n*m) space, bounded by [MAX_CONTEXT_LINES] per side so a large file can
-     * never blow the heap (file_edit itself refuses >8MB, but the tool result
-     * text can still be large).
-     */
     fun diff(before: String, after: String): List<Line> {
         val a = lines(before)
         val b = lines(after)
@@ -63,7 +39,6 @@ object ChangePreview {
         val n = aa.size
         val m = bb.size
 
-        // dp[i][j] = LCS length of aa[i..) and bb[j..).
         val dp = Array(n + 1) { IntArray(m + 1) }
         for (i in n - 1 downTo 0) {
             for (j in m - 1 downTo 0) {
@@ -96,8 +71,6 @@ object ChangePreview {
         while (i < n) out.add(Line(Line.Kind.REMOVE, aa[i++], oldNo++, newNo))
         while (j < m) out.add(Line(Line.Kind.ADD, bb[j++], oldNo, newNo++))
 
-        // Collapse to a bounded window around the first change so the preview
-        // stays small even when the edit is near the end of a long file.
         return collapse(out, approximate)
     }
 
@@ -115,13 +88,11 @@ object ChangePreview {
             if (approximate) append(", input exceeded ${MAX_CONTEXT_LINES} lines: approximate")
             append(")")
         }
-        // Reuse a CONTEXT line to carry the note without adding a new kind.
         if (prefixOmitted > 0) window.add(0, Line(Line.Kind.CONTEXT, note, 0, 0))
         if (suffixOmitted > 0) window.add(Line(Line.Kind.CONTEXT, "… +$suffixOmitted more lines", 0, 0))
         return window
     }
 
-    /** Compact counts without rendering the diff — cheap enough for every edit. */
     fun stats(before: String, after: String): Stats {
         val d = diff(before, after)
         return Stats(
@@ -134,11 +105,9 @@ object ChangePreview {
 
     private fun String.linesCount(): Int = if (isEmpty()) 0 else lines(this).size
 
-    /** Render a unified-style preview with line numbers, capped in length. */
     fun render(before: String, after: String, maxChars: Int = 1200): String {
         val d = diff(before, after)
         val note = "… (preview truncated)"
-        // Reserve room for the note so adding it can never breach maxChars.
         val rowBudget = (maxChars - note.length).coerceAtLeast(0)
         val sb = StringBuilder()
         var truncated = false

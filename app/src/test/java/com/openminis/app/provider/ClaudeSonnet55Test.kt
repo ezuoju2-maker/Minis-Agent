@@ -21,13 +21,6 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-anthropic-sonnet55] Claude Sonnet 5.5 (`claude-sonnet-5-5`), CLIProxyAPI
- * registry 9a3b869f; Android port of iOS 965ff194d / ClaudeSonnet55Tests.swift.
- * Pins the catalog entry, the MAX ceiling (and its scope), the Claude-5 wire
- * path it shares with Sonnet 5, the bundled models.dev snapshot, and the
- * claude-cli fingerprint upstream serves it under.
- */
 class ClaudeSonnet55Test {
 
     private lateinit var server: MockWebServer
@@ -37,7 +30,6 @@ class ClaudeSonnet55Test {
 
     private val sonnet55: LLMModel get() = LLMModel.claudeSonnet55
 
-    // ── Catalog entry ────────────────────────────────────────────────────
 
     @Test
     fun `sonnet 5 5 is shipped in the anthropic list right before sonnet 5`() {
@@ -57,12 +49,9 @@ class ClaudeSonnet55Test {
         assertEquals(true, sonnet55.effectiveInputModalities?.contains("image"))
     }
 
-    // ── Thinking ceiling ─────────────────────────────────────────────────
 
     @Test
     fun `the ceiling is max even when models dev has no entry for it`() {
-        // The static entry declares no effort tiers, i.e. exactly the "lookup
-        // missed" case: without the rule this falls to the XHIGH default.
         assertTrue(sonnet55.selectableThinkingLevels.isEmpty())
         assertEquals(ThinkingLevel.MAX, sonnet55.catalogMaxThinkingLevel)
         assertEquals(ThinkingLevel.MAX, ThinkingLevelCatalog.declaredMaxLevel("claude-sonnet-5-5"))
@@ -78,7 +67,6 @@ class ClaudeSonnet55Test {
         assertNull("claude-sonnet-5 resolves from the catalog, not a rule", ThinkingLevelCatalog.declaredMaxLevel("claude-sonnet-5"))
     }
 
-    // ── Wire: same Claude-5 path as Sonnet 5 ─────────────────────────────
 
     @Test
     fun `sonnet 5 5 shares sonnet 5's wire gates`() {
@@ -86,9 +74,6 @@ class ClaudeSonnet55Test {
             assertTrue("$id rejects temperature", AnthropicProvider.modelRejectsTemperature(id))
             assertTrue("$id uses adaptive thinking", AnthropicProvider.modelUsesAdaptiveThinking(id))
         }
-        // [T-claude5-thinking-off] "Thinking off" is the one place they differ
-        // (Anthropic's per-model table): Sonnet 5.5 400s on `disabled` and takes
-        // `between_tools`; Sonnet 5 accepts `disabled`.
         assertEquals(AnthropicProvider.OffThinking.BETWEEN_TOOLS, AnthropicProvider.offThinking("claude-sonnet-5-5"))
         assertEquals(AnthropicProvider.OffThinking.DISABLED, AnthropicProvider.offThinking("claude-sonnet-5"))
     }
@@ -135,21 +120,16 @@ class ClaudeSonnet55Test {
 
     @Test
     fun `off sends between_tools - never the disabled literal, never an absent field`() {
-        // [T-claude5-thinking-off] An absent field thinks at the default high
-        // effort on Sonnet 5.5 (iOS: voice correction timed out on it), and
-        // `disabled` 400s; `between_tools` is its documented lowest setting.
         val body = anthropicBody(sonnet55, ThinkingLevel.OFF)
         assertEquals("between_tools", body.optJSONObject("thinking")?.optString("type"))
         assertFalse("no effort with between_tools", body.has("output_config"))
         assertNotEquals("disabled", body.optJSONObject("thinking")?.optString("type"))
     }
 
-    // ── Bundled models.dev snapshot ──────────────────────────────────────
 
     @Test
     fun `the bundled snapshot carries sonnet 5 5 with its official tiers`() {
         val root = ProductionSources.mainRoot() ?: error("source root not found")
-        // src/main/java/com/openminis/app -> src/main/assets
         val assets = File(root, "../../../../assets/models-dev-api.json").canonicalFile
         val m = JSONObject(assets.readText()).getJSONObject("anthropic").getJSONObject("models")
             .getJSONObject("claude-sonnet-5-5")
@@ -164,7 +144,6 @@ class ClaudeSonnet55Test {
         assertEquals(listOf("low", "medium", "high", "xhigh", "max"), List(efforts.length()) { efforts.getString(it) })
     }
 
-    // ── Claude Code fingerprint ──────────────────────────────────────────
 
     @Test
     fun `the claude-cli fingerprint is at least upstream's 2_1_280`() {

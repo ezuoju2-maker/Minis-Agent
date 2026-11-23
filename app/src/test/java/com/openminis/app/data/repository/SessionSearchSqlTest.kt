@@ -11,11 +11,6 @@ import org.junit.Test
 import java.sql.Connection
 import java.sql.DriverManager
 
-/**
- * [T-android-search-visible-only] The session-search SQL, run for real against
- * SQLite (port of iOS SearchHitLineTests.swift [3]). Only visible fields may
- * make a session a result; each result carries its NEWEST visible hit.
- */
 class SessionSearchSqlTest {
 
     private lateinit var db: Connection
@@ -60,7 +55,6 @@ class SessionSearchSqlTest {
         }
     }
 
-    /** (session id, hit_parts_json) rows, in query order, for the keywords of [q]. */
     private fun run(sql: (Int) -> String, q: String): List<Pair<String, String?>> {
         val terms = SessionSearch.searchTerms(q)
         return db.prepareStatement(sql(terms.size)).use { st ->
@@ -88,7 +82,6 @@ class SessionSearchSqlTest {
         assertTrue(ids.containsAll(listOf("text", "input", "output", "title", "newest")))
         assertNull("a title-only result carries no message", rows.first { it.first == "title" }.second)
         assertTrue("the NEWEST visible hit is returned", rows.first { it.first == "newest" }.second!!.contains("new GPT line"))
-        // A reminder hit passes SQL; searchSnippet finds no visible line and the repository drops it.
         assertTrue("reminder" in ids)
         assertNull(SessionSearch.searchSnippet(rows.first { it.first == "reminder" }.second!!, "GPT"))
         assertEquals("newest session first", "newest", rows.first().first)
@@ -111,7 +104,6 @@ class SessionSearchSqlTest {
         assertTrue(rows[1].contains("old GPT line"))
     }
 
-    // ── [T-android-search-blob-cap] ────────────────────────────────────────
 
     @Test fun `an oversized hit row comes back as a window around the hit, not whole`() {
         val filler = "x".repeat(SessionSearch.MAX_HIT_JSON_CHARS)
@@ -121,7 +113,6 @@ class SessionSearchSqlTest {
             assertTrue(hit.startsWith(SessionSearch.WINDOW_MARK))
             assertTrue("capped: ${hit.length}", hit.length <= SessionSearch.WINDOW_MARK.length + SessionSearch.HIT_WINDOW_CHARS)
             assertTrue(hit.contains("NEEDLE"))
-            // Not JSON any more: the marked window is read as its raw line.
             assertEquals(true, SessionSearch.searchSnippet(hit, "needle")?.contains("NEEDLE"))
         }
     }

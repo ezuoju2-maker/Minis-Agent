@@ -18,13 +18,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Collections
 
-/**
- * [T-multi-select-share] Debug-server bridge for the share feature (iOS
- * debug.chatShare.openPicker / debug.chatExport.render). The RPCs run outside any
- * screen, but the picker and the renderer need the chat on screen (its view model,
- * its window, its composition), so a request is posted here and served by the
- * ChatScreen showing that session ([ChatShareDebugHost]).
- */
 internal object ChatShareDebugBridge {
     sealed class Event(val sessionId: String)
     class OpenPicker(sessionId: String, val messageId: String?, val reply: CompletableDeferred<String?>) : Event(sessionId)
@@ -32,14 +25,9 @@ internal object ChatShareDebugBridge {
 
     val events = MutableSharedFlow<Event>(extraBufferCapacity = 8)
 
-    /** Sessions currently shown by a ChatScreen that serves these requests. */
     val onScreen: MutableSet<String> = Collections.synchronizedSet(LinkedHashSet())
 }
 
-/**
- * Serves [ChatShareDebugBridge] requests for the session this ChatScreen shows.
- * Debug builds only.
- */
 @Composable
 internal fun ChatShareDebugHost(sessionId: String, viewModel: ChatViewModel, openPicker: (String?) -> Unit) {
     if (!BuildConfig.DEV_TOOLS) return
@@ -76,13 +64,6 @@ internal fun ChatShareDebugHost(sessionId: String, viewModel: ChatViewModel, ope
     }
 }
 
-/**
- * Runs the export headlessly for the session on screen: units picked by
- * `unitIndexes` or `lastUnits` (default all), tool calls / thinking only with
- * `includeToolCalls` / `includeThinking`, options `format` (image|pdf),
- * `wideLayout`, `dark`, `adaptiveTables`, `title`. The file stays in the app cache;
- * `inline: true` also returns its bytes (base64, up to 8 MB).
- */
 private suspend fun debugRender(
     viewModel: ChatViewModel,
     params: JSONObject,
@@ -138,7 +119,6 @@ private suspend fun debugRender(
     }
 }
 
-/** The RPC side of [ChatShareDebugBridge] (dispatched by DebugRPCHandler, debug builds only). */
 internal object ChatShareDebugRpc {
     private fun sessionOnScreen(params: JSONObject): String {
         val sid = params.optString("sessionId")
@@ -149,7 +129,6 @@ internal object ChatShareDebugRpc {
         return sid
     }
 
-    /** debug.chatShare.openPicker: opens the picker as a long-press "Share Chat…" on a message would. */
     suspend fun openPicker(params: JSONObject): JSONObject {
         val sid = sessionOnScreen(params)
         val reply = CompletableDeferred<String?>()
@@ -160,7 +139,6 @@ internal object ChatShareDebugRpc {
         return JSONObject().put("ok", true).put("messageId", target ?: JSONObject.NULL)
     }
 
-    /** debug.chatExport.render: renders the export headlessly for the session on screen. */
     suspend fun render(params: JSONObject): JSONObject {
         val sid = sessionOnScreen(params)
         val reply = CompletableDeferred<JSONObject>()

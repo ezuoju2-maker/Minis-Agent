@@ -49,15 +49,6 @@ import com.openminis.app.config.confirm.PendingConfigChange
 import com.openminis.app.config.confirm.PendingConfigChangeItem
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * Root-level confirmation dialog for every minis-config write.
- * Mirrors iOS `ConfigConfirmSheet`. Mounted in [com.openminis.app.MainActivity]
- * so it shows over any active screen. Bound to
- * [ConfigConfirmationGate.pending].
- *
- * Per-row toggles let the user reject individual items in a `set-batch`;
- * dismissing without buttons is disabled to force an explicit decision.
- */
 @Composable
 fun ConfigConfirmDialogHost() {
     val pending by ConfigConfirmationGate.pending.collectAsState()
@@ -67,8 +58,6 @@ fun ConfigConfirmDialogHost() {
 
 @Composable
 private fun ConfigConfirmDialog(change: PendingConfigChange) {
-    // Local copy so per-row toggles update immediately even though the
-    // underlying [PendingConfigChange] is immutable.
     val workingItems = remember(change.id) {
         mutableStateListOf<PendingConfigChangeItem>().also { it.addAll(change.items) }
     }
@@ -79,20 +68,15 @@ private fun ConfigConfirmDialog(change: PendingConfigChange) {
 
     val approvedCount = workingItems.count { it.isApproved }
     val localize = rememberReadableLocalizer()
-    // [T-config-readable] Batch summary: the readable sentences of the rows
-    // still switched on, grouped by the record they touch. Updates live as
-    // rows are toggled.
     val summaryLines = if (workingItems.size > 1) configSummaryLines(workingItems, localize) else emptyList()
 
     AlertDialog(
-        onDismissRequest = { /* force explicit Apply / Cancel */ },
+        onDismissRequest = {  },
         properties = DialogProperties(
             dismissOnBackPress = false,
             dismissOnClickOutside = false,
         ),
         title = {
-            // [T-config-confirm-i18n] iOS ConfigConfirmSheet keys "Confirm %lld
-            // changes" / "Confirm change"; no plural variants there either.
             Text(
                 if (workingItems.size > 1) {
                     stringResource(R.string.config_confirm_title_many, workingItems.size)
@@ -184,7 +168,6 @@ private fun ConfirmRow(
                 RoundedCornerShape(8.dp),
             )
             .padding(8.dp)
-            // A switched-off row fades, as on iOS (opacity 0.45).
             .alpha(if (item.isApproved) 1f else 0.45f),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -232,9 +215,6 @@ private fun ConfirmRow(
                 )
             }
         }
-        // [T-config-readable] What the raw values above mean, in words, set
-        // apart from them by a hairline. Both appear only together, so a row
-        // without readable text never shows a stray line.
         val readable = item.readable?.displayText(localize).orEmpty()
         if (readable.isNotEmpty()) {
             ConfigReadableDivider()
@@ -259,7 +239,6 @@ private fun ConfirmRow(
                 color = MaterialTheme.colorScheme.error,
                 icon = Icons.Filled.Warning,
             )
-            // iOS: exclamationmark.circle for a sensitive change.
             ConfigRisk.SENSITIVE -> RiskHint(
                 text = stringResource(R.string.config_confirm_risk_sensitive),
                 color = Color(0xFFE65100),

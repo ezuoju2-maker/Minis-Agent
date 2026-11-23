@@ -4,24 +4,6 @@ import android.content.Context
 import kotlin.math.ceil
 import kotlin.math.max
 
-/**
- * Approximate BPE token counter. Mirrors iOS `BPETokenizer` (cl100k_base)
- * but without the full vocabulary — we ship a lightweight heuristic by
- * default so the app size doesn't balloon by ~2 MB before a caller actually
- * needs tokenization. Drop in a real `cl100k_base.tiktoken` asset via
- * [loadVocabularyFromAssets] when a consumer needs higher fidelity.
- *
- * The heuristic: `max(1, codepointCount / 3)` for text. That's the same
- * floor iOS falls back to when vocab fails to load, and it's within ±15%
- * of real cl100k_base counts for English / mixed CJK text.
- *
- * Image tokens: iOS uses `ceil(w/32) * ceil(h/32)` with a 2048px long-edge
- * cap and a floor of 85 tokens. We match that exactly so the context bar
- * stays visually identical across platforms.
- *
- * This class is thread-safe once [loadVocabularyFromAssets] finishes (or if
- * the heuristic path is used). Vocabulary loading is one-shot via [@Volatile].
- */
 object BPETokenizer {
     const val TOKENS_PER_MESSAGE = 3
     const val TOKENS_PER_REPLY = 3
@@ -32,10 +14,6 @@ object BPETokenizer {
 
     @Volatile private var encoder: Map<List<Byte>, Int>? = null
 
-    /**
-     * Count tokens in [text] using the loaded vocabulary if present, otherwise
-     * a codepoint-based heuristic. Returns 0 for empty input.
-     */
     fun countTokens(text: String): Int {
         if (text.isEmpty()) return 0
         val vocab = encoder
@@ -43,16 +21,8 @@ object BPETokenizer {
         return bpeEncode(text.toByteArray(Charsets.UTF_8), vocab).size
     }
 
-    /**
-     * Approximate token count for an image payload. Matches iOS heuristic:
-     * scale long-edge to 2048px, grid at 32×32, min 85 tokens, return 1000
-     * if decoding fails (i.e. treat as a costly opaque blob).
-     */
     fun countImageTokens(data: ByteArray): Int {
         if (data.isEmpty()) return 0
-        // [T-ctx-builder] Bounds-only decode through the image codec seam
-        // (production: the same BitmapFactory inJustDecodeBounds call), so a
-        // JVM test can measure real dimensions instead of the 1000 fallback.
         val (outWidth, outHeight) = com.openminis.app.provider.ImageBudget.codec.bounds(data)
         val w = outWidth.toFloat()
         val h = outHeight.toFloat()
@@ -65,11 +35,6 @@ object BPETokenizer {
         return max(IMAGE_MIN_TOKENS, tokens)
     }
 
-    /**
-     * Opt-in: load a cl100k_base vocabulary from `assets/<fileName>`. File
-     * must match tiktoken's format — one `<base64-bytes> <rank>` per line.
-     * No-op if already loaded or file is missing.
-     */
     fun loadVocabularyFromAssets(context: Context, fileName: String = "cl100k_base.tiktoken"): Boolean {
         if (encoder != null) return true
         return try {
@@ -107,11 +72,6 @@ object BPETokenizer {
         return max(1, cp / 3)
     }
 
-    /**
-     * Greedy BPE: treat each byte as its own segment, repeatedly merge the
-     * adjacent pair with the lowest rank that's still in the vocabulary, stop
-     * when no mergeable pair remains. Mirrors iOS `bytePairEncode`.
-     */
     private fun bpeEncode(bytes: ByteArray, vocab: Map<List<Byte>, Int>): List<Int> {
         if (bytes.isEmpty()) return emptyList()
         val segments = ArrayList<IntArray>(bytes.size)

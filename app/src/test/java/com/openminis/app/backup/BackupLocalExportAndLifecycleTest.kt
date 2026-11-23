@@ -6,28 +6,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-backup-local-export] [T-android-backup-run-controller] Stage 1 of
- * the Android backup rework.
- *
- * Two user reports drove it:
- *  - "No way to back up locally on Android": Start refused outright unless an
- *    rclone / folder destination was configured, and there was no Save or
- *    Share exit for the package.
- *  - "Can't leave the backup screen": the run lived on the Backup screen's
- *    `viewModelScope`, so leaving the screen cancelled it mid-package.
- *
- * The run semantics live on [BackupRunController.RunResult] (pure, tested
- * directly). The wiring — which scope runs the job, whether Start is gated,
- * when Save / Share appear — needs Compose and a Context, so it is pinned
- * against the source, as the neighbouring backup tests do.
- */
 class BackupLocalExportAndLifecycleTest {
 
     private fun outcome(name: String, ok: Boolean) =
         BackupHistory.DestinationOutcome(name, succeeded = ok, kind = "webdav", path = "/")
 
-    // ── Run semantics ─────────────────────────────────────────────────────
 
     @Test
     fun `a run with no destination is local-only and not settled`() {
@@ -55,7 +38,6 @@ class BackupLocalExportAndLifecycleTest {
         assertFalse("and it is not local-only — Save/Share are not offered", partial.localOnly)
     }
 
-    // ── Wiring ────────────────────────────────────────────────────────────
 
     private fun src(path: String): String {
         val f = File(path)
@@ -67,7 +49,6 @@ class BackupLocalExportAndLifecycleTest {
     private val screen by lazy { src("src/main/java/com/openminis/app/ui/settings/backup/BackupAndRestoreScreen.kt") }
     private val controller by lazy { src("src/main/java/com/openminis/app/backup/BackupRunController.kt") }
 
-    /** Source with comment lines dropped, so prose never satisfies a code check. */
     private fun code(s: String) = s.lineSequence()
         .filterNot { val t = it.trimStart(); t.startsWith("//") || t.startsWith("*") || t.startsWith("/*") }
         .joinToString("\n")
@@ -136,7 +117,6 @@ class BackupLocalExportAndLifecycleTest {
             "Backups/ must be a FileProvider root or getUriForFile throws on Share",
             paths.contains("""<files-path name="backups" path="Backups/" />"""),
         )
-        // And it must be the directory the exporter actually writes to.
         assertTrue(
             src("src/main/java/com/openminis/app/backup/BackupFileTreeExporter.kt")
                 .contains("""const val BACKUPS_DIR_NAME = "Backups""""),

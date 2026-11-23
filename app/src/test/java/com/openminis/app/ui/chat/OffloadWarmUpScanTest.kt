@@ -7,11 +7,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-offload-warmup-scan] Port of iOS OffloadWarmUpScanTests
- * (155501fcd): the warm-up indices the offload may scan are exactly the
- * pre-anchor messages effectiveAgentHistoryUncounted sends.
- */
 class OffloadWarmUpScanTest {
 
     private fun user(text: String) = LLMMessage(LLMMessage.Role.USER, text)
@@ -22,14 +17,14 @@ class OffloadWarmUpScanTest {
     private fun reply(text: String) = LLMMessage(LLMMessage.Role.ASSISTANT, text)
 
     private val history = listOf(
-        reply("old tail"),          // 0 leading non-user -> peeled
-        user("turn A"),             // 1
-        call("big"),                // 2 call of a >1000 result -> emptied, dropped
-        result("big", 5000),        // 3 >1000 -> pruned
-        call("mid"),                // 4 file_write argument -> kept (offloadable)
-        result("mid", 700),         // 5 501-1000 chars -> kept (offloadable)
-        reply("done A"),            // 6 text-only -> kept
-        user("turn B (anchor)"),    // 7 anchor
+        reply("old tail"),
+        user("turn A"),
+        call("big"),
+        result("big", 5000),
+        call("mid"),
+        result("mid", 700),
+        reply("done A"),
+        user("turn B (anchor)"),
     )
 
     @Test fun `sent warm-up messages are kept and pruned ones are not`() {

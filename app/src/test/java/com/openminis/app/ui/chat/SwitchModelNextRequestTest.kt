@@ -5,16 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-switch-model-next-request] + [T-android-ctx-overflow-attribute-dispatch]
- * Ports of iOS 86a045284 (+ the d6e475a35 follow-ups) and 08f3feea2.
- *
- * Picking another model while a task runs used to take effect only after the
- * whole turn: runAgentLoop kept its own provider for every request of the turn,
- * so a task with 20 tool calls ran all of them on the old model. Now the next
- * REQUEST uses the new model, and the context calibration is credited to the
- * model a request actually went to.
- */
 class SwitchModelNextRequestTest {
 
     private val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
@@ -34,8 +24,6 @@ class SwitchModelNextRequestTest {
 
     @Test
     fun `a switch the picker has not applied yet stays pending`() {
-        // The flag is set before the picker rebinds; a loop head in between
-        // must not consume it.
         assertFalse(ChatViewModel.modelSwitchToApply(pending = true, chosen = a, loopProvider = a))
         assertFalse(ChatViewModel.modelSwitchToApply(pending = true, chosen = null, loopProvider = a))
     }
@@ -63,8 +51,6 @@ class SwitchModelNextRequestTest {
         val body = loop.substring(apply, sanitize)
         assertTrue(body.contains("currentProvider = chosen"))
         assertTrue("a later fallback may rebind again", body.contains("classProviderAtSend = chosen"))
-        // [T-android-switch-model-fallback-rebind] The fallback chain and its
-        // strategy follow the pick, rebuilt in the same Main snapshot.
         assertTrue(body.contains("Triple(c, buildFallbackProviders(c), strategy)"))
         assertTrue(body.contains("remainingFallbacks.clear()"))
         assertTrue(body.contains("remainingFallbacks.addAll(switched.second)"))

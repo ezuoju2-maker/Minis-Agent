@@ -9,15 +9,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * [T-android-backup-webdav-deadline] Two field problems, both fixed on iOS
- * first (ceac9df0b, c82fe8eb4) and reproduced here on a Pixel 4a:
- *  - backups to a slow WebDAV server always failed: rclone's `Timeout` is a
- *    flat response deadline counted from the end of the upload, and 45 s
- *    failed every server that needs longer to answer;
- *  - Stop could not interrupt an upload in flight: the upload was one
- *    blocking call and the run's cancellation never reached it.
- */
 class BackupStopAndDeadlineTest {
 
     private val tmp: File = Files.createTempDirectory("backup-stop").toFile()
@@ -33,7 +24,6 @@ class BackupStopAndDeadlineTest {
         return f.readText()
     }
 
-    // ── Stop during the file-tree export (behaviour) ──────────────────────
 
     private fun treeExporter(isCancelled: () -> Boolean): BackupFileTreeExporter {
         val staging = File(tmp, "staging").apply { mkdirs() }
@@ -58,7 +48,6 @@ class BackupStopAndDeadlineTest {
             treeExporter { polls++; true }.export(root, "shared", BackupCategory.SHARED_FILES)
             fail("expected the walk to stop")
         } catch (e: kotlinx.coroutines.CancellationException) {
-            // Checked every CANCEL_CHECK_EVERY entries, not on every file.
             assertEquals(1, polls)
         }
     }
@@ -70,7 +59,6 @@ class BackupStopAndDeadlineTest {
         assertEquals(100, r.filesIncluded)
     }
 
-    // ── Wiring (source) ───────────────────────────────────────────────────
 
     @Test
     fun `the upload runs as an async rclone job that Stop can end`() {

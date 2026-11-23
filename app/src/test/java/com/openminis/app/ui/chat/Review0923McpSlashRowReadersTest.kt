@@ -4,19 +4,6 @@ import java.io.File
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Review 2026-09-23 — guards f42128b81 (GH#372, T-android-mcp-slash-dispatch).
- *
- * That fix's own lesson: "If you add another row KIND, give it a flag AND a
- * reader" — the bug was a composer-fill guard that read `isSkill` alone. The
- * ViewModel guard was fixed, but ChatScreen's tap handler has a second
- * composer-fill reader: after `executeSlashCommand` it re-focuses the composer
- * and shows the IME for `cmd.isSkill` only. Tapping an MCP row fills
- * "/<server> " and leaves the keyboard down, unlike a skill row (iOS treats
- * both kinds the same).
- *
- * McpSlashDispatchTest covers the ViewModel; this pins the screen reader.
- */
 class Review0923McpSlashRowReadersTest {
 
     private fun src(path: String): String {

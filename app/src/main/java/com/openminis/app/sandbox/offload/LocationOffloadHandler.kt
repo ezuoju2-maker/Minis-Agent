@@ -22,40 +22,13 @@ import java.util.concurrent.Executor
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/**
- * android-location — current location, reverse geocoding, forward geocoding.
- *
- * Mirrors apple-location (NativeOffloads/LocationOffload.m): same three
- * subcommands and same flag names so prompts and the agent loop are
- * platform-agnostic.
- *
- * The `current` subcommand layers three strategies because
- * `getLastKnownLocation` returns null far more often on Android
- * than on iOS (especially on MIUI/EMUI/ColorOS after background idle):
- *   1. Walk every enabled provider with getLastKnownLocation
- *   2. If all null, request a single fresh fix via
- *      getCurrentLocation (API 30+) or requestSingleUpdate (<30)
- *   3. On timeout, return a structured error naming the enabled
- *      providers so the caller can explain exactly what's wrong.
- *
- * Usage:
- *   android-location current [--timeout SEC]
- *   android-location geocode --lat <lat> --lon <lon>     (--lng alias accepted)
- *   android-location forward --address "<addr>"
- *   android-location geocode <lat> <lon>                 (legacy positional)
- */
 class LocationOffloadHandler(private val context: Context) : NativeOffloadHandler {
 
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
         val args = OffloadArgs(request.argv.drop(1))
-        // [T-location-default-current-android] Help only on explicit
-        // --help/-h. No subcommand defaults to `current` (mirrors iOS) —
-        // `android-location` == `android-location current`, and flags pass
-        // through: `android-location --compact` == `current --compact`.
         if (args.hasFlag("h", "help")) {
             return NativeOffloadResult(0, HELP)
         }
-        // T330: tri-state agent gate before any work.
         OffloadGate.enforce("location", "android-location", args, request)?.let { return it }
 
         return try {
@@ -71,15 +44,7 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
         }
     }
 
-    /**
-     * Resolve --lat / --lon (with --lng alias for apple-location parity)
-     * and fall back to legacy positional `<lat> <lon>`. Returns null if
-     * neither form supplies a valid pair.
-     */
     private fun handleGeocode(args: OffloadArgs): NativeOffloadResult {
-        // Project convention is --lon (matches photos `near`); --lng is
-        // accepted as an alias to keep prompts that came from apple-
-        // location working unchanged.
         val lat = args.getDouble("lat")
             ?: args.positional.getOrNull(1)?.toDoubleOrNull()
         val lon = args.getDouble("lon", "lng")
@@ -93,7 +58,6 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
         return geocode(lat, lon, args)
     }
 
-    // ── Permission / provider helpers ────────────────────────────
 
     private fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
@@ -109,7 +73,6 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
         try { lm.allProviders.filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) } }
         catch (_: Throwable) { emptyList() }
 
-    // ── current ───────────────────────────────────────────────────
 
     private fun current(timeoutSec: Int, args: OffloadArgs): NativeOffloadResult {
         if (!hasPermission()) {
@@ -142,7 +105,7 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
                 r
             }
             when (result) {
-                OffloadPermissionManager.AndroidPermissionResult.GRANTED -> {} // fall through
+                OffloadPermissionManager.AndroidPermissionResult.GRANTED -> {}
                 OffloadPermissionManager.AndroidPermissionResult.DENIED -> {
                     val body = JSONObject()
                         .put("error", "permission_denied")
@@ -178,7 +141,6 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
             return NativeOffloadResult(1, OffloadOutput.formatBody(body, args) + "\n")
         }
 
-        // Strategy 1: last-known across all providers
         val best = enabled
             .mapNotNull {
                 runCatching {
@@ -192,7 +154,6 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
             return NativeOffloadResult(0, OffloadOutput.formatBody(buildLocationJson(best), args) + "\n")
         }
 
-        // Strategy 2: request a single fresh fix with timeout
         AppLogger.debug(TAG, "no last-known, requesting fresh fix (enabled=$enabled)")
         val fresh = requestFreshLocation(lm, enabled, timeoutSec)
         if (fresh != null) {
@@ -200,7 +161,6 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
             return NativeOffloadResult(0, OffloadOutput.formatBody(buildLocationJson(fresh), args) + "\n")
         }
 
-        // Strategy 3: give up with explicit diagnostics
         val oemHint = if (OsCompat.isXiaomi || OsCompat.isHuawei ||
             Build.MANUFACTURER.equals("OPPO", ignoreCase = true) ||
             Build.MANUFACTURER.equals("OnePlus", ignoreCase = true) ||
@@ -222,7 +182,6 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
         enabled: List<String>,
         timeoutSec: Int,
     ): android.location.Location? {
-        // Prefer NETWORK > FUSED > GPS for speed (GPS may take 30s+ cold).
         val ordered = listOf(
             LocationManager.NETWORK_PROVIDER,
             "fused",
@@ -244,11 +203,6 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
                     lm.getCurrentLocation(
                         provider,
                         cancel,
-                        // [GH #453] Run the callback where it is delivered: it
-                        // only stores the fix and counts down. A fresh
-                        // newSingleThreadExecutor() per provider per call was
-                        // never shut down, so its idle thread stayed until a GC
-                        // finalised the executor - up to 3 threads a call.
                         DIRECT_EXECUTOR,
                     ) { loc ->
                         holder[0] = loc
@@ -267,7 +221,6 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
                     }
                     @Suppress("MissingPermission", "DEPRECATION")
                     lm.requestSingleUpdate(provider, listener, Looper.getMainLooper())
-                    // Clean up listener on timeout path below.
                     try {
                         latch.await(perProvTimeoutMs, TimeUnit.MILLISECONDS)
                     } finally {
@@ -313,7 +266,6 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
                 if (parts.isNotEmpty()) json.put("address", parts.joinToString(", "))
             }
         } catch (_: Throwable) {
-            // Geocoder service missing or offline — ok to omit address.
         }
         return json.toString(2)
     }
@@ -333,16 +285,7 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
         }
     }
 
-    // ── forward geocoding ────────────────────────────────────────────────
 
-    /**
-     * Forward-geocode an address string to lat/lon + a structured placemark.
-     * Mirrors apple-location `forward --address "<addr>"`. Geocoder.getFromLocationName
-     * returns a list of candidates; we take the first since iOS does the same.
-     * On devices without a geocoder backend (Huawei HMS-only, some stripped
-     * China ROMs) Geocoder.isPresent() returns false — return a structured
-     * error so the model can explain instead of silently failing.
-     */
     private fun handleForward(args: OffloadArgs): NativeOffloadResult {
         val address = args.get("address")
         if (address.isNullOrBlank()) {
@@ -356,10 +299,6 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
             return NativeOffloadResult(1, OffloadOutput.formatBody(body, args) + "\n")
         }
         return try {
-            // [T-android-location-cjk-geocode] C6: with a non-Chinese system
-            // locale the geocoder often returns empty for CJK queries
-            // (e.g. Beijing/Shanghai written in Chinese characters). Detect
-            // CJK and retry once with Locale.CHINA before giving up.
             val containsCjk = CJK_REGEX.containsMatchIn(address)
             val geocoder = Geocoder(context, Locale.getDefault())
             @Suppress("DEPRECATION")
@@ -383,9 +322,6 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
                     TAG,
                     "forward: no_match for '$address' (locale=${Locale.getDefault()}, cjkRetry=$containsCjk)",
                 )
-                // On GMS-less Chinese ROMs Geocoder.isPresent() can be true
-                // while every query returns empty — the hint below is the
-                // best we can do without a second backend.
                 val hint = if (containsCjk) {
                     "The system geocoder may lack Chinese place-name coverage on this device (common without Google Play Services). Try the address in pinyin/English, pass coordinates directly (--lat/--lon via geocode), or check the spelling."
                 } else {
@@ -425,8 +361,6 @@ class LocationOffloadHandler(private val context: Context) : NativeOffloadHandle
 
         private const val TAG = "LocationOffload"
 
-        // [T-android-location-cjk-geocode] CJK Unified Ideographs (+ Ext A,
-        // compatibility block) — enough to detect Chinese place names.
         private val CJK_REGEX = Regex("[\\u4E00-\\u9FFF\\u3400-\\u4DBF\\uF900-\\uFAFF]")
         private const val HELP = """android-location — current location, reverse + forward geocoding (mirrors apple-location)
 

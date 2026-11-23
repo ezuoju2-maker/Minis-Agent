@@ -7,16 +7,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-android-openrouter-reasoning-details] Port of iOS ReasoningDetailsParseTests
- * (8d17198d6, GH#263): OpenRouter's structured `delta.reasoning_details` array
- * was never read, so reasoning sent only that way left the turn empty.
- */
 class ReasoningDetailsTest {
 
     private fun parse(json: String) = ReasoningDetails.parse(JSONObject(json))
 
-    /** Mirrors the provider: string fields first, then details. */
     private fun run(vararg chunks: String): String = buildString {
         for (c in chunks) {
             val d = JSONObject(c)

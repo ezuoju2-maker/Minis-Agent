@@ -1,18 +1,5 @@
 package com.openminis.app.harness
 
-/**
- * v2.0 · AgentKernel — the "Harness" that the closed-source survey identified
- * as the real moat. It wires together, in one deterministic state machine:
- *
- *   plan → step → tool proposal → risk gate → human approval → execution
- *        → event log → budget/loop guard → model routing/cost → memory
- *        → interrupt / resume / replay / audit
- *
- * Every side effect is injected (clock, executor, endpoints, tool catalog), so
- * the exact same class runs on Android, on the JVM in CI, and in an offline
- * τ-bench style simulator. No Android imports, no coroutines, no singletons
- * that outlive the run.
- */
 
 enum class OutcomeKind { EXECUTED, NEED_APPROVAL, BLOCKED, STOPPED }
 
@@ -42,7 +29,6 @@ class AgentKernel(
     var mode: AgentMode = AgentMode.ACT
     private var currentStep = "run"
 
-    // ---------------------------------------------------------------- lifecycle
 
     fun start(goal: String): AgentEvent =
         events.append(EventKind.RUN_STARTED, summary = goal, stepId = "run")
@@ -56,7 +42,6 @@ class AgentKernel(
         return events.append(EventKind.STEP_STARTED, summary = what, stepId = stepId)
     }
 
-    // ---------------------------------------------------------------- tool call
 
     fun proposeTool(
         toolName: String,
@@ -152,12 +137,10 @@ class AgentKernel(
         return KernelOutcome(OutcomeKind.EXECUTED, result = result.copy(content = trimmed.text))
     }
 
-    // ---------------------------------------------------------------- control
 
     fun interrupt(reason: String): AgentEvent =
         events.append(EventKind.INTERRUPTED, summary = reason, stepId = currentStep)
 
-    /** Resume from the last event; ALL session grants are dropped on restart. */
     fun resume(): Boolean {
         val st = events.state()
         if (st.status == RunStatus.COMPLETED) return false
@@ -178,19 +161,16 @@ class AgentKernel(
         )
     }
 
-    /** Rename avoids the JVM signature clash with the generated `mode` setter. */
     fun switchMode(newMode: AgentMode) {
         mode = newMode
         router.setPrivacyMode(newMode == AgentMode.PRIVACY)
     }
 
-    // ---------------------------------------------------------------- projection & audit
 
     fun timeline(): List<TimelineItem> = events.timeline()
     fun export(): String = events.snapshot()
     fun restore(jsonl: String): Boolean = events.restore(jsonl)
 
-    /** Post-change audit (point 4 of the brief): invariants over the whole log. */
     fun selfCheck(): List<String> {
         val issues = ArrayList(events.selfCheck())
         var autoR3 = 0

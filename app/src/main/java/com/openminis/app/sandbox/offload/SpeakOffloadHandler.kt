@@ -15,34 +15,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 
-/**
- * android-speak — speak text aloud via Android TTS.
- *
- * T60: re-aligned with iOS `apple-speak` (NativeOffloads/SpeakOffload.m).
- * Subcommand model:
- *
- *   android-speak speak <text> [--voice tag] [--rate F] [--pitch F] [--volume F]
- *   android-speak stop
- *   android-speak voices [--language prefix]
- *
- * Back-compat: the legacy positional form (`android-speak Hello world`) still
- * works because the dispatcher falls through to `speak` when the first
- * positional isn't a known subcommand keyword. The legacy `--stop` flag is
- * also still honoured so any agent prompt that learned the old form before
- * this commit doesn't regress.
- *
- * Init order: TTS initialisation is asynchronous, so the first `speak` call
- * after boot can race and silently no-op on slower devices. We wait up to
- * [TextToSpeechManager.INIT_TIMEOUT_MS] (the manager's own budget) for init,
- * and if still unready return a structured error so the model knows
- * speech didn't actually play.
- *
- * Voice resolution: iOS treats `--voice` as a BCP-47 language tag (passed to
- * `AVSpeechSynthesisVoice voiceWithLanguage:`). Android's TTS API exposes
- * voices by identifier AND by Locale; we accept the iOS-style language tag
- * via `Locale.forLanguageTag(...)` for cross-platform parity, and additionally
- * try to match an exact voice identifier when `voices` enumeration finds one.
- */
 class SpeakOffloadHandler(private val context: Context) : NativeOffloadHandler {
     private val tts = TextToSpeechManager().also { it.init(context) }
 
@@ -50,12 +22,7 @@ class SpeakOffloadHandler(private val context: Context) : NativeOffloadHandler {
         val args = OffloadArgs(request.argv.drop(1))
         if (args.hasFlag("h", "help")) return NativeOffloadResult(0, HELP)
 
-        // Legacy `--stop` flag — pre-T60 callers used it as a synonym for
-        // the `stop` subcommand. Honour it before the subcommand dispatch
-        // so old prompts keep working.
         if (args.hasFlag("stop")) return cmdStop(args)
-        // Legacy `--status` is dropped from the iOS spec but kept on
-        // Android as a debug aid (no iOS analogue). Same back-compat.
         if (args.hasFlag("status")) return buildStatus(args)
 
         val sub = args.positional.firstOrNull()
@@ -66,9 +33,6 @@ class SpeakOffloadHandler(private val context: Context) : NativeOffloadHandler {
                 "voices" -> cmdVoices(args)
                 null -> NativeOffloadResult(2, "android-speak: missing command\n$HELP")
                 else -> {
-                    // Backwards-compat: treat the whole positional list as
-                    // free-form text. Mirrors the pre-T60 invocation
-                    // `android-speak Hello world`.
                     cmdSpeak(args, dropFirstPositional = false)
                 }
             }
@@ -82,7 +46,6 @@ class SpeakOffloadHandler(private val context: Context) : NativeOffloadHandler {
         }
     }
 
-    // ── Subcommands ──────────────────────────────────────────────────────────
 
     private fun cmdSpeak(args: OffloadArgs, dropFirstPositional: Boolean): NativeOffloadResult {
         val textParts = if (dropFirstPositional) args.positional.drop(1) else args.positional
@@ -90,9 +53,6 @@ class SpeakOffloadHandler(private val context: Context) : NativeOffloadHandler {
         if (text.isBlank()) {
             return NativeOffloadResult(2, "android-speak: missing <text>\n$HELP")
         }
-        // [T-android-tts-init-timeout] Wait as long as the manager itself does:
-        // 2 s gave up before TextToSpeechManager's own 4 s budget, so a slow
-        // engine cold start (OPPO ColorOS) was reported as "no engine".
         if (!waitForInit(TextToSpeechManager.INIT_TIMEOUT_MS)) {
             val body = JSONObject()
                 .put("error", "tts_unavailable")
@@ -108,9 +68,6 @@ class SpeakOffloadHandler(private val context: Context) : NativeOffloadHandler {
             return NativeOffloadResult(1, OffloadOutput.formatBody(body, args) + "\n")
         }
 
-        // Voice / language: --voice takes precedence and is treated as a
-        // BCP-47 language tag (matches iOS). Empty / invalid tags fall
-        // through to the auto-detect path inside speak().
         val voiceTag = args.get("voice")
         if (!voiceTag.isNullOrBlank()) {
             tts.setLanguage(Locale.forLanguageTag(voiceTag))
@@ -139,15 +96,6 @@ class SpeakOffloadHandler(private val context: Context) : NativeOffloadHandler {
         return NativeOffloadResult(0, OffloadOutput.formatBody(body, args) + "\n")
     }
 
-    /**
-     * List installed voices. iOS returns id/name/language/quality/gender for
-     * each `AVSpeechSynthesisVoice`. Android `TextToSpeech.voices` (API 21+)
-     * exposes equivalent fields:
-     *   - `Voice.name`            → both id+name (Android doesn't separate)
-     *   - `Voice.locale.toLanguageTag()` → language
-     *   - `Voice.quality`         → mapped to default/enhanced/premium
-     *   - `Voice.features`        → no gender field, marked "unspecified"
-     */
     private fun cmdVoices(args: OffloadArgs): NativeOffloadResult {
         if (!waitForInit(TextToSpeechManager.INIT_TIMEOUT_MS)) {
             val body = JSONObject()
@@ -159,15 +107,8 @@ class SpeakOffloadHandler(private val context: Context) : NativeOffloadHandler {
         }
         val languagePrefix = args.get("language")
         val items = JSONArray()
-        // Pull voices through a fresh probe — the long-lived
-        // [TextToSpeechManager] doesn't expose them, and a probe is cheap.
         val probe = TextToSpeech(context.applicationContext, null)
         try {
-            // Voices are enumerable as soon as the engine is installed; a
-            // 200ms post-construction settle is enough on every device I've
-            // tested. waitForInit above already established this engine is
-            // alive globally, so the probe constructor inheriting the same
-            // engine binding shouldn't need a long wait.
             Thread.sleep(200)
             val voices: Set<Voice>? = probe.voices
             voices?.forEach { v ->
@@ -199,7 +140,6 @@ class SpeakOffloadHandler(private val context: Context) : NativeOffloadHandler {
         return NativeOffloadResult(0, OffloadOutput.formatBody(body, args) + "\n")
     }
 
-    // ── Diagnostics (Android-only, no iOS analogue) ──────────────────────────
 
     private fun buildStatus(args: OffloadArgs): NativeOffloadResult {
         val engines = probeEngineNames()
@@ -221,18 +161,6 @@ class SpeakOffloadHandler(private val context: Context) : NativeOffloadHandler {
         return tts.isInitialized
     }
 
-    /**
-     * Installed TTS engines (package names), best effort.
-     *
-     * [T-android-tts-engine-visibility] A direct PackageManager query for
-     * TTS_SERVICE — the same query TextToSpeech.getEngines() makes, without
-     * constructing a throw-away TextToSpeech that starts (and then abandons)
-     * an engine binding just to read a list. Either way the result is subject
-     * to package visibility: it is only complete because the manifest now
-     * declares a TTS_SERVICE <queries> entry. Before that, a user-installed
-     * engine was filtered out and this reported `available_engines: []` on a
-     * device that had one.
-     */
     private fun probeEngineNames(): List<String> = try {
         val pm = context.packageManager
         val intent = Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE)

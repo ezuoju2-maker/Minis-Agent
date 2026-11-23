@@ -5,10 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [FIX-261025-07] During a search, "Select All" then Delete deleted every chat,
- * not the results on screen; and "Deselect All" re-selected instead.
- */
 class SessionSelectAllTest {
 
     @Test fun `deselect only when every shown row is selected`() {

@@ -8,7 +8,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** An open chat picks up a provider edited in Settings before its next turn. */
 class ProviderEditsTest {
 
     private fun inst(id: String, responses: Boolean = false) = ProviderInstance(

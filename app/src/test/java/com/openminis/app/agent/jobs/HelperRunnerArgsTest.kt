@@ -7,7 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [T-p1-delegate-task] Argument parsing / clamping and result JSON shape, aligned with iOS HelperRunner. */
 class HelperRunnerArgsTest {
 
     @Test

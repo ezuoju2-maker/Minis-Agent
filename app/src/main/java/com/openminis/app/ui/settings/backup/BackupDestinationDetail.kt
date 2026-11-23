@@ -37,13 +37,6 @@ import com.openminis.app.ui.settings.SettingsValueRow
 import java.text.DateFormat
 import java.util.Date
 
-/**
- * [T-android-backup-dest-edit] Which destination's detail page is showing,
- * and which of its sub-pages. Hosted inside [RcloneDestinationsScreen] and
- * [RestoreServersScreen] rather than as its own route: a rename changes the
- * name a route argument would be keyed on, and both hosts already switch
- * their content in place for the add flow.
- */
 @Stable
 internal class DestinationDetailNav {
     var name by mutableStateOf<String?>(null)
@@ -64,7 +57,6 @@ internal class DestinationDetailNav {
         editingConnection = false
     }
 
-    /** One step back: folder browser or editor → detail → list. */
     fun back(vm: RcloneDestinationsViewModel) {
         when {
             vm.browse.value?.existing == true -> vm.cancelPending()
@@ -87,14 +79,6 @@ internal class DestinationDetailNav {
     }
 }
 
-/**
- * Details of one saved destination — the Android peer of iOS
- * `BackupDestinationDetailView`. Rename and re-point the folder in place,
- * edit the connection (tested before it is saved), test it, remove it.
- *
- * The password is never shown. It lives in the Keystore-backed store and
- * nothing needs to read it back; the editor only replaces or clears it.
- */
 @Composable
 internal fun DestinationDetailContent(vm: RcloneDestinationsViewModel, nav: DestinationDetailNav) {
     val remotes by vm.remotes.collectAsState()
@@ -104,7 +88,6 @@ internal fun DestinationDetailContent(vm: RcloneDestinationsViewModel, nav: Dest
     val name = nav.name ?: return
     val r = remotes.firstOrNull { it.name == name }
     if (r == null) {
-        // Removed (here or elsewhere) while open: nothing left to show.
         LaunchedEffect(name) { nav.close() }
         return
     }
@@ -122,7 +105,6 @@ internal fun DestinationDetailContent(vm: RcloneDestinationsViewModel, nav: Dest
     var renaming by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
     var testing by remember { mutableStateOf(false) }
-    // (ok, message) of the last test; reset when the destination changes.
     var testResult by remember(r) { mutableStateOf<Pair<Boolean, String?>?>(null) }
 
     val backend = RcloneBackendCatalog.backend(r.backend)
@@ -166,9 +148,6 @@ internal fun DestinationDetailContent(vm: RcloneDestinationsViewModel, nav: Dest
                     }
                 },
             )
-            // What the user typed when adding it, minus the secret — and minus
-            // keys no longer on the backend's form (an old SMB `share`), which
-            // would state a setting that no longer has any effect.
             backend?.fields?.filter { !it.isSecret }?.forEach { f ->
                 val v = r.params[f.key]
                 if (!v.isNullOrEmpty()) SettingsValueRow(title = f.label, value = v)
@@ -183,9 +162,6 @@ internal fun DestinationDetailContent(vm: RcloneDestinationsViewModel, nav: Dest
             )
         }
         if (!local) {
-            // Addresses move and passwords rotate; retyping the whole server
-            // for one field is worse than editing it, as long as the result is
-            // re-tested — the editor does that before saving.
             SettingsRow(
                 title = stringResource(R.string.backup_dest_edit_connection),
                 titleColor = MaterialTheme.colorScheme.primary,
@@ -234,8 +210,6 @@ internal fun DestinationDetailContent(vm: RcloneDestinationsViewModel, nav: Dest
                     }
                 },
             )
-            // A failure is the rclone error — a sentence, so it gets its own
-            // line rather than being squeezed beside the button.
             testResult?.takeIf { !it.first }?.let { (_, msg) ->
                 Text(
                     msg.orEmpty(),
@@ -297,8 +271,6 @@ internal fun DestinationDetailContent(vm: RcloneDestinationsViewModel, nav: Dest
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
             title = { Text(stringResource(R.string.backup_dest_remove_confirm_title)) },
-            // Say what is NOT destroyed — "remove" otherwise reads as though it
-            // deletes the backups stored there.
             text = if (local) null else ({ Text(stringResource(R.string.backup_dest_remove_confirm_note)) }),
             confirmButton = {
                 MinisTextButton(onClick = {
@@ -321,15 +293,6 @@ internal fun DestinationDetailContent(vm: RcloneDestinationsViewModel, nav: Dest
     }
 }
 
-/**
- * Edit a saved server's address and credentials. Mirrors iOS
- * `RcloneConnectionEditor`.
- *
- * The password field starts empty and is only written when something is
- * typed: leaving it alone keeps the stored credential, which is what someone
- * changing only a hostname expects. "No password (anonymous)" clears it.
- * Save connects with the new settings first and stores nothing if that fails.
- */
 @Composable
 private fun ConnectionEditor(
     vm: RcloneDestinationsViewModel,
@@ -391,8 +354,6 @@ private fun ConnectionEditor(
                     else R.string.backup_dest_password_keep_hint,
                 ),
             )
-            // Only where the backend can actually connect without one; an
-            // anonymous SFTP or S3 server is not a configuration to offer.
             if (secretField.isOptional) {
                 SettingsSwitchRow(
                     title = stringResource(R.string.backup_dest_no_password),
@@ -404,8 +365,6 @@ private fun ConnectionEditor(
             }
         }
 
-        // Offered once the server has refused the certificate, or when the
-        // destination already trusts it (so that can be turned back off).
         if (certificateRejected || remote.allowInsecureTLS) {
             Spacer(Modifier.height(8.dp))
             TrustCertificateRow(

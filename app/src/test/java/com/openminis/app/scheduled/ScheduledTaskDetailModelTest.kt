@@ -13,10 +13,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Calendar
 
-/** [T-scheduled-task-detail] The data behind the scheduled-task detail page. */
 class ScheduledTaskDetailModelTest {
 
-    /** Today at [h]:[m], local time — the tests reason in wall-clock terms. */
     private fun today(h: Int, m: Int = 0): Long = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, h); set(Calendar.MINUTE, m); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }.timeInMillis
@@ -51,7 +49,6 @@ class ScheduledTaskDetailModelTest {
     private fun marker(firedAt: Long? = null) =
         ScheduledTaskMarker("task-1", "Disk check", null, "Summarise disk usage", firedAtMs = firedAt)
 
-    // ── status: every row, and never "Interrupted" ──────────────────────────
 
     @Test
     fun `status matrix`() {
@@ -59,7 +56,6 @@ class ScheduledTaskDetailModelTest {
         assertEquals(Status.RUNNING, ScheduledTaskDetailModel.status(task(), fireRunning = true, now = now))
         assertEquals(Status.WAITING, ScheduledTaskDetailModel.status(task(), false, now))
 
-        // One-shot: waiting, then decided by its single run.
         assertEquals(Status.WAITING, ScheduledTaskDetailModel.status(task(ScheduledRepeatMode.ONCE), false, now))
         assertEquals(
             Status.COMPLETED,
@@ -71,13 +67,10 @@ class ScheduledTaskDetailModelTest {
         )
         assertEquals(Status.DISABLED, ScheduledTaskDetailModel.status(task(ScheduledRepeatMode.ONCE, enabled = false), false, now))
 
-        // Repeating: a window that has run out is complete, enabled or not.
         val ended = daysFromToday(-1)
         assertEquals(Status.COMPLETED, ScheduledTaskDetailModel.status(task(end = ended), false, now))
         assertEquals(Status.COMPLETED, ScheduledTaskDetailModel.status(task(enabled = false, end = ended), false, now))
         assertEquals(Status.DISABLED, ScheduledTaskDetailModel.status(task(enabled = false), false, now))
-        // A repeating task keeps waiting after a failed run: one bad fire is
-        // not the task's state.
         assertEquals(Status.WAITING, ScheduledTaskDetailModel.status(task(runs = listOf(run(1, ok = false))), false, now))
     }
 
@@ -95,7 +88,6 @@ class ScheduledTaskDetailModelTest {
         assertFalse("old envelope without a fire time", ScheduledTaskDetailModel.isFireRunning(t, marker(null), true))
     }
 
-    // ── progress ────────────────────────────────────────────────────────────
 
     @Test
     fun `a one-shot task counts to one`() {
@@ -115,7 +107,6 @@ class ScheduledTaskDetailModelTest {
 
     @Test
     fun `a window with an end date has a finite total`() {
-        // Daily 18:00, today through two days from now: today, +1, +2 → 3 to go.
         val p = ScheduledTaskDetailModel.progress(
             task(end = daysFromToday(2), runs = listOf(run(1), run(0)), fireCount = 2), marker(), false, now,
         )
@@ -134,7 +125,7 @@ class ScheduledTaskDetailModelTest {
 
     @Test
     fun `the tapped fire's index counts past the 50-row history cap`() {
-        val runs = (0 until 50).map { run(1000L - it) } // newest first
+        val runs = (0 until 50).map { run(1000L - it) }
         val t = task(runs = runs, fireCount = 120)
         assertEquals(120, ScheduledTaskDetailModel.progress(t, marker(1000), false, now).currentIndex)
         assertEquals(118, ScheduledTaskDetailModel.progress(t, marker(998), false, now).currentIndex)
@@ -148,7 +139,6 @@ class ScheduledTaskDetailModelTest {
         assertEquals(7, task(runs = listOf(run(2)), fireCount = 7).firesSoFar)
     }
 
-    // ── history merge ───────────────────────────────────────────────────────
 
     @Test
     fun `history is newest first, numbered, with the tapped fire and other chats marked`() {
@@ -168,7 +158,6 @@ class ScheduledTaskDetailModelTest {
         assertEquals(FireState.RUNNING, rows[0].state)
         assertEquals(2, rows[0].index)
         assertTrue(rows[0].isCurrent)
-        // Once recorded it is not duplicated.
         val recorded = task(runs = listOf(run(500), run(100)), fireCount = 2)
         assertEquals(2, ScheduledTaskDetailModel.history(recorded, marker(500), "S1", fireRunning = true).size)
     }
@@ -178,7 +167,6 @@ class ScheduledTaskDetailModelTest {
         assertTrue(ScheduledTaskDetailModel.history(null, marker(1), "S1", false).isEmpty())
     }
 
-    // ── trigger text ────────────────────────────────────────────────────────
 
     private val en = ScheduledTaskDetailModel.TriggerPhrases(
         once = "Once at %1\$s", daily = "Every day %1\$s", weekdays = "Weekdays %1\$s",
@@ -195,7 +183,6 @@ class ScheduledTaskDetailModelTest {
         assertEquals("Once at D7 08:05", text(task(ScheduledRepeatMode.ONCE, hour = 8, minute = 5, start = 7)))
         assertEquals("Every day 18:00", text(task()))
         assertEquals("Weekdays 18:00", text(task(ScheduledRepeatMode.WEEKDAYS)))
-        // Monday first, whatever order the set holds.
         assertEquals(
             "Every Mon, Wed, Sun 09:30",
             text(task(ScheduledRepeatMode.CUSTOM, days = setOf(Calendar.SUNDAY, Calendar.WEDNESDAY, Calendar.MONDAY), hour = 9, minute = 30)),
@@ -209,7 +196,6 @@ class ScheduledTaskDetailModelTest {
         assertEquals("Every day 18:00 · D3 – D9", text(task(start = 3, end = 9)))
     }
 
-    // ── chat card subtitle ──────────────────────────────────────────────────
 
     @Test
     fun `the card builds its status line with the iOS subline rule`() {
@@ -220,8 +206,6 @@ class ScheduledTaskDetailModelTest {
 
     @Test
     fun `the card re-reads the clock while its next-fire time is ahead`() {
-        // Read only at composition, an on-screen card kept "Next: <time>"
-        // after the fire had happened; the relative label also needs a tick.
         val card = ProductionSources.read("ui/chat/ScheduledTaskCard.kt")
         assertTrue(card.contains("produceState(System.currentTimeMillis(), marker.nextFireAtMs)"))
         assertTrue(card.contains("delay(ScheduledTaskDetailModel.nextTickMs(wait))"))
@@ -229,14 +213,11 @@ class ScheduledTaskDetailModelTest {
 
     @Test
     fun `the detail sheet pins its nav bar and stays below the status bar`() {
-        // Sized to its content, a long page slid under the status bar and the
-        // nav bar scrolled away with the cards.
         val sheet = ProductionSources.read("ui/chat/ScheduledTaskDetailSheet.kt")
         assertTrue(sheet.contains("Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f))"))
         assertTrue(sheet.contains(".weight(1f)\n                    .verticalScroll(rememberScrollState())"))
     }
 
-    // ── durations ───────────────────────────────────────────────────────────
 
     @Test
     fun `durations use their two largest units`() {
@@ -248,7 +229,6 @@ class ScheduledTaskDetailModelTest {
         assertEquals(listOf(DurationUnit.SECOND to 0), ScheduledTaskDetailModel.durationParts(0))
     }
 
-    // ── prompt ──────────────────────────────────────────────────────────────
 
     @Test
     fun `the prompt is cleaned of every leading note`() {
@@ -272,7 +252,6 @@ class ScheduledTaskDetailModelTest {
         assertEquals("Hello", ScheduledTaskDetailModel.cleanPrompt(null, ScheduledTaskMarker.parse(xml)!!))
     }
 
-    // ── delivery ────────────────────────────────────────────────────────────
 
     @Test
     fun `delivery reads relative to the chat the page was opened from`() {
@@ -286,7 +265,6 @@ class ScheduledTaskDetailModelTest {
         assertEquals(Delivery.ChildOfOtherChat("S9"), d(ScheduledTargetMode.ChildOfCurrent("S9"), null))
     }
 
-    // ── persistence the page relies on ──────────────────────────────────────
 
     @Test
     fun `the envelope carries its fire time and parses it back`() {
@@ -318,12 +296,9 @@ class ScheduledTaskDetailModelTest {
     @Test
     fun `the chat card opens the detail page`() {
         val card = ProductionSources.read("ui/chat/ScheduledTaskCard.kt")
-        // [T-sched-card-metrics] The tap goes through the shared TaskCardFrame.
         assertTrue(card.contains("onClick = { showingDetail = true }"))
         assertTrue(card.contains("ScheduledTaskDetailSheet(\n            marker = marker,\n            hostSessionId = hostSessionId,"))
         val chat = ProductionSources.read("ui/chat/ChatScreen.kt")
-        // [T-port-sched-pill-visible] The real session id: the route id of a
-        // chat started fresh stays its "__new__…" draft id.
         assertTrue(chat.contains("marker = item.marker,\n                                hostSessionId = viewModel.currentSessionId,"))
     }
 }

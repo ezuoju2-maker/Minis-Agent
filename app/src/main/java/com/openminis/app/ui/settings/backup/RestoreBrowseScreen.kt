@@ -58,19 +58,6 @@ import com.openminis.app.ui.components.SwipeRowActions
 import com.openminis.app.ui.settings.SettingsScaffold
 import com.openminis.app.ui.settings.SettingsSection
 
-/**
- * [T-android-restore-browse] Walk a destination's folders and pick a backup.
- *
- * Mirrors the iOS server/folder browsers. Three things it is deliberately NOT:
- *
- * - Not a flat dump of every package on the server. Listing is one level at a
- *   time, because a shared root holding far more than backups made a single
- *   recursive sweep slow enough to look hung.
- * - Not silent about where it is looking. The pinned bar names the directory,
- *   so a live listing is never mistaken for the local backup history.
- * - Not a one-tap download. Tapping a package asks first, leading with its
- *   SIZE — an accidental tap on a multi-GB file over cellular is expensive.
- */
 @Composable
 fun RestoreBrowseScreen(
     remote: RcloneRemoteStore.Remote,
@@ -88,17 +75,12 @@ fun RestoreBrowseScreen(
     val pending by vm.pending.collectAsState()
 
     var confirming by remember { mutableStateOf<RcloneChunkedUpload.RemoteEntry?>(null) }
-    /** Package awaiting delete confirmation; the item itself, so a reload cannot retarget it. */
     var pendingDelete by remember { mutableStateOf<RcloneChunkedUpload.RemoteEntry?>(null) }
 
     LaunchedEffect(remote.name) { vm.browseDestination(remote) }
-    // Leaving mid-browse must not strand listing state for the next visit.
     DisposableEffect(Unit) { onDispose { vm.clearBrowse() } }
-    // The package opened: hand control back so the restore screen can show it.
     LaunchedEffect(pending) { if (pending != null) onPicked() }
 
-    // The remote's own configured folder is the floor — a user restoring should
-    // not wander out of the directory they nominated as their backup location.
     val root = remote.path.trim('/')
     val current = path.trim('/')
     val segments = remember(current, root) {
@@ -107,9 +89,6 @@ fun RestoreBrowseScreen(
     }
 
     SettingsScaffold(title = remote.name, onBack = onBack, scrollable = false) {
-        // Pinned, NOT part of the scrolling list: as a list section it scrolled
-        // away with the content, so a user deep in a long folder could no
-        // longer see — or tap — the way back up.
         BreadcrumbBar(
             rootLabel = remote.name,
             segments = segments,
@@ -141,11 +120,6 @@ fun RestoreBrowseScreen(
                         modifier = Modifier.fillMaxWidth().padding(14.dp),
                     )
                     else -> entries.forEachIndexed { i, e ->
-                        // [T-restore-browse-swipe-delete] Swipe a package left
-                        // to reveal Delete, as on iOS. Reveal-then-tap plus a
-                        // named confirmation, never delete-on-swipe: the file
-                        // is unlinked on the server and SMB / WebDAV / SFTP
-                        // have no trash. Folders get no action.
                         androidx.compose.runtime.key(e.path) {
                             SwipeRowActions(
                                 actions = if (e.isDirectory) emptyList() else listOf(
@@ -183,8 +157,6 @@ fun RestoreBrowseScreen(
         }
     }
 
-    // Size first, as on iOS: it is the fact that decides whether to proceed,
-    // especially on a metered connection.
     confirming?.let { e ->
         AlertDialog(
             onDismissRequest = { confirming = null },
@@ -215,8 +187,6 @@ fun RestoreBrowseScreen(
         )
     }
 
-    // Names the file and its size: package names look alike, and the size is
-    // the cheapest way to notice the one about to go is the big one.
     pendingDelete?.let { e ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
@@ -247,14 +217,6 @@ fun RestoreBrowseScreen(
     }
 }
 
-/**
- * Tappable path, anchored to the trailing edge.
- *
- * A single static label plus an Up button meant climbing several levels one tap
- * at a time. Each crumb jumps straight to that level. The row scrolls
- * horizontally and sits at its end, because on a deep path the levels nearest
- * the user are the ones worth showing.
- */
 @Composable
 private fun BreadcrumbBar(
     rootLabel: String,
@@ -369,26 +331,6 @@ private fun EntryRow(
     }
 }
 
-/**
- * [T-android-restore-progress-sheet] A long-running step, presented as a
- * bottom sheet that only its own Cancel can close.
- *
- * These used to be `AlertDialog`s. A dialog floats in the middle of the
- * screen, so the live area of a multi-GB download sat directly under the
- * thumb, surrounded by scrim on every side — and while `onDismissRequest = {}`
- * blocks the outside tap, the shape still reads as dismissable and invites the
- * tap in the first place. A sheet anchored to the bottom edge puts the content
- * where a phone is actually held, and Cancel becomes a deliberate press rather
- * than the thing you hit by accident.
- *
- * Non-dismissable on purpose, in all three ways it could be closed:
- *   - `onDismissRequest = {}` — scrim taps do nothing
- *   - `confirmValueChange = { it != Hidden }` — the drag handle cannot swipe
- *     it away, which `onDismissRequest` alone does NOT prevent
- *   - `dragHandle = null` — no affordance suggesting it can be
- *
- * Abandoning the work stays possible; it just has to be said out loud.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ProgressSheet(
@@ -427,7 +369,6 @@ private fun ProgressSheet(
     }
 }
 
-/** Live download: bar, bytes, speed, time left, and a Cancel that works. */
 @Composable
 private fun TransferSheet(t: BackupViewModel.TransferInfo, onCancel: () -> Unit) {
     ProgressSheet(
@@ -462,12 +403,6 @@ private fun TransferSheet(t: BackupViewModel.TransferInfo, onCancel: () -> Unit)
     }
 }
 
-/**
- * Which step of opening the package is underway.
- *
- * Deliberately not a percentage: unzip reports nothing along the way, and a bar
- * that sits at 0 and jumps to 100 is a worse lie than naming the step.
- */
 @Composable
 private fun OpenStageSheet(
     stage: Int,
@@ -489,8 +424,6 @@ private fun OpenStageSheet(
             Spacer(Modifier.width(12.dp))
             Text(stringResource(label), style = MaterialTheme.typography.bodyMedium)
         }
-        // [T-android-open-progress] Real counts under the stage label. Absent
-        // until the first entry lands, so the row does not flash "0 files".
         progress?.let { p ->
             Spacer(Modifier.height(10.dp))
             Text(

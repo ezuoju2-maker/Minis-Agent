@@ -18,12 +18,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * [FEAT-261021-03] minis-config for Settings > Network, port of iOS
- * NetworkConfigFields (FEAT-261019-01): the paths, the route / exit-node
- * normalizers and validators, the status shape, the proxies add payload, and
- * the bridge running normalize + validate before the confirmation dialog.
- */
 class NetworkConfigFieldsTest {
 
     private val envVars = EnvVarRepository(
@@ -83,7 +77,6 @@ class NetworkConfigFieldsTest {
         assertEquals("proxy:P1", n("proxy:Home"))
         assertEquals("proxy:P2", n("proxy.example.com:1080"))
         assertEquals("unknown text passes through for validate", "nowhere", n("nowhere"))
-        // Two proxies with one name: ambiguous, not guessed.
         val twins = proxies + home.copy(id = "P3")
         assertEquals("Home", str(NetworkConfigRoute.normalize(ConfigValue.Str("Home"), twins)))
     }
@@ -178,7 +171,6 @@ class NetworkConfigFieldsTest {
         assertTrue(ConfigValue.SECRET_KEYS.containsAll(listOf("password", "authKey", "apiKey")))
         val masked = ConfigValue.Obj(mapOf("host" to ConfigValue.Str("h"), "password" to ConfigValue.Str("s3cret"))).redactingSecrets()
         assertFalse(masked.toString().contains("s3cret"))
-        // Neither write-only field can be read back.
         for (path in listOf("network.tailscale.authKey")) {
             val f = NetworkConfigFields.build(envVars).single { it.path == path }
             rejected("permission_denied") { f.read() }
@@ -192,7 +184,6 @@ class NetworkConfigFieldsTest {
         val block = set.substringBefore("newValue = normalized")
         assertTrue(block.contains("field.normalize(parsedValue)"))
         assertTrue(block.indexOf("field.valueSchema.validate(it)") < block.indexOf("field.validate(it)"))
-        // The confirmation is requested after the resolve loop that holds this block.
         assertTrue(bridge.indexOf("newValue = normalized") < bridge.indexOf("ConfigConfirmationGate", bridge.indexOf("newValue = normalized")))
     }
 }

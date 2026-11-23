@@ -9,26 +9,14 @@ import com.openminis.app.config.ConfigValue
 import com.openminis.app.logging.AppLogger
 import java.util.Locale
 
-// [T-config-readable] App-side half of the readable descriptions: id → name
-// resolution against the live stores, sentence assembly per formatter, and the
-// launch-time template validation. The pure pieces live in ConfigReadable.kt.
-// Port of iOS ConfigReadableRenderer.swift.
-//
-// Every sentence produced here is USER-FACING ONLY (confirmation dialog + Logs
-// → Config Changes). Nothing here may be returned to the CLI or the model.
 
-/** Names for ids, backed by the live stores; swappable in tests. */
 interface ReadableNameSource {
-    /** "Claude Sonnet 5.5 (Anthropic(53))", or null when no entry has this id. */
     fun modelEntryLabel(id: String): String?
-    /** The instance label, its provider type's name when blank, or null. */
     fun instanceLabel(id: String): String?
     fun groupName(id: String): String?
     fun thinkingRuleLabel(instanceId: String, ruleId: String): String?
-    /** Names of the groups that list this model entry. */
     fun groupsContaining(entryId: String): List<String>
     fun modelCountOf(instanceId: String): Int
-    /** The sub agent's name; a default body, so name sources written before it still compile. */
     fun subAgentName(id: String): String? = null
 }
 
@@ -44,17 +32,11 @@ private object NoNames : ReadableNameSource {
 object ConfigRefResolver {
     @Volatile var names: ReadableNameSource = NoNames
 
-    /**
-     * The user-facing name of a record, frozen as literal text. Unknown ids
-     * read "unknown model 1234abcd…" rather than disappearing.
-     */
     fun name(kind: ConfigRefKind, id: String): ReadableArg = when (kind) {
         ConfigRefKind.ModelEntry -> {
             val label = names.modelEntryLabel(id)
             when {
                 label != null -> ReadableArg.Text(label)
-                // A composite "<instance>/<model>" still names the model even
-                // after the entry is gone.
                 id.contains('/') -> {
                     val inst = id.substringBefore('/')
                     val model = id.substringAfter('/')
@@ -90,15 +72,9 @@ object ConfigRefResolver {
 object ConfigReadableRenderer {
     private const val TAG = "ConfigReadable"
 
-    /** First element of a model list = the group's primary model. */
     const val primaryFirstKey = "primary is now %@"
     const val plainFirstKey = "first is now %@"
 
-    /**
-     * Key → format in the in-app UI language (null = no translation), and
-     * that language's tag. Installed by ConfigBuiltins with the app context;
-     * the defaults leave every key in English (JVM tests).
-     */
     @Volatile var localizerFactory: () -> (String) -> String? = { { null } }
     @Volatile var currentLanguage: () -> String = { Locale.getDefault().toLanguageTag() }
     @Volatile var currentLocale: () -> Locale = { Locale.getDefault() }
@@ -109,13 +85,7 @@ object ConfigReadableRenderer {
         return ReadableSummary(locale = currentLanguage(), text = text, lines = lines, subject = subject)
     }
 
-    // -- Field writes (set / .append / .remove) --
 
-    /**
-     * Sentences for one field write. `.append` / `.remove` arrive as the whole
-     * old and new arrays, so the list diff describes them naturally. Never
-     * fails: anything unexpected falls back to the generic sentence.
-     */
     fun forFieldWrite(field: ConfigField, old: RedactedConfigValue, new: RedactedConfigValue): ReadableSummary {
         val spec = field.readable
         val label = spec.fieldLabel ?: field.displayName
@@ -207,7 +177,6 @@ object ConfigReadableRenderer {
         }
     }
 
-    /** "<field>: <old> → <new>", or "<field>: <value> (unchanged)". */
     fun changeLine(phrase: ReadableArg, old: ReadableArg, new: ReadableArg): ReadableLine =
         if (old == new) {
             ReadableLine("%1\$@: %2\$@ (unchanged)", listOf(phrase, new))
@@ -218,7 +187,6 @@ object ConfigReadableRenderer {
     fun genericLine(phrase: ReadableArg, old: ConfigValue, new: ConfigValue): ReadableLine =
         changeLine(phrase, genericPhrase(old), genericPhrase(new))
 
-    /** Raw-value phrase for the fallback sentence. */
     fun genericPhrase(v: ConfigValue): ReadableArg = when (v) {
         ConfigValue.Null -> ReadableArg.Key("(none)")
         is ConfigValue.Bool -> ReadableArg.Key(if (v.value) "On" else "Off")
@@ -230,10 +198,6 @@ object ConfigReadableRenderer {
         is ConfigValue.Obj -> ReadableArg.Key("(settings object)")
     }
 
-    /**
-     * One value → phrase for the value formatters; null when the value does
-     * not have the shape the formatter expects.
-     */
     fun phraseFor(f: ConfigValueFormatter, v: ConfigValue): ReadableArg? = when (f) {
         is ConfigValueFormatter.Bool -> (v as? ConfigValue.Bool)?.let { ReadableArg.Key(if (it.value) f.on else f.off) }
         is ConfigValueFormatter.EnumLabels -> (v as? ConfigValue.Str)?.value?.let { s ->
@@ -280,11 +244,6 @@ object ConfigReadableRenderer {
         -> null
     }
 
-    /**
-     * The Soul icon. Android also accepts bare base64 and minis:// / /var/minis
-     * paths as an image source (iOS only data URIs), so anything that is not a
-     * single short glyph reads "Custom image" — never the payload or a path.
-     */
     private fun imagePhrase(s: String): ReadableArg = when {
         s.isEmpty() -> ReadableArg.Key("Default icon")
         s == "<image>" || RedactedConfigValue.isInlineImage(s) -> ReadableArg.Key("Custom image")
@@ -292,7 +251,6 @@ object ConfigReadableRenderer {
         else -> ReadableArg.Key("Custom image")
     }
 
-    /** 1536 → "1.5 KB", 10_000_000 → "10 MB" (decimal units, like iOS .file). */
     private fun byteCount(n: Long): String {
         if (n < 1000) return "$n bytes"
         val units = listOf("KB", "MB", "GB", "TB")
@@ -302,7 +260,6 @@ object ConfigReadableRenderer {
         return "${ReadableCore.plainNumber(if (v >= 100) Math.rint(v) else Math.rint(v * 10) / 10)} ${units[i]}"
     }
 
-    // -- Lists --
 
     fun listLine(
         phrase: ReadableArg,
@@ -328,10 +285,6 @@ object ConfigReadableRenderer {
         return ReadableLine("%1\$@: %2\$@", listOf(phrase, ReadableArg.Clauses(clauses)))
     }
 
-    /**
-     * Names merged by what they read as (two ids that name the same thing
-     * count together), "×N" for repeats, the first few then "+N more".
-     */
     fun nameList(items: List<ReadableCore.ListItem>, name: (String) -> ReadableArg): ReadableArg {
         val counts = LinkedHashMap<ReadableArg, Int>()
         for (item in items) {
@@ -363,7 +316,6 @@ object ConfigReadableRenderer {
         else -> null
     }
 
-    // -- Collection add / remove --
 
     fun forCollectionAdd(c: ConfigCollection, payload: RedactedConfigValue): ReadableSummary {
         val lines = runCatching { c.readableForAdd(payload) }.getOrElse {
@@ -373,7 +325,6 @@ object ConfigReadableRenderer {
         return summary(lines, "${c.basePath}:new")
     }
 
-    /** Rendered BEFORE the removal, so the record is still named. */
     fun forCollectionRemove(c: ConfigCollection, childId: String): ReadableSummary {
         val lines = runCatching { c.readableForRemove(childId) }.getOrElse {
             AppLogger.warning(TAG, "[ConfigReadable] fallback path=${c.basePath}.remove reason=${it.message}")
@@ -385,15 +336,7 @@ object ConfigReadableRenderer {
         return summary(lines, "${c.basePath}:$childId")
     }
 
-    // -- Launch validation --
 
-    /**
-     * Logs every writable field still on the generic template and every enum
-     * label table that misses a case of its schema — the strong reminder
-     * when a new setting lands. iOS additionally asserts in DEBUG; here a
-     * gap is an error log plus a unit test (ConfigReadableKeysTest), so a
-     * debug build never crashes at launch over a missing label.
-     */
     fun validateRegistry(fields: List<ConfigField>): List<String> {
         var writable = 0
         val generic = ArrayList<String>()
@@ -422,18 +365,15 @@ object ConfigReadableRenderer {
     }
 }
 
-/** [T-config-readable] Raw thinking token → the label keys iOS uses. */
 object ReadableThinkingLabels {
     val levels: Map<String, String> = mapOf(
         "off" to "Off", "low" to "Low", "medium" to "Med", "high" to "High",
         "xhigh" to "XHigh", "max" to "Max", "ultra" to "Ultra",
     )
 
-    /** "" = not set (sessions start with thinking off / the model default). */
     val withNotSet: Map<String, String> = levels + ("" to "Not set")
 }
 
-/** [ReadableNameSource] over the live provider config. */
 class ProviderRepositoryNames(
     private val repo: com.openminis.app.data.repository.ProviderRepository,
 ) : ReadableNameSource {

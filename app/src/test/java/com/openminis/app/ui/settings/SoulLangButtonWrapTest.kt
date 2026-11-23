@@ -5,11 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-soul-lang-button-wrap] The Persona language row's "English" broke
- * mid-word ("Englis" / "h") on a narrow phone: three equal-width buttons with
- * the default 24dp side padding and a label allowed to wrap.
- */
 class SoulLangButtonWrapTest {
 
     @Test

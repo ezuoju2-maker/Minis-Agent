@@ -13,10 +13,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-speed-tier-icons] Standard = speedometer, Fast = outline bolt, Ultrafast
- * = solid bolt; monochrome single glyphs, no emoji, no double bolt.
- */
 class SpeedTierIconsTest {
 
     private fun paths(group: VectorGroup): List<VectorPath> =
@@ -57,7 +53,6 @@ class SpeedTierIconsTest {
             .substringBefore("\n}\n")
         assertTrue(badge.contains("SpeedTierIcons.forTier(tier)"))
         assertTrue(badge.contains("contentDescription = speedTierLabel(tier)"))
-        // [T-android-ultrafast-align] Sized from the text's cap height, not a fixed 12dp.
         assertTrue(badge.contains("paint.getTextBounds(\"H\", 0, 1, bounds)") && badge.contains("SpeedTierIcons.boltBoxForInk(ink)"))
         assertFalse(badge.contains("Modifier.size(12.dp)"))
         assertTrue(screen.contains("MenuItemIcon(com.openminis.app.ui.components.SpeedTierIcons.Speedometer)"))
@@ -103,7 +98,6 @@ class SpeedTierIconsTest {
 
     @Test
     fun `a bolt box sized for its ink`() {
-        // The path spans y 2.5..21.5 with a 1.8 outline: 20.8 of 24 units are ink.
         assertEquals(20.8f / 24f, SpeedTierIcons.BOLT_INK_FRACTION, 1e-6f)
         assertEquals(24f, SpeedTierIcons.boltBoxForInk(20.8f), 1e-4f)
     }

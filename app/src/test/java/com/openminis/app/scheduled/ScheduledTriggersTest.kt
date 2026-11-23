@@ -9,12 +9,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * [T-android-scheduled-triggers] minis-scheduled's iOS triggers on Android
- * (8b315deba / 993b0a5e0 / 3b69e3d00): --after, --interval/--count,
- * --trigger on-completion --of, --thinking — persisted and armed through
- * AlarmManager, without disturbing the in-app calendar tasks.
- */
 class ScheduledTriggersTest {
 
     private val t0 = 1_800_000_000_000L
@@ -36,7 +30,6 @@ class ScheduledTriggersTest {
         onCompletionOf = of, anchorMs = anchor, triggeredCount = triggered,
     )
 
-    // ── Backward compatibility ────────────────────────────────────────────
 
     @Test
     fun `a task stored before triggers existed is still a calendar task`() {
@@ -47,8 +40,6 @@ class ScheduledTriggersTest {
         assertEquals(ScheduledTriggerKind.CALENDAR, t.triggerKind)
         assertTrue(t.isCalendar)
         assertNull(t.delaySec); assertNull(t.intervalSec); assertNull(t.anchorMs)
-        // No trigger keys are written for a calendar task, so an older build
-        // reading this row sees exactly what it always did.
         assertFalse(t.toJson().has("trigger"))
     }
 
@@ -60,7 +51,6 @@ class ScheduledTriggersTest {
         assertEquals(oc, ScheduledTask.fromJson(oc.toJson()))
     }
 
-    // ── When they fire ────────────────────────────────────────────────────
 
     @Test
     fun `after fires once, delay after the anchor, and never again`() {
@@ -108,7 +98,6 @@ class ScheduledTriggersTest {
     fun `saving from the editor keeps history, counts and the anchor`() {
         val stored = task(ScheduledTriggerKind.INTERVAL, intervalSec = 600, triggered = 4)
             .copy(runHistory = listOf(ScheduledRun(t0, "s", "ok", true)), fireCount = 4)
-        // What the editor's buildTask produces: none of the bookkeeping.
         val edited = stored.copy(label = "renamed", runHistory = emptyList(), fireCount = null,
             anchorMs = null, triggeredCount = null)
         val merged = ScheduledTaskManager.mergeBookkeeping(edited, stored)
@@ -119,7 +108,6 @@ class ScheduledTriggersTest {
         assertEquals(4, merged.triggeredCount)
     }
 
-    // ── On-completion ─────────────────────────────────────────────────────
 
     @Test
     fun `dependents are the enabled on-completion tasks waiting for that id`() {
@@ -142,7 +130,6 @@ class ScheduledTriggersTest {
         )
     }
 
-    // ── The CLI ───────────────────────────────────────────────────────────
 
     private fun args(vararg argv: String) =
         OffloadArgs(listOf("create", *argv), booleanFlags = setOf("disabled", "h", "help"))
@@ -209,7 +196,6 @@ class ScheduledTriggersTest {
         }
     }
 
-    // ── What the task screens show ────────────────────────────────────────
 
     private val phrases = ScheduledTaskDetailModel.TriggerPhrases(
         once = "Once at %1\$s", daily = "Every day %1\$s", weekdays = "Weekdays %1\$s",
@@ -257,7 +243,6 @@ class ScheduledTriggersTest {
         assertTrue(com.openminis.app.ui.scheduled.formatScheduleSummary(task(ScheduledTriggerKind.ON_COMPLETION, of = "abcdef123456")).startsWith("After abcdef12"))
     }
 
-    // ── [T-android-scheduled-fire-claim] one delivery, one fire ──────────
 
     @Test
     fun `a stale second delivery of an interval fire is not due`() {
@@ -265,8 +250,6 @@ class ScheduledTriggersTest {
         val fireAt = t0 + 600_000
         assertTrue("the real fire", ScheduledTaskManager.relativeAlarmDue(iv, fireAt))
         val (counted, _) = ScheduledTaskManager.afterAlarmFire(iv, fireAt)!!
-        // rescheduleAll re-armed it for "now" from the pre-count row: that
-        // delivery arrives a moment later and must find nothing to run.
         assertFalse(ScheduledTaskManager.relativeAlarmDue(counted, fireAt + 50))
         assertTrue("the next slot is still due at its time", ScheduledTaskManager.relativeAlarmDue(counted, fireAt + 600_000))
     }
@@ -283,7 +266,6 @@ class ScheduledTriggersTest {
         assertTrue("calendar is not decided here", ScheduledTaskManager.relativeAlarmDue(task(), t0))
     }
 
-    // ── [T-android-scheduled-oncompletion-finish] upstream = whole schedule ─
 
     @Test
     fun `an upstream finishes when its schedule is over, not after each run`() {

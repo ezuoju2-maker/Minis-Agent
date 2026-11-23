@@ -29,24 +29,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * [T-android-user-ask-notify] Posts a notification for a user_ask question
- * asked while the app is in the background (or the screen is off), answerable
- * from the notification - iOS UserAskCenter.postNotification /
- * handleNotificationResponse.
- *
- * Driven by UserAskCenter.asks and the process lifecycle, so every rule is one
- * reconciliation pass:
- *  - a pending ask with the app away posts its open question, once per question
- *    (PendingAsk.notifiedIndex), with sound only on the first;
- *  - an ask that resolves (answered, timed out, Stop, a new user message) or is
- *    forgotten loses its notification;
- *  - coming back to the app clears the notifications - the card is on screen -
- *    without re-alerting on the next trip to the background.
- *
- * Gated by the user_ask "Notify when in the background" setting and by the
- * notification permission; without either it silently posts nothing.
- */
 object UserAskNotifier {
     private const val TAG = "UserAsk"
     const val CHANNEL_ID = "minis_user_ask"
@@ -60,7 +42,6 @@ object UserAskNotifier {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var app: Context
 
-    /** Tags posted per request, so a resolved or foregrounded ask clears exactly those. */
     private val posted = HashMap<String, Int>()
 
     fun install(context: Context) {
@@ -78,13 +59,11 @@ object UserAskNotifier {
     }
 
     private fun sync(asks: Map<String, PendingAsk>, appInForeground: Boolean) {
-        // Resolved or forgotten: its notification goes.
         for (rid in posted.keys.toList()) {
             val a = asks[rid]
             if (a == null || a.state != UserAskState.PENDING) cancelAll(rid)
         }
         if (appInForeground) {
-            // The card is on screen; the notification would only go stale.
             for (rid in posted.keys.toList()) cancelAll(rid)
             return
         }
@@ -93,16 +72,10 @@ object UserAskNotifier {
         for (a in asks.values) {
             val i = UserAskNotificationPlan.indexToPost(a, appInForeground = false, enabled = enabled, nowMs = now) ?: continue
             post(a, sound = UserAskNotificationPlan.alertsWithSound(a))
-            // Marked even when nothing could be posted (permission off), so the
-            // question is not retried on every change of the ask.
             UserAskCenter.markNotified(a.requestId, i)
         }
     }
 
-    /**
-     * Re-post the open question quietly: after a rejected or stale answer from
-     * the notification (which also clears the reply field's spinner).
-     */
     fun repost(requestId: String) {
         if (!installed.get()) return
         val a = UserAskCenter.asks.value[requestId]
@@ -110,19 +83,11 @@ object UserAskNotifier {
         post(a, sound = false)
     }
 
-    /** Clear one notification (an answer for an ask this process no longer has). */
     fun cancel(tag: String) {
         if (!installed.get()) return
         NotificationManagerCompat.from(app).cancel(tag, NOTIFICATION_ID)
     }
 
-    /**
-     * End a direct reply on [tag]. Android 15+ keeps a notification answered
-     * through RemoteInput alive (FLAG_LIFETIME_EXTENDED_BY_DIRECT_REPLY) and
-     * ignores the app cancelling it; only an update from the app ends that.
-     * Seen on the Pixel 6: after replying to question 2, question 3 was posted
-     * and question 2 stayed in the shade. So update it first, then cancel.
-     */
     fun endReply(tag: String) {
         if (!installed.get()) return
         val nm = NotificationManagerCompat.from(app)
@@ -184,8 +149,6 @@ object UserAskNotifier {
         when (c.layout) {
             Layout.CONFIRM -> {
                 b.addAction(button(ask, c.index, UserAskNotificationPlan.ACTION_CANCEL, app.getString(R.string.user_ask_cancel)))
-                // Allow asks the system to unlock the device first (iOS
-                // .authenticationRequired): no approving from a locked screen.
                 b.addAction(
                     NotificationCompat.Action.Builder(
                         0, app.getString(R.string.user_ask_allow),
@@ -212,7 +175,6 @@ object UserAskNotifier {
             }
             Layout.OPEN_ONLY -> b.addAction(0, app.getString(R.string.user_ask_notif_open_app), openChat(ask))
         }
-        // One notification per ask: clear the request's other questions.
         for (t in UserAskNotificationPlan.allTags(ask.requestId, ask.questions.size)) {
             if (t != tag) nm.cancel(t, NOTIFICATION_ID)
         }
@@ -236,19 +198,16 @@ object UserAskNotifier {
     private fun broadcast(ask: PendingAsk, index: Int, action: String, mutable: Boolean): PendingIntent {
         val intent = Intent(app, UserAskNotificationReceiver::class.java)
             .setAction("com.openminis.app.USER_ASK_ANSWER")
-            // Distinct data per action, so PendingIntents never collapse into one.
             .setData(Uri.parse("minis-userask://${ask.requestId}/$index/$action"))
             .putExtra(EXTRA_REQUEST_ID, ask.requestId)
             .putExtra(EXTRA_INDEX, index)
             .putExtra(EXTRA_ACTION, action)
-        // RemoteInput fills the intent in, which needs a mutable PendingIntent.
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or
             if (mutable && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE
             else PendingIntent.FLAG_IMMUTABLE
         return PendingIntent.getBroadcast(app, "${ask.requestId}/$index/$action".hashCode(), intent, flags)
     }
 
-    /** Opens the chat (the card is its newest message), like the task-finished notification. */
     private fun openChat(ask: PendingAsk): PendingIntent {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("minis://session/${ask.sessionId}"))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -262,7 +221,6 @@ object UserAskNotifier {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = ContextCompat.getSystemService(app, NotificationManager::class.java) ?: return
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-        // High: a question that times out in minutes should pop up, not wait in the shade.
         val channel = NotificationChannel(
             CHANNEL_ID, app.getString(R.string.user_ask_notif_channel_name), NotificationManager.IMPORTANCE_HIGH,
         ).apply {

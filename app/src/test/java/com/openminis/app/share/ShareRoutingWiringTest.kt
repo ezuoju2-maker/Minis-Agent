@@ -5,15 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-share-routing] User report: sharing a file to Minis while the
- * session list was showing did nothing visible; the file waited for whichever
- * chat was opened next. Reproduced on a Pixel 4a with the default Auto launch
- * mode: the app opens inside a chat (route `chat/{id}`), Back only pops the
- * scaffold's pane navigator, so the list shows under `chat/{id}` and the old
- * `route == sessions` fallback never fired. These pins keep the routing on
- * what is VISIBLE, not on the NavHost route.
- */
 class ShareRoutingWiringTest {
 
     private val scaffold = ProductionSources.read("ui/navigation/ChatSplitScaffold.kt")

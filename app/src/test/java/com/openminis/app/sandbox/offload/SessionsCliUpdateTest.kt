@@ -16,14 +16,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/**
- * [T-sessions-cli-update] `minis-sessions-cli update / groups` and the new
- * `list` / `status` fields, end to end through the real handler on an
- * in-memory Room DB. The cases are the cross-platform list from the task
- * (each field alone and combined, a missing group is created, "" leaves the
- * group, a bad icon, missing arguments, a child session, an unknown id,
- * `list --group`, `groups`, --compact / -q).
- */
 @RunWith(RobolectricTestRunner::class)
 class SessionsCliUpdateTest {
 
@@ -53,7 +45,6 @@ class SessionsCliUpdateTest {
         return r.exitCode to r.output
     }
 
-    /** The JSON envelope at the start of the output (help text may follow on errors). */
     private fun json(out: String): JSONObject {
         var depth = 0
         for ((i, c) in out.withIndex()) {
@@ -68,7 +59,6 @@ class SessionsCliUpdateTest {
 
     private fun data(out: String) = json(out).getJSONObject("data")
 
-    /** iOS's error envelope: {ok:false, tool, action, error:{code, message}}. */
     private fun errCode(out: String) = json(out).also { assertFalse(it.getBoolean("ok")) }.getJSONObject("error").getString("code")
 
     private fun changed(d: JSONObject) = d.getJSONArray("changed").let { a -> List(a.length()) { a.getString(it) } }
@@ -109,7 +99,6 @@ class SessionsCliUpdateTest {
         val id2 = session()
         run("update", "--id", id2, "--group", "项目A")
         assertEquals(1, runBlocking { repo.listFolders() }.size)
-        // Case-sensitive: a different case is a different group.
         run("update", "--id", id2, "--group", "项目a")
         assertEquals(2, runBlocking { repo.listFolders() }.size)
     }
@@ -121,14 +110,12 @@ class SessionsCliUpdateTest {
         val d = data(run("update", "--id", id, "--group", "").second)
         assertEquals("", d.getString("group"))
         assertNull(runBlocking { repo.getSession(id) }!!.folderId)
-        // The group itself stays (leaving it is not dissolving it).
         assertEquals(1, runBlocking { repo.listFolders() }.size)
 
         val all = data(run("update", "--id", id, "--title", "T", "--group", "Work", "--icon", "research").second)
         assertEquals("T", all.getString("title"))
         assertEquals("Work", all.getString("group"))
         assertEquals("research", all.getString("icon"))
-        // Fixed order, as iOS: title, group, icon.
         assertEquals(listOf("title", "group", "icon"), changed(all))
     }
 
@@ -149,7 +136,6 @@ class SessionsCliUpdateTest {
             assertTrue(json(out).getJSONObject("error").getString("message").contains("productivity"))
             assertEquals(16, json(out).getJSONObject("error").getJSONArray("valid_icons").length())
         }
-        // Argument errors come before the lookup (shared case 22).
         assertEquals("invalid_icon", errCode(run("update", "--id", "no-such-id", "--icon", "rocket").second))
         assertEquals("Old title", runBlocking { repo.getSession(id) }!!.title)
     }
@@ -158,12 +144,12 @@ class SessionsCliUpdateTest {
     fun `9 missing arguments - invalid_arguments`() {
         val id = session()
         for (argv in listOf(
-            arrayOf("update", "--title", "x"),          // no --id
-            arrayOf("update", "--id", id),              // no field
-            arrayOf("update", "--id", id, "--title", ""), // empty title
-            arrayOf("update", "--id", id, "--title", "   "), // blank title
-            arrayOf("update", "--id", id, "--title"),   // value missing
-            arrayOf("update", "--id", id, "--title", "x", "--title-auto"), // both
+            arrayOf("update", "--title", "x"),
+            arrayOf("update", "--id", id),
+            arrayOf("update", "--id", id, "--title", ""),
+            arrayOf("update", "--id", id, "--title", "   "),
+            arrayOf("update", "--id", id, "--title"),
+            arrayOf("update", "--id", id, "--title", "x", "--title-auto"),
         )) {
             val (code, out) = run(*argv)
             assertEquals(argv.joinToString(" "), 2, code)

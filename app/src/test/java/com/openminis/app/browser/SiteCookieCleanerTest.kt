@@ -6,17 +6,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [ISS-040] Browser settings → Cookies & Website Data: Clear All gave no
- * feedback and the per-site delete icon did nothing.
- *
- * The CookieManager calls themselves were verified on a Pixel 4a (see the
- * commit); these pin the pure parts — which cookies a delete targets and how
- * they are expired — and, as source guards, the two root causes.
- */
 class SiteCookieCleanerTest {
 
-    // ── Pure helpers ───────────────────────────────────────────────────────
 
     @Test
     fun `cookie names are parsed from a getCookie header`() {
@@ -47,7 +38,6 @@ class SiteCookieCleanerTest {
     @Test
     fun `every expiry is already expired, root-scoped, and comes with a Secure twin`() {
         val values = SiteCookieCleaner.expiryCookies("sid", "www.example.com")
-        // host-only + www.example.com + example.com, each with and without Secure
         assertEquals(6, values.size)
         values.forEach {
             assertTrue(it, it.startsWith("sid=; "))
@@ -66,8 +56,6 @@ class SiteCookieCleanerTest {
         val history = listOf("a.com", "b.com", "c.com")
         assertEquals(listOf("a.com", "c.com"),
             SiteCookieCleaner.sitesWithCookies(history) { it != "b.com" })
-        // After Clear All every probe is false: the list empties, so the
-        // existing "No cookies stored" text shows instead of stale rows.
         assertEquals(emptyList<String>(), SiteCookieCleaner.sitesWithCookies(history) { false })
     }
 
@@ -77,7 +65,6 @@ class SiteCookieCleanerTest {
         assertFalse(SiteCookieCleaner.Result("x", setOf("a", "b"), setOf("b")).cleared)
     }
 
-    // ── Source guards on the sheet ─────────────────────────────────────────
 
     private val sheet = ProductionSources.read("ui/browser/BrowserSettingsSheet.kt")
 
@@ -92,8 +79,6 @@ class SiteCookieCleanerTest {
 
     @Test
     fun `the per-site delete expires real cookies and reports what is left`() {
-        // The old call: a bare host where a URL belongs, and an empty cookie —
-        // WebView ignores it. (The comment that explains this is allowed.)
         assertFalse("setCookie(domain, \"\") is a no-op", sheet.contains(".setCookie(domain"))
         val tap = sheet.substringAfter("items(domains) { domain ->").substringBefore("Icons.Default.Delete")
         assertTrue(tap.contains("withContext(Dispatchers.IO) { SiteCookieCleaner.clear(domain) }"))

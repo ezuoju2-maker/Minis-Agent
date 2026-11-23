@@ -27,32 +27,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * android-photos — query and manage the device photo library via MediaStore.
- *
- * Mirrors apple-photos (NativeOffloads/PhotosOffload.m) — same subcommand
- * names and flag conventions so prompts and the agent loop are platform-
- * agnostic. Some iOS concepts have no native Android equivalent (smart
- * albums; stable per-asset string identifiers); these are documented at
- * each subcommand.
- *
- * Usage:
- *   android-photos list [--type photo|video|all] [--start ISO --end ISO | --days N]
- *                       [--limit N]
- *   android-photos stats
- *   android-photos near --lat L --lon N [--radius KM] [--limit N]
- *   android-photos albums [--type user|smart|all]
- *   android-photos album [--id <bucket_id> | --name <bucket_name>] [--limit N]
- *   android-photos export --id <id> [--size thumb|medium|original]
- *   android-photos import --path <file> [--album-name <name>]
- *   android-photos create-album --name <name>
- *   android-photos favorite --id <id>
- *   android-photos delete --ids <id1,id2,...> --confirm
- *
- * Backwards compatibility:
- *   - `near <lat> <lon>` legacy positional form still works.
- *   - `--max` is accepted as an alias for `--limit`.
- */
 class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
 
@@ -61,7 +35,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         if (args.hasFlag("h", "help") || args.positional.isEmpty()) {
             return NativeOffloadResult(if (args.positional.isEmpty()) 2 else 0, HELP)
         }
-        // T330: tri-state agent gate before requesting media permissions.
         OffloadGate.enforce("photos", "android-photos", args, request)?.let { return it }
 
         ensureMediaPermission(args)?.let { return it }
@@ -73,11 +46,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
                 "near" -> handleNear(args)
                 "albums" -> handleAlbums(args)
                 "album" -> handleAlbum(args)
-                // [T-offload-caller-session] The session whose /var/minis this
-                // shell sees: the PARENT for a sub agent. With the raw
-                // MINIS_CHAT_SESSION_ID a sub agent's export was written to
-                // the helper's own offloads dir while the result pointed it at
-                // /var/minis/offloads/..., a path its shell then could not read.
                 "export" -> {
                     val caller = OffloadCallerSession.resolve(request.sessionId)
                     AppLogger.info(TAG, "export caller=${caller.sid?.take(8) ?: "nil"} via=${caller.source}")
@@ -104,7 +72,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         }
     }
 
-    // ── list (T59: + --type, --start, --end, --days, --limit) ────────────
 
     private fun handleList(args: OffloadArgs): NativeOffloadResult {
         val limit = (args.getInt("limit") ?: args.getInt("max") ?: 20).coerceIn(1, 100)
@@ -126,13 +93,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         return NativeOffloadResult(0, OffloadOutput.formatBody(data.toString(2), args) + "\n")
     }
 
-    /**
-     * MediaStore.Images and MediaStore.Video share the same column names for
-     * the fields we care about, so one helper handles both. DATE_TAKEN is
-     * milliseconds since epoch; we filter on it when --start/--end/--days
-     * supply a window, and fall back to the (cheaper) implicit "all rows"
-     * query when no range is set.
-     */
     private fun queryMedia(uri: Uri, kind: String, startMs: Long?, endMs: Long?, max: Int, sink: JSONArray) {
         if (max <= 0) return
         val projection = arrayOf(
@@ -179,11 +139,8 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         }
     }
 
-    // ── near (T59: + --lat/--lon flags + --limit) ────────────────────────
 
     private fun handleNear(args: OffloadArgs): NativeOffloadResult {
-        // Flag form (--lat/--lon, mirrors apple-photos near) preferred;
-        // legacy positional <lat> <lon> kept as alias.
         val lat = args.getDouble("lat") ?: args.positional.getOrNull(1)?.toDoubleOrNull()
         val lon = args.getDouble("lon", "lng") ?: args.positional.getOrNull(2)?.toDoubleOrNull()
         if (lat == null || lon == null) {
@@ -206,7 +163,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
             Manifest.permission.READ_EXTERNAL_STORAGE
         }
         if (ContextCompat.checkSelfPermission(context, perm) == PackageManager.PERMISSION_GRANTED) return true
-        // A14+ partial access counts
         if (Build.VERSION.SDK_INT >= 34) {
             val partial = "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
             if (ContextCompat.checkSelfPermission(context, partial) == PackageManager.PERMISSION_GRANTED) return true
@@ -222,11 +178,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         }
     }
 
-    /**
-     * Drive the system-dialog → settings-gate flow. On A13+ we ask for the
-     * granular media permissions; A14+ treats visual-user-selected as partial
-     * access, which [hasMediaPermission] already accepts.
-     */
     private fun ensureMediaPermission(args: OffloadArgs): NativeOffloadResult? {
         if (hasMediaPermission()) return null
         AppLogger.warning(TAG, "media permission not granted — routing through permission flow")
@@ -290,12 +241,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
                 context, "android.permission.ACCESS_MEDIA_LOCATION",
             ) == PackageManager.PERMISSION_GRANTED
 
-    /**
-     * `near` reads GPS EXIF; without ACCESS_MEDIA_LOCATION the MediaStore
-     * strips it from the streams we open and the result set is always empty.
-     * On A10+ it's a runtime permission — manifest entry alone is not enough.
-     * Pre-Q the permission doesn't exist; treat it as granted.
-     */
     private fun ensureMediaLocationPermission(args: OffloadArgs): NativeOffloadResult? {
         if (hasMediaLocationPermission()) return null
         AppLogger.warning(TAG, "ACCESS_MEDIA_LOCATION not granted — routing through permission flow")
@@ -347,15 +292,7 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         }
     }
 
-    // ── albums (T64) ─────────────────────────────────────────────────────
 
-    /**
-     * List buckets (Android's equivalent of iOS PHAssetCollection — every
-     * media row carries BUCKET_ID/BUCKET_DISPLAY_NAME). MediaStore has no
-     * native "smart album" concept, so apple-photos's user/smart distinction
-     * collapses on Android: --type smart returns an empty list with a
-     * structured note; --type user and --type all are equivalent.
-     */
     private fun handleAlbums(args: OffloadArgs): NativeOffloadResult {
         val type = (args.get("type") ?: "all").lowercase()
         if (type !in setOf("user", "smart", "all")) {
@@ -369,8 +306,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
             return NativeOffloadResult(0, OffloadOutput.formatBody(data.toString(2), args) + "\n")
         }
         val items = JSONArray()
-        // Aggregate over the IMAGES table; videos share the same bucket
-        // namespace so we union by id afterwards.
         val seen = mutableSetOf<Long>()
         listOf(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
             .forEach { uri ->
@@ -393,12 +328,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         return NativeOffloadResult(0, OffloadOutput.formatBody(data.toString(2), args) + "\n")
     }
 
-    /**
-     * List media inside one bucket. --id (Long) wins; --name does
-     * case-insensitive contains lookup, mirroring apple-photos. Returns
-     * the same shape as `list` so downstream tooling can treat them the
-     * same.
-     */
     private fun handleAlbum(args: OffloadArgs): NativeOffloadResult {
         val bucketId = args.getLong("id")
         val bucketName = args.get("name")
@@ -416,8 +345,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
             selection = "${MediaStore.Images.Media.BUCKET_DISPLAY_NAME} LIKE ?"
             selArgs = arrayOf("%${bucketName!!}%")
         }
-        // Inline the projection so we can pass selection — queryMedia hides
-        // selection behind the start/end filters.
         listOf(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI to "photo",
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI to "video",
@@ -459,33 +386,7 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         return NativeOffloadResult(0, OffloadOutput.formatBody(data.toString(2), args) + "\n")
     }
 
-    // ── export (T64) ─────────────────────────────────────────────────────
 
-    /**
-     * Copy the asset bytes into the CALLING SESSION's offloads dir
-     * (`<filesDir>/minis-sessions/<sessionId>/offloads/`) and report the
-     * sandbox-visible `/var/minis/offloads/<name>` path plus a `minis://`
-     * URL, matching iOS `PhotosOffload.m` (which exports to
-     * `/var/minis/offloads/` directly).
-     *
-     * [GH#139] This used to write to `<filesDir>/photos-export/` and return
-     * only `host_path`. That path is inside no PRoot bind mount, so the
-     * Linux sandbox cannot read it and `minis-open` rejects it (it accepts
-     * only http/https/about/minis URLs) — the agent could list photo
-     * metadata but never actually look at an exported photo. An older
-     * comment here claimed the handler "doesn't see the session id"; that
-     * stopped being true when T340 added `sessionId` to
-     * [NativeOffloadRequest], so the export is now session-scoped the same
-     * way `ModelUseOffloadHandler.sessionScopedHostFile` already does it.
-     *
-     * `sessionId` is null for offloads launched outside a chat (interactive
-     * terminal). There is no session offloads dir to write into then, so we
-     * keep the app-private fallback — but say plainly in the response that
-     * the file is NOT reachable from Linux, instead of implying it is.
-     *
-     * --size thumb / medium re-encode to JPEG at 256px / 1024px max edge
-     * via BitmapFactory; original copies the resource bytes as-is.
-     */
     private fun handleExport(args: OffloadArgs, sessionId: String?): NativeOffloadResult {
         val id = args.getLong("id")
             ?: return NativeOffloadResult(2, "android-photos export: --id <asset_id> is required\n")
@@ -494,7 +395,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
             return NativeOffloadResult(2, "android-photos export: --size must be thumb|medium|original\n")
         }
 
-        // Try Images first then Video.
         var srcUri: Uri? = null
         var mediaType = "photo"
         var mimeType = ""
@@ -532,10 +432,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
             ) + "\n",
         )
 
-        // [GH#139] Session-scoped when we know the caller's chat, so the export
-        // lands in the dir PRoot bind-mounts at /var/minis/offloads for THIS
-        // session. Mirrors ModelUseOffloadHandler.sessionScopedHostFile and
-        // PRootKernel.resolveSessionHostPath, which use the same layout.
         val sandboxVisible = sessionId != null
         val outDir = if (sandboxVisible) {
             File(context.filesDir, "minis-sessions/$sessionId/offloads").also { it.mkdirs() }
@@ -564,9 +460,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
                 .put("media_type", mediaType)
                 .put("format", if (size == "original") "original" else "jpeg")
                 .put("export_size", size)
-            // [GH#139] Hand back the paths the agent can actually USE: the
-            // sandbox path for shell tools, and the minis:// URL that
-            // `minis-open` accepts for in-chat preview / model rendering.
             if (sandboxVisible) {
                 data.put("linux_path", "/var/minis/offloads/${outFile.name}")
                     .put("minis_url", "minis://offloads/${outFile.name}")
@@ -609,7 +502,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         return written
     }
 
-    /** Re-encode an image asset to JPEG with max edge [maxEdge]. */
     private fun copyResized(src: Uri, dst: File, maxEdge: Int): Long {
         val bytes = context.contentResolver.openInputStream(src)?.use { it.readBytes() }
             ?: throw java.io.IOException("Could not read source bytes")
@@ -632,20 +524,8 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         return dst.length()
     }
 
-    // ── import (T64) ─────────────────────────────────────────────────────
 
-    /**
-     * Copy a host-filesystem file into MediaStore. Mirrors apple-photos
-     * import. --album-name creates the bucket implicitly via RELATIVE_PATH
-     * (Android API 29+) — there's no "create empty album" API.
-     */
     private fun handleImport(args: OffloadArgs): NativeOffloadResult {
-        // [T-photos-positional-path] Accept `import <file>` as well as
-        // `import --path <file>`, matching apple-photos (iOS 048d2d9f). The
-        // file is this subcommand's only natural argument, so the bare form is
-        // what an LLM (or a human) reaches for first; requiring the flag turned
-        // a correct-looking call into an argument error. positional[0] is the
-        // subcommand itself, so the path is positional[1].
         val path = args.get("path") ?: args.positional.getOrNull(1)
             ?: return NativeOffloadResult(
                 2,
@@ -734,14 +614,7 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         }
     }
 
-    // ── create-album (T64) ───────────────────────────────────────────────
 
-    /**
-     * Android has no "create empty album" API — buckets are created
-     * implicitly when files land in them. We return a structured note so
-     * the model knows to use `import --album-name` instead of failing
-     * silently. Mirrors apple-photos create-album shape (id/name/note).
-     */
     private fun handleCreateAlbum(args: OffloadArgs): NativeOffloadResult {
         val name = args.get("name")
             ?: return NativeOffloadResult(2, "android-photos create-album: --name <name> is required\n")
@@ -754,14 +627,7 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         return NativeOffloadResult(0, OffloadOutput.formatBody(data.toString(2), args) + "\n")
     }
 
-    // ── favorite (T64) ───────────────────────────────────────────────────
 
-    /**
-     * Toggle MediaStore.MediaColumns.IS_FAVORITE (Android 11+). Mirrors
-     * apple-photos favorite — toggles the flag and returns the new state.
-     * On API < 30 returns a structured error since the column doesn't
-     * exist.
-     */
     private fun handleFavorite(args: OffloadArgs): NativeOffloadResult {
         val id = args.getLong("id")
             ?: return NativeOffloadResult(2, "android-photos favorite: --id <asset_id> is required\n")
@@ -771,7 +637,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
                 .toString()
             return NativeOffloadResult(1, OffloadOutput.formatBody(body, args) + "\n")
         }
-        // Find the row in either Images or Video.
         var srcUri: Uri? = null
         var currentlyFavorite = false
         for (uri in listOf(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)) {
@@ -807,9 +672,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
                 .put("rows_updated", rows)
             NativeOffloadResult(0, OffloadOutput.formatBody(data.toString(2), args) + "\n")
         } catch (e: SecurityException) {
-            // RecoverableSecurityException on A11+ when the user hasn't
-            // explicitly granted write access to this asset. We can't
-            // launch the system dialog from a CLI sandbox.
             val body = JSONObject().put("error", "write_denied")
                 .put("id", id)
                 .put("message", "Android requires explicit user consent to modify another app's media. Open the asset in the system Photos app and toggle favorite there. Underlying: ${e.message}")
@@ -818,15 +680,7 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         }
     }
 
-    // ── delete (T64) ─────────────────────────────────────────────────────
 
-    /**
-     * Delete one or more assets. --ids comma-separated, --confirm
-     * required (mirrors apple-photos delete). On A11+ MediaStore raises
-     * RecoverableSecurityException when the asset wasn't created by us;
-     * we surface that as a structured error since the CLI sandbox can't
-     * show the system consent dialog.
-     */
     private fun handleDelete(args: OffloadArgs): NativeOffloadResult {
         val idsStr = args.get("ids")
             ?: return NativeOffloadResult(2, "android-photos delete: --ids <id1,id2,...> is required\n")
@@ -840,7 +694,6 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         val deletedIds = JSONArray()
         val failed = JSONArray()
         for (id in ids) {
-            // Try Images then Video.
             var rows = 0
             for (uri in listOf(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)) {
                 try {
@@ -872,13 +725,7 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         return NativeOffloadResult(0, OffloadOutput.formatBody(data.toString(2), args) + "\n")
     }
 
-    // ── helpers ──────────────────────────────────────────────────────────
 
-    /**
-     * Mirror apple-photos resolve_date_range: --days N (last N days
-     * through now) wins over --start/--end. Returns (startMs?, endMs?)
-     * as a Pair; either side may be null when no flag set.
-     */
     private fun resolveDateRange(args: OffloadArgs): Pair<Long?, Long?> {
         args.getInt("days")?.let { days ->
             val n = if (days <= 0) 7 else days
@@ -946,23 +793,9 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
         return json.toString(2)
     }
 
-    /**
-     * `near` reads EXIF from each candidate photo rather than relying on the
-     * MediaStore LATITUDE/LONGITUDE columns — those were deprecated in API 29
-     * and now return 0 on most OEM Gallery implementations. Requires
-     * ACCESS_MEDIA_LOCATION on A10+ and setRequireOriginal() to retrieve
-     * un-redacted EXIF.
-     *
-     * NOTE: this is O(N) disk reads; we scan at most the newest 500 photos
-     * to keep runtime bounded. Photos in encrypted "Secure Folder" / MIUI
-     * private album / Huawei vault are not exposed to MediaStore and will
-     * be invisible — we note that in the response when zero results come back.
-     */
     private fun nearPhotos(lat: Double, lon: Double, radiusKm: Double, max: Int): String {
         val photos = JSONArray()
         val scanLimit = 500
-        // ensureMediaLocationPermission() already guaranteed this on the
-        // happy path; if a caller bypasses the gate we still degrade safely.
         val hasMediaLoc = hasMediaLocationPermission()
 
         val projection = arrayOf(

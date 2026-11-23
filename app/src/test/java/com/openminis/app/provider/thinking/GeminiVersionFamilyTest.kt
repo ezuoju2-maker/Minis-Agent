@@ -9,13 +9,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/**
- * [OpenMinis#470] The level/budget choice is made by the Gemini MAJOR version,
- * not by `contains("gemini-3")`: gemini-4-argon used to get no thinking config
- * on Android (the user's level was ignored; iOS/Windows sent a budget and got a
- * 400 on every message). Table-driven over every tier, with the 2.5 rows and
- * the unversioned alias pinned as unchanged.
- */
 class GeminiVersionFamilyTest {
 
     private val levels = ThinkingLevel.values().toList()
@@ -25,7 +18,6 @@ class GeminiVersionFamilyTest {
         "${lv.name}=${shape(c)}"
     }
 
-    /** `low`, `low+t` (includeThoughts), `b128`, `b1024+t`, or `null`. */
     private fun shape(c: JSONObject?): String {
         if (c == null) return "null"
         val base = when {
@@ -53,11 +45,9 @@ class GeminiVersionFamilyTest {
             "gemini-3.8-flash" to noMinimal,
             "gemini-3.6-flash" to
                 "OFF=minimal LOW=low+t MEDIUM=medium+t HIGH=high+t XHIGH=high+t MAX=high+t ULTRA=high+t",
-            // Only low and high exist on 3 Pro preview: Medium goes out as high.
             "gemini-3-pro-preview" to
                 "OFF=low LOW=low+t MEDIUM=high+t HIGH=high+t XHIGH=high+t MAX=high+t ULTRA=high+t",
             "gemini-3.1-pro-preview" to noMinimal,
-            // 2.5 regression rows: exactly what they were.
             "gemini-2.5-pro" to
                 "OFF=b128 LOW=b2048+t MEDIUM=b8192+t HIGH=b16384+t XHIGH=b32768+t MAX=b32768+t ULTRA=b32768+t",
             "gemini-2.5-flash" to
@@ -96,7 +86,6 @@ class GeminiVersionFamilyTest {
         assertFalse(ThinkingRuleResolver.isGeminiLevelFamily("gemini-flash-latest"))
     }
 
-    /** The retry's forced shapes, for a level model and a budget model. */
     @Test
     fun `forced formats`() {
         fun c(id: String, lv: ThinkingLevel, format: ThinkingRuleResolver.GeminiThinkingFormat) =
@@ -109,7 +98,6 @@ class GeminiVersionFamilyTest {
         assertEquals("b128", c("gemini-4-argon", ThinkingLevel.OFF, F.BUDGET))
         assertEquals("b0", c("gemini-2.5-flash", ThinkingLevel.OFF, F.BUDGET))
         assertEquals("high+t", c("unknown-gemini-model", ThinkingLevel.HIGH, F.LEVEL))
-        // The no-thinking models stay without a config whatever the shape.
         assertEquals("null", c("gemini-2.5-flash-lite", ThinkingLevel.HIGH, F.LEVEL))
         assertEquals("null", c("gemini-3.1-flash-tts-preview", ThinkingLevel.HIGH, F.BUDGET))
     }

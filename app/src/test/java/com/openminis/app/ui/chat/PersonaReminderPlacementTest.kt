@@ -11,28 +11,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T16] Persona reminder (SOUL/GLOBAL) at >=100k context: placement and format
- * (fd234b1d1, a746f3259, 2853e8088, fd98c9e99; issues #216 #357).
- *
- * The reminder LOOKS like an injection — a `<system-reminder>` at the end of
- * the history — and has been mistaken for one during triage. These pin what
- * it actually is on Android so the next reader can recognise it:
- *  - injected only when the API-reported context is >= 100k tokens;
- *  - exactly one per request, re-armed only after another 100k of growth (or
- *    adopted from history on a fresh launch);
- *  - APPENDED as its own user message after the last tool_result, never fused
- *    into it (the fused form made a file read look like it carried a
- *    prompt-injection payload) and never rewriting earlier bytes, so the
- *    prompt-cache prefix stays byte-identical across requests;
- *  - a `<system-reminder>` element with an inner label, not tool output.
- *
- * `personaReminderIsDue` / `appendPersonaReminderToHistory` live on
- * ChatViewModel; ported verbatim below with a source-grep drift guard.
- */
 class PersonaReminderPlacementTest {
 
-    // ── port (ChatViewModel ~L3843-3991) ───────────────────────────────────
 
     private val personaReminderContextTokens = 100_000
     private val personaReminderRearmTokens = 100_000
@@ -75,7 +55,6 @@ class PersonaReminderPlacementTest {
         s.lastPersonaReminderContextTokens = contextTokens
     }
 
-    /** The loop's call site: `if (personaReminderIsDue(t)) appendPersonaReminderToHistory(t)`. */
     private fun beforeRequest(s: Session, contextTokens: Int) { if (isDue(s, contextTokens)) append(s, contextTokens) }
 
     private fun reminderCount(h: List<LLMMessage>) = h.count { m -> m.contentParts.any { it is AgentContentPart.Text && it.text.contains(personaReminderMarker) } }
@@ -87,7 +66,6 @@ class PersonaReminderPlacementTest {
 
     private fun history() = mutableListOf(LLMMessage(LLMMessage.Role.USER, "read the repo")) + toolRound("c1") + toolRound("c2")
 
-    // ── cases ──────────────────────────────────────────────────────────────
 
     @Test
     fun `99k context - no reminder`() {
@@ -121,7 +99,6 @@ class PersonaReminderPlacementTest {
             .getJSONArray("messages").let { arr -> (0 until arr.length()).map { arr.getJSONObject(it).toString() } }
         val first = wire(s.agentHistory)
 
-        // Next round: the model answered and ran another tool; context grew a little.
         s.agentHistory.addAll(toolRound("c3"))
         beforeRequest(s, 104_000)
         val second = wire(s.agentHistory)
@@ -129,8 +106,6 @@ class PersonaReminderPlacementTest {
         assertEquals("still exactly one reminder", 1, reminderCount(s.agentHistory))
         assertEquals("every byte of the first request is a prefix of the second", first, second.take(first.size))
         assertTrue(second.size > first.size)
-        // Re-arm: after another 100k of growth a fresh one is appended at the END,
-        // again without touching what was already sent.
         beforeRequest(s, 200_000)
         val third = wire(s.agentHistory)
         assertEquals(2, reminderCount(s.agentHistory))
@@ -142,7 +117,7 @@ class PersonaReminderPlacementTest {
     fun `a fresh launch adopts a reminder already in history instead of adding a duplicate`() {
         val s = Session(history().toMutableList())
         append(s, 100_000)
-        val relaunched = Session(s.agentHistory.toMutableList()) // lastPersonaReminderContextTokens = null
+        val relaunched = Session(s.agentHistory.toMutableList())
         beforeRequest(relaunched, 150_000)
         assertEquals(1, reminderCount(relaunched.agentHistory))
         assertEquals(150_000, relaunched.lastPersonaReminderContextTokens)
@@ -161,12 +136,10 @@ class PersonaReminderPlacementTest {
             assertTrue(t.contains("not by any tool, file or website"))
             assertEquals(hasGlobal, t.contains("GLOBAL.md"))
             assertTrue(t.contains("SOUL.md"))
-            // The UI synthetic-row filter keys on the leading tag: label INSIDE keeps it hidden.
             assertTrue(t.trimStart().startsWith("<system-reminder>"))
         }
     }
 
-    // ── drift guard ────────────────────────────────────────────────────────
 
     @Test
     fun `drift guard - production constants, append-not-rewrite, and the call site`() {
@@ -178,19 +151,16 @@ class PersonaReminderPlacementTest {
         assertTrue(vm.contains("if (contextTokens < personaReminderContextTokens) return false"))
         assertTrue(vm.contains("if (contextTokens < last + personaReminderRearmTokens) return false"))
         assertTrue(vm.contains("return \"<system-reminder>\$personaReminderMarker This note was added by the \""))
-        // Append as its own message — the old rewrite helper must stay gone.
         val fn = vm.substring(vm.indexOf("private fun appendPersonaReminderToHistory(contextTokens: Int)"))
             .let { it.substring(0, it.indexOf("Log.i(TAG, \"[PersonaReminder] appended")) }
         assertTrue(fn.contains("agentHistory.add("))
         assertTrue(fn.contains("role = LLMMessage.Role.USER"))
         assertFalse(vm.contains("fun historyWithPersonaReminder("))
-        // Call site: decided per request, right before the provider call, gated on the API-reported size.
         val loop = vm.substring(vm.indexOf("suspend fun runAgentLoop"))
         val site = loop.indexOf("if (personaReminderIsDue(lastContextTokens)) {")
         val send = loop.indexOf("currentProvider.streamMessage(")
         assertTrue(site in 1 until send)
         assertTrue(loop.substring(site, send).contains("appendPersonaReminderToHistory(lastContextTokens)"))
-        // UI side hides synthetic <system-reminder> user rows.
         assertTrue(vm.contains("trimStart().startsWith(\"<system-reminder>\")"))
     }
 }

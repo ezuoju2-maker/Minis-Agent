@@ -5,14 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-picker-anf] Source guard: every system picker launcher in the app
- * is launched through [safeLaunchPicker], never with a bare `.launch(`, so a
- * device without a resolvable DocumentsUI gets a toast instead of a crash.
- *
- * It scans the whole main source tree rather than a fixed file list, so a
- * picker added later in a new file is held to the same rule.
- */
 class SafePickerLaunchGuardTest {
 
     private val root = File("src/main/java/com/openminis/app")
@@ -23,7 +15,6 @@ class SafePickerLaunchGuardTest {
             """OpenDocumentTree|PickVisualMedia|PickMultipleVisualMedia)\b""",
     )
 
-    /** file (relative) -> picker launcher names declared in it */
     private fun pickers(): Map<String, List<String>> = root.walkTopDown()
         .filter { it.isFile && it.extension == "kt" }
         .associate { f -> f.relativeTo(root).path to pickerContract.findAll(f.readText()).map { it.groupValues[1] }.toList() }
@@ -32,8 +23,6 @@ class SafePickerLaunchGuardTest {
     @Test
     fun `the scan finds the known picker entry points`() {
         val found = pickers()
-        // If one of these moves or is renamed the guard would silently scan
-        // nothing for it - fail loudly instead.
         val expected = mapOf(
             "ui/chat/ChatScreen.kt" to listOf("mediaPickerLauncher", "filePickerLauncher"),
             "ui/settings/MountedFoldersScreen.kt" to listOf("pickerLauncher"),
@@ -75,8 +64,6 @@ class SafePickerLaunchGuardTest {
         val code = src.readLines().filterNot { it.trimStart().startsWith("*") || it.trimStart().startsWith("//") }
             .joinToString("\n")
         assertTrue(code.contains("catch (e: ActivityNotFoundException)"))
-        // Package-visibility filtering can make these report nothing on devices
-        // where the picker works; using them as a gate would break everyone.
         assertTrue(!code.contains("resolveActivity") && !code.contains("queryIntentActivities"))
     }
 }

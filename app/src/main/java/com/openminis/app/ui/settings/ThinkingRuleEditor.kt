@@ -35,23 +35,12 @@ import com.openminis.app.provider.thinking.ThinkingRuleResolver
 import com.openminis.app.provider.thinking.ThinkingWireFormat
 import org.json.JSONObject
 
-/** What the section asks the editor to open with. */
 data class ThinkingRuleEditorRequest(
-    /** Non-null → editing an existing custom rule (preserve id). Null → creating new. */
     val existingId: String?,
     val seed: ThinkingRule,
     val isNew: Boolean,
 )
 
-/**
- * [T-android-thinking-rules-phase2 §3] Full-screen-ish dialog to add/edit a custom rule.
- * A Dialog (own window) — deliberately NOT a sheet hosted by a section, which is the
- * navigation trap iOS hit (the sheet dismissed the whole settings stack).
- *
- * User-selectable wire formats are a deliberate SUBSET (the Chat-Completions family):
- * Gemini/Anthropic formats are model-generation dependent and would only build broken
- * rules on this path, so they are not offered.
- */
 @Composable
 fun ThinkingRuleEditorDialog(
     request: ThinkingRuleEditorRequest,
@@ -65,7 +54,6 @@ fun ThinkingRuleEditorDialog(
         mutableStateOf((seed.scope as? ThinkingRule.Scope.ModelPattern)?.pattern ?: "")
     }
     var choice by remember { mutableStateOf(FormatChoice.from(seed.wireFormat)) }
-    // Shared editable params across formats.
     var sendOffValue by remember { mutableStateOf(formatOffValue(seed.wireFormat) != null) }
     var offValue by remember { mutableStateOf(formatOffValue(seed.wireFormat) ?: "") }
     var path by remember { mutableStateOf(formatPath(seed.wireFormat) ?: "") }
@@ -96,13 +84,6 @@ fun ThinkingRuleEditorDialog(
         label = label.trim(),
     )
 
-    // [GH#306] Per-field validation for CustomPath. Previously the only check was
-    // "path is not blank", so a rule with an empty value saved cleanly and then emitted
-    // nothing — indistinguishable, from the chat, from the rule not existing.
-    //
-    // Reserved roots are refused here as well as in the resolver: the resolver's refusal
-    // is the safety net, but catching it in the editor is the only place the user can
-    // still see WHY. Kept in sync with ThinkingRuleResolver.RESERVED_ROOT_KEYS.
     val reservedRoots = setOf(
         "messages", "model", "stream", "stream_options", "tools", "tool_choice",
         "n", "functions", "function_call", "response_format",
@@ -139,7 +120,6 @@ fun ThinkingRuleEditorDialog(
         },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                // Name
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it },
@@ -149,7 +129,6 @@ fun ThinkingRuleEditorDialog(
                 )
                 Spacer(Modifier.padding(6.dp))
 
-                // Applies to
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -174,7 +153,6 @@ fun ThinkingRuleEditorDialog(
                 }
                 Spacer(Modifier.padding(6.dp))
 
-                // What to send (format picker)
                 Text(
                     stringResource(R.string.thinking_rules_what_to_send),
                     style = MaterialTheme.typography.labelMedium,
@@ -199,7 +177,6 @@ fun ThinkingRuleEditorDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                // Per-format fields
                 when (choice) {
                     FormatChoice.REASONING_EFFORT, FormatChoice.REASONING_EFFORT_NESTED -> {
                         Row(
@@ -230,10 +207,6 @@ fun ThinkingRuleEditorDialog(
                         )
                     }
                     FormatChoice.CUSTOM_PATH -> {
-                        // [GH#306] `pathError` / `valueError` below: a CustomPath rule with
-                        // a blank path or blank value used to save happily and then emit
-                        // nothing, which reads as "my rule is ignored". Validating at the
-                        // point of entry is the only place the user can still fix it.
                         OutlinedTextField(
                             value = path,
                             onValueChange = { path = it },
@@ -252,10 +225,6 @@ fun ThinkingRuleEditorDialog(
                             supportingText = valueError?.let { { Text(it) } },
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        // [GH#306] The off-value row was missing for CustomPath, so
-                        // `sendOffValue` could never become true and the rule's offValue
-                        // was unreachable from the UI — a thinking OFF tier then wrote
-                        // nothing at all, silently leaving the vendor's default in force.
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -279,7 +248,6 @@ fun ThinkingRuleEditorDialog(
                     else -> {}
                 }
 
-                // Request preview
                 Spacer(Modifier.padding(6.dp))
                 Text(
                     stringResource(R.string.thinking_rules_request_preview),
@@ -305,7 +273,6 @@ fun ThinkingRuleEditorDialog(
     )
 }
 
-/** The user-selectable wire formats (a subset — Gemini/Anthropic families excluded). */
 enum class FormatChoice(val titleRes: Int, val explanationRes: Int) {
     OMIT(R.string.thinking_fmt_omit_title, R.string.thinking_fmt_omit_desc),
     REASONING_EFFORT(R.string.thinking_fmt_effort_title, R.string.thinking_fmt_effort_desc),
@@ -345,11 +312,9 @@ private fun formatPath(fmt: ThinkingWireFormat?): String? = when (fmt) {
     else -> null
 }
 
-/** Live preview: run the real resolver with this rule at HIGH against a sample body. */
 private fun previewJson(rule: ThinkingRule): String {
     return try {
         val body = JSONObject()
-        // Isolate: inject just this one rule as the sole custom rule under a throwaway id.
         val previewInstance = "__preview__"
         ThinkingRuleResolver.setCustomRules(previewInstance, listOf(rule))
         val ctx = ThinkingResolveContext(
@@ -373,7 +338,6 @@ private fun previewJson(rule: ThinkingRule): String {
     }
 }
 
-// ---- Summaries shared with the section list ----
 
 fun ruleScopeSummary(rule: ThinkingRule): String = when (val s = rule.scope) {
     is ThinkingRule.Scope.AllModels -> "All models"
@@ -395,7 +359,6 @@ fun wireFormatSummary(fmt: ThinkingWireFormat?): String = when (fmt) {
     is ThinkingWireFormat.CustomPath -> "custom path · ${fmt.path}"
 }
 
-/** "sample-model → rule #N "label"" — the resolution trace shown under the section. */
 fun resolveHitDescription(
     custom: List<ThinkingRule>,
     builtIns: List<ThinkingRule>,

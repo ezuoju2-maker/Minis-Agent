@@ -12,25 +12,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * SQLite-backed rolling log of config changes. Mirrors iOS
- * `ConfigAuditLog`.
- *
- * Storage: a dedicated `minis-config-audit.db` next to the chat db.
- * Keeping it separate means the audit table never gets caught in
- * sync-dirty queries and can be wiped independently if it ever
- * corrupts. Capacity: most-recent 1000 rows; older rows are pruned in
- * the same transaction as each insert.
- *
- * Threading: every method synchronizes on the helper, so multi-thread
- * inserts from the offload server worker pool are safe. Reads return
- * detached value objects.
- */
 class ConfigAuditLog private constructor(context: Context) {
 
     private val helper = Helper(context.applicationContext)
 
-    /** Bumped on every insert / mark / clear so UI observers refresh. */
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision.asStateFlow()
 
@@ -40,7 +25,6 @@ class ConfigAuditLog private constructor(context: Context) {
         _revision.value = revCounter.incrementAndGet()
     }
 
-    /** Insert a new audit entry. Caps the table at [MAX_ROWS] in the same tx. */
     @Synchronized
     fun append(entry: ConfigAuditEntry) {
         val db = helper.writableDatabase
@@ -66,7 +50,6 @@ class ConfigAuditLog private constructor(context: Context) {
             }
             db.insertWithOnConflict(TABLE, null, cv, SQLiteDatabase.CONFLICT_REPLACE)
 
-            // Rolling cap — drop everything older than the 1000th row.
             db.execSQL(
                 """
                 DELETE FROM $TABLE WHERE $COL_ID NOT IN (
@@ -81,7 +64,6 @@ class ConfigAuditLog private constructor(context: Context) {
         bumpRevision()
     }
 
-    /** Mark an entry as `reverted` (preserves history; no row deletion). */
     @Synchronized
     fun markReverted(id: String) {
         val db = helper.writableDatabase
@@ -90,7 +72,6 @@ class ConfigAuditLog private constructor(context: Context) {
         bumpRevision()
     }
 
-    /** Wipe all rows. Surfaced as a manual UI action; never via CLI. */
     @Synchronized
     fun clearAll() {
         val db = helper.writableDatabase
@@ -98,7 +79,6 @@ class ConfigAuditLog private constructor(context: Context) {
         bumpRevision()
     }
 
-    /** Most-recent first. `limit` is clamped to [MAX_ROWS]. */
     @Synchronized
     fun recent(limit: Int = 200, scope: String? = null): List<ConfigAuditEntry> {
         val cap = limit.coerceIn(1, MAX_ROWS)
@@ -128,7 +108,6 @@ class ConfigAuditLog private constructor(context: Context) {
         return null
     }
 
-    /** Total row count + capacity. UI shows "X / 1000 used". */
     @Synchronized
     fun usage(): Usage {
         val db = helper.readableDatabase
@@ -141,7 +120,6 @@ class ConfigAuditLog private constructor(context: Context) {
 
     data class Usage(val count: Int, val capacity: Int)
 
-    /** Call after opening the database: [Helper.readableColumn] is set in onOpen. */
     private fun selectColumns(): String = if (helper.readableColumn) COLUMNS else LEGACY_COLUMNS
 
     private fun decode(c: android.database.Cursor): ConfigAuditEntry? {
@@ -177,11 +155,6 @@ class ConfigAuditLog private constructor(context: Context) {
         null,
         DB_VERSION,
     ) {
-        /**
-         * false only if the `readable` column is missing and could not be
-         * added; reads and writes then use the pre-readable column list so
-         * the log keeps working without the descriptions.
-         */
         @Volatile var readableColumn = true
 
         override fun onCreate(db: SQLiteDatabase) {
@@ -192,26 +165,10 @@ class ConfigAuditLog private constructor(context: Context) {
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            // No version bump so far — see [DB_VERSION]. Future schema bumps
-            // land here.
         }
 
-        /**
-         * [T-config-readable] Never throw on a downgrade. SQLiteOpenHelper's
-         * default throws, which would make the audit log (and the Logs
-         * screen) fail to open after installing an older build. Every schema
-         * change here only ADDS nullable columns, which an older build ignores
-         * because it names its columns explicitly, so keeping the newer schema
-         * is safe and loses nothing.
-         */
         override fun onDowngrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
 
-        /**
-         * [T-config-readable] Add the `readable` column to a table created
-         * before it existed. Idempotent, and runs on every open — the same
-         * pattern as the iOS audit log's ALTER TABLE — so it needs no version
-         * bump: see [DB_VERSION] for why a bump would be unsafe.
-         */
         override fun onOpen(db: SQLiteDatabase) {
             super.onOpen(db)
             val columns = HashSet<String>()
@@ -227,8 +184,6 @@ class ConfigAuditLog private constructor(context: Context) {
                     AppLogger.info(TAG, "added the readable column")
                 }
             } catch (t: Throwable) {
-                // Never block the log over the descriptions: fall back to the
-                // pre-readable columns (see [readableColumn]).
                 AppLogger.error(TAG, "readable column check failed: ${t.message}")
             }
             readableColumn = COL_READABLE in columns
@@ -239,14 +194,6 @@ class ConfigAuditLog private constructor(context: Context) {
         private const val TAG = "ConfigAuditLog"
         private const val DB_NAME = "minis-config-audit.db"
 
-        /**
-         * Stays 1 on purpose. Builds before [T-config-readable] use the
-         * default SQLiteOpenHelper.onDowngrade, which THROWS: bumping this
-         * would make an older build unable to open the audit log after a
-         * downgrade. New nullable columns are added idempotently in
-         * Helper.onOpen instead (see [missingColumnMigrations]), and older
-         * builds ignore them because they name their columns explicitly.
-         */
         private const val DB_VERSION = 1
         private const val MAX_ROWS = 1000
 
@@ -263,13 +210,8 @@ class ConfigAuditLog private constructor(context: Context) {
         private const val COL_STATUS = "status"
         private const val COL_REVERT_OF = "revert_of"
         private const val COL_CAPTION = "caption"
-        /**
-         * [T-config-readable] ReadableSummary JSON. Nullable with no DEFAULT:
-         * NULL means "written before readable descriptions existed".
-         */
         private const val COL_READABLE = "readable"
 
-        /** Current DDL for a fresh install. */
         internal val CREATE_TABLE = """
             CREATE TABLE $TABLE (
                 $COL_ID            TEXT PRIMARY KEY,
@@ -288,20 +230,14 @@ class ConfigAuditLog private constructor(context: Context) {
             )
         """.trimIndent()
 
-        /**
-         * Statements that bring a table with [existingColumns] up to date.
-         * Empty when nothing is missing, so running it twice is a no-op.
-         */
         internal fun missingColumnMigrations(existingColumns: Set<String>): List<String> =
             if (COL_READABLE in existingColumns) emptyList()
             else listOf("ALTER TABLE $TABLE ADD COLUMN $COL_READABLE TEXT")
 
-        // Cursor column indexes match the SELECT order below.
         internal const val COLUMNS =
             "$COL_ID, $COL_AT, $COL_ACTOR, $COL_SESSION_ID, $COL_SCOPE, $COL_KEY, " +
                 "$COL_OLD_VALUE, $COL_NEW_VALUE, $COL_CONFIRMED_AT, $COL_STATUS, " +
                 "$COL_REVERT_OF, $COL_CAPTION, $COL_READABLE"
-        /** The column list before [T-config-readable]; see [Helper.readableColumn]. */
         private const val LEGACY_COLUMNS =
             "$COL_ID, $COL_AT, $COL_ACTOR, $COL_SESSION_ID, $COL_SCOPE, $COL_KEY, " +
                 "$COL_OLD_VALUE, $COL_NEW_VALUE, $COL_CONFIRMED_AT, $COL_STATUS, " +

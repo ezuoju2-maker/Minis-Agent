@@ -14,38 +14,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-android-image-edit-endpoint] Wire-level coverage for the /images/edits
- * (image-to-image) route added to close the Android gap that made
- * minis-model-use return `image_edit_not_supported`.
- *
- * These assert the multipart body we actually put on the wire — the part most
- * likely to be subtly wrong (field names, file parts, response_format retry) —
- * plus response parsing reuse. MockWebServer means no real API spend.
- */
 class OpenAIEditImageTest {
     private lateinit var server: MockWebServer
     private lateinit var provider: OpenAIProvider
 
-    /** 1x1 PNG-ish bytes; content is irrelevant, only transport matters here. */
     private val pngBytes = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
     private val jpgBytes = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte())
 
     private fun imagePart(data: ByteArray, mime: String) =
         LLMMessage.ImagePart(data = data, mimeType = mime)
 
-    /**
-     * Minimal success envelope — same shape /images/generations returns.
-     *
-     * Deliberately an EMPTY `data` array rather than a `b64_json` item: these
-     * are plain JVM tests with `unitTests.isReturnDefaultValues = true`, so
-     * `android.util.Base64.decode` returns null and the shared
-     * parseImageGenerationsResult NPEs while decoding. That limitation belongs
-     * to the (already shipped, unchanged) parse path — which generateImage
-     * exercises identically — not to the /images/edits transport under test
-     * here. These tests therefore assert on the multipart REQUEST we emit,
-     * which is the actual new code; decoding is covered on-device.
-     */
     private fun imageResponseBody(): String = """{"data":[]}"""
 
     @Before
@@ -64,7 +42,6 @@ class OpenAIEditImageTest {
         server.shutdown()
     }
 
-    // ── Forward: single reference image ──────────────────────────────────────
 
     @Test
     fun `editImage posts multipart to images-edits with image and prompt`() = runBlocking {
@@ -85,7 +62,6 @@ class OpenAIEditImageTest {
         assertTrue("expected multipart, got $contentType", contentType.startsWith("multipart/form-data"))
 
         val body = recorded.body.readUtf8()
-        // The reference image must be a FILE part named exactly `image`.
         assertTrue(
             "missing `image` file part: $body",
             body.contains("""name="image"""") && body.contains("filename="),

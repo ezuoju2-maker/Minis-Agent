@@ -49,38 +49,16 @@ import com.openminis.app.power.PowerOptimizationManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/**
- * T323: surfaces OS-level permission states (Accessibility service,
- * etc.) the user must grant via external Settings flows. Each row
- * reports current status and routes the user to the relevant system
- * settings page; we re-poll while the screen is visible so coming
- * back from system Settings refreshes the row automatically.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SystemPermissionsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     var a11yEnabled by remember { mutableStateOf(isAccessibilityEnabled(context)) }
-    // [T-android-a11y-miui-service-failure] "Service failed" degraded state:
-    // the OEM ROM (MIUI etc.) reports the service as enabled in Settings but
-    // has killed the process / revoked the binding, so getInstance() is null.
-    // On such a device the canonical remediation is autostart-whitelist +
-    // battery "no restrictions"; surface those (reusing PowerOptimizationManager)
-    // only when the service is degraded AND the vendor is known to enforce it.
     var a11yDegraded by remember { mutableStateOf(false) }
-    // [T-android-a11y-force-stop-recovery] Distinct from `a11yDegraded`: the
-    // grant itself is gone from Settings.Secure (force-stop stripped it), which
-    // is repairable by writing the setting back. `a11yDegraded` is the opposite
-    // case — grant present, process killed — where writing would be pointless.
     var a11yRevoked by remember { mutableStateOf(false) }
     var shizukuReady by remember { mutableStateOf(false) }
     var repairing by remember { mutableStateOf(false) }
     var repairFailed by remember { mutableStateOf(false) }
-    // [T-android-restricted-settings] Android 13+ flags installs whose
-    // installer declared a local/downloaded-file package source and refuses to
-    // arm the accessibility toggle until the user allows restricted settings.
-    // Only meaningful while the service is still off — once it is enabled the
-    // user has clearly already gotten past the gate.
     var a11yRestricted by remember { mutableStateOf(false) }
     var unrestricting by remember { mutableStateOf(false) }
     var unrestrictFailed by remember { mutableStateOf(false) }
@@ -92,16 +70,9 @@ fun SystemPermissionsScreen(onBack: () -> Unit) {
             val connected = MinisAccessibilityService.getInstance() != null
             a11yEnabled = inSettings || connected
             a11yDegraded = inSettings && !connected
-            // Only claim "revoked" once the user has actually granted it at
-            // least once — otherwise a first-run user who has never enabled the
-            // service would be shown a "repair" prompt for something that was
-            // never broken.
             a11yRevoked = !inSettings && !connected &&
                 AccessibilityRecoveryManager.hasEverBeenGranted(context)
             shizukuReady = ShizukuManager.isReady()
-            // Re-probed each tick so the section disappears by itself the
-            // moment the user allows restricted settings in system Settings
-            // and comes back.
             a11yRestricted = !a11yEnabled && RestrictedSettingsManager.isRestricted(context)
             delay(1000)
         }
@@ -142,19 +113,6 @@ fun SystemPermissionsScreen(onBack: () -> Unit) {
                 )
             }
 
-            // [T-android-restricted-settings] Shown ONLY when the OS has
-            // actually flagged this install (appop ACCESS_RESTRICTED_SETTINGS
-            // == MODE_ERRORED) and the service is still off — i.e. exactly the
-            // state where tapping the row above leads to a dead, greyed-out
-            // toggle. Without this the user sees "tap to enable in system
-            // Settings", follows it, and hits a wall with no explanation.
-            //
-            // We cannot clear the flag ourselves: it is set on our own uid and
-            // clearing needs the signature permission MANAGE_APP_OPS_MODES.
-            // That is deliberate — the policy exists to stop a sideloaded app
-            // from talking the user into granting it screen-reading power — so
-            // the manual route is the primary affordance and stays visible even
-            // when the Shizuku shortcut is offered.
             if (a11yRestricted) {
                 SettingsSection(
                     header = stringResource(R.string.system_permissions_a11y_restricted_header),
@@ -181,8 +139,6 @@ fun SystemPermissionsScreen(onBack: () -> Unit) {
                                     val ok = RestrictedSettingsManager.clearWithShizuku(context)
                                     unrestricting = false
                                     unrestrictFailed = !ok
-                                    // On success the poll above clears
-                                    // a11yRestricted and this section vanishes.
                                 }
                             },
                         )
@@ -192,10 +148,6 @@ fun SystemPermissionsScreen(onBack: () -> Unit) {
                         iconColor = Color(0xFFFF9500),
                         title = stringResource(R.string.system_permissions_a11y_restricted_manual),
                         subtitle = stringResource(R.string.system_permissions_a11y_restricted_manual_sub),
-                        // Lands on Minis' own App info page, where the
-                        // "Allow restricted settings" item lives in the
-                        // overflow menu. Reuses the existing helper, which
-                        // already falls back when an OEM hides the page.
                         onClick = {
                             (context as? Activity)?.let {
                                 PowerOptimizationManager.openAppDetailsSettings(it)
@@ -206,11 +158,6 @@ fun SystemPermissionsScreen(onBack: () -> Unit) {
                 }
             }
 
-            // [T-android-a11y-force-stop-recovery] Repair affordance, shown ONLY
-            // when the grant was previously held and is now missing from
-            // Settings.Secure — the force-stop signature. Hidden in the healthy
-            // case and on a fresh install (see hasEverBeenGranted) so the screen
-            // stays clean.
             if (a11yRevoked) {
                 SettingsSection(
                     header = stringResource(R.string.a11y_repair_section_header),
@@ -244,9 +191,6 @@ fun SystemPermissionsScreen(onBack: () -> Unit) {
                                     .repairWithShizuku(context)
                                 repairing = false
                                 repairFailed = !ok
-                                // On success the polling loop above clears
-                                // a11yRevoked within a second and this whole
-                                // section disappears on its own.
                             }
                         },
                         showDivider = false,
@@ -254,13 +198,6 @@ fun SystemPermissionsScreen(onBack: () -> Unit) {
                 }
             }
 
-            // [T-android-a11y-miui-service-failure] OEM keep-alive guidance. Only
-            // shown when the service is degraded ("此服务出现故障" — enabled in
-            // Settings but the process was killed by the ROM) AND the vendor is
-            // one known to enforce autostart on top of stock Android. Routes the
-            // two canonical remediations through the existing
-            // PowerOptimizationManager (which already catches a missing Activity
-            // and falls back). Stays hidden on Pixel / stock Android (Vendor.OTHER).
             val activity = context as? Activity
             if (a11yDegraded && activity != null && PowerOptimizationManager.needsOemAutostartGuidance()) {
                 val vendor = PowerOptimizationManager.Vendor.current().displayName
@@ -294,9 +231,6 @@ fun SystemPermissionsScreen(onBack: () -> Unit) {
                 }
             }
 
-            // [T-android-voice-correction] Phase 4: opt-in consent for storing
-            // correction learning data, plus the wipe action. Placed here
-            // because it is a privacy control, matching iOS's Permissions page.
             var correctionEnabled by remember {
                 mutableStateOf(
                     com.openminis.app.speech.correction.VoiceCorrectionConsent.isEnabled(context),
@@ -316,8 +250,6 @@ fun SystemPermissionsScreen(onBack: () -> Unit) {
                         correctionEnabled = on
                         com.openminis.app.speech.correction.VoiceCorrectionConsent
                             .setEnabled(context, on)
-                        // Turning the toggle off counts as an answer, so the
-                        // one-time prompt must not reappear afterwards.
                         com.openminis.app.speech.correction.VoiceCorrectionConsent
                             .setPrompted(context, true)
                     },

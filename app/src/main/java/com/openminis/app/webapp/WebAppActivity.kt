@@ -75,24 +75,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/**
- * T-pwa-1 (renamed Pwa → WebApp): immersive WebView host for a pinned
- * WebApp shortcut. Receives the `webapp_shortcut_id` intent extra (sent
- * by [ShortcutPinner]'s launchIntent), resolves the backing HTML file
- * via [WebAppPathResolver], and renders it
- * via [WebViewAssetLoader] under `https://appassets.androidplatform.net/`.
- * External navigations are blocked — only the asset-loader host and
- * `about:` URIs are allowed.
- *
- * T-pwa-preview-polish: replaces the bare full-bleed WebView with a
- * Compose host that overlays a translucent floating toolbar (close,
- * fullscreen toggle, open-in-browser, share, reload). Toolbar auto-fades
- * after 4s of inactivity and reappears on tap. Default state is
- * non-fullscreen (system bars visible); fullscreen is opt-in via the
- * toolbar button. iOS analog is the edge-swipe-to-dismiss minimal host —
- * Android lacks that gesture vocabulary so we surface a small set of
- * controls instead.
- */
 class WebAppActivity : ComponentActivity() {
 
     private val logTag = "WebAppActivity"
@@ -100,7 +82,6 @@ class WebAppActivity : ComponentActivity() {
     private var resolvedFile: File? = null
     private var isFullscreen: Boolean = false
 
-    // T-n01-andmenu-l10n: pre-Tiramisu locale override (see MainActivity).
     override fun attachBaseContext(newBase: android.content.Context) {
         super.attachBaseContext(com.openminis.app.i18n.LocaleWrap.wrap(newBase))
     }
@@ -108,29 +89,20 @@ class WebAppActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Default state: draw under system bars but keep them visible.
-        // Fullscreen toggle hides them on demand. Both bars are made
-        // transparent so the WebView truly bleeds edge-to-edge instead of
-        // sitting under an opaque status-bar strip.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = android.graphics.Color.TRANSPARENT
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
         WindowInsetsControllerCompat(window, window.decorView).apply {
-            // Default to light (white) icons since arbitrary WebApp content
-            // could be either light or dark — the dark scrim behind the
-            // floating toolbar covers the worst-case white-on-white.
             isAppearanceLightStatusBars = false
             isAppearanceLightNavigationBars = false
         }
         applySystemBars(fullscreen = false)
 
-        // T-pwa-3: back press — exit fullscreen if active, else finish.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (isFullscreen) {
                     isFullscreen = false
                     applySystemBars(fullscreen = false)
-                    // Re-render Compose host so toolbar icon updates.
                     renderHost()
                 } else {
                     finish()
@@ -169,8 +141,6 @@ class WebAppActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-apply current bar state — dialogs / external activities can
-        // resurrect bars even when we asked for fullscreen.
         applySystemBars(fullscreen = isFullscreen)
     }
 
@@ -203,10 +173,6 @@ class WebAppActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * T-pwa-3: replaces the prior toast-and-finish with an inline error
-     * screen offering an "Open in Minis" escape hatch.
-     */
     @OptIn(ExperimentalMaterial3Api::class)
     private fun renderSourceMissing(sourceSessionId: String?) {
         webViewRef?.apply {
@@ -273,8 +239,6 @@ class WebAppActivity : ComponentActivity() {
         val context = LocalContext.current
         var fullscreen by remember { mutableStateOf(initialFullscreen) }
         var toolbarVisible by remember { mutableStateOf(true) }
-        // Bumped on each user interaction; LaunchedEffect uses it as a key
-        // so the auto-hide timer restarts on every tap.
         var interactionTick by remember { mutableStateOf(0) }
         var webViewState by remember { mutableStateOf<WebView?>(null) }
 
@@ -295,7 +259,6 @@ class WebAppActivity : ComponentActivity() {
                         setAcceptThirdPartyCookies(wv, false)
                     }
                     configureWebView(wv)
-                    // Tap-to-show — return false so WebView still handles the input.
                     wv.setOnTouchListener { _, ev ->
                         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
                             toolbarVisible = true
@@ -310,8 +273,6 @@ class WebAppActivity : ComponentActivity() {
                 },
             )
 
-            // Top inset spacer reserves room when system bars are visible so
-            // the toolbar doesn't sit under the status bar.
             val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
             AnimatedVisibility(
@@ -412,13 +373,6 @@ class WebAppActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Stage the HTML file under cacheDir/share/ (covered by FileProvider's
-     * <cache-path name="share" path="share/"/>) and hand its content URI
-     * to the system browser. Copying — rather than exposing the original
-     * `<filesDir>/sessions/...` path — keeps the FileProvider authority
-     * surface narrow and matches LogManagementScreen's pattern.
-     */
     private fun openInExternalBrowser(context: android.content.Context, file: File) {
         val uri = stagedShareUri(context, file) ?: run {
             Toast.makeText(context, R.string.webapp_no_browser_app, Toast.LENGTH_SHORT).show()
@@ -457,11 +411,6 @@ class WebAppActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Copy [file] into `cacheDir/share/` and return a FileProvider Uri for
-     * it. Returns null on IO failure. The staged file overwrites any prior
-     * copy with the same name — share/ accumulates one entry per WebApp.
-     */
     private fun stagedShareUri(context: android.content.Context, file: File): Uri? {
         return try {
             val shareDir = File(context.cacheDir, "share").apply { mkdirs() }
@@ -505,17 +454,11 @@ class WebAppActivity : ComponentActivity() {
             .build()
 
         webView.webViewClient = object : WebViewClient() {
-            // [T-net-android-phase3] Settings > Network: answer the local entry's
-            // proxy challenge (WebViewNetworkProxy); any other auth request as before.
             override fun onReceivedHttpAuthRequest(view: android.webkit.WebView?, handler: android.webkit.HttpAuthHandler?, host: String?, realm: String?) {
                 if (handler != null && com.openminis.app.network.WebViewNetworkProxy.answerAuth(handler, host, realm, view?.url)) return
                 super.onReceivedHttpAuthRequest(view, handler, host, realm)
             }
 
-            // [T-android-webview-render-process-gone] (GH#341) This Activity IS
-            // the WebView — there is no other content to fall back to, so a
-            // dead renderer means finishing rather than leaving the user on a
-            // blank screen with no way to tell what happened.
             override fun onRenderProcessGone(
                 view: WebView?,
                 detail: android.webkit.RenderProcessGoneDetail?,

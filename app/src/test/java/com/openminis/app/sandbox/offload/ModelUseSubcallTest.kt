@@ -19,40 +19,12 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 
-/**
- * [T26] `minis-model-use run` sub-call: no default persona, one path resolver
- * for every file argument, audio blocks survive serialization, audio-output
- * models get no thinking config.
- *
- * Field reports: GH#103/#104/#107 (a "You are Minis" persona was injected when
- * `--system` was absent, and the model silently changed identity — reported
- * three times), GH#105/#108 (`--system-file` must resolve like `--input`),
- * GH#67 (input_audio blocks were dropped on the wire), GH#135/#280/#226 (TTS
- * models routed with a thinking config they reject).
- *
- * The handler itself (ModelUseOffloadHandler) needs a Context + repository, so
- * the argument → system-prompt decision is ported verbatim (source cited per
- * function) with a grep drift guard on the production file, while the
- * serialization half drives the REAL providers: OpenAIProvider's `internal`
- * body builders and GeminiProvider through a MockWebServer.
- */
 class ModelUseSubcallTest {
 
     private val productionFile =
         File("src/main/java/com/openminis/app/sandbox/offload/ModelUseOffloadHandler.kt")
     private val src by lazy { productionFile.readText() }
 
-    // ── Port of ModelUseOffloadHandler.cmdRun (system-prompt resolution) ──
-    //
-    //   val explicitSystem = args.get("system") ?: args.get("system-file")?.let { readLinuxPath(it) }
-    //   ...
-    //   val inlineSystem = parsed.filter { it.role == "system" }.joinToString("\n") { it.content }
-    //   val systemPrompt = when {
-    //       explicitSystem != null && inlineSystem.isNotEmpty() -> "$explicitSystem\n\n$inlineSystem"
-    //       explicitSystem != null -> explicitSystem
-    //       inlineSystem.isNotEmpty() -> inlineSystem
-    //       else -> null
-    //   }
     private fun explicitSystem(args: OffloadArgs, readLinuxPath: (String) -> String?): String? =
         args.get("system") ?: args.get("system-file")?.let { readLinuxPath(it) }
 
@@ -65,9 +37,7 @@ class ModelUseSubcallTest {
 
     private fun args(vararg argv: String) = OffloadArgs(listOf("run", *argv))
 
-    // ============================================================ no default persona
 
-    /** GH#103/#104/#107 — without `--system` the request carries NO system prompt at all. */
     @Test
     fun `no --system and no inline system message means no system prompt`() {
         val a = args("--model", "gpt-4o", "--input", "/var/minis/workspace/in.json")
@@ -80,14 +50,12 @@ class ModelUseSubcallTest {
         assertEquals("only explicit", systemPrompt("only explicit", ""))
         assertEquals("only inline", systemPrompt(null, "only inline"))
         assertEquals("explicit\n\ninline", systemPrompt("explicit", "inline"))
-        // --system beats --system-file; the file is not even read.
         val both = args("--model", "m", "--system", "inline text", "--system-file", "/x/sys.md")
         var reads = 0
         assertEquals("inline text", explicitSystem(both) { reads++; "FILE" })
         assertEquals(0, reads)
     }
 
-    /** Drift guard: the production handler must not carry a default persona literal. */
     @Test
     fun `production handler injects no default persona`() {
         assertTrue(productionFile.exists())

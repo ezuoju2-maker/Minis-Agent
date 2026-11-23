@@ -7,17 +7,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-config-readable] Every label / sentence key the config sources use has a
- * string resource, looked up through ConfigReadableStrings, with zh and zh-TW
- * translations whose placeholders match the English. Port of iOS
- * ConfigReadableTests [5]. The extraction follows the shapes keys are written
- * in (ReadableLine("…"), ReadableArg.Key("…"), label = / on = / off = /
- * zero = / empty =, label maps, *Key constants, subject formats, unknown(…),
- * writable fields' displayName) — iOS once shipped three untranslated keys
- * because its extractor missed a shape, so the regression check below pins
- * those.
- */
 class ConfigReadableKeysTest {
 
     private val configRoot = File(ProductionSources.mainRoot(), "config")
@@ -93,7 +82,6 @@ class ConfigReadableKeysTest {
             if (name !in base) problems.add("$name ($key) not in values")
             if (name !in zh) problems.add("$name ($key) not in values-zh")
             if (name !in tw) problems.add("$name ($key) not in values-zh-rTW")
-            // The English resource is the key with Android placeholders.
             val expected = ReadableCore.placeholderCount(key)
             base[name]?.let { v -> if (ReadableCore.placeholderCount(unescape(v)) != expected) problems.add("$name English placeholders") }
         }

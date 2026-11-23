@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- [T-envvar-disable] Environment variable enable / disable. -->
 <resources>
     <string name="env_var_status_disabled">無効</string>
     <string name="env_var_status_duplicate">名前が重複</string>

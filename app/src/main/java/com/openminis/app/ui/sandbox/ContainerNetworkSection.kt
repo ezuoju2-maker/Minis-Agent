@@ -37,18 +37,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/**
- * [T-container-network-dns] (OpenMinis#396) Settings > Rootfs > Container
- * Network: whether the sandbox's resolv.conf follows the system DNS (Auto,
- * the default) or lists exactly the servers the user enters (Custom).
- *
- * Mode changes apply at once; the server list applies on Save, and only when
- * every entry is a valid IPv4 / IPv6 literal, so a typo can never reach
- * resolv.conf. Custom with no saved server keeps following the system (see
- * ContainerDns.plan) — the footer line always says which one is in effect.
- * Storage is shared with minis-config (`network.dnsMode`,
- * `network.dnsCustomServers`).
- */
 @Composable
 internal fun ContainerNetworkSection() {
     val context = LocalContext.current
@@ -62,7 +50,6 @@ internal fun ContainerNetworkSection() {
     val parsed = ContainerDns.parse(draft)
     val savedMsg = stringResource(R.string.rootfs_dns_saved)
 
-    /** Persist, rewrite resolv.conf off the main thread, refresh the footer. */
     fun persist(newMode: DnsMode, servers: String, toast: Boolean) {
         ContainerDns.save(context, newMode, servers)
         mode = newMode

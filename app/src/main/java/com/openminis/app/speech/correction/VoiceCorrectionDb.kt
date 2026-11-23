@@ -8,35 +8,6 @@ import org.json.JSONArray
 import java.io.File
 import java.util.UUID
 
-/**
- * [T-android-voice-correction] SQLite store for voice smart correction.
- * Port of iOS `Providers/Voice/VoiceCorrectionDB.swift`.
- *
- * ## Why raw SQLite and not Room (the project's usual choice)
- * Two behaviours here are load-bearing and Room cannot express them cleanly:
- *
- *  1. **Self-heal on corruption.** This is regenerable LEARNING data — losing
- *     it degrades correction to "no personalization", it does not break the
- *     app. So an unopenable file is deleted and recreated empty rather than
- *     propagated as an error. Room's `fallbackToDestructiveMigration` covers
- *     version mismatch, NOT a corrupt file.
- *  2. **Unconditional additive column repair.** [ensureIdempotentColumns] runs
- *     on EVERY open, BEFORE the version gate. ProviderConfigDB learned this the
- *     hard way on iOS: a column was added without bumping the schema version,
- *     every already-current DB took the early return, never gained the column,
- *     and the statements referencing it failed to prepare — silently wiping
- *     every provider from the UI. Room's migrations are version-to-version
- *     edges with no "repair regardless of version" slot.
- *
- * It also lives in its OWN file, not in minis.db: "clear my correction data" is
- * then one file to wipe, and a corrupt learning DB can never take the rest of
- * the app down with it.
- *
- * ## Threading
- * Every method is synchronous and must be called off the main thread (callers
- * use Dispatchers.IO). `SQLiteDatabase` is internally synchronized, and WAL
- * lets the send-time read path proceed without blocking the capture writer.
- */
 class VoiceCorrectionDb private constructor(private val dbFile: File) {
 
     private var db: SQLiteDatabase? = null
@@ -45,17 +16,7 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
         db = openOrRebuild(dbFile)
     }
 
-    // ---- Confusion dictionary ----
 
-    /**
-     * Upsert one learned ASR correction. Dedup key is
-     * (phonetic key, corrected term, locale): the same intent recorded via a
-     * different misspelling folds into one row and bumps `frequency`, which is
-     * the whole point of an aggregate table rather than an append-only log.
-     *
-     * Re-writing a row also clears `archived_at` — evidence of continued use
-     * revives a row that cleanup had retired.
-     */
     fun upsertConfusion(
         phoneticKey: String,
         originalVariant: String,
@@ -124,8 +85,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
                 }
                 d.insert("confusion_dictionary", null, values)
             }
-            // [privacy] Lengths only — these pairs are verbatim user speech.
-            // The row keeps the truth; the log does not need it.
             Log.i(
                 TAG,
                 "[Record] upsert originalLen=${originalVariant.length} " +
@@ -134,12 +93,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
         }.onFailure { Log.e(TAG, "upsertConfusion failed", it) }
     }
 
-    /**
-     * Negative feedback: a correction we proposed was rejected. Never write a
-     * POSITIVE row for an accepted AI suggestion — the suggestion was itself
-     * derived from this table, so feeding it back would make the system learn
-     * from an echo of its own output.
-     */
     fun recordNegativeFeedback(phoneticKey: String, correctedTerm: String, locale: String) {
         val d = db ?: return
         runCatching {
@@ -156,11 +109,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
         }.onFailure { Log.e(TAG, "recordNegativeFeedback failed", it) }
     }
 
-    /**
-     * Batch lookup for many phonetic keys in ONE statement: a 30-token
-     * transcript must not become 30 round-trips. Archived and low-confidence
-     * rows are excluded in SQL, not in Kotlin, so the index does the work.
-     */
     fun lookupConfusion(
         phoneticKeys: List<String>,
         locale: String,
@@ -211,13 +159,7 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
         }
     }
 
-    // ---- Typed vocabulary ----
 
-    /**
-     * Upsert a mined vocabulary term. `distinct_days` only increments when the
-     * day key differs from the last recorded one — a term typed 50 times in one
-     * afternoon must not look as established as one used across a week.
-     */
     fun upsertVocabulary(
         term: String,
         phoneticKey: String,
@@ -276,11 +218,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
         }.onFailure { Log.e(TAG, "upsertVocabulary failed", it) }
     }
 
-    /**
-     * Vocabulary lookup. The frequency / distinct-days floors are enforced HERE
-     * at retrieval, not at intake — a term must be storable at frequency=1 to
-     * ever accumulate to the threshold.
-     */
     fun lookupVocabulary(
         phoneticKeys: List<String>,
         locale: String,
@@ -330,7 +267,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
         }
     }
 
-    // ---- Meta / events ----
 
     fun metaValue(key: String): String? {
         val d = db ?: return null
@@ -351,7 +287,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
         }.onFailure { Log.e(TAG, "setMetaValue failed", it) }
     }
 
-    /** Outcome is one of "suggested" / "accepted" / "reverted" — metrics only. */
     fun recordCorrectionEvent(
         original: String,
         corrected: String,
@@ -373,7 +308,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
         }.onFailure { Log.e(TAG, "recordCorrectionEvent failed", it) }
     }
 
-    /** Row counts per table, for the settings screen and debug metrics. */
     fun counts(): Map<String, Int> {
         val d = db ?: return emptyMap()
         return runCatching {
@@ -385,7 +319,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
         }.getOrElse { emptyMap() }
     }
 
-    /** Wipe every learning table. Backs the "Clear Collected Data" button. */
     fun clearAll() {
         val d = db ?: return
         runCatching {
@@ -399,20 +332,14 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
             } finally {
                 d.endTransaction()
             }
-            // Reclaim pages in bounded chunks rather than one long blocking
-            // VACUUM. rawQuery, not execSQL — see openAndPrepare.
             d.rawQuery("PRAGMA incremental_vacuum(1000)", null).use { it.moveToFirst() }
             Log.i(TAG, "[Privacy] all correction learning data cleared")
         }.onFailure { Log.e(TAG, "clearAll failed", it) }
     }
 
-    // ---- Open / schema ----
 
     private fun openOrRebuild(file: File): SQLiteDatabase? {
         openAndPrepare(file)?.let { return it }
-        // Self-heal: throw the file away and come back as a cold-start empty DB.
-        // A WAL database has sidecars; leaving a stale -wal/-shm beside a fresh
-        // main file is its own corruption source, so drop those too.
         Log.e(TAG, "[DBHealth] open failed — rebuilding empty (size=${file.length()})")
         runCatching {
             file.delete()
@@ -427,45 +354,19 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
     private fun openAndPrepare(file: File): SQLiteDatabase? = runCatching<SQLiteDatabase> {
         file.parentFile?.mkdirs()
         val d = SQLiteDatabase.openOrCreateDatabase(file, null)
-        // ⚠️ PRAGMAs that RETURN A ROW must go through rawQuery, not execSQL.
-        // Android's execSQL rejects any statement producing results with
-        // "Queries can be performed using SQLiteDatabase query or rawQuery
-        // methods only" — `journal_mode` returns the resulting mode and
-        // `auto_vacuum` returns the setting, so both fail there. (iOS's
-        // sqlite3_exec has no such restriction, which is why the ported code
-        // needed adjusting rather than transcribing.)
-        //
-        // auto_vacuum MUST be set before any table is created — SQLite ignores
-        // it afterwards. INCREMENTAL (not FULL) so cleanup can reclaim pages in
-        // bounded chunks instead of one long blocking VACUUM.
         d.rawQuery("PRAGMA auto_vacuum = INCREMENTAL", null).use { it.moveToFirst() }
         d.rawQuery("PRAGMA journal_mode = WAL", null).use { it.moveToFirst() }
-        // synchronous returns nothing, so execSQL is fine here.
         d.execSQL("PRAGMA synchronous = NORMAL")
         runMigrations(d)
         d
     }.onFailure { Log.e(TAG, "[DBHealth] openAndPrepare failed", it) }.getOrNull()
 
-    /**
-     * Order is load-bearing:
-     *   1. [ensureIdempotentColumns] — EVERY open, BEFORE the version gate.
-     *   2. versioned structural migrations — only when current < [SCHEMA_VERSION].
-     *   3. stamp user_version.
-     *
-     * Step 1 must precede the gate; see the class comment for the incident that
-     * rule exists to prevent.
-     */
     private fun runMigrations(d: SQLiteDatabase) {
         val current = d.rawQuery("PRAGMA user_version", null)
             .use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
         val patched = ensureIdempotentColumns(d)
 
-        // Downgrade safety: an OLD build's compiled-in version is lower than the
-        // user_version a NEWER build stamped. It takes this early return and
-        // reads only the columns it knows about. That works ONLY because every
-        // statement above names its columns explicitly (never SELECT *), so
-        // extra columns are invisible rather than shifting indices.
         if (current >= SCHEMA_VERSION) {
             if (patched > 0) Log.i(TAG, "[Migration] at v$current, columns patched=$patched")
             return
@@ -545,12 +446,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
         Log.i(TAG, "[Migration] schema $current → $SCHEMA_VERSION")
     }
 
-    /**
-     * Additive-only column repairs, run on every open regardless of
-     * user_version. Each entry also ships in the v1 CREATE TABLE above; this is
-     * the belt-and-braces that repairs a DB written by a build predating the
-     * column. Returns how many columns were actually added.
-     */
     private fun ensureIdempotentColumns(d: SQLiteDatabase): Int {
         var added = 0
         fun columns(table: String): Set<String> = runCatching {
@@ -563,8 +458,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
 
         fun ensure(table: String, column: String, ddl: String) {
             val existing = columns(table)
-            // Empty = table not created yet (fresh DB; the v1 CREATE includes
-            // the column). Skip so we don't log a spurious "no such table".
             if (existing.isEmpty() || existing.contains(column)) return
             runCatching {
                 d.execSQL("ALTER TABLE $table ADD COLUMN $ddl")
@@ -582,30 +475,15 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
     companion object {
         private const val TAG = "VoiceCorrectionDB"
 
-        /**
-         * Bumped ONLY for versioned structural migrations. Additive columns go
-         * through [ensureIdempotentColumns] and do NOT require a bump.
-         */
         const val SCHEMA_VERSION = 1
 
-        /** Signal captured from editing an ASR transcript. */
         const val SOURCE_VOICE = "voice"
 
-        /**
-         * Signal captured from a select-and-replace edit in a plain text field.
-         * Kept distinct from [SOURCE_VOICE] so the two can be weighted or
-         * cleared independently later.
-         */
         const val SOURCE_TEXT = "text_input"
 
         @Volatile
         private var instance: VoiceCorrectionDb? = null
 
-        /**
-         * Shared instance, or null if even the rebuild-empty fallback failed —
-         * in which case every caller degrades to "no correction" rather than
-         * crashing.
-         */
         fun getInstance(context: Context): VoiceCorrectionDb? {
             instance?.let { return it }
             return synchronized(this) {
@@ -616,11 +494,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
             }
         }
 
-        /**
-         * `frequency / (frequency + negative * 2)` — a rejection costs double a
-         * confirmation. (3,0)=1.0, (3,1)=0.6, (1,3)=0.25 which is below the 0.3
-         * retrieval floor, so a thrice-rejected pair stops being offered.
-         */
         fun confidence(frequency: Int, negative: Int): Double {
             val f = maxOf(frequency, 0).toDouble()
             val n = maxOf(negative, 0).toDouble()
@@ -629,7 +502,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
             return f / denominator
         }
 
-        /** yyyy-MM-dd in the device zone, the key for `distinct_days`. */
         fun dayKey(epochSeconds: Double): String {
             val cal = java.util.Calendar.getInstance()
             cal.timeInMillis = (epochSeconds * 1000).toLong()
@@ -650,7 +522,6 @@ class VoiceCorrectionDb private constructor(private val dbFile: File) {
     }
 }
 
-/** One row of the confusion dictionary, as read by the retrieval path. */
 data class ConfusionRow(
     val id: String,
     val phoneticKey: String,
@@ -663,7 +534,6 @@ data class ConfusionRow(
     val lastSeen: Double,
 )
 
-/** One row of the typed-vocabulary table. */
 data class VocabularyRow(
     val id: String,
     val term: String,

@@ -5,11 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-voice-dblclick-select] Double-tapping a word in the voice
- * transcript's edit mode selects it, as on iOS. Compose text fields count
- * clicks for the mouse only, so the editor is a platform EditText.
- */
 class VoiceTranscriptEditorTest {
 
     private val panel = ProductionSources.read("ui/chat/voice/InlineVoiceInputPanel.kt")
@@ -21,7 +16,6 @@ class VoiceTranscriptEditorTest {
         val editing = area.substringAfter("if (isEditing) {").substringBefore("} else {")
         assertTrue(editing.contains("VoiceTranscriptEditor("))
         assertFalse("no Compose text field in edit mode", editing.contains("BasicTextField("))
-        // Outside edit mode a double tap still opens the editor.
         assertTrue(area.substringAfter("} else {").contains("onDoubleTap = { onBeginEdit() },"))
     }
 

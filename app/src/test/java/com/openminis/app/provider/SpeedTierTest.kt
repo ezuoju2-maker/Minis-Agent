@@ -14,21 +14,13 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-speed-tier] Fast Mode became a three-way speed choice (Standard / Fast /
- * Ultrafast). Wire values: none / "priority" / "ultrafast" in the Responses
- * body's `service_tier`. Ultrafast only for an allow-listed model; xAI only
- * ever gets "priority".
- */
 class SpeedTierTest {
 
     @After
     fun tearDown() {
-        // Process-wide singleton: never leak a tier into another test's body.
         FastModePrefs.setCachedTierForTest(SpeedTier.STANDARD)
     }
 
-    // ── Storage migration ────────────────────────────────────────────────
 
     @Test
     fun `legacy boolean true migrates to fast, false or absent to standard`() {
@@ -58,11 +50,9 @@ class SpeedTierTest {
         assertTrue(ProductionSources.read("MinisApp.kt").contains("com.openminis.app.data.FastModePrefs.prime(this)"))
     }
 
-    // ── Allow-list and fallback ──────────────────────────────────────────
 
     @Test
     fun `ultrafast whitelist is gpt-6-astra only, by prefix, case-insensitive`() {
-        // [T-android-ultrafast-align] OpenAI's Codex docs: Ultrafast is "GPT-6 Astra only".
         for (id in listOf("gpt-6-astra", "GPT-6-Astra", "gpt-6-astra-2026-10-01")) {
             assertTrue(id, SpeedTiers.supportsUltrafast(id))
         }
@@ -73,7 +63,6 @@ class SpeedTierTest {
 
     @Test
     fun `ultrafast falls back to fast off the allow-list or off the responses path`() {
-        // No catalog data on these models: the whitelist decides.
         assertEquals(SpeedTier.ULTRAFAST, SpeedTiers.effective(SpeedTier.ULTRAFAST, model("gpt-6-astra"), catalogIds = emptyList()))
         assertEquals(SpeedTier.FAST, SpeedTiers.effective(SpeedTier.ULTRAFAST, model("gpt-6.1-sol"), catalogIds = emptyList()))
         assertEquals(SpeedTier.FAST, SpeedTiers.effective(SpeedTier.ULTRAFAST, model("gpt-6-sol"), catalogIds = emptyList()))
@@ -90,7 +79,6 @@ class SpeedTierTest {
         assertEquals(SpeedTier.FAST, SpeedTiers.displayed(SpeedTier.FAST, fastEligible = true, ultrafastEligible = true))
     }
 
-    // ── Request bodies ───────────────────────────────────────────────────
 
     private val history = listOf(LLMMessage(LLMMessage.Role.USER, "hello"))
 
@@ -117,11 +105,9 @@ class SpeedTierTest {
 
     @Test
     fun `a stored ultrafast choice sends priority on a model outside the allow-list`() {
-        // [T-android-ultrafast-align] gpt-6.1-sol left the whitelist: sent (and shown) as Fast.
         for (id in listOf("gpt-6.1-sol", "gpt-6-sol", "gpt-5.6-sol", "gpt-5.5")) {
             assertEquals(id, "priority", responsesTier(id, SpeedTier.ULTRAFAST))
         }
-        // Non-gpt ids still never carry a tier.
         assertNull(responsesTier("o3-mini", SpeedTier.ULTRAFAST))
     }
 
@@ -142,17 +128,12 @@ class SpeedTierTest {
             temperature = null, imageParts = emptyList(),
         )
         assertEquals("priority", chat.getString("service_tier"))
-        // Even a gpt-named model behind xAI's Responses builder keeps xAI's priority.
         assertEquals("priority", responsesTier("gpt-6.1-sol", SpeedTier.ULTRAFAST, xai = true))
     }
 
-    // ── Downgrade receipt ────────────────────────────────────────────────
 
     @Test
     fun `an echoed default tier is only logged, never shown as an account verdict`() {
-        // [T-ultrafast-no-false-downgrade] A Pro user saw "doesn't support
-        // Ultrafast" on every Astra reply: on ChatGPT auth the echoed
-        // service_tier is not a reliable signal, so nothing may conclude from it.
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
         assertFalse(vm.contains("SpeedTierReceipts"))
         assertFalse(vm.contains("chat_speed_ultrafast_downgraded"))
@@ -170,12 +151,10 @@ class SpeedTierTest {
         val switchRow = screen.indexOf("} else if (showFastMode) {")
         assertTrue(speedRow in 0 until switchRow)
         assertTrue(screen.substring(switchRow).substringBefore("Auto Compact").contains("R.string.chat_menu_fast_mode"))
-        // [T-android-ultrafast-align] The tier row is named "Fast Mode", not "Speed".
         assertTrue(screen.substring(speedRow, switchRow).contains("R.string.chat_menu_fast_mode_tier"))
         assertFalse(screen.contains("R.string.chat_menu_speed)"))
     }
 
-    // ── Unsupported-Ultrafast log line ───────────────────────────────────
 
     @Test
     fun `ultrafast chosen but not supported is logged in ios words`() {
@@ -192,12 +171,10 @@ class SpeedTierTest {
                 "for [] - an account without the entitlement is likely served at Standard (service_tier=ultrafast)",
             wl,
         )
-        // Declared by the catalogue (account-wide list or the model's own entry): nothing to report.
         assertNull(SpeedTiers.ultrafastUnsupportedNote(SpeedTier.ULTRAFAST, model("gpt-5.6-sol"), declared))
         assertNull(SpeedTiers.ultrafastUnsupportedNote(
             SpeedTier.ULTRAFAST, LLMModel("gpt-6-astra", "A", "OpenAI", serviceTiers = listOf("priority", "ultrafast")), emptyList(),
         ))
-        // Another tier, or a non-gpt id (xAI has its own priority path).
         assertNull(SpeedTiers.ultrafastUnsupportedNote(SpeedTier.FAST, model("gpt-5.5"), declared))
         assertNull(SpeedTiers.ultrafastUnsupportedNote(SpeedTier.STANDARD, model("gpt-6.1-sol"), declared))
         assertNull(SpeedTiers.ultrafastUnsupportedNote(SpeedTier.ULTRAFAST, model("grok-4.20"), declared))

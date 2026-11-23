@@ -11,19 +11,8 @@ import org.junit.Test
 import java.sql.Connection
 import java.sql.DriverManager
 
-/**
- * [T-search-multi-keyword] Session search with several keywords (port of iOS
- * b09df3824; the same rules as Windows minis-core/src/search.rs).
- *
- *  - whitespace separates keywords; a session holding ANY of them is a result;
- *  - `%` and `_` in a keyword match themselves, not as LIKE wildcards;
- *  - every keyword is highlighted, overlapping or touching hits as one range.
- *
- * The generated SQL runs for real against SQLite, as in SessionSearchSqlTest.
- */
 class SessionSearchKeywordsTest {
 
-    // ── Keywords ───────────────────────────────────────────────────────────
 
     @Test fun `whitespace of any kind separates keywords`() {
         assertEquals(listOf("apple", "banana"), SessionSearch.searchTerms("apple banana"))
@@ -33,7 +22,6 @@ class SessionSearchKeywordsTest {
     }
 
     @Test fun `a keyword repeated in another case is kept once, in first spelling`() {
-        // Windows minis-storage text.rs search_helpers.
         assertEquals(listOf("gpt", "claude"), SessionSearch.searchTerms("gpt  GPT\tclaude"))
         assertEquals(listOf("GPT"), SessionSearch.searchTerms("GPT gpt Gpt"))
     }
@@ -41,17 +29,14 @@ class SessionSearchKeywordsTest {
     @Test fun `keywords past ten are ignored`() {
         val terms = SessionSearch.searchTerms((1..14).joinToString(" ") { "k$it" })
         assertEquals((1..10).map { "k$it" }, terms)
-        // Duplicates do not use up the budget.
         assertEquals(10, SessionSearch.searchTerms("x X " + (1..12).joinToString(" ") { "k$it" }).size)
     }
 
     @Test fun `LIKE wildcards in a keyword are escaped`() {
-        // Windows minis-storage text.rs search_helpers.
         assertEquals("%100\\%\\_a\\\\b%", SessionSearch.likePattern("100%_a\\b"))
         assertEquals("%plain%", SessionSearch.likePattern("plain"))
     }
 
-    // ── Highlight ranges ───────────────────────────────────────────────────
 
     @Test fun `every keyword is highlighted, in text order`() {
         assertEquals(listOf(0..4, 10..15), SessionSearch.hitRanges("apple and banana", listOf("banana", "apple")))
@@ -65,7 +50,6 @@ class SessionSearchKeywordsTest {
     }
 
     @Test fun `CJK and emoji ranges are char ranges of the original text`() {
-        // Windows: byte ranges (0,6),(12,18) for the same input.
         assertEquals(listOf(0..1, 4..5), SessionSearch.hitRanges("中文搜索中文", listOf("中文")))
         val emoji = "fix 🐛 then 🐛"
         val ranges = SessionSearch.hitRanges(emoji, listOf("🐛"))
@@ -78,13 +62,11 @@ class SessionSearchKeywordsTest {
         assertEquals(emptyList<IntRange>(), SessionSearch.hitRanges("", listOf("a")))
     }
 
-    // ── Hit line ───────────────────────────────────────────────────────────
 
     @Test fun `the hit line is the first keyword in the order typed that the part holds`() {
         val parts = "[" + text("line one has banana\nline two has apple") + "]"
         assertEquals("line two has apple", SessionSearch.searchSnippet(parts, listOf("apple", "banana")))
         assertEquals("line one has banana", SessionSearch.searchSnippet(parts, listOf("banana", "apple")))
-        // A keyword absent from the part is skipped.
         assertEquals("line one has banana", SessionSearch.searchSnippet(parts, listOf("cherry", "banana")))
         assertNull(SessionSearch.searchSnippet(parts, listOf("cherry")))
     }
@@ -94,7 +76,6 @@ class SessionSearchKeywordsTest {
         assertEquals("text has banana", SessionSearch.searchSnippet(parts, listOf("apple", "banana")))
     }
 
-    // ── SQL ────────────────────────────────────────────────────────────────
 
     private lateinit var db: Connection
     private var t0 = 1000L
@@ -144,7 +125,6 @@ class SessionSearchKeywordsTest {
         }
     }
 
-    /** (id, hit_parts_json) for [sql] with [args] bound in order. */
     private fun query(sql: String, args: List<String>): List<Pair<String, String?>> =
         db.prepareStatement(sql).use { st ->
             args.forEachIndexed { i, a -> st.setString(i + 1, a) }
@@ -157,20 +137,17 @@ class SessionSearchKeywordsTest {
         return query(sql, SessionSearch.searchArgs(terms).map { it as String }).map { it.first }.toSet()
     }
 
-    /** What the app ran before: the whole entry in one unescaped LIKE. */
     private fun oldIds(q: String): Set<String> =
         query(SessionSearch.visibleSearchSql(1).replace(" ESCAPE '\\'", ""), listOf("%$q%", q)).map { it.first }.toSet()
 
     @Test fun `a session holding ANY keyword in any visible field is a result`() {
         val found = ids("apple banana cherry durian")
         assertEquals(setOf("text", "output", "input", "title", "both", "reversed"), found)
-        // OR, not AND: "text" holds only apple, "output" only banana.
         assertTrue("text" in found && "output" in found)
     }
 
     @Test fun `the old whole-string pattern found none of those`() {
         assertEquals(emptySet<String>(), oldIds("apple banana cherry durian"))
-        // Not even the adjacent pair in the other order.
         assertEquals(emptySet<String>(), oldIds("apple banana"))
         assertEquals(setOf("text", "both", "reversed", "output"), ids("apple banana"))
     }
@@ -180,8 +157,6 @@ class SessionSearchKeywordsTest {
     }
 
     @Test fun `hits in opaque fields are still not results with several keywords`() {
-        // "opaque" holds apple, banana and Durian only in a tool-call id and a
-        // thought signature.
         assertFalse("opaque" in ids("apple banana Durian"))
         assertTrue("the raw-JSON fallback still lists it", "opaque" in ids("apple banana", legacy = true))
     }
@@ -190,20 +165,15 @@ class SessionSearchKeywordsTest {
         assertEquals(setOf("pct"), ids("100%"))
         assertEquals(setOf("under"), ids("a_b"))
         assertEquals(setOf("pcttitle"), ids("50%"))
-        // The same in the pre-JSON1 fallback statement.
         assertEquals(setOf("pct"), ids("100%", legacy = true))
         assertEquals(setOf("under"), ids("a_b", legacy = true))
         assertEquals(setOf("pcttitle"), ids("50%", legacy = true))
-        // Unescaped, the wildcards matched the wrong sessions.
         assertTrue("thousand" in oldIds("100%"))
         assertTrue("axb" in oldIds("a_b"))
         assertTrue("plaintitle" in oldIds("50%"))
     }
 
     @Test fun `a backslash in a keyword matches itself`() {
-        // Checked on a title: in a message the backslash is stored JSON-escaped
-        // ("C:\\temp"), so the raw parts_json prefilter cannot see "C:\temp" -
-        // the same on iOS, and before this change.
         session("path", """C:\temp notes""", listOf(listOf(text("x"))))
         session("nopath", "C:temp notes", listOf(listOf(text("x"))))
         assertEquals(setOf("path"), ids("""C:\temp"""))
@@ -229,10 +199,7 @@ class SessionSearchKeywordsTest {
             val sql = if (legacy) SessionSearch.legacySearchSql(2) else SessionSearch.visibleSearchSql(2)
             val hit = query(sql, SessionSearch.searchArgs(terms).map { it as String }).single { it.first == "huge" }.second!!
             assertTrue(hit.startsWith(SessionSearch.WINDOW_MARK))
-            // The filler is 50x the window, so holding the hit at all means the
-            // window was cut around BANANA (apple, typed first, is absent).
             assertTrue("window holds the hit (legacy=$legacy)", hit.contains("BANANA"))
-            // The window is raw JSON (its newlines are escaped), read as one line.
             assertEquals(true, SessionSearch.searchSnippet(hit, terms)?.contains("found the BANANA here"))
         }
     }

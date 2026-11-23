@@ -14,16 +14,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-android-503-fallback] An HTTP 5xx must reach the agent loop carrying its
- * status code.
- *
- * The loop decides group fallback from [LLMError.isHttpServerError], so a
- * mapper that drops the status silently disables fallback for that provider —
- * exactly the gap that made a 503 with `no_available_workers` stick to a dead
- * model. Driven through a real response rather than the private mapper so the
- * whole path is covered.
- */
 class ProviderServerErrorStatusTest {
     private lateinit var server: MockWebServer
 
@@ -64,16 +54,6 @@ class ProviderServerErrorStatusTest {
         )
     }
 
-    /**
-     * [T-fallback-5xx-status] The regression review caught: a 5xx outside the
-     * transient set {500,502,503,504,529} — Cloudflare's 520-528 are the common
-     * real-world case — arrives with an HTML body. mapHttpError cannot parse
-     * that as JSON, so it formatted the message as "HTTP 522: <html>…", and the
-     * old bracket-anchored parser found no `[522]` prefix. The error became a
-     * ProviderError with no recoverable status and group fallback stayed put,
-     * where the pre-f1f07a4e8 regex had matched the digits. The status is now
-     * carried structurally, so message formatting cannot lose it.
-     */
     @Test
     fun `openai 522 with an html body is still a server error`() = runBlocking {
         server.enqueue(
@@ -102,7 +82,6 @@ class ProviderServerErrorStatusTest {
         assertTrue(llmError.isHttpServerError)
     }
 
-    /** A 4xx must not be mistaken for a server error just because it now carries a code. */
     @Test
     fun `openai 400 carries its code but is not a server error`() = runBlocking {
         server.enqueue(

@@ -7,22 +7,12 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-voice-send-waits-for-asr] / [T-voice-asr-failure-retry-prompt]
- *
- * Pure rules (wait/idle decision, failure queue, watchdog scaling, which
- * failures prompt) plus source invariants for the wiring that cannot run on
- * the JVM (engines bind AudioRecord / SpeechRecognizer; the gate is Compose).
- */
 class VoiceAsrRetryTest {
 
-    // ── VoiceFinishTracker: when may a waiting send proceed ────────────────
 
     @Test
     fun `send proceeds only after two idle ticks past the settle window`() {
         val t = VoiceFinishTracker()
-        // Idle immediately, but inside the 300 ms settle: a flushed segment may
-        // not have landed yet.
         assertEquals(VoiceFinishTracker.Step.WAIT, t.tick(idle = true, failedSinceStart = false, elapsedMs = 100))
         assertEquals(VoiceFinishTracker.Step.WAIT, t.tick(idle = true, failedSinceStart = false, elapsedMs = 200))
         assertEquals(VoiceFinishTracker.Step.WAIT, t.tick(idle = true, failedSinceStart = false, elapsedMs = 300))
@@ -33,7 +23,7 @@ class VoiceAsrRetryTest {
     fun `a busy tick resets the idle streak`() {
         val t = VoiceFinishTracker()
         assertEquals(VoiceFinishTracker.Step.WAIT, t.tick(true, false, 400))
-        assertEquals(VoiceFinishTracker.Step.WAIT, t.tick(false, false, 500)) // transcription resumed
+        assertEquals(VoiceFinishTracker.Step.WAIT, t.tick(false, false, 500))
         assertEquals(VoiceFinishTracker.Step.WAIT, t.tick(true, false, 600))
         assertEquals(VoiceFinishTracker.Step.SEND, t.tick(true, false, 700))
     }
@@ -61,7 +51,6 @@ class VoiceAsrRetryTest {
         assertEquals(VoiceFinishTracker.Step.SEND, t.tick(true, false, 60_050))
     }
 
-    // ── RetryPromptQueue ────────────────────────────────────────────────────
 
     @Test
     fun `failures are asked one at a time, oldest first`() {
@@ -79,7 +68,6 @@ class VoiceAsrRetryTest {
         val (retry, rest) = q.takeForRetry()
         assertEquals("a", retry)
         assertEquals("b", rest.current)
-        // The retry failed again → queued again, asked after "b".
         val requeued = rest.enqueue(retry!!)
         assertEquals(listOf("b", "a"), requeued.items)
     }
@@ -101,7 +89,6 @@ class VoiceAsrRetryTest {
         assertEquals(listOf("a"), q.items)
     }
 
-    // ── VoiceAsrWatchdog ────────────────────────────────────────────────────
 
     @Test
     fun `watchdog is at least 8s, grows with the audio, capped at 120s`() {
@@ -116,18 +103,17 @@ class VoiceAsrRetryTest {
 
     @Test
     fun `audio duration from pcm bytes and wav header`() {
-        assertEquals(1.0, VoiceAsrWatchdog.pcmSeconds(32_000), 1e-9) // 16 kHz default
+        assertEquals(1.0, VoiceAsrWatchdog.pcmSeconds(32_000), 1e-9)
         assertEquals(1.0, VoiceAsrWatchdog.pcmSeconds(96_000, 48_000), 1e-9)
         assertEquals(0.0, VoiceAsrWatchdog.pcmSeconds(0), 0.0)
         assertEquals(0.0, VoiceAsrWatchdog.pcmSeconds(100, 0), 0.0)
 
         assertEquals(2.5, VoiceAsrWatchdog.wavSeconds(wav(pcmBytes = 80_000, byteRate = 32_000)), 1e-9)
         assertEquals(1.0, VoiceAsrWatchdog.wavSeconds(wav(pcmBytes = 96_000, byteRate = 96_000)), 1e-9)
-        assertEquals(0.0, VoiceAsrWatchdog.wavSeconds(ByteArray(44)), 0.0) // header only
+        assertEquals(0.0, VoiceAsrWatchdog.wavSeconds(ByteArray(44)), 0.0)
         assertEquals(0.0, VoiceAsrWatchdog.wavSeconds(wav(pcmBytes = 100, byteRate = 0)), 0.0)
     }
 
-    // ── VoiceAsrFailurePolicy ───────────────────────────────────────────────
 
     @Test
     fun `real failures with audio prompt, no-speech and blips do not`() {
@@ -136,8 +122,8 @@ class VoiceAsrRetryTest {
             RecognitionError.UNKNOWN,
             RecognitionError.TIMED_OUT,
             RecognitionError.TRANSCRIPTION_FAILED,
-            RecognitionError.OEM_NO_SERVICE, // no usable provider
-            RecognitionError.PERMISSION_DENIED, // provider 401 (only captured audio is handed back)
+            RecognitionError.OEM_NO_SERVICE,
+            RecognitionError.PERMISSION_DENIED,
         )) {
             assertTrue("$e should prompt", VoiceAsrFailurePolicy.shouldPromptRetry(e, 5.0))
         }
@@ -146,13 +132,10 @@ class VoiceAsrRetryTest {
         assertFalse(VoiceAsrFailurePolicy.shouldPromptRetry(RecognitionError.NETWORK, 0.0))
     }
 
-    // ── Source invariants (wiring) ──────────────────────────────────────────
 
     @Test
     fun `provider engine hands the audio back before every exhausted-chain error`() {
         val src = ProductionSources.read("speech/ProviderSpeechRecognitionEngine.kt")
-        // [T-android-voice-asr-stall-skip] The shared fail-over (one-shot take
-        // and VAD segments) now lives in transcribeAndDeliver.
         val body = src.substringAfter("private suspend fun transcribeAndDeliver(").substringBefore("private fun transcribeWithSystem(")
         val tail = body.substringAfterLast("val kind = when {")
         assertTrue(tail.indexOf("listener.onRetainedAudio(wav)") in 0 until tail.indexOf("listener.onError("))

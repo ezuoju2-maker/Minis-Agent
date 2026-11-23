@@ -9,11 +9,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
-/**
- * [GH #453] Offload calls in flight: admission up to the cap, a per-command
- * count with the oldest age, and worker thread names that fit the kernel's
- * 15-byte comm.
- */
 class OffloadInFlightTest {
 
     @Test fun `admission stops at the cap and resumes when a call ends`() {
@@ -41,7 +36,6 @@ class OffloadInFlightTest {
         val f = OffloadInFlight { now }
         assertEquals("none", f.summary())
         val finish = CountDownLatch(1)
-        // begin() is per worker thread; start them one at a time so each reads its own clock value.
         val workers = listOf("android-notification" to 0L, "android-notification" to 5_000L, "model_use" to 9_000L).map { (cmd, at) ->
             now = 1_000_000L + at
             val begun = CountDownLatch(1)

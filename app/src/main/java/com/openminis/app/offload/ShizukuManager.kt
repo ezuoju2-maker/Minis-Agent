@@ -8,24 +8,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * T322 / [T-android-privileged-backend]: lifecycle + permission gateway for
- * Shizuku-protocol privileged execution.
- *
- * Thin façade around a single [ShizukuBackend], which recognises ALL THREE
- * Shizuku-protocol providers — the official Shizuku manager, AXManager, and
- * Sui (root module) — because they share the same client-side binder slot, so
- * there is no "active backend" choice to make at this layer. Public API
- * ([snapshot], [isReady], [runProcess], [openShizukuApp], [openInstallPage],
- * [requestPermission]) is unchanged from earlier callers.
- *
- * State machine ([T-android-sui-support]: binder-first — a live binder wins
- * before any package check, which is what lets APK-less Sui be detected):
- *   READY              Binder up + permission held — calls work.
- *   NEED_PERMISSION    Binder up but Minis not authorized.
- *   NOT_RUNNING        No binder, but a manager APK is installed — start it.
- *   NOT_INSTALLED      No binder and no manager APK — nothing available.
- */
 object ShizukuManager {
     private const val TAG = "ShizukuManager"
 
@@ -35,12 +17,6 @@ object ShizukuManager {
         val state: State,
         val version: Int = -1,
         val uid: Int = -1,
-        /**
-         * [T-android-sui-support] True when the live binder came from Sui (a
-         * root module) rather than a manager APK. DISPLAY ONLY — drives the
-         * "Sui (root)" label and hides the "Open Manager App" row that Sui
-         * has no activity for. Never gate behaviour on it.
-         */
         val isSui: Boolean = false,
     )
 
@@ -74,17 +50,10 @@ object ShizukuManager {
 
     fun isReady(): Boolean = _snapshot.value.state == State.READY
 
-    /**
-     * Whether a manager **APK** is installed. [T-android-sui-support] This is
-     * NOT an availability check — Sui provides the binder with no APK. Use
-     * [isReady] / [snapshot] for "can we actually run privileged commands".
-     */
     fun isInstalled(): Boolean = backend?.isInstalled() == true
 
-    /** [T-android-sui-support] Display-only: is the live binder Sui's? */
     fun isSui(): Boolean = _snapshot.value.isSui
 
-    /** First installed Shizuku-protocol manager package, or null. */
     fun installedManagerPackage(): String? = backend?.installedManagerPackage()
 
     fun requestPermission(): Boolean {
@@ -94,21 +63,14 @@ object ShizukuManager {
         return true
     }
 
-    /** Launch the installed manager app (Shizuku or AXManager). */
     fun openShizukuApp(context: Context) {
         backend?.openManagerApp(context)
     }
 
-    /**
-     * Open the official Shizuku install page. The "AXManager" alternative is
-     * surfaced as a separate row in the Settings UI; this method preserves
-     * the original single-CTA behaviour for callers that don't show a picker.
-     */
     fun openInstallPage(context: Context) {
         backend?.openInstallPage(context, ShizukuBackend.SHIZUKU_GITHUB_URL)
     }
 
-    /** Open a specific install page (Shizuku or AXManager). */
     fun openInstallPage(context: Context, url: String) {
         backend?.openInstallPage(context, url)
     }
@@ -139,15 +101,9 @@ object ShizukuManager {
         val snap = b.snapshot()
         val prev = _snapshot.value
         _snapshot.value = snap
-        // Only log on real transitions — refresh() is fired by every settings
-        // screen entry + every listener callback, so logging unconditionally
-        // floods logcat with NOT_RUNNING repeats.
         if (snap.state != prev.state || snap.version != prev.version ||
             snap.uid != prev.uid || snap.isSui != prev.isSui
         ) {
-            // [T-android-sui-support] provider= is the field to ask GH#110 /
-            // GH#97 reporters for: it distinguishes a Sui-supplied binder from
-            // a manager APK without needing any (unsupported) sender probe.
             val provider = when {
                 snap.isSui -> "sui"
                 else -> b.installedManagerPackage() ?: "none"

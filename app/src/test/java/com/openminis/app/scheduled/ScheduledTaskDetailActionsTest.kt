@@ -5,12 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-scheduled-detail-action-cards] The detail page's bottom actions are full-width
- * card buttons with an icon, as iOS ScheduledTaskDetailView.actions draws them
- * (Label + doc.on.doc / calendar.badge.minus on the card background), not bare
- * orange / red text links.
- */
 class ScheduledTaskDetailActionsTest {
     private val sheet = ProductionSources.read("ui/chat/ScheduledTaskDetailSheet.kt")
     private val actions = sheet.substringAfter("// Actions:").substringBefore("if (confirmingCancel)")

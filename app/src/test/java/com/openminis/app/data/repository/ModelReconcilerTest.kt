@@ -16,10 +16,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-provider-refresh-outlives-screen] (GH#265) A model refresh started by a
- * screen must finish even when that screen is popped right after.
- */
 class ModelReconcilerTest {
 
     private val xai = ProviderInstance(id = "x1", label = "xAI", providerType = ProviderType.xAI,
@@ -33,17 +29,16 @@ class ModelReconcilerTest {
         val network = CompletableDeferred<Unit>()
         var refreshed: Pair<String, Boolean>? = null
         val reconciler = ModelReconciler(repoScope, { if (it == "x1") xai else null }) { inst, force ->
-            network.await() // the fetch is in flight...
+            network.await()
             refreshed = inst.id to force
         }
 
-        // Save: start the refresh, then onSaved() pops the screen.
         var job: Job? = null
         screenScope.launch { job = reconciler.trigger("x1", forceRefresh = false) }
         testScheduler.runCurrent()
-        screenScope.cancel() // composition disposed
+        screenScope.cancel()
 
-        network.complete(Unit) // ...and the response arrives afterwards
+        network.complete(Unit)
         testScheduler.advanceUntilIdle()
         assertEquals("x1" to false, refreshed)
         assertTrue(job!!.isCompleted && !job!!.isCancelled)

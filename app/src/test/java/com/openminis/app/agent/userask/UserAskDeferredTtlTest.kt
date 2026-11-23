@@ -10,12 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-user-ask-deferred-ttl] / [T-user-ask-notify-once] iOS 07fbac2c1: an
- * unanswered deferred card closes after an hour instead of living forever
- * (restored on every launch and re-notified on every trip to the
- * background), and each question alerts once.
- */
 class UserAskDeferredTtlTest {
 
     private val t0 = 1_000_000_000L
@@ -33,10 +27,8 @@ class UserAskDeferredTtlTest {
         assertFalse(a.isExpired(t0 + 59 * min))
         assertTrue(a.isExpired(t0 + 61 * min))
         assertEquals(60 * min, UserAskDeferred.LIFETIME_MS)
-        // An interactive ask with no timeout still waits forever; an explicit deadline still wins.
         assertFalse(a.copy(deferred = false).isExpired(t0 + 10_000 * min))
         assertTrue(a.copy(expiresAtMs = t0 + min).isExpired(t0 + 2 * min))
-        // A resolved one is never "expired".
         assertFalse(a.resolveDismissed(UserAskDismissReason.USER_CLOSED_CARD)!!.isExpired(t0 + 999 * min))
     }
 
@@ -61,7 +53,7 @@ class UserAskDeferredTtlTest {
         var resolved: PendingAsk? = null
         UserAskCenter.onDeferredResolved = { resolved = it }
         UserAskCenter.beginDeferred(deferred())
-        UserAskCenter.markDelivered(listOf("tc1"))   // the loop stored the `deferred` result
+        UserAskCenter.markDelivered(listOf("tc1"))
         UserAskCenter.tick(t0 + 59 * min)
         assertNull(resolved)
         now = t0 + 61 * min

@@ -6,17 +6,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/**
- * [T-android-voice-correction] Capability #3 trigger detection.
- *
- * `captureSelectionReplacement` hands its result to a global object, so these
- * tests exercise the same decision logic through [detect] below, which is a
- * line-for-line mirror of the helper's guards. Keeping them in step matters:
- * a false positive here means noise written into the user's dictionary.
- */
 class SelectionReplacementTest {
 
-    /** (replaced, inserted) when this edit is a select-and-replace, else null. */
     private fun detect(previous: TextFieldValue, next: TextFieldValue): Pair<String, String>? {
         val selection = previous.selection
         if (selection.collapsed) return null
@@ -42,7 +33,7 @@ class SelectionReplacementTest {
 
     @Test
     fun `replacing a selected span is detected`() {
-        val before = value("我们约在石塘见面", 4, 6)   // "石塘" selected
+        val before = value("我们约在石塘见面", 4, 6)
         val after = TextFieldValue("我们约在食堂见面")
         assertEquals("石塘" to "食堂", detect(before, after))
     }
@@ -63,17 +54,14 @@ class SelectionReplacementTest {
 
     @Test
     fun `a reversed selection range still works`() {
-        // Dragging right-to-left gives start > end.
         val before = value("我们约在石塘见面", 6, 4)
         val after = TextFieldValue("我们约在食堂见面")
         assertEquals("石塘" to "食堂", detect(before, after))
     }
 
-    // -- must NOT fire --
 
     @Test
     fun `ordinary typing is ignored`() {
-        // No selection: append-only, carries no correction signal.
         val before = value("我们约在", 4, 4)
         val after = TextFieldValue("我们约在食")
         assertNull(detect(before, after))
@@ -81,7 +69,6 @@ class SelectionReplacementTest {
 
     @Test
     fun `deleting a selection is ignored`() {
-        // An empty replacement says what was wrong but not what was right.
         val before = value("我们约在石塘见面", 4, 6)
         val after = TextFieldValue("我们约在见面")
         assertNull(detect(before, after))
@@ -103,8 +90,6 @@ class SelectionReplacementTest {
 
     @Test
     fun `an edit that also changes the surrounding text is ignored`() {
-        // Prefix no longer matches, so this was not a clean span replacement —
-        // treating it as one would learn a bogus pair.
         val before = value("我们约在石塘见面", 4, 6)
         val after = TextFieldValue("他们约在食堂见面")
         assertNull(detect(before, after))
@@ -119,11 +104,6 @@ class SelectionReplacementTest {
 
     @Test
     fun `an out-of-range selection is clamped by TextFieldValue and still handled`() {
-        // TextFieldValue clamps TextRange(0,5) on a 1-char string down to (0,1),
-        // so this arrives as an ordinary select-all-and-replace and IS a valid
-        // correction signal. The bounds guard in the helper therefore never
-        // fires for this input — it stays as defence against a caller
-        // constructing a range by hand.
         val before = TextFieldValue("短", TextRange(0, 5))
         val after = TextFieldValue("长")
         assertEquals("短" to "长", detect(before, after))

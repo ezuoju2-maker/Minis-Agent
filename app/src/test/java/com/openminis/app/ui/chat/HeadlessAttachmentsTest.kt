@@ -6,18 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-headless-own-attachments] A prompt nobody typed neither reads nor clears
- * the user's composer files. Before, every headless send that started a turn
- * on an idle chat (scheduled fire, CLI / RPC, a sub agent's result) took the
- * files the user had staged into the background turn and cleared the
- * composer; and a CLI / RPC prompt's own files were staged INTO the composer,
- * so on a busy chat they were left there (in front of the user, or in their
- * next send) while the queued prompt went without them.
- *
- * The send funnel needs a full ChatViewModel (Room, providers, a Context), so
- * the rule is the pure [PromptAttachments] and each path is pinned as source.
- */
 class HeadlessAttachmentsTest {
 
     private val vm by lazy { ProductionSources.read("ui/chat/ChatViewModel.kt") }
@@ -39,10 +27,8 @@ class HeadlessAttachmentsTest {
         assertTrue(send.contains("val promptAttachments = PromptAttachments.of(ownsComposer = !headless, own = headlessAttachments, composer = _attachments.value)"))
         assertTrue(send.contains("val currentAttachments = promptAttachments\n        if (PromptAttachments.clearsComposer(ownsComposer = !headless)) clearAttachments()"))
         assertTrue("the empty-prompt check counts the prompt's own files", send.contains("if (trimmed.isBlank() && promptAttachments.isEmpty()) return SubmitOutcome.Rejected(\"empty_prompt\")"))
-        // No other composer read or clear on the way.
         assertEquals(1, send.split("_attachments.value").size - 1)
         assertEquals(1, send.split("clearAttachments()").size - 1)
-        // The draft text: only the user's own send clears it.
         assertTrue(send.contains("if (!headless) _inputText.value = \"\""))
     }
 
@@ -67,19 +53,14 @@ class HeadlessAttachmentsTest {
     }
 
     @Test fun `every headless entry is headless and brings only its own files`() {
-        // submitPrompt: CLI / RPC / scheduled / sub agent results via HeadlessChatRunner,
-        // and the steer nudge, resume notice, child prompt and progress report directly.
         assertTrue(vm.contains("sendMessage(text, skipContextCheck = false, headless = true, prefill = prefill, headlessAttachments = attachments)"))
         assertTrue(vm.contains("submitPrompt(com.openminis.app.agent.jobs.HelperRunner.STEER_NUDGE_PROMPT)"))
         assertTrue(vm.contains("childVm.submitPrompt(hr.resumeNotice())"))
         assertTrue(vm.contains("childVm.submitPrompt(hr.childPrompt(args))"))
         assertTrue(vm.contains("val outcome = submitPrompt(text)"))
-        // The deferred answer.
         assertTrue(vm.contains("sendMessage(text, skipContextCheck = true, headless = true, userAskAnswer = true)"))
-        // HeadlessChatRunner hands its files to the prompt, never to the composer.
         assertFalse(runner.contains("vm.addAttachment("))
         assertTrue(runner.contains("val outcome = vm.submitPrompt(text, prefill, attachments)"))
-        // The only non-headless send is the user's own (the composer, or debug chat.send which stands in for it).
         assertTrue(vm.contains("sendMessage(text, skipContextCheck = false, headless = false)"))
     }
 
@@ -93,11 +74,7 @@ class HeadlessAttachmentsTest {
     }
 
     @Test fun `edit mode - only the user's own send applies the edit`() {
-        // [T-headless-keeps-edit-mode] A headless send used to consume the
-        // composer's edit mode and truncate the chat from the message being
-        // edited, sending its own text in the edit's place.
         assertTrue(send.contains("val editingId = if (headless) null else _editingMessageId.value"))
-        // One read (behind the check) and the clear that follows it - no other path.
         assertEquals(2, send.split("_editingMessageId.value").size - 1)
         assertTrue(send.contains("if (editingId != null) {\n                truncateBeforeEdit(editingId)"))
     }

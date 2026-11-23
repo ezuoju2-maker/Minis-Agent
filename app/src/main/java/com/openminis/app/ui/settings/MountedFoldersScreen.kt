@@ -76,14 +76,6 @@ import com.openminis.app.ui.components.safeLaunchPicker
 import kotlinx.coroutines.launch
 import com.openminis.app.i18n.uppercaseForDisplay
 
-/**
- * Settings → Mount External Folders. Mirrors iOS MountedFoldersSettingsView.
- *
- * Lists user-picked SAF tree URIs that map to a real POSIX path on the host
- * (only `com.android.externalstorage.documents` is accepted at picker time).
- * Each entry shows an R/W / Locked / Read-only badge, the linux mount path,
- * and the resolved host path. Tap → MountDetailScreen. Swipe → remove.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MountedFoldersScreen(
@@ -100,14 +92,8 @@ fun MountedFoldersScreen(
     var pendingDefaultName by remember { mutableStateOf("") }
     var addError by remember { mutableStateOf<String?>(null) }
 
-    // [T-android-mount-picker-landing] Shown once before handing off to the
-    // system picker, explaining that Android forbids mounting the storage root.
-    // See showPicker() below for why this is needed.
     var showPickerIntro by remember { mutableStateOf(false) }
 
-    // T219 follow-up: re-read all-files-access state on every ON_RESUME so
-    // returning from the system Settings page (where the user toggles the
-    // permission) clears the banner without an app restart.
     var hasAllFilesAccess by remember { mutableStateOf(checkAllFilesAccess(context)) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -120,13 +106,6 @@ fun MountedFoldersScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Android 10 (Q) base ROMs grant storage via the normal runtime flow — request
-    // READ + WRITE directly rather than pushing the user to a Settings page that
-    // (on HarmonyOS/EMUI) may not exist. WRITE is required for two things the read
-    // grant alone doesn't cover: probeWritable's write test (drives the R/W vs
-    // read-only badge) and the agent's raw proot writes into the bound folder —
-    // without it those writes report success but land in a shadow FUSE view instead
-    // of shared storage. Re-check on grant so the banner clears.
     val legacyStorageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { grants ->
@@ -140,9 +119,6 @@ fun MountedFoldersScreen(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        // Only on-device storage maps to a POSIX path PRoot can bind. Reject
-        // cloud providers (Drive, Dropbox, OneDrive) with a clear toast —
-        // the spec defers Option B mirror-copy to a follow-up.
         if (uri.authority != "com.android.externalstorage.documents") {
             Toast.makeText(
                 context,
@@ -170,11 +146,6 @@ fun MountedFoldersScreen(
                 actions = {
                     IconButton(
                         onClick = {
-                            // On Android 10, a folder can readdir but still EACCES on
-                            // write unless WRITE_EXTERNAL_STORAGE is granted at runtime
-                            // (the ROM's single storage toggle often only grants READ).
-                            // Request it up front so the mount probes as writable and
-                            // the "Allow writes" toggle isn't stuck disabled.
                             if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q &&
                                 context.checkSelfPermission(
                                     android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
@@ -208,7 +179,6 @@ fun MountedFoldersScreen(
             if (!hasAllFilesAccess) {
                 AllFilesAccessBanner(onClick = {
                     when {
-                        // Android 11+: special All Files Access page.
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> runCatching {
                             context.startActivity(
                                 Intent(
@@ -217,8 +187,6 @@ fun MountedFoldersScreen(
                                 ),
                             )
                         }.onFailure {
-                            // Some OEMs (HarmonyOS/EMUI) don't host the per-app page —
-                            // fall back to the app details screen.
                             runCatching {
                                 context.startActivity(
                                     Intent(
@@ -228,8 +196,6 @@ fun MountedFoldersScreen(
                                 )
                             }
                         }
-                        // Android 10: request the legacy storage runtime permissions
-                        // (READ for readdir, WRITE for the badge + agent writes).
                         Build.VERSION.SDK_INT == Build.VERSION_CODES.Q ->
                             legacyStorageLauncher.launch(
                                 arrayOf(
@@ -331,17 +297,6 @@ fun MountedFoldersScreen(
         )
     }
 
-    // [T-android-mount-picker-landing] GH#93: the system picker used to open at
-    // whatever location it liked — on the reporter's Xiaomi that was the shared
-    // storage ROOT, where Android shows "无法使用此文件夹 / can't use this folder",
-    // greys out "Use this folder", and (being already the top level) offers no
-    // way back. The user reads that as being trapped.
-    //
-    // Two halves to the fix; this is the half we control from our side of the
-    // hand-off. The picker's own chrome belongs to the system + OEM, so we
-    // cannot add a back button to it — what we CAN do is (a) explain the
-    // restriction in our own words before the user leaves our UI, and
-    // (b) land them somewhere selectable (see initialPickerUri()).
     if (showPickerIntro) {
         AlertDialog(
             onDismissRequest = { showPickerIntro = false },
@@ -350,13 +305,6 @@ fun MountedFoldersScreen(
             confirmButton = {
                 MinisTextButton(onClick = {
                     showPickerIntro = false
-                    // [T-android-mount-picker-anf] OpenDocumentTree fires
-                    // ACTION_OPEN_DOCUMENT_TREE, and some OEM ROMs ship without a
-                    // resolvable DocumentsUI (field crash: OnePlus 8T / ColorOS,
-                    // ActivityNotFoundException straight out of
-                    // startActivityForResult). safeLaunchPicker catches it and
-                    // tells the user instead of dying; it deliberately does NOT
-                    // pre-check with resolveActivity (see its doc).
                     pickerLauncher.safeLaunchPicker(
                         initialPickerUri(),
                         context,
@@ -376,26 +324,6 @@ fun MountedFoldersScreen(
     }
 }
 
-/**
- * [T-android-mount-picker-landing] Where the system folder picker should open.
- *
- * Returning null (the old behaviour) lets the picker choose, and on some ROMs
- * that is the shared-storage ROOT — the one place Android refuses to grant
- * (blocked since Android 11, alongside Android/data and Android/obb). The user
- * lands on a greyed-out "Use this folder" with no parent left to go back to,
- * which is exactly what GH#93 reported.
- *
- * `Documents` is chosen because it satisfies all three constraints at once:
- *  • NOT on Android's blocked list, so it is actually selectable;
- *  • always present on a real device (a non-existent initial URI is silently
- *    ignored, which would drop the user back at the broken default);
- *  • one level below the root, so the breadcrumb still lets them navigate
- *    anywhere else — this positions the user without deciding for them.
- *
- * Media dirs (DCIM/Pictures/Music/Movies) were rejected as too narrow in
- * meaning, and Download as more "transient scratch" than the long-lived folder
- * a mount implies.
- */
 private fun initialPickerUri(): Uri? = runCatching {
     DocumentsContract.buildDocumentUri(
         "com.android.externalstorage.documents",
@@ -449,20 +377,6 @@ private fun AllFilesAccessBanner(onClick: () -> Unit) {
     }
 }
 
-/**
- * Whether the app currently has enough storage access for PRoot to readdir a
- * mounted external folder's real contents.
- *
- * - Android 11+ (R): needs MANAGE_EXTERNAL_STORAGE. It's a special permission
- *   granted only via a system Settings page, never the runtime flow.
- * - Android 10 (Q) base ROMs — including HarmonyOS 2.x / EMUI 11 (Mate 40
- *   ELS-AN00 etc.) that never expose the "All Files Access" page: legacy
- *   storage is what feeds proot the /mnt/runtime/write FUSE view, and that
- *   requires READ_EXTERNAL_STORAGE to actually be granted. Returning true
- *   unconditionally here (the old behaviour) hid the banner even when the
- *   user hadn't granted "允许访问文件", leaving them stuck on an empty mount.
- * - Below Q: legacy storage is always on, no opt-in needed.
- */
 private fun checkAllFilesAccess(context: android.content.Context): Boolean {
     return when {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Environment.isExternalStorageManager()
@@ -566,9 +480,6 @@ private fun MountRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            // Source line: prefer spec-contract `resolvedHostPath` (T219-1
-            // adds it). Until that lands, fall back to `sourceDisplayName`
-            // — same rendering shape, just less precise.
             val source = entry.sourceDisplayName.ifEmpty { stringResource(R.string.mount_path_unavailable) }
             Text(
                 text = "← $source",
@@ -581,11 +492,6 @@ private fun MountRow(
     }
 }
 
-/**
- * Access pill: R/W (green) when fully writable, Locked (purple) when the OS
- * permits writes but the user toggled them off, Read-only (orange) when the
- * grant itself is read-only.
- */
 @Composable
 private fun AccessBadge(entry: MountedFoldersStore.Entry) {
     val (text, color) = when {
@@ -711,19 +617,12 @@ internal fun isValidMountName(raw: String): Boolean {
     return true
 }
 
-/**
- * Default mount name from a SAF tree URI. Special-cases the
- * `Android/data/<pkg>/files` shape so the suggested name is the owning
- * package rather than the meaningless `files`. Otherwise the leaf segment
- * after the volume's `:` separator is used.
- */
 internal fun defaultMountName(uri: Uri): String {
     val docId = runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull().orEmpty()
     val rel = docId.substringAfter(':', docId)
     val segments = rel.split('/').filter { it.isNotEmpty() }
     if (segments.isEmpty()) return "mount"
 
-    // Android/data/<pkg>/files → <pkg>
     val androidIdx = segments.indexOf("Android")
     if (androidIdx >= 0 && androidIdx + 2 < segments.size && segments[androidIdx + 1] == "data") {
         return sanitize(segments[androidIdx + 2])

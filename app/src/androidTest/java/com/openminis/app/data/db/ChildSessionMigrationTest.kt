@@ -11,12 +11,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/**
- * [T-p1-delegate-task] 12 → 13 adds `parent_session_id` / `parent_tool_use_id`
- * to `sessions`; 13 → 12 is a no-op that keeps them. Mirrors
- * MessageAttributionMigrationTest. NOTE: connectedAndroidTest UNINSTALLS the
- * app under test — run only on a device whose data is disposable.
- */
 @RunWith(AndroidJUnit4::class)
 class ChildSessionMigrationTest {
     private val dbName = "child-session-migration-test"

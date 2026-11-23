@@ -59,21 +59,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * [T-workbuddy] WorkBuddy platform screen — reached from Built-in Models.
- *
- * Sign-in opens the SYSTEM browser (the user asked for this explicitly); the
- * app keeps polling the token endpoint in the background and picks the account
- * up when the user returns. Everything else (models, quota, check-in, rewards)
- * is done in-app with no manual configuration.
- *
- * Every number on this screen comes from an upstream endpoint:
- *  - model count / rows  -> /console/enterprises/personal/models
- *  - remaining / total   -> /billing/meter/get-user-resource-*
- *  - check-in delta      -> balance snapshot diff around /daily-checkin
- *  - streak              -> /activity/growth/streak  (hidden when unavailable)
- *  - gift / compensation -> /billing/meter/claim-gift, /claim-compensation
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkBuddyPlatformScreen(
@@ -98,7 +83,6 @@ fun WorkBuddyPlatformScreen(
     var loadedOnce by remember { mutableStateOf(false) }
     var loadedAt by remember { mutableStateOf<Long?>(null) }
     var query by remember { mutableStateOf("") }
-    // Site the next sign-in targets; once signed in it mirrors the account.
     var selectedRegion by remember {
         mutableStateOf(
             if (account?.region == "international") "international" else "domestic"
@@ -152,7 +136,6 @@ fun WorkBuddyPlatformScreen(
                     repo = providerRepository,
                     region = selectedRegion,
                     onAuthUrl = { session ->
-                        // Open the system browser (not an embedded webview).
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(session.authUrl))
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         runCatching { context.startActivity(intent) }
@@ -193,7 +176,6 @@ fun WorkBuddyPlatformScreen(
                     else -> result.message
                 }
                 streak = runCatching { WorkBuddyApi.fetchStreak(acc) }.getOrNull()
-                // The provider list must see the new balance too.
                 providerRepository.triggerAsyncModelReconcile(instanceId, forceRefresh = false)
             } catch (e: Exception) {
                 error = e.message ?: "签到失败"
@@ -235,7 +217,6 @@ fun WorkBuddyPlatformScreen(
     }
 
     SettingsScaffold(title = "WorkBuddy", onBack = onBack) {
-        // ── Account card ────────────────────────────────────────────────
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -299,7 +280,6 @@ fun WorkBuddyPlatformScreen(
                     )
                 }
 
-                // Quota bar — only when the upstream gave both numbers.
                 val remain = credits?.remaining
                 val total = credits?.total
                 if (remain != null && total != null && total > 0) {
@@ -323,7 +303,6 @@ fun WorkBuddyPlatformScreen(
                     )
                 }
 
-                // Detail rows: uid copy / domain / expiry / last sync.
                 Spacer(Modifier.height(10.dp))
                 Row(
                     modifier = Modifier
@@ -369,10 +348,6 @@ fun WorkBuddyPlatformScreen(
             }
         }
 
-        // ── Messages ────────────────────────────────────────────────────
-        // Errors are shown as a full sentence-level explanation (what failed,
-        // which endpoint, what upstream said, what to try), not a bare code —
-        // a "HTTP 400" alone tells the user nothing actionable.
         error?.let { e ->
             Column(
                 modifier = Modifier
@@ -423,8 +398,6 @@ fun WorkBuddyPlatformScreen(
 
         if (account == null) {
             Spacer(Modifier.height(12.dp))
-            // WorkBuddy runs two separate sites (workbuddy.cn / codebuddy.ai).
-            // Accounts and quotas do not carry over, so the site is picked here.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -488,7 +461,6 @@ fun WorkBuddyPlatformScreen(
             return@SettingsScaffold
         }
 
-        // ── Actions ────────────────────────────────────────────────────
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -518,10 +490,6 @@ fun WorkBuddyPlatformScreen(
             )
         }
 
-        // ── Check-in panel: one-week grid, same style as MiniMax / Qoder ──
-        // Replaced the old 28-day heatmap with a compact 7-day row so every
-        // platform uses the identical check-in card. Data is still the real
-        // /activity/growth/heatmap result (last 7 days), never fabricated.
         if (streak != null || heatcells.isNotEmpty()) {
             SettingsSection(header = "每日签到") {
                 Column(
@@ -532,10 +500,6 @@ fun WorkBuddyPlatformScreen(
                         .background(MaterialTheme.colorScheme.surfaceContainerLow)
                         .padding(14.dp),
                 ) {
-                    // Status chip — identical to Qoder / MiniMax so all three
-                    // check-in cards share the same structure. "Today" is the
-                    // latest heatmap day whose date equals the local calendar
-                    // day with a positive score; never fabricate a check-in.
                     val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                     val signedToday = heatcells.lastOrNull()?.let { it.date == todayStr && it.score > 0 } == true
                     Text(
@@ -585,7 +549,6 @@ fun WorkBuddyPlatformScreen(
             }
         }
 
-        // ── Models ─────────────────────────────────────────────────────
         Row(
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -640,7 +603,6 @@ fun WorkBuddyPlatformScreen(
             )
         }
 
-        // ── Footer / account actions ───────────────────────────────────
         Text(
             text = "以上数据全部来自 WorkBuddy 服务端接口（模型目录、计费资源包、签到接口），非本地预置。签到接口本身不返回积分数，此处显示的是签到前后余额快照的差值。",
             style = MaterialTheme.typography.bodySmall,
@@ -669,7 +631,6 @@ fun WorkBuddyPlatformScreen(
     }
 }
 
-/** One catalogue row: everything shown is a field the upstream actually sent. */
 @Composable
 private fun ModelRow(m: WorkBuddyApi.WorkBuddyModel) {
     Column(

@@ -7,11 +7,6 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-restore-list-sync-race] Overlapping server screens must not recreate a
- * remote's rclone section while another one is listing it (iOS f465c10b1:
- * "The attempted logon is invalid" for correct SMB credentials).
- */
 class RcloneConfigSyncRaceTest {
 
     private fun fp(
@@ -35,7 +30,6 @@ class RcloneConfigSyncRaceTest {
         assertNotEquals(base, fp(params = mapOf("host" to "nas2", "user" to "me")))
         assertNotEquals(base, fp(backend = "webdav"))
         assertNotEquals(base, fp(tls = true))
-        // Separators keep "a=b" + "c" apart from "a=bc".
         assertNotEquals(fp(params = mapOf("a" to "b", "c" to "")), fp(params = mapOf("a" to "bc")))
     }
 

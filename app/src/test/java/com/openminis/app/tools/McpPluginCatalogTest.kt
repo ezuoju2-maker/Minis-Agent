@@ -7,11 +7,6 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [plugin-ecosystem] Curated MCP plugin directory: valid installable configs,
- * credential classification, and import-payload generation for the existing
- * "Import JSON" flow (zero UI changes required to install a plugin).
- */
 class McpPluginCatalogTest {
 
     @Test

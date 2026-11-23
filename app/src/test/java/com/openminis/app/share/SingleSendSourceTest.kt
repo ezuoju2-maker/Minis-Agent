@@ -3,7 +3,6 @@ package com.openminis.app.share
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** Which part of an ACTION_SEND the share receiver stages. */
 class SingleSendSourceTest {
 
     @Test

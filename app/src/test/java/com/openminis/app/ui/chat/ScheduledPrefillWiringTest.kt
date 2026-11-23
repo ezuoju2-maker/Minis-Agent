@@ -6,16 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-scheduled-tool-prefill] Source guards for the firing path.
- *
- * ChatViewModel needs a Context, a database and a live provider to construct,
- * so the path from a scheduled task to "the loop's first turn streams the
- * prefilled calls instead of asking the model" is pinned at the lines that
- * carry it. Each guard names the behaviour it protects; the pure pieces
- * (scripted chunk stream, storage, CLI parsing) are tested directly in
- * PrefilledToolCallTest and ScheduledPrefillCliTest.
- */
 class ScheduledPrefillWiringTest {
 
     private val vm by lazy { ProductionSources.read("ui/chat/ChatViewModel.kt") }
@@ -24,33 +14,23 @@ class ScheduledPrefillWiringTest {
     fun `the runner stamps the envelope and passes the prefill to every prompting target`() {
         val src = ProductionSources.read("scheduled/ScheduledAgentRunner.kt")
         assertTrue(src.contains("prefilledTool = prefill.firstOrNull()?.toolName,"))
-        // NewSession / AppendToSession and ChildOfCurrent both prompt; rerun does not.
         assertEquals(2, Regex("""prefill = prefill,""").findAll(src).count())
     }
 
     @Test
     fun `the headless runner forwards the prefill into the send funnel`() {
         val src = ProductionSources.read("debug/HeadlessChatRunner.kt")
-        // [T-headless-own-attachments] ...with the prompt's own files beside it.
         assertTrue(src.contains("val outcome = vm.submitPrompt(text, prefill, attachments)"))
     }
 
     @Test
     fun `every way a prompt can reach the loop keeps its prefill`() {
-        // Idle session: straight into the loop it starts.
         assertTrue(vm.contains("sendMessage(text, skipContextCheck = false, headless = true, prefill = prefill, headlessAttachments = attachments)"))
-        // Busy session: rides the queue.
-        // [T-user-ask-deferred] The call also carries ownsComposer now.
         assertTrue(vm.contains("QueuedPromptOrigin.USER,\n                prefill,\n                ownsComposer = !headless,"))
         assertTrue(vm.contains("prefill = queued.flatMap { it.prefill },"))
-        // Mid-loop injection re-arms the one-shot for the next turn.
         assertTrue(vm.contains("return InjectedTurn(newAssistantId, queued.flatMap { it.prefill })"))
         assertTrue(vm.contains("scriptedTurnFor(handled.prefill)?.let { pendingScriptedTurn = it }"))
-        // Auto-compact before send parks it with the text and sends it after.
         assertTrue(vm.contains("pendingSendPrefill = prefill"))
-        // f8cb6f989 threads `headless` through the same two calls; what this
-        // pins is that the prefill still rides along.
-        // [T-headless-own-attachments] They now also carry a parked headless prompt's own files.
         assertEquals(2, Regex("""sendMessage\(text, skipContextCheck = true, (headless = headless, )?prefill = prefill(, headlessAttachments = ownFiles)?\)""").findAll(vm).count())
     }
 
@@ -58,12 +38,9 @@ class ScheduledPrefillWiringTest {
     fun `the first turn streams the scripted calls in place of the provider request`() {
         assertTrue(vm.contains("var pendingScriptedTurn: com.openminis.app.scheduled.ScriptedToolTurn? = scriptedTurnFor(prefill)"))
         val hook = vm.substringAfter("val scriptedTurn = pendingScriptedTurn?.takeUnless { helperWrapUpInjected }")
-        // Consumed before the stream is built, so a later turn cannot replay it.
         assertTrue(hook.trimStart().startsWith("pendingScriptedTurn = null"))
         val branch = hook.substringBefore("turnChunks.collect { chunk ->")
         assertTrue(branch.contains("scriptedTurn.asStreamChunks()"))
-        // The provider request, and its request-side bookkeeping, only happen
-        // on the non-scripted branch.
         val elseBranch = branch.substringAfter("} else {")
         assertTrue(elseBranch.contains("currentProvider.streamMessage("))
         assertTrue(elseBranch.contains("recordContextDispatch(outboundHistory, currentProvider.model)"))
@@ -72,9 +49,6 @@ class ScheduledPrefillWiringTest {
 
     @Test
     fun `there is exactly one chunk collector, shared by both branches`() {
-        // The whole point of scripting the stream: a prefilled call goes
-        // through the same tool card, dispatch and persistence code a model
-        // call does. A second collector would be a second code path.
         assertEquals(1, Regex("""turnChunks\.collect \{ chunk ->""").findAll(vm).count())
         assertEquals(0, Regex("""\)\.collect \{ chunk ->""").findAll(vm.substringAfter("private suspend fun runAgentLoop(").substringBefore("private suspend fun executeTool(")).count())
     }
@@ -86,15 +60,8 @@ class ScheduledPrefillWiringTest {
 
     @Test
     fun `the system prompt no longer says nothing can wake the model`() {
-        // [T-android-parity-fixes] The shell bullet claimed `delay` was the ONLY
-        // wait mechanism and that scheduling options "do not wake you", while
-        // the minis-scheduled bullet below it described exactly that. Synced
-        // with iOS 62286901a.
         assertFalse(vm.contains("`delay` is your ONLY wait mechanism"))
         assertFalse(vm.contains("they do not wake you"))
-        // [T-prompt-cli-via-shell] CLI commands are phrased as "run X via
-        // shell_execute", never as something to "use" like a tool (a model
-        // once called minis-scheduled as a function tool: Unknown tool).
         assertTrue(vm.contains("For a check that should happen AFTER this turn ends, register it by running `minis-scheduled create …` via shell_execute"))
         assertTrue(vm.contains("either register a `minis-scheduled` follow-up (say so, with its task id)"))
         assertTrue(vm.contains("For follow-ups and recurring prompts, run `minis-scheduled create …` via shell_execute: it fires through a system alarm"))

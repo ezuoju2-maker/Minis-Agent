@@ -7,12 +7,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [#467] The chunking behind the "Show full thinking" viewer. */
 class ThinkingChunkingTest {
 
     private fun lines(n: Int, prefix: String = "line") = (1..n).joinToString("") { "$prefix $it\n" }
 
-    /** Chunks cover the text exactly, in order, none empty. */
     private fun assertCovers(text: String, chunks: List<Chunk>) {
         assertEquals(text, chunks.indices.joinToString("") { ThinkingChunking.chunkText(text, chunks, it) })
         chunks.zipWithNext { a, b -> assertEquals(a.end, b.start) }
@@ -35,9 +33,7 @@ class ThinkingChunkingTest {
         assertEquals(listOf(Chunk(0, text.length)), c)
         assertEquals(1, ThinkingChunking.initialCount(c))
         assertFalse(ThinkingChunking.hasMore(1, c.size))
-        // One line more starts a second chunk.
         assertEquals(2, ThinkingChunking.chunks(lines(41)).size)
-        // A text without a final newline is one chunk too.
         assertEquals(1, ThinkingChunking.chunks("short thought").size)
     }
 
@@ -71,7 +67,6 @@ class ThinkingChunkingTest {
 
     @Test
     fun initialRevealStopsAtTheCharacterCap() {
-        // 40 lines of 100 characters: 4 KB a chunk, so the 10 KB cap stops at 3.
         val text = (1..400).joinToString("") { "x".repeat(99) + "\n" }
         val c = ThinkingChunking.chunks(text)
         assertEquals(3, ThinkingChunking.initialCount(c))
@@ -84,7 +79,6 @@ class ThinkingChunkingTest {
         assertCovers(text, c)
         assertTrue(c.all { it.length <= ThinkingChunking.CHUNK_MAX_CHARS })
         assertEquals(13, c.size)
-        // A long line after short ones: the cut prefers the last newline.
         val mixed = "head\n" + "b".repeat(5000)
         val m = ThinkingChunking.chunks(mixed)
         assertEquals(Chunk(0, 5), m.first())
@@ -93,9 +87,6 @@ class ThinkingChunkingTest {
 
     @Test
     fun emojiAndCjkAreNeverSplit() {
-        // A ZWJ family emoji is 11 UTF-16 units; CJK characters are 1; a
-        // surrogate-pair emoji is 2. With a small limit every cut would
-        // otherwise land inside one of them.
         val family = "👨‍👩‍👧‍👦"
         val text = ("思考" + family + "😀").repeat(500)
         for (limit in listOf(3, 7, 10, 13, 4000)) {
@@ -108,7 +99,6 @@ class ThinkingChunkingTest {
                 assertFalse("chunk starts with a joiner at limit $limit", piece.first() == '‍')
             }
         }
-        // A grapheme longer than the limit is kept whole in its own chunk.
         val c = ThinkingChunking.chunks(family + "x", maxChars = 3)
         assertEquals(family, ThinkingChunking.chunkText(family + "x", c, 0))
     }
@@ -129,7 +119,6 @@ class ThinkingChunkingTest {
         val slow = ThinkingChunking.paceAfter(normal, ThinkingChunking.SLOW_BATCH_MS)
         assertEquals(Pacing(batch = 1, auto = false), slow)
         assertEquals(6, ThinkingChunking.nextCount(5, 25, slow))
-        // It stays slow after a fast frame.
         assertEquals(slow, ThinkingChunking.paceAfter(slow, 1))
     }
 }

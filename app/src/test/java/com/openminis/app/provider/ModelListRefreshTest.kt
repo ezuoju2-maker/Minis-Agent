@@ -12,16 +12,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-android-model-refresh-visible] "Refresh model list does nothing" (Open
- * Minis group, 2026-10-06, SenseNova at token.sensenova.cn/v1). With a valid
- * key the real endpoint refreshes fine (Pixel 4a, 2026-10-07: STEP1 vendor-api,
- * 10 models). What the user could see as "nothing" was every FAILURE: a 401, a
- * body that is not `{"data":[...]}`, an empty list - each returned an empty
- * list, the custom base had no models.dev match, the old list was kept, and the
- * button said nothing. These pin that a custom-base fetch now (a) reads the
- * shapes gateways send and (b) says why when it cannot use the answer.
- */
 class ModelListRefreshTest {
 
     private lateinit var server: MockWebServer
@@ -41,7 +31,6 @@ class ModelListRefreshTest {
 
     private fun ids(r: OpenAIModelsApi.FetchResult) = r.models.map { it.id }
 
-    // ── shapes ──────────────────────────────────────────────────────────
 
     @Test
     fun `standard data array`() {
@@ -69,7 +58,6 @@ class ModelListRefreshTest {
         assertEquals("deepseek-v4.1-flash", r.models.single().id)
     }
 
-    // ── failures are named, and a custom base keeps the user's list ─────
 
     @Test
     fun `401 says so with the provider's message`() {
@@ -111,7 +99,6 @@ class ModelListRefreshTest {
         assertTrue(OpenAIModelsApi.fetchModels("k", base(), forceRefresh = true).isEmpty())
     }
 
-    // ── the outcome reaches the user ─────────────────────────────────────
 
     @Test
     fun `refresh returns an outcome and the Refresh row and the RPC show it`() {

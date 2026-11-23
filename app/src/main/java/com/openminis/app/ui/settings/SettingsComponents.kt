@@ -51,42 +51,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openminis.app.i18n.uppercaseForDisplay
 
-/**
- * Shared primitives for settings pages. Grouped-card layout (iOS inset-grouped style).
- *
- * Structure:
- *   SettingsScaffold(title, actions?) {
- *     SettingsSection(header?, footer?) { SettingsRow/SwitchRow/ValueRow(...) ... }
- *     SettingsSection(...) { ... }
- *   }
- */
 
-// ─── Scaffold ──────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScaffold(
     title: String,
-    // [T-android-settings-ui-md3] #11 onBack is nullable so an EDIT screen can
-    // suppress the back arrow and use an explicit Cancel/Save action pair instead
-    // (a back arrow + a "Cancel" action that both pop the screen is redundant and
-    // semantically muddy). Non-edit screens keep passing a non-null onBack and get
-    // the usual back arrow — unchanged.
     onBack: (() -> Unit)? = null,
     actions: @Composable (() -> Unit)? = null,
-    // [T-android-modeldetail-savecancel-ios-parity] Optional custom
-    // navigation slot — e.g. a leading Cancel text action on modal-style
-    // edit screens. When null, the slot falls back to the back arrow iff
-    // onBack is set, so every existing caller renders unchanged.
     navigation: @Composable (() -> Unit)? = null,
-    // [T-android-modeldetail-savecancel-ios-parity] Center the title
-    // (CenterAlignedTopAppBar) for iOS-modal-style edit screens. Default
-    // keeps the start-aligned TopAppBar.
     centerTitle: Boolean = false,
     floatingActionButton: @Composable (() -> Unit)? = null,
     scrollable: Boolean = true,
-    // [T-android-storage-usage-cache] Optional bottom action bar (e.g. a
-    // selection mode's actions). Null keeps every existing caller unchanged.
     bottomBar: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -130,12 +106,6 @@ fun SettingsScaffold(
         bottomBar = { bottomBar?.invoke() },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        // T183: imePadding() shrinks the scroll container by the IME's
-        // height while the keyboard is up, giving Modifier.bringIntoView()
-        // (used by `bringIntoViewOnFocus`) a meaningful "above the
-        // keyboard" rect to scroll a focused TextField into. Without it,
-        // adjustResize + edge-to-edge leaves the scrollable column at
-        // full height behind the IME and bringIntoView is a no-op.
         val baseMod = Modifier
             .fillMaxSize()
             .padding(padding)
@@ -147,40 +117,7 @@ fun SettingsScaffold(
     }
 }
 
-// ─── Switch ────────────────────────────────────────────────────────────────────
 
-/**
- * [T-android-switch-row-height] A [Switch] that does not inflate the row it
- * sits in. Use this instead of Material's `Switch` inside any settings row.
- *
- * ## The problem it solves
- *
- * Compose applies `LocalMinimumInteractiveComponentSize` (48dp) to Switch, so
- * although the control DRAWS at 32dp it MEASURES at 48. Inside a row whose
- * height is `heightIn(min = 56.dp)` + 12dp vertical padding, that produced:
- *
- *     with a switch:  48 + 12 + 12  = 72dp   (heightIn never applies)
- *     without one:    30 + 12 + 12  = 54dp   -> clamped to 56dp
- *
- * Measured on a Pixel 6: switch rows rendered 190px and plain rows 147px, a
- * visible 16dp step between neighbouring rows of the same card. It read as
- * "the Encryption section has odd spacing" when in fact every switch row in
- * the app was taller than every non-switch row.
- *
- * iOS has no equivalent problem — SwiftUI's List sizes all its rows alike and
- * a Toggle does not stretch one — so this was an Android-only artefact rather
- * than an intentional difference.
- *
- * ## Why waiving the minimum is safe here
- *
- * The 48dp floor exists so a small control is still easy to hit. In these rows
- * the WHOLE ROW is clickable and at least 56dp tall, and tapping anywhere on it
- * toggles the same state, so the effective touch target grows rather than
- * shrinks. Material's own guidance allows waiving the minimum exactly when a
- * control is embedded in a larger interactive surface.
- *
- * Do NOT use this for a standalone switch that is the only touch target.
- */
 @Composable
 fun SettingsSwitch(
     checked: Boolean,
@@ -202,12 +139,7 @@ fun SettingsSwitch(
     }
 }
 
-// ─── Section ───────────────────────────────────────────────────────────────────
 
-/**
- * A grouped section — optional small-caps header + rounded card + optional footer caption.
- * Children (SettingsRow / SettingsSwitchRow / …) appear inside the card; dividers auto-inset.
- */
 @Composable
 fun SettingsSection(
     header: String? = null,
@@ -215,10 +147,6 @@ fun SettingsSection(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    // [T-android-settings-ui-md3] Section vertical rhythm normalized to the 4dp
-    // grid (fix_android_settings_ui.md #13): 24dp between sections instead of the
-    // off-grid 20dp. Applied as top padding so the first section under a TopAppBar
-    // keeps a consistent gap too.
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -231,23 +159,9 @@ fun SettingsSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 0.5.sp,
-                // [T-android-settings-ui-md3] #5 header→card gap = 8dp (was 6dp,
-                // off-grid). Horizontal stays 32dp to align the header text with
-                // the inset card's content.
                 modifier = Modifier.padding(start = 32.dp, end = 32.dp, bottom = 8.dp),
             )
         }
-        // [T-android-settings-section-symmetry] The card carries NO vertical
-        // padding of its own: rows already supply 12dp top AND bottom, so any
-        // tail here makes the gap below the content read larger than the gap
-        // above it. An unconditional 8dp bottom pad used to live on this
-        // Column to stop a trailing divider sitting flush against the rounded
-        // edge — but every section either suppresses its last divider
-        // (showDivider = false, or an `index < size - 1` guard) or follows it
-        // with more content, so nothing actually needed the clearance. The
-        // asymmetry it cost was invisible in a tall multi-row card and glaring
-        // in a single-row one ("Status / Enabled", "Voice Services", the
-        // thinking-rules note).
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -261,10 +175,6 @@ fun SettingsSection(
                 text = footer,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                // [T-android-settings-ui-md3] #6 explanatory footer: 8dp below the
-                // card, 4dp before the next section (the parent's 24dp top padding
-                // already provides separation, so keep the footer's own bottom
-                // tight at 4dp).
                 modifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 8.dp, bottom = 4.dp),
                 lineHeight = 16.sp,
             )
@@ -272,12 +182,7 @@ fun SettingsSection(
     }
 }
 
-// ─── Row primitives ────────────────────────────────────────────────────────────
 
-/**
- * Generic row: left icon (optional colored circle) + title/subtitle + trailing slot + optional chevron.
- * Pass `showDivider = false` on the last row of a section.
- */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SettingsRow(
@@ -290,24 +195,13 @@ fun SettingsRow(
     showDivider: Boolean = true,
     titleColor: Color = MaterialTheme.colorScheme.onSurface,
     trailing: (@Composable () -> Unit)? = null,
-    // [T-android-settings-ui-md3] #8 single-line List Item is 56dp; a caller with
-    // two-line content (e.g. the model list: name + id) passes 72dp for the MD3
-    // double-line height. Default keeps every other row at the single-line 56dp.
     minHeight: Dp = 56.dp,
-    // Long-press on a row that is also tappable (e.g. a skill's context menu).
-    // Null keeps the plain clickable, so no other row changes.
     onLongClick: (() -> Unit)? = null,
 ) {
     Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // [T-android-settings-ui-md3] #1/#8 fixed List Item height so every
-                // toggle/value/nav row in a section is uniform (was content-driven
-                // → 24/54/72dp mix). heightIn(min) not height() so an unexpectedly
-                // tall row can still grow; the symmetric 12dp vertical padding (was
-                // effectively asymmetric once the 0.5dp divider was added/removed)
-                // is what made a no-subtitle last row read ~50px shorter.
                 .heightIn(min = minHeight)
                 .then(
                     when {
@@ -318,8 +212,6 @@ fun SettingsRow(
                     },
                 )
                 .padding(horizontal = 14.dp, vertical = 12.dp),
-            // #10 keep the trailing control (Switch/value) vertically centered
-            // against the title — already centered, kept explicit.
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
@@ -390,7 +282,6 @@ fun SettingsRow(
     }
 }
 
-/** Title + Switch row. */
 @Composable
 fun SettingsSwitchRow(
     title: String,
@@ -421,7 +312,6 @@ fun SettingsSwitchRow(
     )
 }
 
-/** Title + right-aligned value text (tap opens picker/detail). */
 @Composable
 fun SettingsValueRow(
     title: String,
@@ -453,7 +343,6 @@ fun SettingsValueRow(
     )
 }
 
-/** Single-choice row (tap to select; shows check on selected). Used for radio-style lists. */
 @Composable
 fun SettingsChoiceRow(
     title: String,
@@ -466,8 +355,6 @@ fun SettingsChoiceRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                // [T-android-settings-ui-md3] #1 match SettingsRow's 56dp min so
-                // choice/radio rows line up with toggle/value rows in mixed lists.
                 .heightIn(min = 56.dp)
                 .clickable(onClick = onSelect)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -504,10 +391,6 @@ fun SettingsChoiceRow(
     }
 }
 
-/**
- * Container for non-row content (sliders, segmented pickers, custom composables)
- * that still wants the grouped-card background.
- */
 @Composable
 fun SettingsCardBlock(
     modifier: Modifier = Modifier,

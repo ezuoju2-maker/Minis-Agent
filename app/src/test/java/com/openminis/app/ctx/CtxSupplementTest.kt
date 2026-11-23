@@ -11,19 +11,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Checks around the C01–C32 table:
- *  - the Fixture Kit itself (A1–A4 generators produce what they claim);
- *  - every A1 format / variant attached as an image, live and after restart
- *    (the format matrix, written to build/ctx-report/formats.md);
- *  - A5 tool products that reach the model as text (file_read, shell, MCP JSON
- *    with base64) and the model-use → read_image path.
- */
 class CtxSupplementTest {
 
     private val dims = ImageRealFixtures::dims
 
-    // ── the kit ─────────────────────────────────────────────────────────────
 
     @Test fun `A1 generators produce real images of the requested size and format`() {
         assertEquals("jpeg 4032x3024", dims(CtxKit.jpeg(Preset.CAMERA_4032x3024))!!.let { "${it.format} ${it.width}x${it.height}" })
@@ -37,7 +28,6 @@ class CtxSupplementTest {
             assertTrue("decodable by the JDK", CtxRequestView.jdkDecodes(b))
         }
         assertEquals("image/tiff", CtxRequestView.magic(CtxKit.tiff(40, 30)))
-        // Header-only formats are recognisable but not decodable.
         assertEquals("image/heic", CtxRequestView.magic(CtxKit.heicHeaderOnly())); assertFalse(CtxRequestView.jdkDecodes(CtxKit.heicHeaderOnly()))
         assertEquals("image/webp", CtxRequestView.magic(CtxKit.webpHeaderOnly())); assertFalse(CtxRequestView.jdkDecodes(CtxKit.webpHeaderOnly()))
         for (o in 1..8) assertEquals(o, dims(CtxKit.exifJpeg(160, 120, o))!!.exifOrientation)
@@ -47,10 +37,9 @@ class CtxSupplementTest {
 
     @Test fun `A1 GIF has the requested frames and PNG alpha is real`() {
         val gif = CtxKit.gif(50, 40, frames = 3)
-        // Three image descriptors (0x2C) after the header / colour tables.
         assertTrue(gif.count { it == 0x2C.toByte() } >= 3)
         val png = CtxKit.png(20, 10, alpha = true)
-        assertEquals(6, png[25].toInt()) // IHDR colour type 6 = RGBA
+        assertEquals(6, png[25].toInt())
     }
 
     @Test fun `A3 and A4 fixtures`() {
@@ -72,26 +61,17 @@ class CtxSupplementTest {
         assertEquals(10_000, CtxKit.Text.cjk(10_000).length)
     }
 
-    // ── A1 format matrix ────────────────────────────────────────────────────
 
     private data class Fmt(val label: String, val name: String, val mime: String, val bytes: ByteArray, val expected: String)
 
-    /**
-     * Each A1 format / variant attached alone. Expected = "live → restart" as
-     * the Anthropic body carries it: `WxH mime` per image, `ph` = the format
-     * gate's placeholder, `-` = nothing. Measured on this code (JVM codec).
-     */
     private val formats = listOf(
         Fmt("JPEG 1600×1200", "a.jpg", "image/jpeg", CtxKit.jpeg(1600, 1200), "1600x1200 image/jpeg → 1600x1200 image/jpeg"),
         Fmt("JPEG CAMERA", "cam.jpg", "image/jpeg", CtxKit.jpeg(Preset.CAMERA_4032x3024), "2000x1500 image/jpeg → 2000x1500 image/jpeg"),
         Fmt("PNG opaque 3000", "o.png", "image/png", CtxKit.png(3000, 2000), "2000x1333 image/png → 2000x1333 image/png"),
         Fmt("PNG alpha 800", "a.png", "image/png", CtxKit.png(800, 600, alpha = true), "800x600 image/png → 800x600 image/png"),
         Fmt("GIF 3 frames 640", "g.gif", "image/gif", CtxKit.gif(640, 480, 3), "640x480 image/gif → 640x480 image/gif"),
-        // The format gate converts a decodable BMP to JPEG at the provider boundary.
         Fmt("BMP 640", "b.bmp", "image/bmp", CtxKit.bmp(640, 480), "640x480 image/jpeg → 640x480 image/jpeg"),
         Fmt("TIFF 640", "t.tiff", "image/tiff", CtxKit.tiff(640, 480), "ph → ph"),
-        // WebP is an accepted format: the gate passes it by magic without decoding, so an
-        // undecodable WebP reaches the wire as is (sizes unknown).
         Fmt("WebP (header only)", "w.webp", "image/webp", CtxKit.webpHeaderOnly(), "nullxnull image/webp → nullxnull image/webp"),
         Fmt("HEIC (header only)", "h.heic", "image/heic", CtxKit.heicHeaderOnly(), "ph → ph"),
         Fmt("TINY 10×10", "t.png", "image/png", CtxKit.png(Preset.TINY_10x10), "10x10 image/png → 10x10 image/png"),
@@ -128,15 +108,7 @@ class CtxSupplementTest {
         assertTrue(wrong.joinToString("\n"), wrong.isEmpty())
     }
 
-    // ── P-a5: the request budget measures what the format gate sends ───────
 
-    /**
-     * [T-request-budget-post-gate] Six 1100×1100 BMPs (~3.6 MB each, under the
-     * 3.75 MB per-image cap, so the compose budget keeps them as BMP). Their raw
-     * base64 is ~29 MB, but the provider's format gate sends each as a small
-     * JPEG. The request budget now measures that output, so nothing is elided:
-     * before this fix it dropped one for a request that left at ~236 KB.
-     */
     @Test fun `P-a5 the request budget measures what the format gate sends - six BMPs all go out`() {
         ImageRealJvmCodec.with { _ ->
             CtxSession("pa5").use { s ->
@@ -162,22 +134,14 @@ class CtxSupplementTest {
         }
     }
 
-    /**
-     * [T-request-budget-post-gate] Drops are decided per position (message
-     * index + part index), not per array identity: the same array in two
-     * messages is two images, and only the occurrence that does not fit is
-     * elided. Keyed by identity, both occurrences were replaced.
-     */
     @Test fun `P-a5 request budget drops by position, not by array identity`() {
         val mb = 1024 * 1024
-        // Undecodable on purpose, so the gate cannot shrink them: each goes out as is.
         fun blob(n: Int) = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) + ByteArray(n)
         val shared = blob(3 * mb)
         fun turn(img: ByteArray, path: String) = com.openminis.app.data.model.LLMMessage(
             com.openminis.app.data.model.LLMMessage.Role.USER, "",
             contentParts = listOf(com.openminis.app.data.model.AgentContentPart.ImageData(img, "image/png", linuxPath = path)),
         )
-        // eldest: shared; then six 3 MB fillers; latest: shared again. 8 × 4 MB base64 > 25 MB.
         val history = listOf(turn(shared, "/p/shared-old.png")) + (0 until 6).map { turn(blob(3 * mb + it), "/p/f$it.png") } +
             listOf(turn(shared, "/p/shared-new.png"))
         val applied = ImageBudget.applyRequestBudget(history) { null }
@@ -190,7 +154,6 @@ class CtxSupplementTest {
         assertTrue(applied.messages[0].contentParts.single().let { it is com.openminis.app.data.model.AgentContentPart.Text && it.text.contains("/p/shared-old.png") })
     }
 
-    // ── A5 tool products ────────────────────────────────────────────────────
 
     @Test fun `A5 text tool products go out verbatim, and a generated image reaches the model only through read_image`() {
         ImageRealJvmCodec.with { _ ->
@@ -203,7 +166,6 @@ class CtxSupplementTest {
                 val mcpCall = CtxSession.Call("call_mcp", "shell_execute", JSONObject().put("command", "minis-mcp call img.render"))
                 val gen = CtxSession.Call("call_gen", "shell_execute", JSONObject().put("command", "minis-model-use image 'a cat' -o /var/minis/workspace/gen.png"))
                 s.assistant("", read, shell, mcpCall, gen)
-                // model-use writes a file and reports its path as shell text (offload/ModelUseManager).
                 val genFile = java.io.File(s.filesDir, "minis-sessions/${s.sid}/workspace/gen.png").apply { parentFile.mkdirs(); writeBytes(CtxKit.png(1024, 1024)) }
                 s.toolResults(
                     read to s.text(big),
@@ -220,15 +182,10 @@ class CtxSupplementTest {
                     assertEquals("${p.id}: no image yet", 0, CtxRequestView.images(view).size)
                     assertEquals("${p.id}: adjacency", emptyList<String>(), CtxRequestView.adjacency(view))
                 }
-                // The GH#352 payload audit does NOT flag the base64 text: it is "suspicious" at
-                // >= 64 bytes per estimated token, and without a loaded vocabulary BPETokenizer
-                // estimates code points / 3, i.e. 3 bytes per token for base64.
                 val audit = r1.diagnostics.audit.map { "${it.kind}:${it.id}:suspicious=${it.finding.suspicious}:dangerous=${it.finding.dangerous}" }
                 println("[A5] audit=$audit estimate=${ContextSizeMeter.estimateTokens(r1.outbound)}")
-                // The 5,000-line file_read (~330 KB) is over half the 200k window: "dangerous".
                 assertEquals(listOf("tool_result:call_read:suspicious=false:dangerous=true"), audit)
 
-                // The agent then reads the generated file.
                 val readGen = CtxSession.Call("call_ri", "read_image", JSONObject().put("path", "/var/minis/workspace/gen.png"))
                 s.assistant("", readGen)
                 s.toolResults(readGen to s.readImage(genFile, "/var/minis/workspace/gen.png"))

@@ -53,15 +53,6 @@ import com.openminis.app.ui.components.SectionTextField
 import kotlinx.coroutines.launch
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * Detail/edit screen for a single mounted folder. Mirrors iOS
- * MountDetailView (external case only). Allows renaming, toggling
- * the user soft-lock on writes, opening the in-app file browser
- * (placeholder toast for T219-2), and unmounting with confirmation.
- *
- * Save is enabled only when there are pending changes AND the new
- * name is valid.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MountDetailScreen(
@@ -75,7 +66,6 @@ fun MountDetailScreen(
     val entry = entries.firstOrNull { it.id == mountId }
 
     if (entry == null) {
-        // Entry was removed (e.g. unmount + back-stack pop race). Pop out.
         LaunchedEffect(Unit) { onBack() }
         return
     }
@@ -181,7 +171,6 @@ fun MountDetailScreen(
                     SettingsSwitch(
                         checked = allowWrite,
                         onCheckedChange = { allowWrite = it },
-                        // Disable when the OS-level grant itself isn't writable.
                         enabled = entry.isWritable,
                     )
                 }

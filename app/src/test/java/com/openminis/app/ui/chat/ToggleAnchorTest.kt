@@ -6,18 +6,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-user-ask-resolved-expand] An answered user_ask card (and a folded tool
- * row) the user opens or shuts keeps its TOP in place, and the card's icon and
- * chevron stay on its title and status lines (iOS e563158e2).
- */
 class ToggleAnchorTest {
 
-    /**
-     * The reverseLayout list in one dimension, screen y growing downward: the
-     * card's BOTTOM is pinned at [pinnedBottom] by the list, and a scroll of
-     * `s` (LazyListState units: + moves content down) moves everything by +s.
-     */
     private class ReverseList(var pinnedBottom: Float) {
         fun top(height: Int) = pinnedBottom - height
         fun scroll(s: Float) { pinnedBottom += s }
@@ -36,7 +26,6 @@ class ToggleAnchorTest {
             }
             assertEquals(to, current)
         }
-        // Without the compensation the card grows upward: the reported bug.
         val list = ReverseList(900f)
         assertEquals(900f - 312, list.top(312), 0f)
         assertTrue(list.top(312) < list.top(58))
@@ -70,31 +59,22 @@ class ToggleAnchorTest {
     }
 
     @Test fun `reveal after an expand - bottom into view, the top never pushed out, nothing when it fits`() {
-        // Fits: no scroll.
         assertEquals(0f, ToggleAnchorMath.revealShift(100f, 400f, 0f, 800f), 0f)
-        // Bottom 150 px under the visible bottom, plenty of room above: shift 150.
         assertEquals(150f, ToggleAnchorMath.revealShift(300f, 950f, 0f, 800f), 0f)
-        // Taller than the room above: stop with the top at the visible top.
         assertEquals(60f, ToggleAnchorMath.revealShift(60f, 1500f, 0f, 800f), 0f)
-        // Top already above the visible top: never scroll it further out.
         assertEquals(0f, ToggleAnchorMath.revealShift(-20f, 1500f, 0f, 800f), 0f)
     }
 
     @Test fun `a fold row's index and offset are restored across the rows it inserts`() {
-        // 10 flat rows, 1 leading item (resume banner); the group row is flat #6.
         val leading = ToggleAnchorMath.leadingCount(lazyIndex = 4, flatPos = 6, flatSize = 10)
         assertEquals(1, leading)
         assertEquals(4, ToggleAnchorMath.lazyIndex(6, 10, leading))
-        // Opening inserts its 3 calls after it (newer, so LOWER lazy indices):
-        // the row itself moves to a higher index.
         assertEquals(7, ToggleAnchorMath.lazyIndex(6, 13, leading))
-        // Requested at -offset, an item at scroll position (i, s) has offset -s.
         for (offset in listOf(0, 37, 640)) {
             assertEquals(offset, -ToggleAnchorMath.restoreScrollOffset(offset))
         }
     }
 
-    // ── Source guards ──────────────────────────────────────────────────────
 
     private val frame = ProductionSources.read("ui/chat/TaskCardFrame.kt")
     private val card = ProductionSources.read("ui/chat/UserAskCard.kt")
@@ -119,7 +99,6 @@ class ToggleAnchorTest {
         assertTrue(resolved.contains("onClick = { resize.toggle(scope, anchor) { expanded = !expanded } },"))
         assertTrue(resolved.contains("modifier = resize.modifier.onGloballyPositioned { resize.coords = it },"))
         assertFalse("animateContentSize resizes during measure; the scroll would lag a frame", card.contains("animateContentSize"))
-        // Scroll and height set in the same frame callback.
         val loop = anchor.substringAfter("val done = withFrameNanos { now ->").substringBefore("t >= 1f\n")
         assertTrue(loop.indexOf("anchor?.keepTop(current, h)") in 0 until loop.indexOf("shown = h"))
         assertTrue(anchor.contains("if (d != 0f) listState.dispatchRawDelta(d)"))
@@ -135,8 +114,6 @@ class ToggleAnchorTest {
     }
 
     @Test fun `the bottom drift snap stands down while a toggle moves the list`() {
-        // [T-toggle-anchor-snap-yield] Pinned to the bottom, LAYOUT-DRIFT-SNAP
-        // re-pinned after every compensation step, a frame late.
         val snap = screen.substringBefore("tracedScrollToItem(\"LAYOUT-DRIFT-SNAP\", 0, 0)").takeLast(2500)
         assertTrue(snap.contains("if (toggleAnchor.isBusy) return@collectLatest"))
         assertTrue("the anchor exists before the snap effect", screen.indexOf("val toggleAnchor = remember(listState)") < screen.indexOf("tracedScrollToItem(\"LAYOUT-DRIFT-SNAP\", 0, 0)"))

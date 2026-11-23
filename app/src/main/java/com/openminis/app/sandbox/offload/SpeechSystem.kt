@@ -31,11 +31,6 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
-/**
- * [T-431] Everything `android-speech` asks of the system, behind one seam so
- * the handler's decisions (envelope, exit codes, wording) are unit-tested
- * against a fake.
- */
 internal interface SpeechSystem {
     fun environment(): SpeechCli.Environment
     fun voiceDetails(timeoutMs: Long): SpeechCli.VoiceDetails
@@ -43,27 +38,16 @@ internal interface SpeechSystem {
     fun hasMicPermission(): Boolean
     fun requestMicPermission(): OffloadPermissionManager.AndroidPermissionResult
     fun recognize(request: RecognizeRequest): RecognizeOutcome
-    /** Open and cancel one session, to see whether Android connects at all. */
     fun probe(timeoutMs: Long): JSONObject
     fun resolveSourcePath(source: String): File?
-    /** Non-null while the chat voice input is capturing (it owns the microphone). */
     fun micBusyReason(): String?
 
-    /**
-     * [T-431-cancel] Whether the guest process that invoked the CLI is still
-     * running. The offload protocol has no cancel message: when the caller is
-     * killed (Ctrl-C, the agent's stop) the host handler keeps going unless it
-     * looks. Offload callers are host processes of this app's uid, so
-     * `/proc/<pid>` answers it; pid <= 0 (debug RPC) counts as alive.
-     */
     fun callerAlive(pid: Int): Boolean
 
-    // [T-431-engine] Provider engine: the Voice Input group's models.
     fun voiceInputModels(): List<SpeechEngines.VoiceModel>
     fun recordMic(seconds: Int, isCancelled: () -> Boolean = { false }): CaptureOutcome
     fun decodeAudioFile(file: File, isCancelled: () -> Boolean = { false }): DecodeOutcome
     fun providerTranscribe(wav: ByteArray, language: String?): ProviderOutcome
-    /** Remember (or, with null, forget) the last recognizer failure for `status`. */
     fun recordLastError(code: Int?, recognizer: String?)
 }
 
@@ -71,9 +55,7 @@ internal data class RecognizeRequest(
     val language: String?,
     val maxResults: Int,
     val durationSec: Long,
-    /** Which system recognizer this one session uses; fallback is the caller's. */
     val onDevice: Boolean = false,
-    /** [T-431-cancel] Polled while waiting; true ends the session at once. */
     val isCancelled: () -> Boolean = { false },
 )
 
@@ -92,21 +74,10 @@ internal sealed class RecognizeOutcome {
 
     data class CreationFailed(val message: String, override val recognizer: String) : RecognizeOutcome()
 
-    /** [T-431-cancel] The caller went away; the session was cancelled. */
     data class Cancelled(override val recognizer: String) : RecognizeOutcome()
 }
 
-/**
- * [T-431-cancel] Reads a caller's `/proc/<pid>/status`. The caller is a proot
- * tracee: during the offload call it sits in a ptrace stop, so a SIGTERM or
- * SIGINT does not end it until proot gets back to it - which is after the host
- * replies. The process therefore stays in /proc; what changes at once is the
- * pending-signal mask (checked on a Pixel 4a: ShdPnd 0x4000 after SIGTERM).
- * Minis' own stop sends SIGTERM then SIGKILL to the group, a terminal Ctrl-C
- * SIGINT; a SIGKILLed process becomes a zombie.
- */
 internal object CallerStatus {
-    /** SIGHUP(1), SIGINT(2), SIGKILL(9), SIGTERM(15) as bits of a signal mask. */
     private const val STOP_SIGNALS: Long = (1L shl 0) or (1L shl 1) or (1L shl 8) or (1L shl 14)
 
     fun alive(status: String?): Boolean {
@@ -152,7 +123,6 @@ internal class AndroidSpeechSystem(private val context: Context) : SpeechSystem 
             AppLogger.warning(TAG, "queryIntentServices failed: ${it.message}")
             emptyList()
         }
-        // Readable by ordinary apps: SpeechRecognizer reads it in-process.
         val def = runCatching {
             Settings.Secure.getString(context.contentResolver, VOICE_RECOGNITION_SERVICE)
         }.getOrNull()?.takeIf { it.isNotBlank() }
@@ -172,12 +142,6 @@ internal class AndroidSpeechSystem(private val context: Context) : SpeechSystem 
         )
     }
 
-    /**
-     * The documented way to ask a recognizer for its languages: resolve the
-     * voice-search activity, read its `android.speech.DETAILS` receiver and
-     * send it an EXPLICIT ordered broadcast. The pre-#431 implicit broadcast
-     * reaches no manifest receiver on Android 8+.
-     */
     override fun voiceDetails(timeoutMs: Long): SpeechCli.VoiceDetails {
         val intent = runCatching { RecognizerIntent.getVoiceDetailsIntent(context) }.getOrNull()
             ?: return SpeechCli.VoiceDetails(
@@ -210,7 +174,6 @@ internal class AndroidSpeechSystem(private val context: Context) : SpeechSystem 
         }
     }
 
-    /** API 33+: ask the regular and the on-device recognizer directly. */
     override fun recognitionSupport(timeoutMs: Long): SpeechCli.Support? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return null
         val online = linkedSetOf<String>()
@@ -302,7 +265,6 @@ internal class AndroidSpeechSystem(private val context: Context) : SpeechSystem 
         ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
 
-    /** The 3-stage flow the chat composer's mic button uses (T67). */
     override fun requestMicPermission(): OffloadPermissionManager.AndroidPermissionResult = runBlocking {
         var r = OffloadPermissionManager.requestAndroidPermission(listOf(Manifest.permission.RECORD_AUDIO))
         if (r == OffloadPermissionManager.AndroidPermissionResult.DENIED &&
@@ -327,11 +289,6 @@ internal class AndroidSpeechSystem(private val context: Context) : SpeechSystem 
         r
     }
 
-    /**
-     * One recognition session on the recognizer the request names.
-     * [T-431-fallback] Pre-#431 the CLI always took the on-device recognizer on
-     * S+ and never fell back; the handler now plans the order.
-     */
     override fun recognize(request: RecognizeRequest): RecognizeOutcome =
         session(request, request.onDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
 
@@ -345,11 +302,6 @@ internal class AndroidSpeechSystem(private val context: Context) : SpeechSystem 
         }
     }
 
-    /**
-     * [T-android-speech-error10] Every exit path destroys the recognizer
-     * exactly once, on the main looper that created it - an orphaned session
-     * exhausts the system recognizer service (ERROR_TOO_MANY_REQUESTS, 10).
-     */
     private fun session(request: RecognizeRequest, onDevice: Boolean): RecognizeOutcome {
         val label = if (onDevice) Recognizers.ON_DEVICE else Recognizers.REGULAR
         val latch = CountDownLatch(1)
@@ -415,8 +367,6 @@ internal class AndroidSpeechSystem(private val context: Context) : SpeechSystem 
             }
         }
 
-        // [T-431-cancel] A caller that went away cancels the session now,
-        // freeing the microphone, instead of at the end of --duration.
         fun cancelled(): RecognizeOutcome {
             mainHandler.post {
                 runCatching { recognizerRef.get()?.cancel() }
@@ -425,10 +375,6 @@ internal class AndroidSpeechSystem(private val context: Context) : SpeechSystem 
             return RecognizeOutcome.Cancelled(label)
         }
 
-        // [T-431] --duration is the recording length, as on iOS: stop
-        // listening when it is up and give the recognizer a grace period to
-        // deliver the final result. Pre-#431 the duration was only a timeout,
-        // so a quiet room always ended as "timed out".
         when (awaitOrCancel(latch, request.durationSec * 1000, request.isCancelled)) {
             Wait.DONE -> Unit
             Wait.CANCELLED -> return cancelled()
@@ -440,7 +386,6 @@ internal class AndroidSpeechSystem(private val context: Context) : SpeechSystem 
                     Wait.DONE -> Unit
                     Wait.CANCELLED -> return cancelled()
                     Wait.TIME_UP -> {
-                        // [T-android-speech-error10] Never leave the session behind.
                         mainHandler.post {
                             runCatching { recognizerRef.get()?.cancel() }
                             finish(RecognizeOutcome.Timeout(request.durationSec + RESULT_GRACE_SEC, label))
@@ -455,7 +400,6 @@ internal class AndroidSpeechSystem(private val context: Context) : SpeechSystem 
 
     private enum class Wait { DONE, TIME_UP, CANCELLED }
 
-    /** Wait up to [millis] for [latch], checking [isCancelled] every 250 ms. */
     private fun awaitOrCancel(latch: CountDownLatch, millis: Long, isCancelled: () -> Boolean): Wait {
         val end = System.currentTimeMillis() + millis
         while (true) {
@@ -515,10 +459,6 @@ internal class AndroidSpeechSystem(private val context: Context) : SpeechSystem 
         return result.get().put("recognizer", Recognizers.REGULAR).put("ms", System.currentTimeMillis() - started)
     }
 
-    /**
-     * Resolve a `/var/minis/...`-style Linux path to a host File via
-     * [PRootKernel]'s global bind-mount table.
-     */
     override fun resolveSourcePath(source: String): File? {
         val trimmed = source.trim()
         if (trimmed.isEmpty()) return null
@@ -558,10 +498,8 @@ internal class AndroidSpeechSystem(private val context: Context) : SpeechSystem 
         private const val KEY_LAST_RECOGNIZER = "last_error_recognizer"
         private const val RECOGNITION_SERVICE_ACTION = "android.speech.RecognitionService"
 
-        /** After stopListening, how long the recognizer may take to answer. */
         private const val RESULT_GRACE_SEC = 8L
 
-        /** `Settings.Secure.VOICE_RECOGNITION_SERVICE` is @hide; the key is not. */
         private const val VOICE_RECOGNITION_SERVICE = "voice_recognition_service"
     }
 }

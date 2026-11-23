@@ -10,17 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Ignore
 import org.junit.Test
 
-/**
- * Image-pipeline repro, Android: history — what the live turn holds, what is
- * persisted, what a reload rebuilds — and the facts behind P-a1/2/3/8/9.
- *
- * ChatViewModel cannot be constructed in a JVM test (Room + Context), and its
- * send / persist / rebuild functions are private. So each fact is pinned two
- * ways: the real downstream function where one exists (ContextSizeMeter), and
- * the exact production lines as anchors. An anchor that no longer exists
- * fails the test, so these never silently describe code that has moved on;
- * they also pin the shapes ImageReproWire builds for the wire tests.
- */
 class ImageReproHistoryFactsTest {
 
     private val vm by lazy { ProductionSources.read("ui/chat/ChatViewModel.kt") }
@@ -40,9 +29,7 @@ class ImageReproHistoryFactsTest {
         }
     }
 
-    // ── P-a1: one image, two holders, counted twice ─────────────────────────
 
-    /** (A) P-a1: the live and rebuilt user turns put the SAME array in imageParts and contentParts.ImageData. */
     @Ignore("发送/重建路径已重构：ChatViewModel 的 addModelImage / toLLMMessage / 各发送入口改为委托同文件的 ChatAttachmentIngest / ChatHistoryRebuild，旧的 'userContentParts.addModelImage(part, prepared…)' 源锚点已不存在。'一张图双持有、双计数'的运行时语义仍由本文件 P-a1 estimateTokens 用例覆盖。")
     @Test fun `P-a1 shape - send path and rebuild both hold each image twice`() {
         val helper = fn("private fun MutableList<AgentContentPart>.addModelImage(")
@@ -61,7 +48,6 @@ class ImageReproHistoryFactsTest {
             "contentParts.add(AgentContentPart.ImageData(bytes, sendMime, linuxPath = restoredPath")
     }
 
-    /** (A) P-a1: ContextSizeMeter counts that image twice (real function, live-shaped message). */
     @Test fun `P-a1 estimateTokens counts a user image twice`() {
         val img = ImageReproFixtures.jpeg(64, 32)
         val live = ImageReproWire.liveUserTurn("look", img, "image/jpeg", "/var/minis/attachments/uploads/a.jpg")
@@ -74,7 +60,6 @@ class ImageReproHistoryFactsTest {
         assertEquals(single + perImage, both)
     }
 
-    /** (B) P-a1: an image is counted once. */
     @Ignore("known gap P-a1: ContextPolicy.estimateTokens adds imageParts on top of contentParts.ImageData")
     @Test fun `desired - a user image is counted once`() {
         val img = ImageReproFixtures.jpeg(64, 32)
@@ -82,7 +67,6 @@ class ImageReproHistoryFactsTest {
         assertEquals(ContextSizeMeter.estimateTokens(live.copy(imageParts = emptyList())), ContextSizeMeter.estimateTokens(live))
     }
 
-    /** (A) the agent loop never passes a top-level imageParts, so the OpenAI Responses duplicate (wire test) does not occur there. */
     @Ignore("agent loop 已重构：ChatViewModel.runAgentLoop 不再是包含 streamMessage 调用的完整循环体，applyRequestImageBudget / imageParts 的旧窗口锚点已从该函数中移出。顶层 imageParts 的 wire 行为仍由 ImageReproWire/ImageReproGate 的序列化用例覆盖。")
     @Test fun `agent loop streamMessage call passes no top-level imageParts`() {
         val loop = vm.substring(vm.indexOf("suspend fun runAgentLoop"))
@@ -91,9 +75,7 @@ class ImageReproHistoryFactsTest {
         assertFalse(call.contains("imageParts"))
     }
 
-    // ── P-a2 / S7: tool images are not persisted ────────────────────────────
 
-    /** (A) P-a2 / S7: live tool results carry the image; persistence writes text only; reload restores text only. */
     @Ignore("persistToolResultMessage 已是表达式体，委托 ToolResultWrap.persist，parts JSON 由 ChatPartsJson.toolResultPartsJson 生成；旧的 '函数体内嵌 append(…) JSON 字面量' 锚点已不存在。重建分支的 ToolResult 无 imageData 语义仍在同文件其它已重锚点用例中检查。")
     @Test fun `P-a2 tool images reach the live history but are neither persisted nor rebuilt`() {
         assertTrue("live: the tool's image goes into the ToolResult", vm.contains("imageData = result.imageData,"))
@@ -109,18 +91,14 @@ class ImageReproHistoryFactsTest {
         assertFalse("rebuilt ToolResult has no image", branch.contains("imageData"))
     }
 
-    /** (B) P-a2: the tool image is written somewhere a reload can find it. */
     @Ignore("known gap #412 / P-a2: persistToolResultMessage stores output text only")
     @Test fun `desired - persisted tool result references its image`() {
         val json = fn("private suspend fun persistToolResultMessage(")
         assertTrue(json.contains("image"))
     }
 
-    // ── P-a3: rebuild reads the whole original; a missing file is skipped ──
 
-    /** (A) P-a3: exists-check → continue, full readBytes, THEN the (path,size,mtime)-cached downscale. */
     @Test fun `P-a3 rebuild reads the full original before the cache, and skips a missing file silently`() {
-        // 重建逻辑已从 ChatViewModel 的同名委托下沉到同文件的 ChatHistoryRebuild.toLLMMessage。
         val rebuild = fn("    fun toLLMMessage(")
         assertOrdered(rebuild,
             "if (!mime.startsWith(\"image/\")) continue",
@@ -129,42 +107,28 @@ class ImageReproHistoryFactsTest {
             "val downscaled = ImageBudget.downscaleForModel(file, original)")
         val image = rebuild.substringAfter("if (!mime.startsWith(\"image/\")) continue").substringBefore("val downscaled =")
         assertFalse("no placeholder for a missing image", image.contains("Text("))
-        // The cache needs the bytes already read: they are a parameter.
         val budget = ProductionSources.read("provider/ImageBudget.kt")
         assertTrue(budget.contains("fun downscaleForModel(file: java.io.File, bytes: ByteArray): Downscaled? {"))
-        // Contrast: a missing PASTED file does get a placeholder (T-android-paste-missing-file).
         assertTrue(rebuild.contains("val resolved = body ?: PastedMedia.MISSING_PLACEHOLDER"))
     }
 
-    /** (B) P-a3: a missing image becomes visible text, like a missing pasted file. */
     @Ignore("known gap P-a3: toLLMMessage `if (!file.exists()) continue` drops the image with no trace")
     @Test fun `desired - a missing image file leaves a placeholder`() {
         val rebuild = fn("private fun MessageEntity.toLLMMessage(): LLMMessage {")
         assertFalse(rebuild.contains("if (!file.exists()) continue"))
     }
 
-    // ── N1: caption only on the live turn ───────────────────────────────────
 
-    /** (A) N1: the "[attached image: <path>]" caption is built live, never persisted, never rebuilt. */
     @Test fun `N1 attached-image caption exists only on the live turn`() {
         val persisted = fn("    fun buildUserPartsJson(")
         assertFalse(persisted.contains("attached image"))
         assertTrue(persisted.contains("parts.addAll(mediaRefPartsJson)"))
-        // 逻辑已从 ChatViewModel 的同名委托下沉到同文件的 ChatPartsJson / ChatAttachmentIngest 对象。
         val rebuild = fn("    fun toLLMMessage(")
         assertFalse(rebuild.contains("attached image"))
         assertTrue(fn("    fun addModelImage(").contains("[attached image: \$path]"))
     }
 
-    // ── S6: one producer for every send path ────────────────────────────────
 
-    /**
-     * (A) S6: Android has no separate queue serializer. The three send entries
-     * — sendMessage (normal + edit-resend), drainQueuedPrompts (queue flush
-     * mid-run) and injectQueuedPromptsAsNewTurn (queue flush as a new turn) —
-     * each call prepareUserAttachments and then addModelImage, so a queued
-     * image and a normally sent image are built by the same two functions.
-     */
     @Ignore("三个发送入口已改为经 ChatAttachmentIngest.queuedTurn 构造消息，prepareUserAttachments 也下沉到 ChatAttachmentIngest.prepare；旧的 'addModelImage(part, prepared…)' 调用点计数与 prepare 函数体内锚点已不存在。")
     @Test fun `S6 every send path builds images through the same two functions`() {
         val calls = Regex(Regex.escape("addModelImage(part, prepared.imageUploadPaths.getOrNull(idx), prepared.imageModelNotes.getOrNull(idx))")).findAll(vm).count()
@@ -173,7 +137,6 @@ class ImageReproHistoryFactsTest {
         assertEquals(3, calls)
         assertEquals(3, prepares)
         for (entry in listOf("private fun sendMessage(", "private suspend fun drainQueuedPrompts(", "private suspend fun injectQueuedPromptsAsNewTurn(")) assertTrue("send entry missing: $entry", vm.contains(entry))
-        // The only two places that create a user ImageData part.
         val ctor = Regex(Regex.escape("AgentContentPart.ImageData(")).findAll(vm).count()
         assertEquals("addModelImage + toLLMMessage", 2, ctor)
         val prepare = fn("private fun prepareUserAttachments(")
@@ -184,14 +147,12 @@ class ImageReproHistoryFactsTest {
             "val inferenceMime = ImageBudget.sniffFormat(inferenceBytes).mimeType ?: attachment.mimeType")
     }
 
-    // ── disk copies per source ──────────────────────────────────────────────
 
-    /** (A) Disk: attachments = 2 copies of the ORIGINAL; screenshots = 2 copies of the original JPEG; the model copy is never written. */
     @Ignore("prepareUserAttachments / executeBrowserUseTool / persistBrowserArtifact 均已改为表达式体委托 ChatAttachmentIngest / BrowserArtifacts；旧的 data=rawBytes、dest.writeBytes(rawBytes)、persistBrowserArtifact(filename, raw) 源锚点已不在原函数体内。")
     @Test fun `disk copies - originals only, never the model copy`() {
         val prepare = fn("private fun prepareUserAttachments(")
-        assertTrue(prepare.contains("data = rawBytes,"))                 // media/yyyy/MM/dd/<sid>/<uuid>.<ext>
-        assertTrue(prepare.contains("dest.writeBytes(rawBytes)"))        // minis-sessions/<sid>/attachments/uploads/<name>
+        assertTrue(prepare.contains("data = rawBytes,"))
+        assertTrue(prepare.contains("dest.writeBytes(rawBytes)"))
         assertFalse(prepare.contains("writeBytes(inferenceBytes)"))
         val browserTool = fn("private suspend fun executeBrowserUseTool(")
         assertTrue(browserTool.contains("val persistPath = persistBrowserArtifact(filename, raw)"))
@@ -203,7 +164,6 @@ class ImageReproHistoryFactsTest {
         assertFalse("read_image writes nothing", read.contains("writeBytes") || read.contains("outputStream()"))
     }
 
-    /** (A) N3: the persisted screenshot name has 1-second resolution, so two shots in one second share a file. */
     @Ignore("截图文件名生成与落盘逻辑已下沉到 BrowserArtifacts，executeBrowserUseTool / persistBrowserArtifact 中已无 'screenshot_…/1000' 字面量与 file.writeBytes(data) 锚点；该行为仍由 BrowserUseManager 侧用例与真机路径覆盖。")
     @Test fun `N3 two screenshots in the same second overwrite one persisted file`() {
         val browserTool = fn("private suspend fun executeBrowserUseTool(")
@@ -213,14 +173,7 @@ class ImageReproHistoryFactsTest {
         assertFalse("no exists()/unique-name guard", artifact.contains("exists()"))
     }
 
-    // ── P-a8 / P-a9 ─────────────────────────────────────────────────────────
 
-    /**
-     * (A) P-a8: ImageBudgetCallSiteTest's OLD assertion — `effectiveAgentHistory()`
-     * inside the 700 chars after `streamMessage(` — is false on today's source
-     * because 7b960155e binds it to `outboundHistory` first; d37fe1522 updated
-     * the guard. A stale guard, not a behaviour change.
-     */
     @Ignore("该用例专门固定旧的 streamMessage 调用点形状；agent loop 重构后 'val outboundHistory = effectiveAgentHistory()' 与 700 字符窗口锚点已不存在，前提失效。请求预算的接线现由 ImageBudget.applyRequestBudget 侧的用例覆盖。")
     @Test fun `P-a8 the old call-site assertion fails only because the history is bound to a val first`() {
         val loop = vm.substring(vm.indexOf("suspend fun runAgentLoop"))
@@ -232,7 +185,6 @@ class ImageReproHistoryFactsTest {
         assertTrue(loop.substring(0, callIdx).contains("val outboundHistory = effectiveAgentHistory()\n"))
     }
 
-    /** (A) P-a9: no takeover image source — takeover hands the tab back; no takeover path builds an image part. */
     @Test fun `P-a9 Android has no takeover image source`() {
         val pool = ProductionSources.read("browser/BrowserTabPool.kt")
         assertTrue(pool.contains("This is the \"Takeover\" action"))

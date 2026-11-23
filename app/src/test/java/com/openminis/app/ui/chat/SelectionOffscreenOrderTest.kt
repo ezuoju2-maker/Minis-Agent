@@ -7,18 +7,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-selection-offscreen-order] (GH#296) A long-press selection whose
- * handle is dragged past one screen auto-scrolls its START out of the list.
- * The start shard unregisters; the highlight of every paragraph in between
- * vanished and a copy returned only the tail of the last shard.
- *
- * Exercised through the real SelectionController via its ShardText seam
- * (no Compose TextLayoutResult needed).
- */
 class SelectionOffscreenOrderTest {
 
-    // Real chat shard ids: MdText appends "#<subIndex>" to the row's base id.
     private fun md(msg: String, parent: String, index: Int, sub: Int = 0) =
         TextShardId(msg, "mdblock:$parent:$index#$sub")
     private fun rowKey(msg: String, parent: String, index: Int) = "mdblock:$msg:$parent:$index"
@@ -30,7 +20,6 @@ class SelectionOffscreenOrderTest {
     private val c = md(m1, "p1", 2)
     private val d = md(m2, "q1", 0)
 
-    /** Flattened rows, oldest first, as ChatScreen's flatRowIndexByKey holds them. */
     private val rows = mapOf(
         rowKey(m1, "p1", 0) to 1,
         rowKey(m1, "p1", 1) to 2,
@@ -50,11 +39,9 @@ class SelectionOffscreenOrderTest {
         replaceEnd(to)
     }
 
-    // 1. Regression witness ------------------------------------------------------
 
     @Test
     fun `the old order key could not parse a chat shard id`() {
-        // shardOrderKey's rule, verbatim: the int after the last ':'.
         fun oldKey(s: String) = s.substring(s.lastIndexOf(':') + 1).toIntOrNull()
         assertNull("since the #subIndex suffix (958ff9290) the old key is always null", oldKey(a.shardId))
         assertEquals(rowKey(m1, "p1", 0), chatRowKeyForShard(a))
@@ -64,13 +51,12 @@ class SelectionOffscreenOrderTest {
         assertNull(chatRowKeyForShard(TextShardId(m1, "something-else")))
     }
 
-    // 2. Ordering with the start off-screen ------------------------------------
 
     @Test
     fun `endpoints and middle shards still order after the start scrolled away`() {
         val ctl = controller()
         ctl.select(TextPosition(a, 6), TextPosition(c, 7))
-        ctl.unregister(a) // auto-scroll pushed the start out of the list
+        ctl.unregister(a)
         val (first, last) = ctl.orderedEndpoints(ctl.selection.value!!)!!
         assertEquals(a, first.shard)
         assertEquals(c, last.shard)
@@ -81,14 +67,13 @@ class SelectionOffscreenOrderTest {
     @Test
     fun `dragging the start handle upward past the end reverses cleanly`() {
         val ctl = controller()
-        ctl.select(TextPosition(c, 7), TextPosition(a, 6)) // start below end
+        ctl.select(TextPosition(c, 7), TextPosition(a, 6))
         ctl.unregister(c)
         val (first, last) = ctl.orderedEndpoints(ctl.selection.value!!)!!
         assertEquals(a, first.shard)
         assertEquals(c, last.shard)
     }
 
-    // 3. Copy with the start off-screen ------------------------------------------
 
     @Test
     fun `copy returns the whole span, not only the tail of the last shard`() {
@@ -107,7 +92,6 @@ class SelectionOffscreenOrderTest {
         assertEquals("first paragraph\nBravo middle\nCharlie", ctl.selectedPlainText())
     }
 
-    // 4. Across messages ----------------------------------------------------------
 
     @Test
     fun `a selection spanning two replies orders and copies across them`() {
@@ -119,12 +103,9 @@ class SelectionOffscreenOrderTest {
         assertEquals("middle\nCharlie last one\nDelta", ctl.selectedPlainText())
     }
 
-    // 5. Same message, different parent blocks ----------------------------------
 
     @Test
     fun `blocks of different parents order by row, not by their own index`() {
-        // p2 comes AFTER p1 in the reply but its block index (0) is lower
-        // than p1's (5): the old index-only key would have put it first.
         val late = md(m1, "p2", 0)
         val early = md(m1, "p1", 5)
         val ctl = SelectionController().apply {
@@ -141,7 +122,6 @@ class SelectionOffscreenOrderTest {
         assertTrue(ctl.compareShards(md(m1, "p1", 0, sub = 1), md(m1, "p1", 0, sub = 2))!! < 0)
     }
 
-    // 6. retired lifecycle (no leak) ------------------------------------------
 
     @Test
     fun `shards are only kept while a selection is active, and are dropped with it`() {
@@ -154,7 +134,7 @@ class SelectionOffscreenOrderTest {
         ctl.unregister(b)
         assertEquals(2, ctl.retiredCount())
 
-        ctl.registerText(ShardText(b, text.getValue(b), null) { y[b] }) // scrolled back in
+        ctl.registerText(ShardText(b, text.getValue(b), null) { y[b] })
         assertEquals("a re-registered shard leaves the retired set", 1, ctl.retiredCount())
 
         ctl.clearSelection()
@@ -162,16 +142,13 @@ class SelectionOffscreenOrderTest {
 
         ctl.select(TextPosition(c, 0), TextPosition(c, 3))
         ctl.unregister(c)
-        ctl.beginSelection(TextPosition(b, 0)) // a new selection starts clean
+        ctl.beginSelection(TextPosition(b, 0))
         assertEquals(0, ctl.retiredCount())
     }
 
-    // 7. Unknown order never inverts ------------------------------------------
 
     @Test
     fun `order that cannot be decided is reported as unknown, not guessed`() {
-        // No document order, nothing registered, and the shards sit in
-        // different messages, so not even the same-block index applies.
         val ctl = SelectionController()
         assertNull(ctl.orderedEndpoints(TextSelection(TextPosition(a, 0), TextPosition(d, 1))))
         assertFalse(ctl.isShardBetween(a, d, b))
@@ -179,7 +156,6 @@ class SelectionOffscreenOrderTest {
 
     @Test
     fun `without document order, shards of one block still order by their embedded index`() {
-        // The shardOrderKey fallback MouseSelectionTest relies on, now #sub-aware.
         val ctl = SelectionController()
         assertTrue(ctl.compareShards(md(m1, "p1", 0, sub = 2), md(m1, "p1", 1, sub = 0))!! < 0)
         assertTrue(ctl.compareShards(md(m1, "p1", 1, sub = 0), md(m1, "p1", 1, sub = 3))!! < 0)
@@ -194,7 +170,6 @@ class SelectionOffscreenOrderTest {
         assertTrue(fallback.contains("if (a.shard == b.shard && a.charOffset > b.charOffset) b to a else a to b"))
     }
 
-    // 8. Surfaces without document order keep y ordering ---------------------
 
     @Test
     fun `without document order the y ordering of old still applies`() {
@@ -213,7 +188,6 @@ class SelectionOffscreenOrderTest {
         assertEquals("Bravo", ctl.selectedPlainText())
     }
 
-    // Row keys are the chat's real ones ---------------------------------------------
 
     @Test
     fun `row key shapes match FlatChatItem keys`() {

@@ -12,12 +12,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-/**
- * [T-android-fresh-shells-concurrent] + [T-android-fresh-session-terminate]
- *
- * Drives the real ExecutionCoordinator registry with real host processes
- * (`sleep`) standing in for the proot child of a FreshProcessShell.
- */
 class FreshShellSessionTerminateTest {
 
     private val spawned = mutableListOf<Process>()
@@ -72,7 +66,7 @@ class FreshShellSessionTerminateTest {
         val b = sleeper()
         register("sess-A", shell("sess-A", a1))
         register("sess-A", shell("sess-A", a2))
-        register("sess-AB", shell("sess-AB", b)) // id with sess-A as a prefix
+        register("sess-AB", shell("sess-AB", b))
 
         ExecutionCoordinator.sessionDidTerminate("sess-A")
 
@@ -86,7 +80,6 @@ class FreshShellSessionTerminateTest {
         assertTrue(newSet().javaClass.name.contains("ConcurrentHashMap"))
     }
 
-    /** Stop iterates while other threads register/unregister: must never throw. */
     @Test
     fun `stop racing registration does not throw`() {
         val sid = "sess-race"
@@ -119,7 +112,6 @@ class FreshShellSessionTerminateTest {
         val src = ProductionSources.read("sandbox/ExecutionCoordinator.kt")
         assertFalse(src.contains("(existing ?: mutableSetOf())"))
         assertTrue(src.contains("ConcurrentHashMap.newKeySet()"))
-        // Kotlin toList() on a shrinking concurrent collection can throw.
         assertFalse(src.contains("freshShells[sessionId]?.toList()"))
         assertFalse(src.contains("freshShells.keys.toList()"))
         val terminate = src.substringAfter("fun sessionDidTerminate(sessionId: String) {")

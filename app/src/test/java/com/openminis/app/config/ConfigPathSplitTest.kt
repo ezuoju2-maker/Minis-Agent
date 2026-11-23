@@ -9,18 +9,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-config-path-dotted-id] OpenMinis#390 — config paths address an entry by
- * its RAW id, dots included. Android half of iOS cef38f13b
- * (MinisTests/Standalone/ConfigPathSplitTests.swift); the fixture table and
- * the expected message texts are the same, and the message templates are
- * compared against the iOS source so neither side can drift alone.
- */
 class ConfigPathSplitTest {
 
     private val u = "05B474B3-C297-48C3-A239-688569B3F872"
 
-    // -- Split: the fixture table shared with iOS ---------------------------------
 
     @Test
     fun `split fixture table (shared with iOS)`() {
@@ -50,13 +42,7 @@ class ConfigPathSplitTest {
         assertEquals("6-pro.contextWindow", old[2])
     }
 
-    // -- End to end through a real registry ---------------------------------------
 
-    /**
-     * Behaves like ModelsCollection: canonical paths carry the RAW id, and a
-     * path id resolves raw first, then by the legacy `~d` decode (the REAL
-     * ModelsCollection.lookupIn rule).
-     */
     private class FakeModels(private val ids: List<String>) : ConfigCollection {
         override val basePath = "models"
         override val displayName = "LLM models"
@@ -147,7 +133,6 @@ class ConfigPathSplitTest {
         assertTrue(children.none { it.path == legacy })
     }
 
-    // -- Guided unknown_path reasons (same texts as iOS) --------------------------
 
     private fun noEntry(base: String, id: String) =
         "No entry '$id' under '$base'. Run `minis-config get $base` and use an entry_id verbatim — ids may contain dots and slashes, no escaping needed: $base.<entry_id>.<field>."
@@ -189,7 +174,6 @@ class ConfigPathSplitTest {
         assertEquals("No registered field at 'appearance.nope'.", registry.explainUnknownPath("appearance.nope"))
     }
 
-    // -- Cross-platform parity with the iOS source --------------------------------
 
     private val repoRoot: File by lazy {
         var dir: File? = File("").absoluteFile
@@ -200,17 +184,11 @@ class ConfigPathSplitTest {
     private fun android(rel: String) =
         File(repoRoot, "src/android/app/src/main/java/com/openminis/app/$rel").readText()
 
-    /**
-     * A source line with every string interpolation replaced by `{}`. Done on
-     * the whole line BEFORE literals are cut out, because interpolations carry
-     * quotes of their own (`joined(separator: ", ")`, `joinToString(", ")`).
-     */
     private fun skeleton(line: String): String = line
-        .replace(Regex("""\\\((?:[^()]|\([^()]*\))*\)"""), "{}") // Swift \(…), one nested (…)
-        .replace(Regex("""\$\{[^}]*\}"""), "{}")                 // Kotlin ${…}
-        .replace(Regex("""\$[A-Za-z_][A-Za-z0-9_]*"""), "{}")     // Kotlin $name
+        .replace(Regex("""\\\((?:[^()]|\([^()]*\))*\)"""), "{}")
+        .replace(Regex("""\$\{[^}]*\}"""), "{}")
+        .replace(Regex("""\$[A-Za-z_][A-Za-z0-9_]*"""), "{}")
 
-    /** Every double-quoted literal, interpolations as `{}`, on lines containing [marker]. */
     private fun literalsWith(source: String, marker: String): Set<String> =
         source.lines().filter { it.contains(marker) }
             .flatMap { line ->
@@ -262,7 +240,6 @@ class ConfigPathSplitTest {
         )
     }
 
-    // -- Source guards ---------------------------------------------------------------
 
     @Test
     fun `resolveField splits once and matches by leaf`() {
@@ -283,7 +260,6 @@ class ConfigPathSplitTest {
     @Test
     fun `ModelsCollection publishes raw ids and looks up raw first`() {
         val src = android("config/collections/ModelsCollection.kt")
-        // 12 literal leaves plus the one `$leaf` template temperature and topP share.
         assertEquals(13, src.split("path = \"models.\$id.").size - 1)
         assertTrue(!src.contains("pathSegment"))
         assertTrue(src.contains("repo.config.value.modelEntries.map { it.id }"))
@@ -294,7 +270,6 @@ class ConfigPathSplitTest {
         assertTrue(remove.contains("lookup(id)") && remove.contains("repo.removeEntry(entry.id)"))
     }
 
-    // -- The invariant the new split relies on ---------------------------------------
 
     @Test
     fun `every collection path template has a single-segment leaf`() {

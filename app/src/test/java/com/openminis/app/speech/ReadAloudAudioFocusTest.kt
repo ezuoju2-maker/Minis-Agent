@@ -11,10 +11,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/**
- * [T-readaloud-focus] One MAY_DUCK focus holder for both read-aloud engines,
- * held for a whole run of sentences, released on every exit path.
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
 class ReadAloudAudioFocusTest {
@@ -28,7 +24,6 @@ class ReadAloudAudioFocusTest {
         override fun abandon() { abandons++ }
     }
 
-    /** Manual clock: tasks run only when [advance] passes their due time. */
     private class FakeScheduler : ReadAloudAudioFocus.Scheduler {
         private class Task(val due: Long, val block: () -> Unit) { var cancelled = false }
         private val tasks = mutableListOf<Task>()
@@ -60,14 +55,14 @@ class ReadAloudAudioFocusTest {
     fun `a run of sentences is one request and one abandon`() {
         repeat(5) {
             focus.acquire(a) {}
-            clock.advance(1_000)       // sentence plays
+            clock.advance(1_000)
             focus.releaseSoon(a)
-            clock.advance(800)         // inter-sentence gap shorter than the grace
+            clock.advance(800)
         }
         assertEquals("no re-request between sentences", 1, gw.requests)
         assertEquals("no release between sentences", 0, gw.abandons)
         assertTrue(focus.isHeld)
-        clock.advance(2_500)           // queue drained
+        clock.advance(2_500)
         assertEquals(1, gw.abandons)
         assertFalse(focus.isHeld)
         assertEquals(0, focus.ownerCount)
@@ -77,7 +72,7 @@ class ReadAloudAudioFocusTest {
     fun `a gap longer than the grace releases and the next sentence re-requests`() {
         focus.acquire(a) {}
         focus.releaseSoon(a)
-        clock.advance(2_600)           // slow synthesis of the next sentence
+        clock.advance(2_600)
         assertEquals(1, gw.abandons)
         focus.acquire(a) {}
         assertEquals(2, gw.requests)
@@ -86,17 +81,15 @@ class ReadAloudAudioFocusTest {
 
     @Test
     fun `slow provider synthesis of a queued sentence keeps focus - the device finding`() {
-        // Measured on a Pixel 4a with Gemini TTS: 3-4 s between sentences. With
-        // only the 2.5 s grace every sentence released and re-requested focus.
         repeat(6) {
             focus.acquire(a) {}
-            clock.advance(5_000)                                   // sentence plays
-            focus.releaseSoon(a, ReadAloudAudioFocus.SYNTH_WAIT_MS) // next one is queued
-            clock.advance(4_000)                                   // synthesis
+            clock.advance(5_000)
+            focus.releaseSoon(a, ReadAloudAudioFocus.SYNTH_WAIT_MS)
+            clock.advance(4_000)
         }
         assertEquals(1, gw.requests)
         assertEquals(0, gw.abandons)
-        focus.releaseSoon(a, ReadAloudAudioFocus.GRACE_MS)         // queue drained
+        focus.releaseSoon(a, ReadAloudAudioFocus.GRACE_MS)
         clock.advance(2_500)
         assertEquals(1, gw.abandons)
     }
@@ -132,7 +125,7 @@ class ReadAloudAudioFocusTest {
         clock.advance(10_000)
         assertEquals(0, gw.abandons)
         focus.acquire(a) {}
-        focus.acquire(a) {}            // duplicate acquire: still one owner
+        focus.acquire(a) {}
         assertEquals(1, focus.ownerCount)
         focus.releaseNow(a)
         focus.releaseNow(a)
@@ -147,8 +140,8 @@ class ReadAloudAudioFocusTest {
         focus.releaseSoon(a)
         focus.releaseNow(a)
         assertEquals(1, gw.abandons)
-        focus.acquire(a) {}            // a new run starts
-        clock.advance(2_500)           // the OLD grace must not drop the new run
+        focus.acquire(a) {}
+        clock.advance(2_500)
         assertTrue(focus.isHeld)
         assertEquals(1, gw.abandons)
     }
@@ -158,7 +151,6 @@ class ReadAloudAudioFocusTest {
         for (change in intArrayOf(AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)) {
             var stoppedA = 0
             var stoppedB = 0
-            // Like ReadAloudPlayer: onLost -> stop() -> releaseNow (re-entrant).
             focus.acquire(a) { stoppedA++; focus.releaseNow(a) }
             focus.acquire(b) { stoppedB++ }
             val before = gw.abandons
@@ -183,7 +175,7 @@ class ReadAloudAudioFocusTest {
 
     @Test
     fun `watchdog bounds a run whose utterance never ends`() {
-        focus.acquire(a) {}            // the sentence never reports completion
+        focus.acquire(a) {}
         clock.advance(299_000)
         assertTrue(focus.isHeld)
         clock.advance(1_000)

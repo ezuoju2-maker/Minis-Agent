@@ -3,11 +3,6 @@ package com.openminis.app.ui.chat
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * [T-android-list-nested-table] A GFM table indented under a list item must
- * render as a table, both when it arrives as its own fragment (latest turn)
- * and when coalesceMarkdownFragments has re-joined it with the list (history).
- */
 class ListNestedTableParseTest {
     private val item = "4. Name it `Minis DNS`, with permissions:"
     private val table = """

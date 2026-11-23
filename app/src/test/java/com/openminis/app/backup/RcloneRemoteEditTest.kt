@@ -16,12 +16,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 
-/**
- * [T-android-backup-dest-edit] Editing a saved backup destination: blank
- * password keeps the secret, anonymous clears it, a failed connection test
- * changes nothing, renames move the secret and keep the switch, and history
- * records follow the new name.
- */
 @RunWith(RobolectricTestRunner::class)
 class RcloneRemoteEditTest {
 
@@ -58,7 +52,6 @@ class RcloneRemoteEditTest {
         assertEquals("the probe connects with the kept password", "old-pw", probed)
         assertEquals("old-pw", secretOf("nas"))
         assertEquals("https://nas2.local/dav", store.remote("nas")!!.params["url"])
-        // An empty Replace (field typed then cleared) is the same as blank.
         store.update(name = "nas", secret = SecretEdit.Replace(""))
         assertEquals("old-pw", secretOf("nas"))
     }
@@ -103,7 +96,6 @@ class RcloneRemoteEditTest {
                 assertEquals("https://nas2.local/dav", c.params["url"])
                 assertFalse("a cleared optional field drops its key", c.params.containsKey("user"))
                 assertTrue(c.allowInsecureTLS)
-                // Nothing written yet while the probe runs.
                 assertEquals("https://nas.local/dav", store.remote("nas")!!.params["url"])
             },
         )
@@ -137,7 +129,6 @@ class RcloneRemoteEditTest {
         assertFalse(store.remote("home-nas")!!.enabled)
         assertEquals("old-pw", secretOf("home-nas"))
         assertNull("no credential left under the old name", secretOf("nas"))
-        // Position in the list is kept, so the destinations list doesn't reorder.
         assertEquals(0, store.remotes.indexOfFirst { it.name == "home-nas" })
     }
 
@@ -179,7 +170,6 @@ class RcloneRemoteEditTest {
         assertEquals("key", s3["secret_access_key"])
         val dav = RcloneRemoteStore.buildConfigParams("webdav", mapOf("url" to "u"), "pw", obscure)
         assertEquals("OBSCURED(pw)", dav["pass"])
-        // The edit probe goes through the same builder as the live sync.
         val src = ProductionSources.read("backup/remote/RcloneRemoteStore.kt")
         val probe = src.substringAfter("fun probeConnection(").substringBefore("fun dropRcloneSection(")
         assertTrue(probe.contains("buildConfigParams("))

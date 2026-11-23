@@ -75,15 +75,6 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-/**
- * [T-android-scheduled-tasks-design / T-android-scheduled-tasks-full]
- * Create or edit a single scheduled task. taskId=null means create-new.
- *
- * Mirrors the iOS Shortcuts option set: target mode (new session / follow-up
- * an existing chat / re-run a chat from a chosen message), optional model
- * override, time (compact input), repeat, and an optional start/end date
- * window.
- */
 private enum class TargetKind { NEW, FOLLOW_UP, RERUN, AGENT }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -113,32 +104,17 @@ fun ScheduledTaskEditScreen(
     var lastResultPreview by remember { mutableStateOf<String?>(null) }
     var lastResultSessionId by remember { mutableStateOf<String?>(null) }
 
-    // [T-android-scheduled-tasks-full] target mode + model + date window
     var targetKind by remember { mutableStateOf(TargetKind.NEW) }
     var targetSessionId by remember { mutableStateOf<String?>(null) }
     var targetSessionTitle by remember { mutableStateOf<String?>(null) }
     var targetMessageId by remember { mutableStateOf<String?>(null) }
     var targetMessagePreview by remember { mutableStateOf<String?>(null) }
-    // Three-way model selection mirroring ChatSessionEntity.modelBinding:
-    //   - modelBinding == null  → "use app default" (resolved at run time)
-    //   - {"type":"entry","entryId":"…"} → pinned to that entry
-    //   - {"type":"group","groupId":"…"} → bound to that group (load-balance / fallback)
     var modelBinding by remember { mutableStateOf<String?>(null) }
     var modelDisplay by remember { mutableStateOf<String?>(null) }
-    // [T-android-scheduled-task-thinking] null = inherit (the run resolves its
-    // own level from the bound group's default, as before this existed).
     var thinkingLevel by remember { mutableStateOf<ThinkingLevel?>(null) }
-    // [T-scheduled-tool-prefill] Not editable here (set via minis-scheduled),
-    // but carried through a save: buildTask rebuilds the task from scratch,
-    // so without this, changing the time in the editor would silently drop
-    // the task's prefilled command.
     var prefillToolCall by remember { mutableStateOf<com.openminis.app.scheduled.PrefilledToolCall?>(null) }
     var startDateMs by remember { mutableStateOf<Long?>(null) }
     var endDateMs by remember { mutableStateOf<Long?>(null) }
-    // [T-android-scheduled-triggers] A task whose trigger this editor cannot
-    // express (--after / --interval / on-completion, set by minis-scheduled).
-    // Its trigger is shown read-only and carried through a save unchanged;
-    // without this, buildTask would rebuild it as a calendar task at 09:00.
     var fixedTriggerTask by remember { mutableStateOf<ScheduledTask?>(null) }
 
     LaunchedEffect(taskId) {
@@ -173,11 +149,6 @@ fun ScheduledTaskEditScreen(
                 targetSessionId = m.sessionId
             }
         }
-        // Resolve display names for any pre-selected session / model. The
-        // binding takes priority (it carries both group and entry shapes); we
-        // only fall back to the legacy modelId-only path when no binding is
-        // present on the row (tasks created before T-android-scheduled-task-
-        // model-binding).
         when {
             existing.modelBinding != null -> {
                 modelBinding = existing.modelBinding
@@ -219,7 +190,6 @@ fun ScheduledTaskEditScreen(
         fixedTrigger = fixedTriggerTask,
     )
 
-    // [T-android-scheduled-triggers] The fixed trigger in the detail page's words.
     val triggerPhrases = com.openminis.app.ui.chat.triggerPhrases()
     val fixedTriggerText = fixedTriggerTask?.let { t ->
         com.openminis.app.scheduled.ScheduledTaskDetailModel.triggerText(
@@ -229,7 +199,6 @@ fun ScheduledTaskEditScreen(
         )
     }
 
-    // re-run replays the chosen message, so prompt isn't required there.
     val needsPrompt = targetKind != TargetKind.RERUN
     val targetOk = when (targetKind) {
         TargetKind.NEW -> true
@@ -312,11 +281,6 @@ fun ScheduledTaskEditScreen(
         )
     }
 
-    // [T-android-scheduled-tasks-full] Run-now feedback. RUNNING shows a
-    // dismissable loading dialog; the runner returns quickly (async — it does
-    // NOT wait for the agent loop), flipping to STARTED ("task started, open
-    // the chat") or FAILED. Dismissing during RUNNING just hides the dialog;
-    // the background run continues and posts its completion notification.
     val state = runNowState
     if (state != null) {
         when (state.status) {
@@ -397,7 +361,6 @@ private fun EditFormBody(
     thinkingLevel: ThinkingLevel?, onPickThinking: (ThinkingLevel?) -> Unit,
     startDateMs: Long?, onStartDateChange: (Long?) -> Unit,
     endDateMs: Long?, onEndDateChange: (Long?) -> Unit,
-    /** Non-null: the trigger is fixed; show this instead of time/repeat/window. */
     fixedTriggerText: String?,
     vm: ScheduledTasksViewModel,
     isNew: Boolean,
@@ -407,8 +370,6 @@ private fun EditFormBody(
     onSave: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    // [T-android-scheduled-tasks-full] Compact time entry (TimeInput keyboard,
-    // not the full clock dial — the user asked for the compact mode).
     val timeState = rememberTimePickerState(initialHour = hour, initialMinute = minute, is24Hour = true)
     LaunchedEffect(timeState.hour, timeState.minute) { onTimeChange(timeState.hour, timeState.minute) }
 
@@ -435,7 +396,6 @@ private fun EditFormBody(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        // ── Target mode ──
         Column {
             SectionLabel(stringResource(R.string.scheduled_task_field_target))
             Spacer(Modifier.height(8.dp))
@@ -474,8 +434,6 @@ private fun EditFormBody(
             }
         }
 
-        // [T-android-scheduled-triggers] A trigger this editor cannot express
-        // replaces the time / repeat / window pickers with a read-only line.
         if (fixedTriggerText != null) {
             Column {
                 SectionLabel(stringResource(R.string.scheduled_task_field_trigger))
@@ -490,14 +448,12 @@ private fun EditFormBody(
             }
         }
 
-        // ── Time (compact) ──
         if (fixedTriggerText == null) Column {
             SectionLabel(stringResource(R.string.scheduled_task_field_time))
             Spacer(Modifier.height(8.dp))
             TimeInput(state = timeState)
         }
 
-        // ── Repeat ──
         if (fixedTriggerText == null) Column {
             SectionLabel(stringResource(R.string.scheduled_task_field_repeat))
             Spacer(Modifier.height(8.dp))
@@ -545,7 +501,6 @@ private fun EditFormBody(
             }
         }
 
-        // ── Active window (start / end date) ──
         if (fixedTriggerText == null) Column {
             SectionLabel(stringResource(R.string.scheduled_task_field_active_window))
             Spacer(Modifier.height(8.dp))
@@ -571,7 +526,6 @@ private fun EditFormBody(
             }
         }
 
-        // ── Prompt ──
         if (needsPrompt) {
             OutlinedTextField(
                 value = prompt,
@@ -589,7 +543,6 @@ private fun EditFormBody(
             )
         }
 
-        // ── Model (optional) ──
         PickerRow(
             title = stringResource(R.string.scheduled_task_field_model),
             value = modelDisplay ?: stringResource(R.string.scheduled_task_model_default),
@@ -597,10 +550,6 @@ private fun EditFormBody(
             onClear = if (modelDisplay != null) ({ onPickModel(null, null) }) else null,
         )
 
-        // ── Thinking (optional) ──
-        // [T-android-scheduled-task-thinking] Reported: "定时任务不能添加思考强度".
-        // The runner already accepted a level (HeadlessChatRunner.prompt) — it
-        // was hardcoded null because the task had nowhere to carry one.
         PickerRow(
             title = stringResource(R.string.scheduled_task_field_thinking),
             value = thinkingLevel?.localizedName(LocalContext.current)
@@ -638,20 +587,7 @@ private fun EditFormBody(
             onPickMessage(id, preview); showMessagePicker = false
         }
     }
-    // [T-android-scheduled-lateinit-crash-156] `vm.providerRepository` is null
-    // when the Application is half-built (safe-mode / aborted onCreate); the
-    // editor is reachable in exactly that state via a scheduled-task
-    // notification tap. Gating the whole block here keeps the picker from
-    // reading an unassigned lateinit — the row's label and the "use default
-    // model" behaviour are unaffected.
     if (showThinkingPicker) {
-        // [T-android-scheduled-task-thinking] Plain list of levels rather than
-        // reusing the chat composer's picker: that one is bound to a live
-        // ChatViewModel (it clamps to the *currently resolved* model's ceiling),
-        // and a scheduled task has no resolved model until it fires. Offering
-        // every level and letting `setThinkingLevel` clamp at run time — it
-        // already silently no-ops on a model that cannot reason — keeps the
-        // editor honest about what it can and cannot know in advance.
         ModalBottomSheet(onDismissRequest = { showThinkingPicker = false }) {
             Column(modifier = Modifier.padding(bottom = 24.dp)) {
                 Text(
@@ -659,7 +595,6 @@ private fun EditFormBody(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                 )
-                // "App default" == inherit == null.
                 ThinkingChoiceRow(
                     label = stringResource(R.string.scheduled_task_model_default),
                     selected = thinkingLevel == null,
@@ -677,13 +612,6 @@ private fun EditFormBody(
     }
     val providerRepo = vm.providerRepository
     if (showModelPicker && providerRepo != null) {
-        // [T-android-scheduled-task-model-binding] Reuse the chat-screen's
-        // ModelPickerSheet so groups and individual entries are both
-        // selectable; the editor only needs the JSON shape that
-        // ChatSessionEntity.modelBinding uses, so we synthesize it from the
-        // picker's three callback shapes (group / group+entry / standalone
-        // entry). The picker doesn't surface a "default model" option — we
-        // model that as null binding via the row's onClear action above.
         val cfg by providerRepo.config.collectAsState()
         val entryById: (String) -> com.openminis.app.data.model.ModelEntry? = { id ->
             cfg.modelEntries.firstOrNull { it.id == id }
@@ -691,12 +619,6 @@ private fun EditFormBody(
         val groupById: (String) -> com.openminis.app.data.model.ModelGroup? = { id ->
             cfg.modelGroups.firstOrNull { it.id == id }
         }
-        // Pre-highlight the user's prior pick when re-opening the sheet:
-        //   - binding pinned to a group → highlight that group
-        //   - binding pinned to an entry → highlight that entry (no group)
-        //   - binding == null ("use default") → fall through to the app's
-        //     default primary group so the user sees it as the implicit
-        //     current selection (instead of an empty radio everywhere).
         val preselectGroupId: String?
         val preselectEntryId: String?
         run {
@@ -727,9 +649,6 @@ private fun EditFormBody(
                 onPickModel(json, name); showModelPicker = false
             },
             onSelectGroupEntry = { _, entryId ->
-                // User explicitly picked a single entry inside a group → pin
-                // to that entry; matches the chat screen's per-group entry
-                // override semantics.
                 val entry = entryById(entryId)
                 val name = entry?.model?.displayName ?: "Model"
                 val json = """{"type":"entry","entryId":"$entryId"}"""
@@ -883,11 +802,7 @@ private fun DateDialog(initialMs: Long?, onDismiss: () -> Unit, onPick: (Long) -
     }
 }
 
-/** DatePicker hands back a UTC-midnight ms; convert to local start-of-day. */
 private fun startOfLocalDay(utcMidnightMs: Long): Long {
-    // The picker's value is UTC midnight of the picked calendar day. Re-anchor
-    // to the local time zone's start-of-day so the active-window comparison in
-    // ScheduledTask.nextTriggerMs (which works in local time) matches.
     val utc = Calendar.getInstance(java.util.TimeZone.getTimeZone("UTC")).apply {
         timeInMillis = utcMidnightMs
     }
@@ -923,7 +838,6 @@ private fun buildTask(
     modelEntryIdLookup: (String) -> String?,
     startDateMs: Long?,
     endDateMs: Long?,
-    /** [T-android-scheduled-triggers] The task whose non-calendar trigger is kept. */
     fixedTrigger: ScheduledTask? = null,
 ): ScheduledTask {
     val targetMode = when (targetKind) {
@@ -937,10 +851,6 @@ private fun buildTask(
         TargetKind.AGENT -> targetSessionId?.let { ScheduledTargetMode.ChildOfCurrent(it) }
             ?: ScheduledTargetMode.NewSession
     }
-    // For backcompat: if the binding pins to a specific entry, also fill in
-    // legacy modelId so older code paths (and any external readers) still
-    // resolve the same concrete model. Group bindings leave modelId null —
-    // they resolve to a member entry at run time.
     val derivedModelId: String? = modelBinding?.let { json ->
         runCatching {
             val o = org.json.JSONObject(json)
@@ -961,8 +871,6 @@ private fun buildTask(
         modelId = derivedModelId,
         modelBinding = modelBinding,
         thinkingLevel = thinkingLevel,
-        // A rerun replays an existing message and sends nothing new, so a
-        // prefilled call has nothing to precede.
         prefillToolCall = prefillToolCall.takeIf { targetMode !is ScheduledTargetMode.RerunMessage },
         enabled = enabled,
         createdAt = createdAt,
@@ -971,8 +879,6 @@ private fun buildTask(
         lastFiredAt = lastFiredAt,
         lastResultPreview = lastResultPreview,
         lastResultSessionId = lastResultSessionId,
-        // [T-android-scheduled-triggers] Unchanged from the stored task. Its
-        // run history and counters are merged back by ScheduledTaskManager.update.
         triggerKind = fixedTrigger?.triggerKind ?: com.openminis.app.scheduled.ScheduledTriggerKind.CALENDAR,
         delaySec = fixedTrigger?.delaySec,
         intervalSec = fixedTrigger?.intervalSec,
@@ -983,11 +889,6 @@ private fun buildTask(
     )
 }
 
-/**
- * [T-android-scheduled-task-thinking] One selectable row in the thinking-level
- * sheet. Deliberately local to this screen: it is a plain label + check, and
- * the chat-side picker it visually echoes is coupled to a live ChatViewModel.
- */
 @Composable
 private fun ThinkingChoiceRow(label: String, selected: Boolean, onClick: () -> Unit) {
     Row(

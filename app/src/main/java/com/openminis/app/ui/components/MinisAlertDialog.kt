@@ -23,13 +23,6 @@ import androidx.compose.ui.window.DialogProperties
 import com.openminis.app.R
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * App-wide confirmation dialog. Tighter than the Material 3 default
- * (16 dp radius, titleLarge instead of headlineSmall) so small
- * confirmation prompts don't read as oversized cards. The destructive
- * variant tints the confirm button with `colorScheme.error`, matching
- * the pattern iOS uses for `UIAlertActionStyle.destructive`.
- */
 @Composable
 fun MinisAlertDialog(
     onDismissRequest: () -> Unit,
@@ -40,21 +33,8 @@ fun MinisAlertDialog(
     dismissText: String = stringResource(R.string.cancel),
     isDestructive: Boolean = false,
     onDismiss: () -> Unit = onDismissRequest,
-    /**
-     * Optional third action, rendered between dismiss and confirm. When set,
-     * the buttons stack vertically instead of sitting in a row: three labels
-     * of real length (the pre-send compact prompt's "Compact & Enable
-     * Auto-Compact" is 29 chars, and its zh translations are similar) do not
-     * fit side by side on a phone, and a Row would either clip them or shrink
-     * the text. Callers that pass nothing keep the original two-button row.
-     */
     neutralText: String? = null,
     onNeutral: (() -> Unit)? = null,
-    /**
-     * The neutral action's color; null keeps the confirm button's. Lets a
-     * dialog put a safe primary choice beside a destructive confirm
-     * ([T-stop-choice]: "Stop Current Tool Only" next to a red "Stop All").
-     */
     neutralColor: Color? = null,
 ) {
     Dialog(
@@ -89,9 +69,6 @@ fun MinisAlertDialog(
                     MaterialTheme.colorScheme.primary
                 }
                 if (neutralText != null && onNeutral != null) {
-                    // Stacked layout. Order runs least-committal first
-                    // (dismiss) down to the most specific action, so the
-                    // primary choice sits closest to the thumb.
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()

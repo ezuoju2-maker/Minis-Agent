@@ -49,16 +49,7 @@ import com.openminis.app.ui.chat.AssistantBlock
 import com.openminis.app.ui.theme.ChatColors
 import com.openminis.app.ui.chat.helperControlSummaryText
 
-/**
- * [T-in-chat-search] The texts of rows that are worked out with Android
- * resources, the same way the views draw them.
- */
 internal class ResourceChatSearchTextSource(private val res: Resources) : ChatSearchUnits.TextSource {
-    /**
-     * ToolCallPill's line: `controlSummary ?: displayToolTitle(block)`. A
-     * user_ask call is drawn as its card, and a real sub agent delegation as
-     * HelperToolBlock's card - both phase 2, so neither is a capsule here.
-     */
     override fun toolCapsule(block: AssistantBlock): String? {
         if (block.toolName == UserAskPromptText.TOOL_NAME) return null
         if (HelperRunner.isSubAgentToolName(block.toolName)) {
@@ -70,11 +61,6 @@ internal class ResourceChatSearchTextSource(private val res: Resources) : ChatSe
     }
 }
 
-/**
- * [T-in-chat-search] The search bar, in the composer's place (iOS
- * ChatSearchBar): query field, "3/12" counter, previous (older), next
- * (newer), Done. A "wrapped round" notice floats above it.
- */
 @Composable
 internal fun ChatSearchBar(controller: ChatSearchController, modifier: Modifier = Modifier) {
     val focus = remember { FocusRequester() }
@@ -123,9 +109,6 @@ internal fun ChatSearchBar(controller: ChatSearchController, modifier: Modifier 
                     textStyle = TextStyle(fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    // Return steps to the next result and keeps the keyboard
-                    // up (iOS ChatSearchBar.onSubmit: the user is stepping
-                    // through results).
                     keyboardActions = KeyboardActions(onSearch = { controller.next() }),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -178,4 +161,3 @@ internal fun ChatSearchBar(controller: ChatSearchController, modifier: Modifier 
         }
     }
 }
-

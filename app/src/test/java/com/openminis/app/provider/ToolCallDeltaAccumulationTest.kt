@@ -20,26 +20,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T20] Streaming tool_call delta accumulation — the SSE reducer inside
- * `OpenAIProvider.streamMessage` (Chat Completions `delta.tool_calls[]`, and the
- * Responses `function_call_arguments.delta` / `output_item.done` pair).
- *
- * Four providers reported one symptom (GH#61 DashScope, #83, #146, #310): a tool
- * call arrives with a mangled id / name / arguments. The reducer's contract:
- *   • a later delta carrying `id:""` / `name:""` must NOT overwrite the values an
- *     earlier delta established (#61 — DashScope sends the id/name once, then
- *     empty strings on every argument chunk);
- *   • calls are keyed by `index`, not by array position, so parallel calls
- *     interleaved across chunks reassemble separately;
- *   • argument fragments concatenate in arrival order;
- *   • a stream that dies mid-arguments must NOT be silently "fixed" into a valid
- *     JSON object — the accumulated raw tail is surfaced and the repair, when it
- *     happens, is explicit (ToolJsonRepair tags it).
- *
- * The reducer is private, so every case drives the real provider through a
- * MockWebServer SSE body, exactly as StreamDropNoFinishTest does.
- */
 class ToolCallDeltaAccumulationTest {
 
     private lateinit var server: MockWebServer
@@ -68,7 +48,6 @@ class ToolCallDeltaAccumulationTest {
         }
     }
 
-    /** One `data:` line per element, blank-line separated, `[DONE]`-terminated unless told otherwise. */
     private fun sse(vararg events: String, done: Boolean = true): String = buildString {
         for (e in events) { append("data: ").append(e).append("\n\n") }
         if (done) append("data: [DONE]\n\n")
@@ -92,13 +71,7 @@ class ToolCallDeltaAccumulationTest {
     private fun completes(chunks: List<LLMStreamChunk>) = chunks.filterIsInstance<LLMStreamChunk.ToolCallComplete>()
     private fun starts(chunks: List<LLMStreamChunk>) = chunks.filterIsInstance<LLMStreamChunk.ToolUseStart>()
 
-    // ============================================================ #61: empty id/name never overwrite
 
-    /**
-     * GH#61 (DashScope): chunk 1 names the call, every later chunk repeats
-     * `id:""` / `name:""` while carrying an argument fragment. Before the fix the
-     * accumulator's id/name were overwritten with "" and the call was dropped.
-     */
     @Test
     fun `empty id and name on later deltas keep the values from the first delta`() {
         val chunks = stream(
@@ -118,7 +91,6 @@ class ToolCallDeltaAccumulationTest {
         assertEquals("call_abc", starts(chunks)[0].id)
     }
 
-    /** The same defence when the field is ABSENT (not just empty) on later deltas. */
     @Test
     fun `absent id and name on later deltas keep the values from the first delta`() {
         val chunks = stream(
@@ -134,14 +106,7 @@ class ToolCallDeltaAccumulationTest {
         assertEquals("/a.txt", done.args.getString("path"))
     }
 
-    // ============================================================ index-keyed, not position-keyed
 
-    /**
-     * Two parallel calls whose fragments interleave across chunks. Each chunk's
-     * `tool_calls` array holds ONE element at position 0 — only `index` says
-     * which call it belongs to. Position-keyed accumulation would merge both
-     * into one corrupted call.
-     */
     @Test
     fun `parallel calls interleaved by index reassemble separately`() {
         val chunks = stream(
@@ -164,7 +129,6 @@ class ToolCallDeltaAccumulationTest {
         assertEquals(2, starts(chunks).size)
     }
 
-    /** A single chunk carrying BOTH calls, index 1 listed before index 0. */
     @Test
     fun `index wins over array position inside one chunk`() {
         val chunks = stream(
@@ -183,7 +147,6 @@ class ToolCallDeltaAccumulationTest {
         assertEquals("beta", done.getValue("call_b").name)
     }
 
-    // ============================================================ fragment concatenation
 
     @Test
     fun `arguments split across five fragments concatenate into parseable json`() {
@@ -199,22 +162,12 @@ class ToolCallDeltaAccumulationTest {
         assertEquals("echo hello", done.args.getString("command"))
         assertEquals(30, done.args.getInt("timeout"))
         assertEquals("/tmp", done.args.getString("cwd"))
-        // Every ToolInputDelta carries the ACCUMULATED prefix, monotonically growing.
         val deltas = chunks.filterIsInstance<LLMStreamChunk.ToolInputDelta>().map { it.accumulated }
         assertTrue(deltas.zipWithNext().all { (a, b) -> b.startsWith(a) && b.length >= a.length })
         assertEquals(full, deltas.last())
     }
 
-    // ============================================================ truncation is not silently repaired
 
-    /**
-     * The stream dies in the middle of the arguments: no finish_reason, no
-     * [DONE]. The reducer must NOT quietly turn the partial text into a valid
-     * object — the surfaced args are EMPTY, the raw tail is still visible on the
-     * last ToolInputDelta, and no Finished chunk claims the turn ended cleanly.
-     * The only repair path is the explicit ToolJsonRepair pass, which TAGS what
-     * it did.
-     */
     @Test
     fun `a stream cut mid-arguments surfaces empty args plus the raw tail, never a fabricated object`() {
         val chunks = stream(
@@ -235,8 +188,6 @@ class ToolCallDeltaAccumulationTest {
             chunks.filterIsInstance<LLMStreamChunk.Finished>().firstOrNull()?.stopReason,
         )
 
-        // The repair is a separate, explicit, tagged step — it is never implicit
-        // in the reducer.
         val tools = listOf(
             AgentToolDefinition(
                 name = "file_write",
@@ -254,7 +205,6 @@ class ToolCallDeltaAccumulationTest {
         assertEquals("partial te", done.args.getString("content"))
     }
 
-    /** Control: a clean stream needs no repair and reports finish_reason. */
     @Test
     fun `a clean tool call stream needs no repair`() {
         val chunks = stream(sse(toolDelta(0, id = "call_c", name = "read_file", args = """{"path":"/a"}"""), finishToolCalls))
@@ -267,7 +217,6 @@ class ToolCallDeltaAccumulationTest {
         assertEquals("tool_calls", chunks.filterIsInstance<LLMStreamChunk.Finished>().single().stopReason)
     }
 
-    /** A delta with no id yet must not emit ToolUseStart — the start waits for id AND name. */
     @Test
     fun `start is emitted only once both id and name are known`() {
         val chunks = stream(
@@ -284,14 +233,7 @@ class ToolCallDeltaAccumulationTest {
         assertFalse("nothing started under an empty id", s.any { it.id.isEmpty() })
     }
 
-    // ============================================================ Responses API
 
-    /**
-     * Responses: `output_item.added` opens the accumulator, argument deltas
-     * append by `item_id`, and `output_item.done` closes it — preferring the
-     * item's authoritative `arguments` over the streamed buffer. Two items
-     * interleaved must not cross-contaminate.
-     */
     @Test
     fun `responses function_call arguments accumulate per item_id`() {
         val chunks = stream(
@@ -316,7 +258,6 @@ class ToolCallDeltaAccumulationTest {
         assertEquals("tool_use", chunks.filterIsInstance<LLMStreamChunk.Finished>().single().stopReason)
     }
 
-    /** Responses stream cut before `output_item.done`: flushed with empty args, never fabricated. */
     @Test
     fun `responses stream cut mid-arguments flushes the call with empty args`() {
         val chunks = stream(

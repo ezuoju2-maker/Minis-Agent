@@ -32,24 +32,6 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 
-/**
- * android-notification — post, schedule, cancel, or read device notifications.
- *
- * Mirrors apple-notification (NativeOffloads/NotificationOffload.m): same
- * subcommands and same flag names so prompts and the agent loop are
- * platform-agnostic. Legacy aliases are preserved (`send` → `schedule`,
- * `list` for active notifications still works alongside `pending` for
- * not-yet-fired ones).
- *
- * Usage:
- *   android-notification schedule --title T --body B [--after SECS | --at ISO]
- *                                 (alias: send)
- *   android-notification list                  Active (already-delivered)
- *   android-notification pending               Scheduled but not yet fired
- *   android-notification cancel --id <id> | --all
- *   android-notification clear                 Clear all delivered (legacy)
- *   android-notification settings              Authorization status
- */
 class NotificationOffloadHandler(private val context: Context) : NativeOffloadHandler {
     private val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private val store = ScheduledNotificationStore(context)
@@ -68,8 +50,6 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
 
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
         val args = OffloadArgs(request.argv.drop(1), booleanFlags = setOf("all"))
-        // [T-offload-defaults-batch-android] Help only on explicit
-        // --help/-h; no subcommand defaults to `list`.
         if (args.hasFlag("h", "help")) {
             return NativeOffloadResult(0, HELP)
         }
@@ -100,16 +80,11 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
         }
     }
 
-    // ── send ────────────────────────────────────────────────────────────────
 
     private fun handleSend(args: OffloadArgs): NativeOffloadResult {
         val title = args.get("title")
             ?: return NativeOffloadResult(2, "android-notification send: --title is required\n")
 
-        // Android 13+: POST_NOTIFICATIONS is a runtime permission. First try
-        // the system dialog; if the user has permanently denied it the dialog
-        // won't re-appear, so fall back to an in-app "go to settings" gate
-        // that polls for the grant.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
@@ -130,8 +105,6 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
                     r = OffloadPermissionManager.AndroidPermissionResult.GRANTED
                 }
                 if (r == OffloadPermissionManager.AndroidPermissionResult.DENIED) {
-                    // Dialog either won't re-appear or the user just tapped
-                    // "Don't allow". Offer the in-app path to Settings.
                     r = OffloadPermissionManager.requestSettingsGate(
                         OffloadPermissionManager.SettingsGateRequest(
                             id = Manifest.permission.POST_NOTIFICATIONS,
@@ -151,7 +124,7 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
                 r
             }
             when (result) {
-                OffloadPermissionManager.AndroidPermissionResult.GRANTED -> {} // continue
+                OffloadPermissionManager.AndroidPermissionResult.GRANTED -> {}
                 OffloadPermissionManager.AndroidPermissionResult.DENIED -> {
                     return NativeOffloadResult(
                         77,
@@ -179,19 +152,12 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
 
         val body = args.get("body") ?: ""
 
-        // Deferred path: --after <seconds> or --at <ISO> schedules the
-        // notification via AlarmManager + ScheduledNotificationReceiver.
-        // Mirrors apple-notification's UNTimeIntervalNotificationTrigger
-        // (after) and UNCalendarNotificationTrigger (at) semantics.
         val afterSec = args.getInt("after")
         val atStr = args.get("at")
         if (afterSec != null || atStr != null) {
             return scheduleDeferred(title, body, afterSec, atStr, args)
         }
 
-        // Immediate path (apple-notification has no equivalent — UN
-        // schedules with trigger=nil deliver immediately, which is what
-        // our pre-T58 `send` already does).
         val id = UUID.randomUUID().toString()
         val notifId = id.hashCode() and 0x7FFFFFFF
         val n = NotificationCompat.Builder(context, CHANNEL_ID)
@@ -199,18 +165,9 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
             .setContentTitle(title)
             .setContentText(body)
             .setAutoCancel(true)
-            // [GH#116] Without this the notification is inert: tapping it did
-            // nothing and setAutoCancel merely dismissed it. The deferred
-            // (--after/--at) path has always set one; this immediate path
-            // never did, so plain `send` — the most common invocation — was
-            // the one broken shape. Same helper both sides, see its KDoc.
             .setContentIntent(ScheduledNotificationReceiver.contentIntentFor(context, notifId))
             .build()
         nm.notify(notifId, n)
-        // The system fans the post to bound listeners on its own thread, so
-        // an immediate follow-up `list` may miss this notification. Block
-        // until our listener observes it (best-effort: 2s, only when the
-        // listener is connected — otherwise `list` would have failed anyway).
         if (MinisNotificationListenerService.isEnabled(context) &&
             MinisNotificationListenerService.isConnected()
         ) {
@@ -232,15 +189,7 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
         return NativeOffloadResult(0, OffloadOutput.formatBody(data.toString(2), args) + "\n")
     }
 
-    // ── schedule (deferred) ─────────────────────────────────────────────
 
-    /**
-     * Schedule a notification to fire after [afterSec] seconds, or at
-     * [atStr] (ISO 8601). Uses AlarmManager.setExactAndAllowWhileIdle so
-     * the notification fires even in Doze; mirrors what AlarmOffloadManager
-     * does for alarms. Persists the entry so `pending` and `cancel --id`
-     * can find it.
-     */
     private fun scheduleDeferred(
         title: String,
         body: String,
@@ -301,18 +250,9 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
         return NativeOffloadResult(0, OffloadOutput.formatBody(data.toString(2), args) + "\n")
     }
 
-    // ── cancel ──────────────────────────────────────────────────────────
 
-    /**
-     * Cancel pending (scheduled-but-not-yet-fired) notifications. Mirrors
-     * apple-notification cancel: --id removes one, --all removes all.
-     * If the id matches an already-delivered notification (very common —
-     * the model can't tell pending vs delivered), fall through to nm.cancel
-     * on the integer hash so the user-visible notification disappears too.
-     */
     private fun handleCancel(args: OffloadArgs): NativeOffloadResult {
         if (args.hasFlag("all")) {
-            // Cancel pending: walk store, drop alarms, clear prefs.
             val all = store.loadAll()
             var n = 0
             for (i in 0 until all.length()) {
@@ -321,8 +261,6 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
                 n++
             }
             store.clear()
-            // Also clear delivered notifications (matches apple-notification
-            // cancel --all semantics: nothing the user sees from us remains).
             nm.cancelAll()
             AppLogger.info(TAG, "cancel --all: pending=$n")
             val data = JSONObject().put("cancelled", "all").put("pending_cleared", n)
@@ -336,9 +274,6 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
             cancelAlarmFor(id, entry.optInt("request_code"))
             store.remove(id)
         }
-        // Also drop any delivered notification posted with the same id —
-        // notifId = id.hashCode() & 0x7FFFFFFF, same convention as both
-        // immediate-send and scheduled-fire.
         val notifId = id.hashCode() and 0x7FFFFFFF
         nm.cancel(notifId)
 
@@ -360,10 +295,7 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
         pi.cancel()
     }
 
-    // ── pending ─────────────────────────────────────────────────────────
 
-    /** List scheduled-but-not-yet-fired notifications. iOS equivalent is
-     *  UNUserNotificationCenter.getPendingNotificationRequests. */
     private fun handlePending(args: OffloadArgs): NativeOffloadResult {
         store.sweepExpired()
         val all = store.loadAll()
@@ -373,19 +305,9 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
         return NativeOffloadResult(0, OffloadOutput.formatBody(out.toString(2), args) + "\n")
     }
 
-    // ── settings ────────────────────────────────────────────────────────
 
-    /**
-     * Return notification authorization + per-feature state. Mirrors
-     * apple-notification settings — same field names where possible
-     * (authorization_status, sound_enabled, badge_enabled, alert_enabled,
-     * lock_screen_enabled). Android-only adds: can_post,
-     * channel_importance, schedule_exact_allowed, listener_access.
-     */
     private fun handleSettings(args: OffloadArgs): NativeOffloadResult {
         val canPost = NotificationManagerCompat.from(context).areNotificationsEnabled()
-        // No iOS-style "ephemeral / provisional" on Android — collapse to
-        // authorized vs denied, matching what users see in settings.
         val authStatus = if (canPost) "authorized" else "denied"
         val data = JSONObject()
             .put("authorization_status", authStatus)
@@ -413,16 +335,12 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
         return NativeOffloadResult(0, OffloadOutput.formatBody(data.toString(2), args) + "\n")
     }
 
-    // ── helpers ─────────────────────────────────────────────────────────
 
-    /** ISO 8601 with offset, matches noff_format_date on iOS. */
     private fun formatIso(ms: Long): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
         return sdf.format(Date(ms))
     }
 
-    /** Parse ISO 8601 into ms epoch. Accepts the same set of forms as the
-     *  alarm and calendar handlers so prompts can use any convention. */
     private fun parseIso(s: String): Long? {
         val patterns = listOf(
             "yyyy-MM-dd'T'HH:mm:ssXXX",
@@ -441,14 +359,9 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
         return null
     }
 
-    // ── list ────────────────────────────────────────────────────────────────
 
     private fun handleList(args: OffloadArgs): NativeOffloadResult {
         if (!MinisNotificationListenerService.isEnabled(context)) {
-            // Notification Access can only be granted from the system settings
-            // page — requestPermissions is not an option. Use the in-app
-            // "settings gate" which shows a dialog, opens the settings page,
-            // and polls for the user to complete the grant.
             val result = runBlocking {
                 OffloadPermissionManager.requestSettingsGate(
                     OffloadPermissionManager.SettingsGateRequest(
@@ -463,7 +376,7 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
                 )
             }
             when (result) {
-                OffloadPermissionManager.AndroidPermissionResult.GRANTED -> {} // continue
+                OffloadPermissionManager.AndroidPermissionResult.GRANTED -> {}
                 OffloadPermissionManager.AndroidPermissionResult.DENIED -> {
                     return NativeOffloadResult(
                         77,
@@ -491,9 +404,6 @@ class NotificationOffloadHandler(private val context: Context) : NativeOffloadHa
             }
         }
 
-        // `NotificationManager.activeNotifications` only exposes this app's
-        // own notifications. The cross-app list comes from our bound
-        // `NotificationListenerService`.
         val active: Array<StatusBarNotification> =
             MinisNotificationListenerService.getActiveNotifications()
                 ?: return NativeOffloadResult(

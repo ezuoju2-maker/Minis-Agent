@@ -8,14 +8,8 @@ import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 
-/**
- * [T-android-pshell-utf8-split] PersistentShell reads the shell's output in
- * chunks of up to 4096 bytes whose boundaries are arbitrary. A multi-byte
- * character cut by a boundary must come out whole, not as two U+FFFD.
- */
 class Utf8StreamDecoderTest {
 
-    /** Hands out [data] with a read boundary after every offset in [cuts]. */
     private class ChunkedStream(data: ByteArray, cuts: Set<Int>) : InputStream() {
         private val source = ByteArrayInputStream(data)
         private val boundaries = (cuts + data.size).filter { it in 1..data.size }.sorted()
@@ -29,7 +23,6 @@ class Utf8StreamDecoderTest {
         }
     }
 
-    /** The read loop of PersistentShell, reduced to its decoding. */
     private fun readAll(data: ByteArray, cuts: Set<Int>): String {
         val stream = ChunkedStream(data, cuts)
         val decoder = Utf8StreamDecoder()
@@ -43,7 +36,6 @@ class Utf8StreamDecoderTest {
         return out.append(decoder.finish()).toString()
     }
 
-    /** [expected] must come out for one cut at every byte position, and for a cut after every byte. */
     private fun assertEveryCut(expected: String, data: ByteArray) {
         assertEquals("one read", expected, readAll(data, emptySet()))
         for (cut in 1 until data.size) {
@@ -74,7 +66,6 @@ class Utf8StreamDecoderTest {
 
     @Test
     fun `each stray continuation byte at the start is one replacement character, and the rest is intact`() {
-        // 0x96 0x87 are the tail of a character whose lead byte was never read.
         assertEveryCut("��件 ok", bytes(0x96, 0x87) + "件 ok".toByteArray(Charsets.UTF_8))
         assertEveryCut("�abc", bytes(0x80) + "abc".toByteArray(Charsets.UTF_8))
     }
@@ -82,10 +73,8 @@ class Utf8StreamDecoderTest {
     @Test
     fun `half a character at the end of the stream is one replacement character`() {
         val full = "结尾 中".toByteArray(Charsets.UTF_8)
-        // "中" is E4 B8 AD: drop one, then two, of its bytes.
         assertEveryCut("结尾 �", full.copyOf(full.size - 1))
         assertEveryCut("结尾 �", full.copyOf(full.size - 2))
-        // A 4-byte emoji missing its last byte.
         val emoji = "x🎉".toByteArray(Charsets.UTF_8)
         assertEveryCut("x�", emoji.copyOf(emoji.size - 1))
     }

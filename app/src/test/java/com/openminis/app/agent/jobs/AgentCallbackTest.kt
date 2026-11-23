@@ -6,7 +6,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [T-p2-agent-callback] The envelope must round-trip and match the iOS shape byte for byte. */
 class AgentCallbackTest {
     @Test
     fun `finished envelope serialises in the iOS shape and parses back`() {

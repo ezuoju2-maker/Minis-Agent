@@ -11,13 +11,6 @@ import java.io.File
 import java.nio.file.Files
 import kotlin.random.Random
 
-/**
- * [T-port-filetool-size-guard] file_read streams instead of File.readLines(),
- * file_edit refuses files over 8 MB, and all three file tools run their I/O
- * with a timeout and an OutOfMemoryError catch (iOS 26e6e63e9).
- *
- * The large files are generated in a temp dir and deleted afterwards.
- */
 class FileToolSizeGuardTest {
 
     private val tmp: File = Files.createTempDirectory("filetool-guard").toFile()
@@ -27,9 +20,7 @@ class FileToolSizeGuardTest {
         tmp.deleteRecursively()
     }
 
-    // --- Reference: the pre-port file_read body (File.readLines) ------------
 
-    /** The file_read logic as it was before the port, kept verbatim. */
     private fun legacyRead(file: File, path: String, offset: Int, requestedLines: Int?, maxLength: Int, direction: String): String {
         val size = file.length()
         val allLines = file.readLines()
@@ -77,9 +68,6 @@ class FileToolSizeGuardTest {
     private fun read(file: File, offset: Int = 1, lines: Int? = null, maxLength: Int = 15000, direction: String = "head") =
         FileReadTool.read(file, "/p", offset, lines, maxLength, direction, "t")
 
-    // Bytes that exercise every line-splitting and decoding path: \n, \r\n,
-    // lone \r, 2/3/4-byte UTF-8, and malformed sequences (a lone continuation
-    // byte, a truncated 3-byte lead). No 0x00, so nothing is "binary".
     private val alphabet: List<ByteArray> = listOf(
         "a", "b", "xyz", " ", "\n", "\n", "\r\n", "\r", "é", "中", "😀",
     ).map { it.toByteArray() } + listOf(byteArrayOf(0x80.toByte()), byteArrayOf(0xE4.toByte(), 0xB8.toByte()))
@@ -87,7 +75,6 @@ class FileToolSizeGuardTest {
     private fun randomBytes(rnd: Random, n: Int): ByteArray {
         val out = java.io.ByteArrayOutputStream()
         repeat(n) { out.write(alphabet[rnd.nextInt(alphabet.size)]) }
-        // Sometimes a long run with no line break, to cut a line mid-sequence.
         if (rnd.nextInt(4) == 0) repeat(rnd.nextInt(1, 80)) { out.write("中é😀a".toByteArray()) }
         return out.toByteArray()
     }
@@ -127,9 +114,7 @@ class FileToolSizeGuardTest {
         }
     }
 
-    // --- Large files --------------------------------------------------------
 
-    /** A ~[mb] MB file of numbered lines "line 0000001 ......". */
     private fun bigLinesFile(mb: Int): Pair<File, Int> {
         val f = File(tmp, "big.log")
         val pad = "x".repeat(50)
@@ -158,8 +143,6 @@ class FileToolSizeGuardTest {
         assertTrue(tail.output, tail.output.contains("showing ${n - 2}-$n of $n]"))
         assertTrue(tail.output.endsWith("line %07d %s".format(n, "x".repeat(50))))
 
-        // No lines limit: the whole file is "selected", the 15000-char cap
-        // applies and next_offset points at the first line not returned.
         val all = read(f)
         assertTrue(all.output, all.output.contains("| truncated at 15000 chars, next_offset="))
         val allTail = read(f, direction = "tail")
@@ -182,7 +165,6 @@ class FileToolSizeGuardTest {
         assertTrue(tail.output.endsWith("abcdefghij中"))
     }
 
-    // --- file_edit size cap ---------------------------------------------------
 
     @Test
     fun `file_edit refuses a file over 8 MB with the iOS message and leaves it untouched`() {
@@ -227,7 +209,6 @@ class FileToolSizeGuardTest {
         assertEquals("y b y", f.readText())
     }
 
-    // --- Runner: timeout and OOM ----------------------------------------------
 
     @Test
     fun `run gives control back after the timeout with an agent-facing message`() {
@@ -254,13 +235,12 @@ class FileToolSizeGuardTest {
     fun `a read blocked in open() of a FIFO with no writer times out`() {
         val fifo = File(tmp, "fifo")
         val made = runCatching { ProcessBuilder("mkfifo", fifo.absolutePath).start().waitFor() == 0 }.getOrDefault(false)
-        if (!made) return // no mkfifo on this host; the sleep test above covers the runner
+        if (!made) return
         try {
             FileToolIO.run("Reading /fifo", timeoutMs = 500) { FileReadTool.read(fifo, "/fifo", 1, null, 100, "head", "t") }
             fail("expected TimedOut")
         } catch (_: FileToolIO.TimedOut) {
         } finally {
-            // Unblock the stuck open() so the pool thread can finish.
             runCatching { java.io.FileOutputStream(fifo).close() }
         }
     }
@@ -273,7 +253,6 @@ class FileToolSizeGuardTest {
         } catch (e: FileToolIO.OutOfMemory) {
             assertEquals("Reading /big ran out of memory.", e.message)
         }
-        // Ordinary exceptions pass through unchanged.
         try {
             FileToolIO.run("Reading /x") { throw java.io.IOException("Permission denied") }
             fail("expected IOException")
@@ -282,7 +261,6 @@ class FileToolSizeGuardTest {
         }
     }
 
-    // --- Source guards ----------------------------------------------------------
 
     @Test
     fun `file tools never load a whole file outside the guard`() {

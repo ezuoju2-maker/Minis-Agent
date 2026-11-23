@@ -3,28 +3,6 @@ package com.openminis.app.diagnostics
 import android.os.Debug
 import com.openminis.app.logging.AppLogger
 
-/**
- * [T-android-stream-pipeline-incremental] Per-streaming-turn render-pipeline
- * aggregator. Exists to quantify the frozen/live incremental flatten rollout
- * against the ANR baseline (minis-2026-06-10 crash loop: GC freeing
- * 130–180MB/s, buildFlatChatItems up to 100s, main-thread regex hang).
- *
- * Zero-overhead contract (the monitor must never become its own perf bug):
- *  - Hot path ([tick]) does primitive field math only — no allocation, no
- *    string building, no logging, no locks (single-writer: the pipeline's
- *    collect loop).
- *  - Turn boundaries ([turnStart]/[turnEnd]) each do two
- *    [Debug.getRuntimeStat] reads and at most ONE AppLogger line. Runtime
- *    stats are cheap counters maintained by ART; reading them twice per turn
- *    is negligible.
- *  - When no turn is active every call no-ops on a boolean check.
- *
- * The single summary line per turn gives the before/after comparison:
- *   [StreamPerf] sid=… ticks=N flattenAvgUs=… flattenMaxMs=… frozenHits=N-1/N
- *   rowsLast=total(frozen+live) gcCount=+x gcFreedMB=+y.z turnS=…
- * Baseline equivalents come from the existing PerfLongCtx slow-build lines and
- * logcat GC lines, so old logs remain comparable.
- */
 object StreamPerfMonitor {
 
     private const val TAG = "StreamPerf"
@@ -41,13 +19,9 @@ object StreamPerfMonitor {
     private var gcCountStart = 0L
     private var gcFreedStart = 0L
 
-    /** ART runtime stat, or 0 when unavailable (older devices / stat renamed). */
     private fun runtimeStat(key: String): Long =
         Debug.getRuntimeStat(key)?.toLongOrNull() ?: 0L
 
-    /** Begin aggregating a streaming turn. Idempotent for the same session;
-     *  a different session means the previous turn's collector was cancelled
-     *  mid-stream (session switch) — flush its summary before starting. */
     fun turnStart(sid: String) {
         if (active && sid == sessionId) return
         if (active) turnEnd()
@@ -64,11 +38,6 @@ object StreamPerfMonitor {
         gcFreedStart = runtimeStat("art.gc.bytes-freed")
     }
 
-    /**
-     * One pipeline tick (one sampled flatten+publish). [flattenNanos] covers
-     * the off-main flatten work for this tick; [frozenReused] is true when the
-     * frozen-prefix cache was reused as-is (the expected steady state).
-     */
     fun tick(flattenNanos: Long, frozenReused: Boolean, frozenRows: Int, liveRows: Int) {
         if (!active) return
         tickCount++
@@ -79,7 +48,6 @@ object StreamPerfMonitor {
         lastLiveRows = liveRows
     }
 
-    /** End the turn and emit the one-line summary. No-op when not active. */
     fun turnEnd() {
         if (!active) return
         active = false

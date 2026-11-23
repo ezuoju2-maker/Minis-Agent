@@ -6,7 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.openminis.app.ProductionSources
 
-/** [T-android-oauth-log-redact] OAuth secrets reach logs only as length + first 4 chars. */
 class OAuthSecretRedactionTest {
 
     @Test
@@ -47,7 +46,6 @@ class OAuthSecretRedactionTest {
         assertFalse(out.contains("V-SECRET"))
     }
 
-    /** Source-fact guard: the verbatim code/verifier/body logs must not come back. */
     @Test
     fun `openrouter manager no longer logs raw code or verifier`() {
         val src = ProductionSources.read("auth/OpenRouterOAuthManager.kt")

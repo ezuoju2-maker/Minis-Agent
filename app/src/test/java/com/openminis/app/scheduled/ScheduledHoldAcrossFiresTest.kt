@@ -5,22 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-port-sched-wait-hold-gap] Replays a scheduled task's fires exactly as the
- * app performs them, and checks that the chat stays held - and the ongoing
- * notification keeps a wait to show - through every gap until the last fire's
- * run is done.
- *
- * Per fire, in the app's order (ScheduledTaskAlarmReceiver, ScheduledAgentRunner):
- *  1. the receiver takes a run hold (beginRun) BEFORE touching the row;
- *  2. rescheduleNext writes ScheduledTaskManager.afterAlarmFire (count, new
- *     anchor; the last fire disables the task);
- *  3. ScheduledAgentRunner.run takes its own run hold;
- *  4. the receiver's handoff returns and releases its hold;
- *  5. the fire's agent loop ends and the runner releases its hold.
- * After every step the held set (ScheduledSessionHold.heldNow, what observe()
- * emits) is checked.
- */
 class ScheduledHoldAcrossFiresTest {
 
     private val chat = "chat-1"
@@ -33,7 +17,6 @@ class ScheduledHoldAcrossFiresTest {
         creatorSessionId = chat,
     )
 
-    /** One run hold count per holder, like ScheduledSessionHold._runningRuns. */
     private class Runs {
         private val counts = HashMap<String, Int>()
         fun begin(id: String) { counts[id] = (counts[id] ?: 0) + 1 }
@@ -44,10 +27,6 @@ class ScheduledHoldAcrossFiresTest {
     private fun held(task: ScheduledTask, runs: Runs, now: Long) =
         ScheduledSessionHold.heldNow(listOf(task), runs.ids, emptyMap(), now)
 
-    /**
-     * Fire [task] at [now]; [check] sees the held set after each step.
-     * Returns the row after the fire.
-     */
     private fun fire(task: ScheduledTask, runs: Runs, now: Long, check: (String, Set<String>) -> Unit): ScheduledTask {
         runs.begin(task.id); check("receiver hold", held(task, runs, now))
         assertTrue("alarm must be a due fire", ScheduledTaskManager.relativeAlarmDue(task, now))
@@ -55,7 +34,6 @@ class ScheduledHoldAcrossFiresTest {
         check("row advanced", held(after, runs, now))
         runs.begin(after.id); check("runner hold", held(after, runs, now))
         runs.end(after.id); check("handoff returned", held(after, runs, now))
-        // The fire's chat turn runs for a while.
         check("turn running", held(after, runs, now + 3_000))
         runs.end(after.id)
         return after
@@ -88,8 +66,6 @@ class ScheduledHoldAcrossFiresTest {
 
     @Test
     fun `without the receiver's early hold the last fire would flash the chat idle`() {
-        // Documents why the receiver holds before rescheduleNext: the last
-        // fire's "disabled" row with no run hold yet holds nothing.
         val last = ScheduledTaskManager.afterAlarmFire(interval(3).copy(triggeredCount = 2), t0 + 180_000)!!.first
         assertEquals(emptySet<String>(), held(last, Runs(), t0 + 180_000))
         val recv = ProductionSources.read("scheduled/ScheduledTaskAlarmReceiver.kt")

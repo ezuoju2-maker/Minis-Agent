@@ -10,27 +10,11 @@ import java.util.UUID
 import java.util.zip.ZipException
 import java.util.zip.ZipInputStream
 
-/**
- * Helpers for the zip-format import flow used by [ProviderListScreen].
- *
- * Streams a user-picked .zip through [ZipInputStream], extracts into a unique
- * subdirectory of [Context.getCacheDir], then feeds every supported leaf file
- * (.json / .txt) through the existing single-file import handler.
- *
- * Hardens against the "zip slip" path-traversal class by resolving every
- * entry to a canonical path and rejecting anything that escapes the staging
- * root. Skips `__MACOSX/` noise, dot-files, and `.DS_Store`. Cleans up the
- * staging directory on every exit path.
- */
 internal object ProviderImportZip {
 
     private const val TAG = "ProviderImportZip"
     private val SUPPORTED_EXTS = setOf("json", "txt")
 
-    /**
-     * Read the display name reported by the [Uri]'s content provider, if any.
-     * Returns null on failure — callers should fall back to MIME-type sniffing.
-     */
     fun queryDisplayName(context: Context, uri: Uri): String? {
         return try {
             context.contentResolver.query(
@@ -47,14 +31,6 @@ internal object ProviderImportZip {
         }
     }
 
-    /**
-     * Extracts the zip behind [uri], runs every .json/.txt entry through
-     * [onImportSingle], and dispatches a summary / failure toast via the
-     * provided callbacks. Always tears down the staging dir before returning.
-     *
-     * @param onImportSingle Should return a non-null label on success, null on
-     *   "invalid file" — matches the existing provider import contract.
-     */
     fun importFromZip(
         context: Context,
         uri: Uri,
@@ -90,7 +66,6 @@ internal object ProviderImportZip {
 
                             val target = File(stagingDir, rawName)
                             val canonical = target.canonicalPath
-                            // ── zip-slip guard ───────────────────────────────
                             if (canonical != rootCanonical && !canonical.startsWith(rootPrefix)) {
                                 Log.w(TAG, "rejected zip-slip entry: $rawName")
                                 continue

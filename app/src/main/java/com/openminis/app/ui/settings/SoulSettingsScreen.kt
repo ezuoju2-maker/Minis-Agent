@@ -77,20 +77,6 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.withContext
 
-/**
- * [T-soul-md] Settings page for editing SOUL.md. Mirrors iOS
- * `SoulSettingsView` (commit 6370d5a):
- *   - Header preview card showing `✨ [name]` + `[style]` (emoji is
- *     locked to ✨; the editable emoji field was removed to keep
- *     identity surface consistent across the app)
- *   - Identity fields: name, style, lang (Auto / Chinese / English)
- *   - Personality prompt (multiline) with soft-warning + hard-truncate
- *     length indicators (>2000 chars = yellow, >4000 = red)
- *   - "Restore Default" with confirmation dialog
- *   - "Save" writes to SOUL.md via [SoulStore.save] and refreshes the
- *     in-memory metadata cache so chat bubble headers update without a
- *     restart.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SoulSettingsScreen(onBack: () -> Unit) {
@@ -104,32 +90,14 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
     var loaded by remember { mutableStateOf(false) }
     var showRestoreDialog by remember { mutableStateOf(false) }
     var saveError by remember { mutableStateOf<String?>(null) }
-    // Preserve the raw `emoji` field exactly as it appears in SOUL.md so
-    // Save round-trips without clobbering a value the user may have set
-    // on another device (or an older build). Not surfaced in the UI —
-    // the identity emoji shown to the user is locked to ✨ everywhere
-    // (see [SoulMetadata.displayEmoji]).
     var preservedEmoji by remember { mutableStateOf(SoulMetadata.DEFAULT.emoji) }
-    // [T-android-soul-custom-icon] The user-settable identity icon: an emoji
-    // literal, a data:image/png;base64 URI, or empty for the default sparkle.
     var icon by remember { mutableStateOf(SoulMetadata.DEFAULT.icon) }
     var showIconMenu by remember { mutableStateOf(false) }
     var showEmojiSheet by remember { mutableStateOf(false) }
     var iconError by remember { mutableStateOf<String?>(null) }
 
-    // [T-android-soul-save-in-appbar] What was loaded from disk, kept so
-    // "has the user changed anything" is a comparison rather than a flag.
-    //
-    // A boolean set by every onValueChange would report dirty after a round
-    // trip that lands back on the original text (type a character, delete it),
-    // and would need a reset at each of the several places state is
-    // reassigned — the load, the restore-default, and the save itself. A
-    // snapshot compared by value cannot drift out of sync with the fields.
     var baseline by remember { mutableStateOf<SoulFile?>(null) }
 
-    // [T-android-soul-custom-icon] Image import: decode → reject opaque →
-    // centre-crop → 96px → PNG → base64 data URI. Runs off the main thread
-    // because a full-resolution camera photo is expensive to decode and scan.
     val iconUnreadableMsg = stringResource(R.string.soul_icon_error_unreadable)
     val iconTooLargeMsg = stringResource(R.string.soul_icon_error_too_large)
     val imagePicker = rememberLauncherForActivityResult(
@@ -159,9 +127,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
         }
     }
 
-    // Initial load + (defensive) ensureExists. The Application-level call
-    // already seeded on first run, but loading from a freshly cleared app
-    // shouldn't crash.
     LaunchedEffect(Unit) {
         val parsed = withContext(Dispatchers.IO) {
             SoulStore.ensureExists(context)
@@ -173,14 +138,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
         style = parsed.metadata.style
         lang = parsed.metadata.lang
         body = parsed.body
-        // [T-android-soul-save-in-appbar] Snapshot what disk holds, so the
-        // dirty check starts from the loaded state rather than from the
-        // pre-load defaults (which would read as "changed" immediately).
-        //
-        // Rebuilt through the same normalisation Save applies (ifBlank
-        // fallbacks) rather than stored raw: a file whose `lang` is empty on
-        // disk would otherwise compare unequal to the field state the instant
-        // it loaded, and the screen would open already dirty.
         baseline = SoulFile(
             metadata = SoulMetadata(
                 name = parsed.metadata.name.ifBlank { SoulMetadata.DEFAULT.name },
@@ -194,8 +151,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
         loaded = true
     }
 
-    // Language-aware length check used by both the editor counter and the
-    // Save button's enabled state. See [SoulStore.isOverLimit] for the rule.
     val bodyLimitCheck by remember(body) { derivedStateOf { SoulStore.isOverLimit(body) } }
 
     val currentFile = SoulFile(
@@ -223,9 +178,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
         Unit
     }
 
-    // [T-android-soul-save-in-appbar] Leaving with unsaved edits asks first.
-    // Routed through one lambda so the app bar's back arrow and the system
-    // back gesture cannot disagree about whether the guard applies.
     val attemptBack: () -> Unit = {
         if (isDirty) showDiscardDialog = true else onBack()
     }
@@ -235,9 +187,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
         title = stringResource(R.string.soul_settings_title),
         onBack = attemptBack,
         actions = {
-            // Save lives in the app bar, where a top-level commit action
-            // belongs and where it stays reachable without scrolling the
-            // (long) prompt editor to the bottom.
             MinisTextButton(
                 onClick = save,
                 enabled = loaded && isDirty && !bodyLimitCheck.isOverLimit,
@@ -253,11 +202,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
                     .padding(horizontal = 12.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // [T-android-soul-custom-icon] A bare glyph does not read as
-                // tappable — reported on iOS review — so the icon sits on a
-                // filled circle with a hairline border and a pencil badge.
-                // The circle doubles as the backdrop for transparent PNGs,
-                // which by definition have no background of their own.
                 Box(modifier = Modifier.width(48.dp), contentAlignment = Alignment.Center) {
                     Box(
                         modifier = Modifier
@@ -273,9 +217,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
                         contentAlignment = Alignment.Center,
                     ) {
                         SoulIconGlyph(icon = icon, sizeDp = 30.dp, emojiSp = 24.sp)
-                        // Badge kept INSIDE the circle's bounds: on iOS an
-                        // overhanging badge was clipped to a sliver by the
-                        // enclosing button label.
                         Icon(
                             imageVector = Icons.Filled.Edit,
                             contentDescription = null,
@@ -337,8 +278,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(8.dp))
-                // Emoji field intentionally removed — identity emoji is
-                // locked to ✨; only name / style / lang are editable.
                 OutlinedTextField(
                     value = style,
                     onValueChange = { style = it },
@@ -356,9 +295,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
             footer = stringResource(R.string.soul_personality_footer),
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                // [T-android-editor-keyboard-overlap] The page scrolls and
-                // pads for the keyboard (SettingsScaffold); this field asks
-                // it to keep the caret's line in view, not just the field.
                 com.openminis.app.ui.components.DocumentEditorField(
                     value = body,
                     onValueChange = { body = it },
@@ -379,9 +315,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
                     else MaterialTheme.colorScheme.onSurfaceVariant
                 val indicatorText: String = when (val c = bodyLimitCheck) {
                     is SoulBodyLimitCheck.Ok -> {
-                        // Show the unit that matches whichever rule the
-                        // current body is being measured against — mirrors
-                        // iOS soulBodyCountText.
                         soulBodyCountTextAndroid(body)
                     }
                     is SoulBodyLimitCheck.OverLimitChinese -> stringResource(
@@ -408,25 +341,12 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
             ) {
                 MinisOutlinedButton(
                     onClick = { showRestoreDialog = true },
-                    // [T-android-soul-save-in-appbar] Full width now that Save
-                    // has moved to the app bar and this is the only button left
-                    // in the row.
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text(stringResource(R.string.soul_restore_default)) }
             }
         }
     }
 
-    // [T-android-soul-save-in-appbar] Unsaved-changes guard.
-    //
-    // Each button leads with the verdict and then names the consequence
-    // ("OK, discard" / "Cancel, keep editing"), so the row scans correctly
-    // whether the user reads the leading word or the trailing one — a bare
-    // "Discard"/"Keep editing" pair reads fine but gives no cue about which
-    // side is the safe one.
-    //
-    // Dismissing the dialog by tapping outside keeps the edits — the
-    // conservative reading of an ambiguous gesture.
     if (showDiscardDialog) {
         AlertDialog(
             onDismissRequest = { showDiscardDialog = false },
@@ -482,11 +402,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
         )
     }
 
-    // [T-android-soul-custom-icon] Image rejection is explained after the
-    // fact here. There is no longer a transparency requirement to state up
-    // front — any image is accepted (see soul_icon_image_hint) — so the only
-    // remaining rejections are "couldn't be read" and "too large", neither of
-    // which can be predicted before the user picks a file.
     iconError?.let { err ->
         AlertDialog(
             onDismissRequest = { iconError = null },
@@ -507,14 +422,6 @@ fun SoulSettingsScreen(onBack: () -> Unit) {
     }
 }
 
-/**
- * [T-android-soul-custom-icon] The icon itself, rendered the same way
- * everywhere it appears: a decoded bitmap, an emoji, or the default sparkle.
- *
- * The bitmap decode is `remember`ed on the icon string. Without that, the
- * chat header would re-decode base64 on every recomposition — and headers
- * recompose on every streaming tick.
- */
 @Composable
 internal fun SoulIconGlyph(
     icon: String,
@@ -524,11 +431,6 @@ internal fun SoulIconGlyph(
 ) {
     val bitmap = remember(icon) { SoulIcon.decode(icon) }
     when {
-        // Rounded rectangle, NOT a circle: at 18dp in the chat header a circle
-        // eats the corners of a small avatar. Clipping here is also what makes
-        // an opaque image acceptable at all — the refusal that used to guard
-        // against "opaque rectangle reads as a broken tile" was a presentation
-        // concern, and this is the presentation fix.
         bitmap != null -> Image(
             bitmap = bitmap.asImageBitmap(),
             contentDescription = null,
@@ -537,8 +439,6 @@ internal fun SoulIconGlyph(
                 .clip(RoundedCornerShape(sizeDp * SoulIcon.CORNER_RADIUS_FRACTION)),
         )
         icon.isNotEmpty() -> Text(text = icon, fontSize = emojiSp)
-        // Unset: byte-for-byte the previous sparkle, so a user who never
-        // touches this sees no visual change at all.
         sparkleTint != null -> Icon(
             imageVector = Icons.Filled.AutoAwesome,
             contentDescription = null,
@@ -573,9 +473,6 @@ private fun SoulIconMenu(
             text = {
                 Column {
                     Text(stringResource(R.string.soul_icon_choose_image))
-                    // Stated up front so the square crop isn't a surprise after
-                    // picking. (There is no alpha requirement: opaque images are
-                    // accepted and the rounded clip is what makes them look right.)
                     Text(
                         text = stringResource(R.string.soul_icon_image_hint),
                         fontSize = 12.sp,
@@ -585,7 +482,6 @@ private fun SoulIconMenu(
             },
             onClick = onChooseImage,
         )
-        // Only offered when there is something to clear.
         if (hasIcon) {
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.soul_icon_use_default)) },
@@ -595,10 +491,6 @@ private fun SoulIconMenu(
     }
 }
 
-/**
- * Two rows of suggestions, tap-to-fill, a live preview at render size, and a
- * free-form field that normalizes per keystroke.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SoulEmojiPickerSheet(
@@ -622,7 +514,6 @@ private fun SoulEmojiPickerSheet(
             )
             Spacer(Modifier.height(16.dp))
 
-            // Preview at the size the icon is actually drawn on the card.
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
@@ -663,9 +554,6 @@ private fun SoulEmojiPickerSheet(
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = draft,
-                // Normalized PER KEYSTROKE rather than validated on submit:
-                // a second emoji replaces the first, and non-emoji input is
-                // dropped silently instead of being accepted then rejected.
                 onValueChange = { draft = SoulIcon.normalizeEmojiInput(it) },
                 label = { Text(stringResource(R.string.soul_icon_emoji_field)) },
                 singleLine = true,
@@ -687,9 +575,6 @@ private fun SoulEmojiPickerSheet(
     }
 }
 
-/// Render the within-budget counter — picks the CJK character unit vs "words" depending on
-/// the same CJK ratio rule that decides which cap applies. Standalone
-/// helper so it stays out of the Composable hot-path's expression budget.
 @Composable
 private fun soulBodyCountTextAndroid(body: String): String {
     val trimmed = body.trim()
@@ -719,7 +604,6 @@ private fun soulBodyCountTextAndroid(body: String): String {
     }
 }
 
-/** [T-soul-lang-button-wrap] Side padding of the language buttons. */
 internal val LANG_BUTTON_SIDE_PADDING = 8.dp
 
 @Composable
@@ -737,10 +621,6 @@ private fun LangPicker(lang: String, onLangChange: (String) -> Unit) {
     )
     val current = options.firstOrNull { it.first == lang } ?: options.first()
     var expanded by remember { mutableStateOf(false) }
-    // Render the picker as a simple labeled row of buttons. Three options
-    // (auto / Chinese / English) fit comfortably without a dropdown — avoids
-    // depending on material3 ExposedDropdownMenu, which has a fragile
-    // alignment story across compose versions.
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = stringResource(R.string.soul_field_lang),
@@ -748,10 +628,6 @@ private fun LangPicker(lang: String, onLangChange: (String) -> Unit) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
         )
-        // [T-soul-lang-button-wrap] Three equal-width buttons leave little room
-        // once the default 24dp side padding is taken: on narrow phones
-        // "English" broke mid-word ("Englis" / "h"). Keep labels on one line
-        // and use a tighter side padding.
         val padding = PaddingValues(horizontal = LANG_BUTTON_SIDE_PADDING, vertical = 8.dp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             options.forEach { (key, label) ->
@@ -771,5 +647,5 @@ private fun LangPicker(lang: String, onLangChange: (String) -> Unit) {
             }
         }
     }
-    expanded // suppress unused-var warning
+    expanded
 }

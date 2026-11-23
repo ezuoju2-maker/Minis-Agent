@@ -7,13 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-tool-text-line-cap] Alice Q4: one 200 KB line with no newline in a
- * shell tool's output froze the main thread for 30 s inside the preview tile's
- * `Text` (LineBreaker / MeasuredText / EmojiCompat all walk the whole
- * paragraph; maxLines does not stop them). The tile cut by lines only, so the
- * whole line went through. These lock the per-line and total bounds.
- */
 class ToolTextTailTest {
 
     private val n = 12
@@ -63,7 +56,6 @@ class ToolTextTailTest {
     }
 
     @Test fun `multi-byte characters are not split into half surrogate pairs`() {
-        // Each emoji is two UTF-16 units; any odd cut would leave half a pair.
         val text = "\uD83D\uDE00".repeat(60_000) + "\u4E2D\u6587"
         for (cap in listOf(MAX_LINE_CHARS, MAX_LINE_CHARS - 1, 7)) {
             val out = ToolTextTail.lastLines(text, n, maxLineChars = cap)

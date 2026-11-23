@@ -9,15 +9,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-sub-agents-sibling-status] Every callback tells the parent about the rest
- * of the batch.
- *
- * Without this a model that fanned out three delegations and got one result
- * back can quite reasonably summarise as if it had them all — the parent sees
- * one result at a time and nothing else says whether the rest is still coming,
- * already lost, or never started.
- */
 class SubAgentCallbackSiblingsTest {
 
     private fun cb(siblings: String?, agent: String? = null) = AgentCallback(
@@ -47,8 +38,6 @@ class SubAgentCallbackSiblingsTest {
 
     @Test
     fun `a callback round-trips through parse unchanged`() {
-        // The envelope is re-parsed when a transcript is reloaded, so a value
-        // that survives emission but not parsing would silently vanish.
         val original = cb("Other sub agents in this conversation: 1 queued.", agent = "Researcher")
         val parsed = AgentCallback.parse(original.xml)
         assertNotNull(parsed)
@@ -72,7 +61,6 @@ class SubAgentCallbackSiblingsTest {
         assertFalse(cb(null, agent = null).xml.contains(" agent="))
     }
 
-    // ── The summary text itself ─────────────────────────────────────────────
 
     @Test
     fun `a parent with nothing else running gets no line`() {
@@ -84,8 +72,6 @@ class SubAgentCallbackSiblingsTest {
         val line = AgentJobRegistry.siblingSummary("no-such-parent", "job-1", interruptedCount = 2)
         assertNotNull(line)
         assertTrue(line!!.contains("2 interrupted"))
-        // Naming the recovery is the point: otherwise the model has no way to
-        // know those runs can be restarted rather than re-delegated.
         assertTrue(line.contains("action=resume"))
     }
 

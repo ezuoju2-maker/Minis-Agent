@@ -9,17 +9,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * [T-update-channels] What the updater remembers between launches: the user's
- * channel and auto-check switch, the throttle times, the last result (the
- * "available" update, kept per channel and per installed build), the ETag of
- * the release list, and which version the user skipped or downloaded.
- *
- * It also owns the one shared badge state, [hasUpdateBadge], computed locally
- * from those fields ([UpdatePolicy.hasUpdateBadge]) - no request is ever made
- * to show or hide a badge. The beta-only home badge is derived from it and
- * [channel] by the UI ([UpdatePolicy.hasHomeBadge]), not stored.
- */
 object UpdateStateStore {
 
     private const val TAG = "UpdateState"
@@ -44,7 +33,6 @@ object UpdateStateStore {
     private const val K_SKIPPED = "skippedVersionCode"
     private const val K_DOWNLOADED = "downloadedVersionCode"
 
-    /** An update the last successful check found. */
     data class Available(
         val tag: String,
         val versionName: String,
@@ -67,10 +55,8 @@ object UpdateStateStore {
 
     private val _hasUpdateBadge = MutableStateFlow(false)
 
-    /** The update badge everywhere it shows. Always false on a build without automatic checks. */
     val hasUpdateBadge: StateFlow<Boolean> = _hasUpdateBadge.asStateFlow()
 
-    /** Idempotent; MinisApp.onCreate calls it, every other entry point too. */
     fun init(context: Context) {
         if (prefs != null) return
         synchronized(this) {
@@ -88,13 +74,7 @@ object UpdateStateStore {
         return prefs!!
     }
 
-    // ── Settings ────────────────────────────────────────────────────────────
 
-    /**
-     * Switch channel. The cached result belonged to the old channel: drop it,
-     * with the ETag and both throttle times, so the next check (immediate,
-     * see [UpdateAutoChecker.onChannelChanged]) is not held back by either.
-     */
     fun setChannel(context: Context, ch: Channel) {
         if (_channel.value == ch) return
         p(context).edit().putString(K_CHANNEL, ch.id).apply()
@@ -103,7 +83,6 @@ object UpdateStateStore {
         AppLogger.info(TAG, "[UpdateCheck] channel=${ch.id}")
     }
 
-    /** Off hides the badge and stops requests; the cache stays. */
     fun setAutoEnabled(context: Context, on: Boolean) {
         p(context).edit().putBoolean(K_AUTO, on).apply()
         _autoEnabled.value = on
@@ -111,7 +90,6 @@ object UpdateStateStore {
         AppLogger.info(TAG, "[UpdateCheck] autoCheck=$on")
     }
 
-    // ── Throttle ────────────────────────────────────────────────────────────
 
     fun throttleState(context: Context): UpdatePolicy.ThrottleState {
         val p = p(context)
@@ -123,12 +101,6 @@ object UpdateStateStore {
         )
     }
 
-    /**
-     * A check is starting. Stamps the attempt and binds the cache to the
-     * current channel and installed build - so an invalidation happens once,
-     * and a failure right after it backs off instead of invalidating again on
-     * every foreground.
-     */
     fun beginAttempt(context: Context, now: Long, ch: Channel, localCode: Int) {
         val s = throttleState(context)
         val bound = s.cacheChannel != null || s.cacheVersionCode != null
@@ -142,10 +114,8 @@ object UpdateStateStore {
             .apply()
     }
 
-    /** ETag of page 1 of the release list, valid for the bound channel/build. */
     fun etag(context: Context): String? = p(context).getString(K_ETAG, null)
 
-    /** A check succeeded (200 or 304). [available] null = up to date; ignored for a 304. */
     fun markSuccess(context: Context, now: Long, etag: String?, available: Available?, notModified: Boolean) {
         val e = p(context).edit().putLong(K_SUCCESS, now)
         if (!notModified) {
@@ -197,9 +167,7 @@ object UpdateStateStore {
         AppLogger.info(TAG, "[UpdateCheck] cache cleared ($why)")
     }
 
-    // ── Badge ───────────────────────────────────────────────────────────────
 
-    /** "Skip this version": the badge stays off for this build number. */
     fun skip(context: Context, versionCode: Int?) {
         if (versionCode == null) return
         p(context).edit().putInt(K_SKIPPED, versionCode).apply()
@@ -207,7 +175,6 @@ object UpdateStateStore {
         AppLogger.info(TAG, "[UpdateCheck] skipped build $versionCode")
     }
 
-    /** A download started: the badge has done its job for this build. */
     fun markDownloaded(context: Context, versionCode: Int?) {
         if (versionCode == null) return
         p(context).edit().putInt(K_DOWNLOADED, versionCode).apply()

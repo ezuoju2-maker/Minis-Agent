@@ -15,12 +15,6 @@ import org.robolectric.RuntimeEnvironment
 import java.io.File
 import javax.crypto.AEADBadTagException
 
-/**
- * [T-android-keystore-no-cascade] One unreadable encrypted store must cost that
- * store only - never the shared master key, and with it every other credential.
- * AndroidKeyStore does not exist on the JVM, so [EncryptedPrefsFactory.open]
- * is driven through a fake [EncryptedPrefsFactory.Ops].
- */
 @RunWith(RobolectricTestRunner::class)
 class EncryptedPrefsFactoryTest {
 
@@ -28,7 +22,6 @@ class EncryptedPrefsFactoryTest {
 
     private fun prefs(name: String): SharedPreferences = ctx.getSharedPreferences(name, Context.MODE_PRIVATE)
 
-    /** [buildFailures]: how many build() calls fail per file before one succeeds. */
     private inner class FakeOps(
         val buildFailures: MutableMap<String, Int> = mutableMapOf(),
         var keyWorks: Boolean = true,
@@ -88,8 +81,6 @@ class EncryptedPrefsFactoryTest {
 
     @Test
     fun `a broken store leaves every other store untouched`() {
-        // The Pixel 4a repro: one corrupted keyset used to empty provider_secrets
-        // and oauth_prefs at the next cold start.
         val ops = FakeOps(mutableMapOf("backup_rclone_secrets" to 2))
         EncryptedPrefsFactory.open(ops, "backup_rclone_secrets")
         EncryptedPrefsFactory.open(ops, "provider_secrets")

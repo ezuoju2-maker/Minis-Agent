@@ -6,11 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-tool-preview-longpress-close] / [T-thinking-autoexpand-toggle-longpress]
- * Long-press shortcuts for two Appearance settings (port of iOS 277d5ce1b and
- * b556ea8f8).
- */
 class ToolPreviewAndThinkingLongPressTest {
 
     private val bar = ProductionSources.read("ui/chat/ChatComposerWidgets.kt")

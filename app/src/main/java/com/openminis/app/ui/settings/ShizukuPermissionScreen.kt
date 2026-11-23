@@ -30,26 +30,6 @@ import com.openminis.app.R
 import com.openminis.app.offload.ShizukuBackend
 import com.openminis.app.offload.ShizukuManager
 
-/**
- * T322 / [T-android-privileged-backend]: state-driven Shizuku-protocol
- * permission walkthrough.
- *
- * Renders a single section whose body changes based on
- * [ShizukuManager.snapshot]:
- *
- *   NOT_INSTALLED     → THREE install CTAs (Shizuku / AXManager / Sui). All
- *                        speak the same protocol — the user picks whichever
- *                        suits them; Sui is the rooted-user option.
- *   NOT_RUNNING       → "Open Manager App and press Start" — launches the
- *                        installed manager.
- *   NEED_PERMISSION   → "Authorize DeepSeek" CTA → triggers system dialog.
- *   READY             → green status row with version + uid.
- *
- * [T-android-sui-support] (GH#110 / GH#97) Sui is a Magisk/KernelSU module
- * with no APK and no launcher activity, so on a Sui-supplied binder the
- * "Open Manager App" rows are hidden — there is nothing to open — and the
- * READY row is labelled "Sui (root)".
- */
 @Composable
 fun ShizukuPermissionScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -68,8 +48,6 @@ fun ShizukuPermissionScreen(onBack: () -> Unit) {
             SettingsRow(
                 title = stringResource(stateTitle(snap.state)),
                 subtitle = if (snap.state == ShizukuManager.State.READY) {
-                    // [T-android-sui-support] Name the live provider so a Sui
-                    // user can see their root module is what's serving Minis.
                     if (snap.isSui) {
                         stringResource(R.string.shizuku_ready_subtitle_sui, snap.version, snap.uid)
                     } else {
@@ -90,11 +68,6 @@ fun ShizukuPermissionScreen(onBack: () -> Unit) {
         }
 
         when (snap.state) {
-            // Two parallel install entries — Shizuku and AXManager are
-            // functionally equivalent; the user picks whichever they like.
-            // Both go to the project's GitHub Releases page (no Play Store —
-            // AXManager isn't published there, and a single source per manager
-            // keeps the option set symmetrical).
             ShizukuManager.State.NOT_INSTALLED -> SettingsSection(
                 header = stringResource(R.string.shizuku_actions_header),
                 footer = stringResource(R.string.shizuku_install_footer),
@@ -109,9 +82,6 @@ fun ShizukuPermissionScreen(onBack: () -> Unit) {
                     subtitle = stringResource(R.string.shizuku_install_btn_axmanager_subtitle),
                     onClick = { ShizukuManager.openInstallPage(context, ShizukuBackend.AXMANAGER_GITHUB_URL) },
                 )
-                // [T-android-sui-support] Third option for rooted users: Sui
-                // needs no APK and survives reboots, so it is strictly nicer
-                // than Shizuku IF the user already runs Magisk/KernelSU.
                 SettingsRow(
                     title = stringResource(R.string.shizuku_install_btn_sui),
                     subtitle = stringResource(R.string.shizuku_install_btn_sui_subtitle),
@@ -148,7 +118,6 @@ fun ShizukuPermissionScreen(onBack: () -> Unit) {
                     title = stringResource(R.string.shizuku_grant_btn),
                     subtitle = stringResource(R.string.shizuku_grant_subtitle),
                     onClick = { ShizukuManager.requestPermission() },
-                    // Sui has no manager activity, so this is the only row.
                     showDivider = !snap.isSui,
                 )
                 if (!snap.isSui) {
@@ -161,24 +130,10 @@ fun ShizukuPermissionScreen(onBack: () -> Unit) {
                 }
             }
 
-            // [T-android-sui-capabilities-not-empty] READY renders the actual
-            // capability LIST, one row per android-shizuku-cli subcommand.
-            //
-            // This section used to be just a header + a static footer paragraph
-            // enumerating the subcommands as prose, plus (Shizuku only) an "open
-            // app" row. On Sui — which has no launcher activity, so that row is
-            // hidden — the whole section collapsed to header + gray footer, and
-            // users read that as "empty capabilities" (Sanite&Ava's report,
-            // status badge read fine: Sui(root) v=13 uid=0). It was NEVER a
-            // detection bug: the surface is compile-time-fixed and identical for
-            // Shizuku / AXManager / Sui, so a static list is the correct model.
-            // Now it renders as a real list on every provider.
             ShizukuManager.State.READY -> SettingsSection(
                 header = stringResource(R.string.shizuku_capabilities_header),
                 footer = stringResource(R.string.shizuku_capabilities_footer),
             ) {
-                // Sui has no manager app to open, so that row stays hidden — but
-                // the list below is now the section's content regardless.
                 if (!snap.isSui) {
                     SettingsRow(
                         title = stringResource(R.string.shizuku_open_btn),
@@ -188,12 +143,9 @@ fun ShizukuPermissionScreen(onBack: () -> Unit) {
                 }
                 ShizukuCapabilities.forEachIndexed { index, cap ->
                     SettingsRow(
-                        // Subcommand name is a literal CLI token — not localized;
-                        // only the human description is.
                         title = cap.name,
                         subtitle = stringResource(cap.descriptionRes),
                         icon = cap.icon,
-                        // No divider after the last capability row.
                         showDivider = index != ShizukuCapabilities.lastIndex,
                         minHeight = 72.dp,
                     )
@@ -233,13 +185,6 @@ private fun stateColor(s: ShizukuManager.State): Color = when (s) {
     ShizukuManager.State.NOT_INSTALLED -> MaterialTheme.colorScheme.error
 }
 
-/**
- * [T-android-sui-capabilities-not-empty] One android-shizuku-cli subcommand.
- * The list is static: the CLI's command surface is fixed at compile time and
- * identical across Shizuku / AXManager / Sui, so no runtime probing is
- * appropriate. Icons are indicative only; the CLI token in [name] is the
- * source of truth and is never localized.
- */
 private data class ShizukuCapability(
     val name: String,
     @androidx.annotation.StringRes val descriptionRes: Int,

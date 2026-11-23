@@ -26,27 +26,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 
-// [T-config-readable] Pieces shared by the approval dialog, the Config Changes
-// list and the record detail page. Port of the iOS ConfigConfirmSheet /
-// ConfigAuditView / ConfigAuditDetailView helpers (70f7871d7, dec7c238a).
 
-/**
- * Key → format in the language the UI is showing, for re-rendering a stored
- * description (names stay as frozen at write time; labels follow the UI).
- */
 @Composable
 internal fun rememberReadableLocalizer(): (String) -> String? {
     val context = LocalContext.current
     return remember(context) { { key: String -> ConfigReadableStrings.lookup(context, key) } }
 }
 
-/**
- * Hairline between a change's raw values (path, old → new) and its readable
- * sentence: one physical pixel in the outline-variant color, legible in light
- * and dark themes without competing with the gaps between rows. Only ever
- * drawn together with a non-empty sentence, so a row without one gets no
- * stray line. Mirrors iOS ConfigReadableDivider.
- */
 @Composable
 internal fun ConfigReadableDivider() {
     val onePx = with(LocalDensity.current) { 1f.toDp() }
@@ -57,11 +43,6 @@ internal fun ConfigReadableDivider() {
     )
 }
 
-/**
- * Approved rows' readable sentences, rows about the same record kept together
- * (first-appearance order), global settings as their own group. Updates as
- * rows are toggled. Mirrors iOS ConfigConfirmSheet.summaryLines.
- */
 internal fun configSummaryLines(items: List<PendingConfigChangeItem>, localize: (String) -> String?): List<String> {
     val bySubject = LinkedHashMap<String, MutableList<String>>()
     for (item in items) {
@@ -72,7 +53,6 @@ internal fun configSummaryLines(items: List<PendingConfigChangeItem>, localize: 
     return bySubject.values.flatten().filter { it.isNotEmpty() }
 }
 
-/** Revert dialog text: what will be undone, in words when the row has them. */
 @Composable
 internal fun configRevertMessage(entry: ConfigAuditEntry, localize: (String) -> String?): String {
     val readable = entry.readable
@@ -82,10 +62,6 @@ internal fun configRevertMessage(entry: ConfigAuditEntry, localize: (String) -> 
     return "${entry.key}\n${prettyConfigJSON(entry.newValueJSON)} → ${prettyConfigJSON(entry.oldValueJSON)}"
 }
 
-/**
- * Audit JSON → readable raw text: pretty-printed objects / arrays with sorted
- * keys, bare strings unquoted, "—" for an empty side (add / remove).
- */
 internal fun prettyConfigJSON(json: String): String {
     if (json.isEmpty()) return "—"
     val v = try {
@@ -119,7 +95,6 @@ private fun pretty(v: Any?, depth: Int): String {
     }
 }
 
-/** Status capsule shared by the audit list and the detail page. */
 @Composable
 internal fun ConfigAuditStatusBadge(status: ConfigAuditStatus) {
     val color = when (status) {

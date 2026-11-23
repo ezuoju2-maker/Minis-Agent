@@ -12,19 +12,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-responses-toolresult-image-split] Field report (zzz, deepseek-flash
- * over /v1/responses): the model ran read_image and shell_execute in parallel;
- * the next request came back `[400] No tool output found for tool call call_01_…`
- * with "this model may not support image input" appended.
- *
- * The Responses builder emitted read_image's image carrier (a `user` item) right
- * after call_00's output, i.e. BETWEEN the two outputs. The Chat Completions
- * builder had been fixed for exactly this in 030d059cb; the Responses one was
- * not. iOS buffers the carriers in both paths.
- *
- * These drive the real OpenAIProvider.buildResponsesAPIBody.
- */
 class ResponsesParallelToolImageTest {
 
     private val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte()) + ByteArray(32)
@@ -43,7 +30,6 @@ class ResponsesParallelToolImageTest {
         imageData = if (image) jpeg else null, imageMimeType = if (image) "image/jpeg" else null,
     )
 
-    /** The reported turn: two parallel calls, the FIRST one returns an image. */
     private fun history(vararg results: AgentContentPart.ToolResult) = listOf(
         LLMMessage(LLMMessage.Role.USER, "can't this model read images?"),
         LLMMessage(role = LLMMessage.Role.ASSISTANT, content = "",
@@ -51,7 +37,6 @@ class ResponsesParallelToolImageTest {
         LLMMessage(role = LLMMessage.Role.USER, content = "", contentParts = results.toList()),
     )
 
-    /** One token per input item: fc:<call>, out:<call>, img (a tool-image carrier), user, other. */
     private fun sequence(messages: List<LLMMessage>): List<String> {
         val input = provider().buildResponsesAPIBody(messages = messages, systemPrompt = null,
             maxTokens = 1024, stream = false).getJSONArray("input")
@@ -66,7 +51,6 @@ class ResponsesParallelToolImageTest {
         }
     }
 
-    /** Every output must come after its calls and before any carrier or other item. */
     private fun outputsContiguous(seq: List<String>): Boolean {
         val firstOut = seq.indexOfFirst { it.startsWith("out:") }
         val lastOut = seq.indexOfLast { it.startsWith("out:") }
@@ -105,7 +89,6 @@ class ResponsesParallelToolImageTest {
         assertEquals(listOf("out:call_00", "out:call_01"), seq.dropWhile { !it.startsWith("out:") })
     }
 
-    // -- the misleading "may not support image input" hint --
 
     private fun err(detail: String) = LLMError.ProviderError(detail, httpStatus = 400)
 

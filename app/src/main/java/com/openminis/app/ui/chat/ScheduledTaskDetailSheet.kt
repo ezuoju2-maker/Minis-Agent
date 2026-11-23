@@ -90,19 +90,6 @@ import java.util.Locale
 private val StatusGreen = Color(0xFF34C759)
 private val StatusRed = Color(0xFFFF3B30)
 
-/**
- * [T-scheduled-task-detail] The page a scheduled-task card opens: the task's
- * parameters, progress, prompt and every fire it has run, in the card's amber.
- *
- * Shared design with iOS. Everything
- * shown is derived by [ScheduledTaskDetailModel]; this file only lays it out.
- * The task is read live from [com.openminis.app.scheduled.ScheduledTaskStore],
- * so a fire completing or a cancel elsewhere updates the page in place.
- *
- * @param hostSessionId the chat the card was tapped in — decides "this chat"
- *   wording and which history rows link to another chat. Null in read-only
- *   transcripts.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ScheduledTaskDetailSheet(
@@ -116,12 +103,9 @@ internal fun ScheduledTaskDetailSheet(
     val tasks by tasksFlow.collectAsState(initial = remember { manager.store().all() })
     val task = tasks.firstOrNull { it.id == marker.taskId }
 
-    // Whether the chat this card lives in is processing right now: with the
-    // fire not yet recorded, that means this fire is still running.
     val hostVm = remember(hostSessionId) { hostSessionId?.let { ChatViewModelStore.existing(it) } }
     val hostStreaming = hostVm?.isStreaming?.collectAsState()?.value == true
 
-    // One-second clock for the countdown; only runs while the page is open.
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -141,8 +125,6 @@ internal fun ScheduledTaskDetailSheet(
         ScheduledTaskDetailModel.triggerText(
             it, phrases, ::formatHm,
             formatDate = { ms -> formatDay(context, ms) },
-            // [T-android-scheduled-triggers] Name the task an on-completion
-            // trigger waits for; an agent job has no row and shows its id.
             upstreamName = { id -> scheduledTaskLabel(context, id) },
         )
     }
@@ -150,11 +132,6 @@ internal fun ScheduledTaskDetailSheet(
     var confirmingCancel by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // A fixed-height sheet with the nav bar pinned above a scrolling body, as
-    // ChatToolDetailUI does. Sized to its content, a long page grew to the
-    // full window: the sheet slid under the status bar (the title and close
-    // button collided with the clock and icons) and the nav bar scrolled away
-    // with the cards. iOS pins the bar the same way.
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -163,7 +140,6 @@ internal fun ScheduledTaskDetailSheet(
         contentWindowInsets = { WindowInsets(0) },
     ) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.92f)) {
-            // Nav bar: close on the left, centred title.
             Box(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp)) {
                 IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterStart)) {
                     Icon(Icons.Default.Close, contentDescription = stringResource(R.string.scheduled_detail_close), tint = ChatColors.primaryText)
@@ -207,8 +183,6 @@ internal fun ScheduledTaskDetailSheet(
 
                 HistoryCard(history)
 
-                // Actions: full-width card buttons, icon + label, as iOS
-                // ScheduledTaskDetailView.actions (Label on the card background).
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (task != null && task.enabled) {
                         ActionCardButton(
@@ -236,8 +210,6 @@ internal fun ScheduledTaskDetailSheet(
             text = { Text(stringResource(R.string.scheduled_card_cancel_confirm_body, name)) },
             confirmButton = {
                 TextButton(onClick = {
-                    // Disable rather than delete, as the card does: the history
-                    // stays, and the task can be re-enabled from Settings.
                     manager.setEnabled(marker.taskId, false)
                     confirmingCancel = false
                 }) { Text(stringResource(R.string.scheduled_card_cancel_confirm_ok)) }
@@ -251,13 +223,7 @@ internal fun ScheduledTaskDetailSheet(
     }
 }
 
-// ── cards ────────────────────────────────────────────────────────────────
 
-/**
- * A bottom action of the detail page: the whole card is the button, with the icon and
- * label centred in [color]. Same card shape and fill as [SectionCard], so the actions
- * read as part of the page rather than as bare links (iOS draws them the same way).
- */
 @Composable
 private fun ActionCardButton(icon: ImageVector, label: String, color: Color, onClick: () -> Unit) {
     Row(
@@ -364,7 +330,6 @@ private fun StatusPill(status: Status) {
     }
 }
 
-/** Pulse driven by the shared 30 fps decorative clock, read in the layer. */
 @Composable
 private fun PulsingDot(color: Color) {
     val tick = rememberDecorativeTick()
@@ -461,7 +426,6 @@ private fun deliveryText(task: ScheduledTask, hostSessionId: String?): String =
             stringResource(R.string.scheduled_delivery_child_other, sessionTitle(d.sessionId))
     }
 
-/** A chat's title, loaded off the main thread; its short id until then. */
 @Composable
 private fun sessionTitle(sessionId: String): String {
     val context = LocalContext.current
@@ -607,14 +571,11 @@ private fun LabeledRow(
     }
 }
 
-// ── formatting ───────────────────────────────────────────────────────────
 
-/** [T-android-scheduled-triggers] A scheduled task's label, or null. */
 internal fun scheduledTaskLabel(context: Context, id: String): String? =
     runCatching { com.openminis.app.scheduled.ScheduledTaskManager(context).get(id)?.label?.ifBlank { null } }
         .getOrNull()
 
-// internal: the task editor shows the same trigger line for tasks it cannot edit.
 @Composable
 internal fun triggerPhrases(): ScheduledTaskDetailModel.TriggerPhrases {
     val locale = Locale.getDefault()
@@ -625,7 +586,6 @@ internal fun triggerPhrases(): ScheduledTaskDetailModel.TriggerPhrases {
         weekdays = stringResource(R.string.scheduled_trigger_weekdays),
         weekly = stringResource(R.string.scheduled_trigger_weekly),
         daySeparator = stringResource(R.string.scheduled_trigger_day_separator),
-        // DateFormatSymbols is 1-based (index 0 is empty); the model wants 0-based.
         dayNames = (Calendar.SUNDAY..Calendar.SATURDAY).map { shortDays[it] },
         from = stringResource(R.string.scheduled_trigger_from),
         until = stringResource(R.string.scheduled_trigger_until),
@@ -636,10 +596,8 @@ internal fun triggerPhrases(): ScheduledTaskDetailModel.TriggerPhrases {
     )
 }
 
-/** [T-android-scheduled-triggers] HH:mm, shared with the task editor. */
 internal fun formatTriggerTime(hour: Int, minute: Int): String = formatHm(hour, minute)
 
-/** [T-android-scheduled-triggers] A day, shared with the task editor. */
 internal fun formatTriggerDay(context: Context, ms: Long): String = formatDay(context, ms)
 
 private fun formatHm(hour: Int, minute: Int): String = "%02d:%02d".format(hour, minute)
@@ -652,7 +610,6 @@ private fun formatDay(context: Context, ms: Long): String {
     return SimpleDateFormat(android.text.format.DateFormat.getBestDateTimePattern(locale, skeleton), locale).format(Date(ms))
 }
 
-/** `HH:mm:ss` today, otherwise the day plus `HH:mm`. */
 private fun formatFireTime(context: Context, ms: Long, now: Long): String {
     val locale = context.resources.configuration.locales[0]
     val a = Calendar.getInstance().apply { timeInMillis = ms }
@@ -665,7 +622,6 @@ private fun formatFireTime(context: Context, ms: Long, now: Long): String {
     }
 }
 
-/** "in 1 h 5 min" — the two largest units, refreshed by the caller's clock. */
 private fun relative(context: Context, deltaMs: Long): String {
     if (deltaMs <= 0) return context.getString(R.string.scheduled_detail_now)
     val parts = ScheduledTaskDetailModel.durationParts(deltaMs / 1000).map { (unit, n) ->
@@ -685,7 +641,6 @@ private fun copy(context: Context, text: String) {
     Toast.makeText(context, R.string.scheduled_detail_copied, Toast.LENGTH_SHORT).show()
 }
 
-/** Same deep link the completion notification uses. */
 private fun openSession(context: Context, sessionId: String) {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse("minis://session/$sessionId")).apply {
         setPackage(context.packageName)

@@ -69,59 +69,24 @@ import com.openminis.app.data.repository.ProviderRepository
 import com.openminis.app.speech.VoiceOutputState
 import com.openminis.app.ui.theme.ChatColors
 
-/**
- * [T-android-unified-model-picker] Android counterpart of iOS
- * UnifiedModelPicker: ONE single-select model picker sheet, parameterized the
- * way iOS parameterizes ModelPickerConfig (voiceInput() / voiceOutput() are
- * just configs over the same view).
- *
- * [T-android-picker-mainsheet-language] Rendered in the MAIN model picker's
- * visual language (ChatModelPickerSheet.ModelPickerSheet): 42dp capsule
- * search directly under the title, section CARDS on surfaceContainerHigh
- * with 14dp corners and EMBEDDED headers, titleMedium SemiBold header
- * typography, expandable bound-group row, per-provider cards with collapse
- * chevrons, provider dots, modality chips and Quick Test bolts. The previous
- * cut borrowed AddModelsToGroup's flat multi-select rows
- * (modelEntryPickerItems), which read as a different app next to the main
- * picker — the exact drift iOS avoids by having one UnifiedModelPicker.
- *
- * Selection semantics (unchanged): tap = select + dismiss; selecting the
- * bound group row clears the override (null = follow the group).
- */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun UnifiedModelPickerSheet(
     providerRepository: ProviderRepository,
     title: String,
     modalityFilter: PickerModalityFilter,
-    /** The bound group (iOS groupScope .single); null hides the section. */
     boundGroup: ModelGroup?,
     boundGroupName: String?,
-    /** Current override entry id; null = follow the bound group. */
     selectedId: String?,
     onSelect: (String?) -> Unit,
     onDismiss: () -> Unit,
-    /**
-     * [T-android-picker-mainsheet-language] Optional "Edit" affordance on the
-     * group card's header (mirrors the main picker's onEditGroups and iOS's
-     * group-section Edit). Null hides the button — callers without a
-     * navigation route (the floating capsule) simply don't show it.
-     */
     onEditGroups: (() -> Unit)? = null,
-    /**
-     * [T-android-picker-provider-edit] Edit button on each provider section
-     * header, as in the chat picker and iOS UnifiedModelPicker (698cc65c6).
-     * Only stored instances have sections here; the built-in System card has
-     * no detail page and never gets the button. Null hides it.
-     */
     onEditProvider: ((instanceId: String) -> Unit)? = null,
 ) {
     val config by providerRepository.config.collectAsState()
     var quickTestEntry by remember { mutableStateOf<ModelEntry?>(null) }
     var searchText by remember { mutableStateOf("") }
     var groupExpanded by remember { mutableStateOf(false) }
-    // [T-android-system-voice-catalog] Device TTS voice rows (voice-output
-    // scenarios only) + the currently-picked voice for selection marks.
     val pickerContext = androidx.compose.ui.platform.LocalContext.current
     var systemVoices by remember {
         mutableStateOf(emptyList<com.openminis.app.speech.SystemTtsVoiceCatalog.SystemVoice>())
@@ -134,8 +99,6 @@ fun UnifiedModelPickerSheet(
             systemVoices = com.openminis.app.speech.SystemTtsVoiceCatalog.voices(pickerContext)
         }
     }
-    // Voice scenarios keep provider sections expanded (iOS d4e3798f
-    // seedCollapse note: multi-voice vendors would fold all-but-one voice).
     var collapsedInstanceIds by remember { mutableStateOf(setOf<String>()) }
 
     fun select(id: String?) {
@@ -143,15 +106,9 @@ fun UnifiedModelPickerSheet(
         onDismiss()
     }
 
-    // [T-picker-search-debounce] [T-picker-search-relevance] Same search as
-    // the chat picker: debounced, and scored (exact > prefix > word prefix >
-    // substring > subsequence) instead of a plain `contains`.
     val query = rememberDebouncedQuery(searchText)
     fun matches(text: String): Boolean = query.isEmpty() || ModelSearch.score(text, query) > 0
 
-    // [T-android-voice-picker-active] Which group member actually serves the
-    // next request — recomputed whenever the config changes so the badge can't
-    // go stale after an instance is disabled or a member is removed.
     val activeGroupMemberId = remember(config, modalityFilter) {
         when (modalityFilter) {
             PickerModalityFilter.AUDIO_INPUT ->
@@ -168,8 +125,6 @@ fun UnifiedModelPickerSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        // Slim drag handle, same as the main picker / StandardChatSheet — the
-        // Material default puts ~44dp of whitespace above the title.
         dragHandle = {
             Box(
                 modifier = Modifier
@@ -189,17 +144,12 @@ fun UnifiedModelPickerSheet(
             }
         },
     ) {
-        // 0.9f fixed height + nav-bar inset, exactly like the main picker —
-        // a content-wrapping column here let the voice pickers (whose provider
-        // sections seed expanded) grow to cover the full screen.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.9f)
                 .navigationBarsPadding(),
         ) {
-            // Title bar — CENTERED title + trailing Done, byte-for-byte the
-            // main picker's layout (ChatModelPickerSheet title bar).
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -219,12 +169,6 @@ fun UnifiedModelPickerSheet(
                 }
             }
 
-            // ── Search bar — the main picker's exact OutlinedTextField
-            // DecorationBox recipe (ChatModelPickerSheet [T-android-search-height]):
-            // outlined 50%-radius container so focus draws the primary ring,
-            // trailing ✕ clears. The previous filled-capsule stand-in had no
-            // focus feedback and no clear affordance — visibly different the
-            // moment the field was tapped.
             val searchInteraction = remember { MutableInteractionSource() }
             BasicTextField(
                 value = searchText,
@@ -284,8 +228,6 @@ fun UnifiedModelPickerSheet(
                 },
             )
 
-            // [T-android-picker-scroll-guard] See rememberSheetScrollGuard: fling
-            // momentum is absorbed, a deliberate drag still dismisses.
             val unifiedPickerScrollGuard = rememberSheetScrollGuard()
 
             LazyColumn(
@@ -294,7 +236,6 @@ fun UnifiedModelPickerSheet(
                     .weight(1f, fill = false)
                     .nestedScroll(unifiedPickerScrollGuard),
             ) {
-                // ── Model Groups card ──
                 if (boundGroup != null && matches(boundGroupName ?: "")) {
                     item("group_card") {
                         Column(
@@ -325,21 +266,6 @@ fun UnifiedModelPickerSheet(
                                     .padding(horizontal = 16.dp, vertical = 13.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                // Group-row anatomy copied from the MAIN picker
-                                // (ChatModelPickerSheet:600-762): GREEN check,
-                                // blue Layers glyph, icon+text strategy badge,
-                                // bodySmall member count, 24dp circled chevron.
-                                //
-                                // The group stays CHECKED while the effective
-                                // choice is one of its own members — group
-                                // membership and entry selection are separate
-                                // axes, exactly as iOS models them
-                                // (isGroupSelected == currentGroupId, tested
-                                // independently of the entry's isActive). Keying
-                                // this on `selectedId == null` alone made
-                                // pinning a member look like leaving the group,
-                                // even though the group is still what's bound
-                                // and still what the override falls back to.
                                 val groupSelected =
                                     selectedId == null ||
                                         boundGroup.memberEntryIds.contains(selectedId)
@@ -391,11 +317,6 @@ fun UnifiedModelPickerSheet(
                                             )
                                         }
                                     }
-                                    // Count what the expansion can actually
-                                    // RENDER, not the raw member-id count —
-                                    // otherwise a member that no longer
-                                    // resolves still inflates the number and
-                                    // the row promises rows it can't show.
                                     Text(
                                         stringResource(
                                             R.string.voice_input_picker_group_models,
@@ -429,15 +350,6 @@ fun UnifiedModelPickerSheet(
                                 }
                             }
                             if (groupExpanded) {
-                                // Fall back to the VIRTUAL system entries: the
-                                // default voice groups are seeded with
-                                // "__builtin_system_speech__/…" member ids,
-                                // which are synthesized on demand and never
-                                // live in config.modelEntries. Resolving only
-                                // against modelEntries dropped every member of
-                                // those groups, so "2 models" expanded to an
-                                // empty list. Same fallback ModelGroupDetail
-                                // already uses.
                                 val members = boundGroup.memberEntryIds.mapNotNull { id ->
                                     config.modelEntries.find { it.id == id }
                                         ?: SystemVoiceEntries.resolve(id)
@@ -450,17 +362,6 @@ fun UnifiedModelPickerSheet(
                                     )
                                     val inst = config.instances
                                         .find { it.id == entry.providerInstanceId }
-                                    // "In effect" — the member that actually
-                                    // serves the next request, from EITHER
-                                    // source: an explicit override pointing at
-                                    // it, or (group-follow) the member the
-                                    // group routes to. iOS fills the member
-                                    // checkmark from exactly this
-                                    // (UnifiedModelPicker expandedEntryRow's
-                                    // isActive), not from the override alone —
-                                    // a filled circle here means "this is the
-                                    // one", which is the question the
-                                    // expansion exists to answer.
                                     val isActive = if (selectedId != null) {
                                         selectedId == entry.id
                                     } else {
@@ -489,9 +390,6 @@ fun UnifiedModelPickerSheet(
                                                 ),
                                         )
                                         Spacer(Modifier.width(10.dp))
-                                        // [T-model-row-premature-wrap] Name and badge on one
-                                        // line when they fit, else the name keeps the width
-                                        // and the badge drops below (iOS ViewThatFits).
                                         FitOrWrapLine(
                                             modifier = Modifier.weight(1f),
                                             lead = {
@@ -501,21 +399,11 @@ fun UnifiedModelPickerSheet(
                                                 )
                                             },
                                             tags = {
-                                                // Badge only in the group-follow case:
-                                                // it explains WHY a row is checked when
-                                                // the user didn't pick it. With an
-                                                // explicit override the check is
-                                                // self-explanatory and the badge would
-                                                // just be noise.
                                                 if (isActive && selectedId == null) ModelActiveBadge()
                                             },
                                         )
                                     }
                                 }
-                                // The last member's 10dp row padding alone left
-                                // it visually crowding the card's bottom edge —
-                                // the collapsed row's own 13dp padding sets the
-                                // expectation, so pad the expansion to match.
                                 Spacer(Modifier.height(6.dp))
                             }
                         }
@@ -530,7 +418,6 @@ fun UnifiedModelPickerSheet(
                     }
                 }
 
-                // ── System card ──
                 val systemEntries = modalityFilter.systemEntries()
                     .filter { matches(it.model.displayName) }
                 if (systemEntries.isNotEmpty()) {
@@ -554,7 +441,6 @@ fun UnifiedModelPickerSheet(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            // Auto row: clear any picked voice.
                                             if (modalityFilter == PickerModalityFilter.AUDIO_OUTPUT) {
                                                 VoiceOutputState.setSystemVoice(null, null)
                                             }
@@ -563,11 +449,6 @@ fun UnifiedModelPickerSheet(
                                         .padding(horizontal = 16.dp, vertical = 13.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    // In effect from EITHER source, same rule as
-                                    // the group members above. The extra TTS
-                                    // clause stands: once a specific device
-                                    // voice is picked, the mark belongs to that
-                                    // voice's row, not to this "Auto" row.
                                     val systemInEffect =
                                         (if (selectedId != null) selectedId == entry.id
                                         else entry.id == activeGroupMemberId) &&
@@ -593,14 +474,6 @@ fun UnifiedModelPickerSheet(
                                     }
                                 }
                             }
-                            // [T-android-system-voice-catalog] Every device TTS
-                            // voice as its own selectable row — what makes the
-                            // iOS System section list "Tingting (Chinese)…,
-                            // Anna (German)…" individually. The voice choice is
-                            // a system-engine detail (VoiceOutputState pref),
-                            // layered under the entry-level selection: tapping a
-                            // voice both records it and selects the system
-                            // engine. Auto (the plain row above) clears it.
                             if (modalityFilter == PickerModalityFilter.AUDIO_OUTPUT) {
                                 systemVoices
                                     .filter { matches(it.label) }
@@ -645,20 +518,9 @@ fun UnifiedModelPickerSheet(
                     }
                 }
 
-                // ── Per-provider cards ──
                 val entriesByInstance = config.instances
                     .filter { it.isEnabled }
                     .mapNotNull { inst ->
-                        // [T-model-release-ranking] Provider sections follow the
-                        // user's arrangement; models INSIDE a section follow
-                        // release date. This list is built from the config
-                        // snapshot rather than ProviderRepository.entriesFor(),
-                        // so it does not inherit that accessor's sort — without
-                        // this call the picker shows models in raw config order
-                        // (instance cluster, then id alphabetically) while the
-                        // provider-detail list right next to it shows them
-                        // newest-first. iOS fixed the same divergence in
-                        // UnifiedModelPicker.swift.
                         val sectionEntries = com.openminis.app.data.repository.ModelEntryRanking
                             .sortedByReleaseRank(
                                 config.modelEntries.filter { e ->
@@ -666,9 +528,6 @@ fun UnifiedModelPickerSheet(
                                         modalityFilter.matches(e.model)
                                 },
                             )
-                        // A provider-name hit shows the whole section (iOS
-                        // T-picker-search-provider-name); otherwise matches,
-                        // most relevant first — ties keep newest-first.
                         val entries = if (matches(inst.label.ifEmpty { inst.providerType.displayName })) sectionEntries
                             else ModelSearch.rank(sectionEntries, query)
                         if (entries.isEmpty()) null else inst to entries
@@ -682,9 +541,6 @@ fun UnifiedModelPickerSheet(
                                 .background(cardColor, cardShape)
                                 .clip(cardShape),
                         ) {
-                            // Provider header — main picker's embedded header:
-                            // start16/end8 top10/bottom8, 24dp circled chevron,
-                            // hairline under the name.
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -702,11 +558,6 @@ fun UnifiedModelPickerSheet(
                                     modifier = Modifier.weight(1f),
                                 )
                                 if (onEditProvider != null) {
-                                    // [T-android-picker-provider-edit-text] A text "Edit" link,
-                                    // styled like the Model Groups "Edit" (iOS a0acb1c0f replaced its
-                                    // icon button with this). Compact rather than a MinisTextButton so
-                                    // the header row keeps its height; still its own tap target, so it
-                                    // never folds the section.
                                     val editLabel = stringResource(R.string.model_picker_edit_provider, providerName)
                                     Text(
                                         stringResource(R.string.model_picker_groups_edit),
@@ -789,11 +640,6 @@ fun UnifiedModelPickerSheet(
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.SemiBold,
                                             )
-                                            // [T-model-row-premature-wrap] Id, "·" and the
-                                            // modality chips on one line when they fit;
-                                            // else the id keeps the full width and the
-                                            // chips drop below it (iOS entryRow). The
-                                            // chips never break internally (ModalityBadge).
                                             val badges = modalityBadges(entry.model)
                                             FitOrWrapLine(
                                                 separator = if (badges.isNotEmpty()) {
@@ -843,7 +689,6 @@ fun UnifiedModelPickerSheet(
     }
 }
 
-/** Card-embedded section header, main-picker typography. */
 @Composable
 private fun PickerSectionHeader(
     label: String,
@@ -877,7 +722,6 @@ private fun SelectionMark(selected: Boolean) {
     )
 }
 
-/** Subtitle for the injected System virtual rows, keyed on the model id. */
 @Composable
 private fun systemEntrySubtitle(entry: ModelEntry): String = when (entry.model.id) {
     SystemVoiceIds.SYSTEM_TTS -> stringResource(R.string.voice_system_tts_subtitle)

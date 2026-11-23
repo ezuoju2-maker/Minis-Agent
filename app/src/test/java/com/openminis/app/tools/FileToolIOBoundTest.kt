@@ -10,20 +10,12 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
-/**
- * [GH #453] FileToolIO's pool is bounded. A read stuck in the kernel keeps its
- * thread past the 45 s timeout; the pool used to be a cachedThreadPool, so
- * every retry against a dead mount added a thread. Past the cap the call now
- * fails at once with an agent-facing message, and the pool still serves
- * normal work concurrently below it.
- */
 class FileToolIOBoundTest {
 
     @Test fun `a full pool of uninterruptible work refuses the next call at once`() {
         val pool = FileToolIO.newPool(2)
         val release = CountDownLatch(1)
         val running = CountDownLatch(2)
-        // Uninterruptible, like FileInputStream.read on a hung FUSE mount.
         val work = { running.countDown(); while (release.count > 0) { try { release.await() } catch (_: InterruptedException) {} }; "late" }
         try {
             val callers = List(2) { thread { runCatching { FileToolIO.runOn(pool, 2, "file_read", false, 100, work) } } }
@@ -49,8 +41,6 @@ class FileToolIOBoundTest {
     }
 
     @Test fun `a pool full of live work waits for a thread instead of blaming a mount`() {
-        // [T-fileio-cap-healthy-load] Several chats' parallel file tools can
-        // fill the pool with healthy work; the next call waits for a thread.
         val pool = FileToolIO.newPool(2)
         val release = CountDownLatch(1)
         val running = CountDownLatch(2)

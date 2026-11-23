@@ -8,16 +8,6 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.nio.file.Files
 
-/**
- * [T-android-storage-symlink-inflation] Pins that sizing counts real bytes
- * once, the way `du` does — not `du -L`.
- *
- * The reported bug: the storage screen showed "Shell 容器 43.89 GB" for an
- * install Android's own settings measured at 9.60 GB. `walkTopDown()` follows
- * directory symlinks and `File.length()`/`isFile()` resolve file symlinks, so
- * every link re-counted its target — and a link to a directory re-counted a
- * whole subtree, multiplying rather than adding.
- */
 class DirectorySizeSymlinkTest {
 
     @get:Rule
@@ -41,8 +31,6 @@ class DirectorySizeSymlinkTest {
 
     @Test
     fun `a symlink to a directory is not descended into`() {
-        // The expensive case: the Alpine rootfs and every venv/node_modules
-        // layout has these, and each one re-counted an entire subtree.
         val root = tmp.newFolder("root")
         write(File(root, "usr/lib/a.so"), 4_000)
         write(File(root, "usr/lib/b.so"), 6_000)
@@ -55,8 +43,6 @@ class DirectorySizeSymlinkTest {
 
     @Test
     fun `many links to one target inflate nothing`() {
-        // 304 busybox applet links ship in the stock rootfs; the multiplier is
-        // what turns single-digit GB into tens of GB.
         val root = tmp.newFolder("root")
         write(File(root, "bin/busybox"), 900_000)
         repeat(300) { i ->
@@ -70,8 +56,6 @@ class DirectorySizeSymlinkTest {
 
     @Test
     fun `a symlink pointing outside the tree cannot import foreign bytes`() {
-        // Deleting this directory would not free those bytes, so counting them
-        // would make the "bytes freed" figure a lie too.
         val outside = tmp.newFolder("outside")
         write(File(outside, "huge.bin"), 50_000)
         val root = tmp.newFolder("root")
@@ -85,7 +69,6 @@ class DirectorySizeSymlinkTest {
 
     @Test
     fun `a symlink cycle terminates instead of hanging`() {
-        // `a/loop -> a` would recurse forever under the old walk.
         val root = tmp.newFolder("root")
         write(File(root, "a/file.bin"), 42)
         Files.createSymbolicLink(
@@ -122,10 +105,6 @@ class DirectorySizeSymlinkTest {
 
     @Test
     fun `walkTopDown follows directory symlinks`() {
-        // Not testing our code — pinning the platform behaviour the bug rested
-        // on, so the reasoning above stays checkable rather than remembered.
-        // If a future Kotlin/JDK stops following directory links here, the
-        // pruning in directorySize becomes redundant and this test says so.
         val root = tmp.newFolder("root")
         write(File(root, "usr/lib/a.so"), 4_000)
         Files.createSymbolicLink(
@@ -143,55 +122,27 @@ class DirectorySizeSymlinkTest {
         )
     }
 
-    // ── [T-android-storage-symlink-inflation] no fourth copy ──────────────
-    //
-    // 754e65eac fixed two sizing walks and a THIRD survived in RootfsManager,
-    // which is why the "Rootfs 管理" screen still read 40.25 GB while the
-    // Storage screen next to it was correct. A fourth then turned up in
-    // DeviceOffloadHandler. Each was hand-rolled, each read plausibly, and each
-    // disagreed with the others by an order of magnitude.
-    //
-    // So the guard is structural: one implementation, and a test that fails if
-    // someone writes a second. Cheaper than discovering the next one from a
-    // screenshot.
 
     private fun mainSources(): List<File> =
         File("src/main/java").walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
 
     @Test
     fun `no file rolls its own recursive directory-size walk`() {
-        // The shape that keeps recurring: summing `length()` while recursing on
-        // `isDirectory`/`walkTopDown`, both of which resolve symlinks.
-        // Counting bytes ACTUALLY COPIED OR WRITTEN is a different question from
-        // "how much does this directory occupy": there, resolving a symlink is
-        // correct, because the copy really does duplicate the target's bytes.
-        // The backup writers are that case and are deliberately exempt — the
-        // exemption is by path and is listed here so it stays a decision rather
-        // than a hole the heuristic quietly grew.
         val bytesWrittenNotBytesOnDisk = setOf(
-            "backup/BackupZip.kt",        // pre-flight check against the ZIP format's 4GB limit
-            "backup/BackupExporter.kt",   // progress counter over files it just copied
-            "backup/BackupImporter.kt",   // progress counter over files it just wrote
+            "backup/BackupZip.kt",
+            "backup/BackupExporter.kt",
+            "backup/BackupImporter.kt",
         )
 
         val offenders = mutableListOf<String>()
         for (f in mainSources()) {
-            if (f.path.endsWith("SessionStorage.kt")) continue // the one real implementation
+            if (f.path.endsWith("SessionStorage.kt")) continue
             val norm = f.path.replace(File.separatorChar, '/')
             if (bytesWrittenNotBytesOnDisk.any { norm.endsWith(it) }) continue
             val text = f.readText()
-            // Any accumulation of `length()` counts — `total += f.length()`,
-            // `sumOf { it.length() }`, and the ternary form
-            // `total += if (isDirectory) recurse(f) else f.length()`, which the
-            // first version of this regex missed and which is exactly the shape
-            // RootfsManager had.
             val sumsLength = Regex("""\+=[^\n]*\.length\(\)|sumOf\s*\{[^}]*\.length\(\)""")
                 .containsMatchIn(text)
             if (!sumsLength) continue
-            // Only a RECURSIVE/tree walk is the bug — a flat listFiles() over a
-            // directory with no symlinks (AppLogger's log dir) is fine, and so
-            // is counting bytes actually copied (the backup writers), where
-            // following a link is the correct behaviour.
             val walksTree = Regex("""walkTopDown\(\)""").containsMatchIn(text) ||
                 Regex("""isDirectory\s*\)\s*\{?\s*
 ?\s*\w*[Dd]irSize|calculateDirSize\(""")
@@ -208,8 +159,6 @@ class DirectorySizeSymlinkTest {
 
     @Test
     fun `the known former offenders now delegate to the shared implementation`() {
-        // Named explicitly so deleting the delegation is loud, even if the
-        // heuristic above ever stops matching.
         for (rel in listOf(
             "src/main/java/com/openminis/app/sandbox/RootfsManager.kt",
             "src/main/java/com/openminis/app/sandbox/offload/DeviceOffloadHandler.kt",

@@ -14,38 +14,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [M19 / M20] The per-family GATES on the OpenAI-compatible request body: which
- * ids and which endpoints a given field is allowed to reach.
- *
- * Every row here is a field that one vendor requires and another rejects, so
- * each is asserted BOTH present where it belongs and absent where it does not —
- * an over-broad gate is a 400 for someone else, which is how each of these was
- * reported in the first place.
- *
- * Pins:
- *  • #35 / a5a0de20d / 8db455fff / 20bd0367b / bd68bf809 — `thinking_budget`
- *    must be STRICTLY below `max_completion_tokens`.
- *  • 672fc4de9 / 251657006 / 8b72080da — the DashScope dual-send is scoped to
- *    DashScope; a third-party gateway serving the same qwen id must not get it.
- *  • fb671083 / 838ba929 — Fast Mode's `service_tier: "priority"` is gated to
- *    gpt-family ids on the Responses path.
- *  • GH#191 — the OpenRouter `anthropic/` prefix routes Anthropic-shaped quirks.
- *  • The `startsWith("o")` reasoning predicate, which is deliberately BROADER on
- *    Android than on iOS (see the cross-check at the bottom).
- *
- * Seam: the production body builders (`buildRequestBody` /
- * `buildResponsesAPIBody`) are `internal` and documented as directly callable
- * from unit tests, which is the honest place to read a field-placement decision
- * — going through MockWebServer would add a network dependency to a question
- * that is pure JSON construction.
- */
 class OpenAIFamilyGatesTest {
 
     @After
     fun tearDown() {
-        // Process-wide singleton; leaving it on would leak into any other test
-        // that builds a request body.
         FastModePrefs.setCachedEnabledForTest(false)
     }
 
@@ -94,18 +66,7 @@ class OpenAIFamilyGatesTest {
         imageParts = emptyList(),
     )
 
-    // ═══════════════════════ M19a: thinking_budget < max_completion_tokens (#35)
 
-    /**
-     * Qwen rejects a `thinking_budget` that is not STRICTLY below the output
-     * cap, so the two fields must be read together — the budget is carved out of
-     * the same allowance as the reply. GH#35 was "thinking on, every request
-     * 400s"; the budget was landing at or above the cap for small caps.
-     *
-     * Asserted as an INEQUALITY across a sweep of caps rather than as fixed
-     * numbers, because the ladder's absolute values are tuning and may change
-     * while the inequality may not.
-     */
     @Test
     fun `qwen thinking_budget stays strictly below the output cap at every level`() {
         val m = model("qwen3-32b")
@@ -131,11 +92,6 @@ class OpenAIFamilyGatesTest {
         }
     }
 
-    /**
-     * The pathological cap: when there is no room for a budget at all the field
-     * is DROPPED rather than sent as 0 or as a negative. `maxTokens < 2` leaves
-     * nothing to carve out, and a 0 budget is itself a 400 on this vendor.
-     */
     @Test
     fun `qwen drops the budget entirely when the cap leaves no room`() {
         val b = chat(
@@ -151,13 +107,6 @@ class OpenAIFamilyGatesTest {
         )
     }
 
-    /**
-     * The budget appears in BOTH places or neither. DashScope reads it from
-     * `extra_body` on some deployments and from the root on others, so the
-     * dual-send is the point — and the two copies disagreeing is worse than
-     * either alone, because the request then succeeds with a budget the user did
-     * not ask for.
-     */
     @Test
     fun `the root and extra_body copies of the budget always agree`() {
         for (maxTokens in listOf(1, 2, 1024, 65536)) {
@@ -190,19 +139,7 @@ class OpenAIFamilyGatesTest {
         }
     }
 
-    // ═══════════════════ M19b: the dual-send is scoped to DashScope (672fc4de9)
 
-    /**
-     * `enable_thinking` is DashScope's own extension. A gateway reselling the
-     * same qwen id controls thinking by its own mechanism and a strict schema
-     * rejects the unknown key outright, so the dual-send must not follow the id
-     * off DashScope.
-     *
-     * OpenRouter is the load-bearing row: it nests the effort under
-     * `reasoning:{}` instead, so this is a mechanism SWAP, not just a missing
-     * field — the request succeeds either way and only the thinking behaviour
-     * silently differs.
-     */
     @Test
     fun `a qwen id on OpenRouter nests the effort instead of dual-sending`() {
         val b = chat(model("qwen3-32b"), base = "https://openrouter.ai/api/v1")
@@ -211,13 +148,6 @@ class OpenAIFamilyGatesTest {
         assertEquals("high", b.getJSONObject("reasoning").getString("effort"))
     }
 
-    /**
-     * The mirror of the ordering rule: on a UNIFIED gateway the qwen rule still
-     * wins (it is registered above the gateway rule), so the dual-send DOES
-     * apply there. Kept beside the OpenRouter row because the two look alike and
-     * resolve differently — OpenRouter is registered ABOVE the qwen rule and Ark
-     * below it, which is the entire difference.
-     */
     @Test
     fun `a qwen id on a unified gateway keeps the dual-send`() {
         val b = chat(model("qwen3-32b"), base = "https://ark.cn-beijing.volces.com/api/v3")
@@ -225,11 +155,6 @@ class OpenAIFamilyGatesTest {
         assertFalse(b.has("reasoning_effort"))
     }
 
-    /**
-     * And the endpoint half: DashScope claims a NON-qwen id too, because the
-     * mechanism belongs to the endpoint as much as to the family. Both halves of
-     * the original `contains("qwen") || isDashScope` predicate survive.
-     */
     @Test
     fun `DashScope dual-sends for a non-qwen id as well`() {
         val b = chat(model("some-other-model"), base = "https://dashscope.aliyuncs.com/compatible-mode/v1")
@@ -237,14 +162,6 @@ class OpenAIFamilyGatesTest {
         assertFalse("never the generic root tier on this mechanism: $b", b.has("reasoning_effort"))
     }
 
-    /**
-     * A plain custom relay serving a qwen-named id gets neither: the id matches
-     * the qwen rule, so it dual-sends. Recording the ACTUAL behaviour, which is
-     * deliberate — the pre-refactor chain matched the id without an endpoint
-     * guard, and Phase 1 preserved that verbatim. The field-reported failure was
-     * the reverse direction (a gateway losing its own mechanism), so the id match
-     * stays.
-     */
     @Test
     fun `a qwen id on an unrecognised relay keeps the id-matched mechanism`() {
         val b = chat(model("qwen3-32b"), base = "https://relay.example.com/v1")
@@ -254,17 +171,7 @@ class OpenAIFamilyGatesTest {
         )
     }
 
-    // ═════════════════════ M20a: Fast Mode is gpt-family only (fb671083)
 
-    /**
-     * Fast Mode injects `service_tier: "priority"` on the Responses path, gated
-     * to gpt-family ids. The value is not the UI name: verified against
-     * openai/codex source (`codex-rs/protocol config_types.rs`),
-     * `ServiceTier::Fast` sends "priority".
-     *
-     * The gate matters because a strict OpenAI-compatible relay 400s on an
-     * unknown key, and this builder serves relays too.
-     */
     @Test
     fun `Fast Mode carries priority for gpt-family ids on the Responses path`() {
         FastModePrefs.setCachedEnabledForTest(true)
@@ -278,7 +185,6 @@ class OpenAIFamilyGatesTest {
         }
     }
 
-    /** Off by default, and off means the key is ABSENT — not `"default"`. */
     @Test
     fun `Fast Mode off omits the key rather than stating a default`() {
         FastModePrefs.setCachedEnabledForTest(false)
@@ -289,7 +195,6 @@ class OpenAIFamilyGatesTest {
         )
     }
 
-    /** A non-gpt id never carries it, however the toggle is set. */
     @Test
     fun `a non-gpt id never carries the fast tier`() {
         FastModePrefs.setCachedEnabledForTest(true)
@@ -299,12 +204,6 @@ class OpenAIFamilyGatesTest {
         }
     }
 
-    /**
-     * The gate is on the RESPONSES builder. The Chat builder's `service_tier` is
-     * a different feature entirely (xAI Priority Processing, keyed on a
-     * per-provider capability flag), so a gpt id on the Chat path must stay
-     * clean — otherwise the two features would silently merge.
-     */
     @Test
     fun `the gpt fast-mode gate does not leak onto the Chat path`() {
         FastModePrefs.setCachedEnabledForTest(true)
@@ -315,11 +214,6 @@ class OpenAIFamilyGatesTest {
         )
     }
 
-    /**
-     * Read at request-BUILD time, not at provider construction: a flip must
-     * apply to the very next request of an ongoing session, including
-     * offload / title-gen calls that never pass through ChatViewModel.
-     */
     @Test
     fun `flipping Fast Mode applies to the next request on the same provider`() {
         val provider = OpenAIProvider(
@@ -336,18 +230,7 @@ class OpenAIFamilyGatesTest {
         assertFalse("and back off again", build().has("service_tier"))
     }
 
-    // ══════════════════ M20b: the OpenRouter anthropic/ prefix (GH#191)
 
-    /**
-     * OpenRouter passes `cache_control` through to Anthropic but never injects
-     * it, so without this field a Claude request caches NOTHING — the reporter
-     * measured `cache_read_input_tokens` pinned at 0 and a 3-6x cost overrun.
-     * Unlike the OpenAI / Grok / Moonshot models on the same gateway, Claude
-     * needs an explicit breakpoint.
-     *
-     * Two conditions, and BOTH are required: the host must be OpenRouter and the
-     * id must carry OpenRouter's `anthropic/` namespace.
-     */
     @Test
     fun `an anthropic-prefixed id on OpenRouter opts into prompt caching`() {
         for (id in listOf("anthropic/claude-sonnet-4.5", "anthropic/claude-opus-5", "Anthropic/Claude-Opus-5")) {
@@ -360,7 +243,6 @@ class OpenAIFamilyGatesTest {
         }
     }
 
-    /** Every other model on the same gateway keeps a byte-identical body. */
     @Test
     fun `other models on OpenRouter are unchanged`() {
         for (id in listOf("openai/gpt-5.3", "google/gemini-3-pro", "qwen3-32b", "moonshotai/kimi-k2")) {
@@ -369,12 +251,6 @@ class OpenAIFamilyGatesTest {
         }
     }
 
-    /**
-     * And the same `anthropic/` id OFF OpenRouter is unchanged: the gate is
-     * host-matched, never a compat flag. Keying it on a compat flag would have
-     * leaked the field into Mistral requests, which set the same flag for an
-     * unrelated reason (the legacy `max_tokens` body shape).
-     */
     @Test
     fun `an anthropic-prefixed id off OpenRouter gets no cache_control`() {
         for (base in listOf("https://api.openai.com/v1", "https://relay.example.com/v1")) {
@@ -383,14 +259,7 @@ class OpenAIFamilyGatesTest {
         }
     }
 
-    // ═══════════════════════ M20c: max_completion_tokens vs max_tokens
 
-    /**
-     * OpenRouter needs the LEGACY `max_tokens`; everyone else takes
-     * `max_completion_tokens`. Exactly one of the two, always — sending both
-     * makes the effective cap ambiguous, and sending neither lets a relay's tiny
-     * default truncate the reply.
-     */
     @Test
     fun `exactly one output-cap field is sent, chosen by gateway`() {
         val onOpenRouter = chat(model("gpt-5.3"), base = "https://openrouter.ai/api/v1", maxTokens = 1234)
@@ -404,7 +273,6 @@ class OpenAIFamilyGatesTest {
         }
     }
 
-    /** The Responses path has its own spelling again, and states the cap. */
     @Test
     fun `the Responses path states the cap as max_output_tokens`() {
         val b = responses(model("gpt-5.3"), maxTokens = 4321)
@@ -413,16 +281,7 @@ class OpenAIFamilyGatesTest {
         assertFalse(b.has("max_tokens"))
     }
 
-    // ═══════════════════════ M20d: temperature placement
 
-    /**
-     * `temperature` is written only when the CALLER supplies one — the builder
-     * does not invent a default. That is the layering this file pins: the
-     * decision "this model rejects temperature" belongs to the caller (for
-     * Anthropic it is `modelRejectsTemperature`; for reasoning models the chat
-     * layer passes null), and the builder must not second-guess it by adding a
-     * value nobody asked for.
-     */
     @Test
     fun `temperature is written only when the caller supplies one`() {
         assertFalse(
@@ -442,25 +301,13 @@ class OpenAIFamilyGatesTest {
         )
     }
 
-    /**
-     * The Responses builder takes no temperature at all — no caller supplies one
-     * on that path — so the field can never appear there. Pinned because adding
-     * it would be a silent behaviour change for reasoning models, which reject
-     * it.
-     */
     @Test
     fun `the Responses path never carries temperature`() {
         assertFalse(responses(model("gpt-5.3")).has("temperature"))
         assertFalse(responses(model("o3-mini")).has("temperature"))
     }
 
-    // ══════════════ M20e: the reasoning-family predicate, and its breadth
 
-    /**
-     * The OpenAI-native reasoning predicate on Android is
-     * `startsWith("o") || startsWith("gpt-5")`. The real o-series ids are the
-     * cases it exists for.
-     */
     @Test
     fun `the o-series and gpt-5 families take a root reasoning_effort`() {
         for (id in listOf("o1", "o1-mini", "o3", "o3-mini", "o4-mini", "gpt-5.3", "gpt-5.6-sol")) {
@@ -469,12 +316,6 @@ class OpenAIFamilyGatesTest {
         }
     }
 
-    /**
-     * The OpenAI-native branch sends its tier UNCONDITIONALLY — it does not
-     * consult the model's declared set. That is what distinguishes it from the
-     * generic branch, where an undeclared tier is clamped down, so the two are
-     * asserted side by side on the same declaration.
-     */
     @Test
     fun `the native branch ignores an incomplete declaration while the generic branch clamps`() {
         val declared = listOf("low", "medium")
@@ -490,31 +331,11 @@ class OpenAIFamilyGatesTest {
         )
     }
 
-    /**
-     * CROSS-PLATFORM CHECK, and the reason this test exists rather than a
-     * comment. iOS narrows the same predicate to an explicit prefix set
-     * (o1/o3/o4/gpt-5/gpt-4); Android keeps a bare `startsWith("o")`, which is
-     * DELIBERATELY broader — the Phase 1 refactor preserved it verbatim rather
-     * than narrowing it, on the grounds that narrowing changes behaviour for any
-     * id beginning with "o" and that phase must not.
-     *
-     * So the breadth is a documented choice, and this test's job is to make the
-     * blast radius visible rather than to assert it is empty. Each id below
-     * begins with "o" and is NOT an o-series reasoning model: it is routed as
-     * one anyway, which means the tier goes out unclamped and the model's own
-     * declaration is ignored.
-     *
-     * ⚠️ printed, not failed — the fix is a production edit this test layer may
-     * not make, and the narrowing is exactly what Phase 1 declined to do.
-     */
     @Test
     fun `KNOWN GAP - the broad startsWith o predicate routes non-o-series ids as native`() {
         val notReasoningModels = listOf("olmo-2-13b", "omni-x-7b", "openchat-3.5", "orca-2-13b")
         val misrouted = mutableListOf<String>()
         for (id in notReasoningModels) {
-            // Declare a narrow set: the generic branch would clamp HIGH down to
-            // "low", the native branch sends "high". The emitted value therefore
-            // names which branch claimed the id.
             val b = chat(model(id, reasoningEffortValues = listOf("low")))
             if (b.optString("reasoning_effort", null) == "high") misrouted += id
         }
@@ -534,9 +355,6 @@ class OpenAIFamilyGatesTest {
             println("✅ [M20] the OpenAI-native predicate has been narrowed; tighten this test to assert it.")
         }
 
-        // What IS asserted: the breadth is bounded to the leading-"o" rule and
-        // has not silently grown. An id that does NOT begin with "o" or "gpt-5"
-        // must still take the generic, clamping branch.
         for (id in listOf("some-relay-reasoner", "gpt-4o", "llama-3.1-70b", "mistral-large")) {
             assertEquals(
                 "$id must take the generic branch and clamp",
@@ -546,17 +364,9 @@ class OpenAIFamilyGatesTest {
         }
     }
 
-    /**
-     * The same predicate appears TWICE — once as a rule scope (`ModelPattern`)
-     * and once inside the emitter as `isOpenAINative` — and the two must agree,
-     * or a rule matches while the emitter takes the other path. Asserted through
-     * the resolver directly, since only the emitter's copy is observable there.
-     */
     @Test
     fun `the rule scope and the emitter predicate agree on what is native`() {
         fun nativeByEmitter(id: String): Boolean {
-            // A declared set the generic branch would clamp; the native branch
-            // ignores it. The answer therefore identifies the branch taken.
             val b = JSONObject()
             ThinkingRuleResolver.apply(
                 b,
@@ -589,44 +399,23 @@ class OpenAIFamilyGatesTest {
         }
     }
 
-    // ══════════════════════════════════════════════ drift guards
 
-    /**
-     * SOURCE-GREP DRIFT GUARD. Each gate below is private or inlined in a
-     * builder, so the behavioural rows above are the only view of it — and a
-     * refactor can reproduce those rows while relocating the decision. Pin the
-     * literals that define each gate's SCOPE, since scope is what every one of
-     * these bugs was about.
-     */
     @Test
     fun `the production gates still carry their scoping literals`() {
         val src = ProductionSources.read("provider/openai/OpenAIProvider.kt")
         for (needle in listOf(
-            // Fast Mode: gpt-family AND don't clobber an existing tier, and the
-            // tier the user chose run through the Ultrafast allow-list
-            // ([T-speed-tier], was a plain FastModePrefs.isEnabled() check).
             "if (!body.has(\"service_tier\") && model.id.contains(\"gpt\", ignoreCase = true)) {",
             ".effective(com.openminis.app.data.FastModePrefs.tier(), model)",
-            // OpenRouter Anthropic cache control: host AND prefix.
             "isOpenRouter && model.id.lowercase().startsWith(\"anthropic/\")",
             "body.put(\"cache_control\", JSONObject().put(\"type\", \"ephemeral\"))",
-            // The output-cap fork.
             "body.put(\"max_tokens\", maxTokens)",
             "body.put(\"max_completion_tokens\", maxTokens)",
-            // DashScope is host-matched, like the other vendor predicates.
             "basePath.contains(\"dashscope\")",
         )) {
             assertTrue("gate literal is gone from OpenAIProvider: $needle", src.contains(needle))
         }
     }
 
-    /**
-     * The budget inequality and the broad-"o" predicate both live in the
-     * resolver, and both are the kind of line a tidy-up would "simplify". The
-     * margin arithmetic is what keeps the budget strictly below the cap for
-     * small caps; the comment on the prefix is what records that its breadth is
-     * a decision.
-     */
     @Test
     fun `the resolver still carries the budget margin and the documented broad prefix`() {
         val src = ProductionSources.read("provider/thinking/ThinkingRuleResolver.kt")
@@ -638,10 +427,6 @@ class OpenAIFamilyGatesTest {
             "…and a hard strictly-below ceiling",
             src.contains("val ceiling = maxOf(1, minOf(ctx.maxTokens - margin, ctx.maxTokens - 1))"),
         )
-        // [OpenMinis#377] gpt-6 joined the family; the point of this assertion is
-        // that the emitter predicate and the rule scopes move TOGETHER, so both
-        // sides are checked for the same three generations rather than for one
-        // frozen spelling.
         assertTrue(
             "the emitter's native predicate must stay in lockstep with the rule scopes",
             src.contains("lid.startsWith(\"o\")") &&

@@ -3,36 +3,12 @@ package com.openminis.app.crash
 import com.openminis.app.diagnostics.ResourceWatermark
 import java.io.InputStream
 
-/**
- * [GH #453] A few lines summarising a WHOLE tombstone - thread count, threads
- * per name, memory-mapping count, open fds, abort message - for the top of an
- * exitinfo log.
- *
- * Why: from API 31, `ApplicationExitInfo.getTraceInputStream()` for a native
- * crash is debuggerd's tombstone in protobuf form (system/core/debuggerd/proto/
- * tombstone.proto), and [ExitInfoCollector] keeps only its first
- * [ExitInfoCollector.MAX_TRACE_BYTES]. For a process killed by thread or
- * mapping exhaustion that head is a binary dump of the first few dozen
- * threads: the thread list and the 60k-line memory map that would answer
- * "who created all these" are past the cut. This reads the full stream once,
- * keeping only counters, and copies the head out on the way so the existing
- * raw section is unchanged.
- *
- * Fields used (tombstone.proto): Tombstone.pid = 5, tid = 6, abort_message =
- * 14, threads = 16 (map<uint32, Thread>: entry key = 1, value = 2),
- * memory_mappings = 17, open_fds = 19; Thread.name = 2. A text tombstone
- * (older platforms, some vendors) is recognised by its leading `*** ` and
- * summarised from its `pid: …, tid: …, name: …` headers and memory-map lines.
- * Anything else, or a malformed stream, yields a summary that says so.
- */
 internal object TombstoneSummary {
 
     class Result(val summary: String, val head: ByteArray)
 
-    /** Hard stop on bytes read, so a huge or endless stream cannot pin the collector. */
     const val MAX_TOTAL_BYTES = 64L * 1024 * 1024
 
-    /** A Thread entry bigger than this is skipped rather than buffered (its name is lost, its count is not). */
     private const val MAX_THREAD_ENTRY_BYTES = 1 shl 20
 
     fun read(input: InputStream, headBytes: Int): Result {
@@ -47,12 +23,10 @@ internal object TombstoneSummary {
         } catch (t: Throwable) {
             "(not summarised: ${t.javaClass.simpleName}: ${t.message})"
         }
-        // A parse that stopped early still owes the raw section its full head.
         runCatching { tee.fillHead() }
         return Result(summary, tee.head())
     }
 
-    // ── protobuf ─────────────────────────────────────────────────────────────
 
     private class Malformed(msg: String) : Exception(msg)
 
@@ -94,14 +68,12 @@ internal object TombstoneSummary {
             }
         }
 
-        /** Thread.name from one map entry (key = 1, value = 2 -> Thread). */
         private fun threadName(entry: ByteArray): String? {
             val thread = field(entry, 0, entry.size, 2) ?: return null
             val name = field(entry, thread.first, thread.second, 2) ?: return null
             return String(entry, name.first, name.second - name.first, Charsets.UTF_8)
         }
 
-        /** [start, end) of the first length-delimited [want] field inside entry[from, to). */
         private fun field(b: ByteArray, from: Int, to: Int, want: Int): Pair<Int, Int>? {
             var i = from
             fun varint(): Long {
@@ -182,7 +154,6 @@ internal object TombstoneSummary {
         }
     }
 
-    // ── text ─────────────────────────────────────────────────────────────────
 
     private class TextParser(private val s: HeadTee) {
         private val header = Regex("""^pid: \d+, tid: \d+, name: (.*?)\s+>>>""")
@@ -211,9 +182,7 @@ internal object TombstoneSummary {
         }
     }
 
-    // ── stream that keeps its first bytes ───────────────────────────────────
 
-    /** Passes reads through, copying the first [cap] bytes aside, and stops at [MAX_TOTAL_BYTES]. */
     private class HeadTee(private val input: InputStream, cap: Int) : InputStream() {
         private val buf = ByteArray(cap)
         private var held = 0

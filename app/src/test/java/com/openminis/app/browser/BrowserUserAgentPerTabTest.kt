@@ -7,11 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [ISS-033] The browser UA setting applies to every tab opened after it
- * changes, in any chat, and never changes a tab already open;
- * set_user_agent switches one tab only (port of iOS ceeb63bbd).
- */
 class BrowserUserAgentPerTabTest {
 
     private val pool = ProductionSources.read("browser/BrowserTabPool.kt")

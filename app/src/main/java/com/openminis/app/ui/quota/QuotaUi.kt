@@ -72,15 +72,7 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 
-// [T-provider-quota] Shared quota visuals: the provider page section, the
-// detail sheet and (stage 2) the picker pills all draw pools through these, so
-// every surface reads the same numbers. Port of the iOS views in
-// ProviderQuotaSection.swift / QuotaDetailSheet.swift.
-//
-// Colour carries state only: no green except a reliable percent that is fine,
-// so "nothing shown" never reads as "plenty left".
 
-// MARK: - Words from resources
 
 class QuotaResourceStrings(private val context: Context) : QuotaStrings {
     private fun s(id: Int, vararg args: Any): String = context.getString(id, *args)
@@ -128,14 +120,7 @@ internal fun currentLocale(): Locale {
     return config.locales[0] ?: Locale.getDefault()
 }
 
-// MARK: - Attention  [T-quota-attention-refresh]
 
-/**
- * Marks an instance as WATCHED for as long as this composable is on screen
- * (keyed by the id, so a changed id re-targets). Coming on screen refreshes
- * it if due; while watched it refreshes on the normal interval instead of the
- * unattended hour. A lazy-list row scrolled out of view ends its watch.
- */
 @Composable
 fun QuotaWatch(instanceId: String?, reason: String) {
     DisposableEffect(instanceId) {
@@ -144,9 +129,7 @@ fun QuotaWatch(instanceId: String?, reason: String) {
     }
 }
 
-// MARK: - Tone colours
 
-/** Text / accent colour. Green only for `healthy`; an unmeasured balance stays neutral. */
 @Composable
 fun QuotaTone.color(): Color {
     val dark = LocalChatPalette.current.isDark
@@ -159,7 +142,6 @@ fun QuotaTone.color(): Color {
     }
 }
 
-/** Emphasised amount text: neutral stays primary, warnings keep their colour. */
 @Composable
 fun QuotaTone.amountColor(): Color = when (this) {
     QuotaTone.normal, QuotaTone.healthy -> MaterialTheme.colorScheme.onSurface
@@ -169,14 +151,8 @@ fun QuotaTone.amountColor(): Color = when (this) {
 @Composable
 internal fun quotaOrange(): Color = QuotaTone.caution.color()
 
-// MARK: - Text helpers
 
 object QuotaText {
-    /**
-     * "2 hr. ago" / "in 3 hr." - iOS RelativeDateTimeFormatter (.short).
-     * Not DateUtils: its future form is sentence-cased ("In 3 hr."), which
-     * reads wrong inside "Resets %s" / "updated %s".
-     */
     fun relative(context: Context, at: Long, now: Long = System.currentTimeMillis()): String {
         val locale = context.resources.configuration.locales[0] ?: Locale.getDefault()
         val f = android.icu.text.RelativeDateTimeFormatter.getInstance(
@@ -293,7 +269,6 @@ object QuotaText {
         is QuotaPoolBinding.Target.Product -> context.getString(R.string.quota_scope_product, t.name)
     }
 
-    /** What a blocked manual refresh tells the user; null clears the message. */
     fun blocked(context: Context, result: QuotaRefreshResult): String? {
         val decision = (result as? QuotaRefreshResult.Blocked)?.decision ?: return null
         return when (decision) {
@@ -304,14 +279,11 @@ object QuotaText {
         }
     }
 
-    /** "“A”, “B”" - the same separator iOS uses. */
     fun sharing(context: Context, labels: List<String>): String =
         context.getString(R.string.quota_same_account, labels.joinToString("”, “"))
 }
 
-// MARK: - Bar, chip, window line
 
-/** A progress bar drawn ONLY from a reliable fraction ([QuotaBarRules]). */
 @Composable
 fun QuotaUsageBar(fraction: Double, tone: QuotaTone, modifier: Modifier = Modifier) {
     val fill = tone.color()
@@ -335,7 +307,6 @@ fun QuotaUsageBar(fraction: Double, tone: QuotaTone, modifier: Modifier = Modifi
     }
 }
 
-/** Coloured status word ("Low", "Used up", "Stale"). */
 @Composable
 fun QuotaStatusChip(status: PoolStatus) {
     val context = LocalContext.current
@@ -366,7 +337,6 @@ fun QuotaStatusChip(status: PoolStatus) {
     }
 }
 
-/** One window of a pool: label, used %, bar (only with a reliable percent), reset. */
 @Composable
 fun QuotaWindowLine(window: QuotaWindow, pool: QuotaPool) {
     val context = LocalContext.current
@@ -413,12 +383,7 @@ fun QuotaWindowLine(window: QuotaWindow, pool: QuotaPool) {
     }
 }
 
-// MARK: - Pool row
 
-/**
- * A pool in the provider page's Quota section, and (with [detailed]) a full
- * card in the quota sheet: the same composable, so both read the same numbers.
- */
 @Composable
 fun QuotaPoolRow(pool: QuotaPool, status: PoolStatus, detailed: Boolean = false, modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -507,7 +472,6 @@ private fun PoolDetails(pool: QuotaPool, tone: QuotaTone, detailed: Boolean) {
     }
 }
 
-/** The pool's main figure: remaining balance / remaining allowance. */
 private fun headlineAmount(pool: QuotaPool, locale: Locale, strings: QuotaStrings): String? {
     val a = pool.amounts ?: return null
     a.remaining?.let { return QuotaFormat.amount(it, pool.unit, locale, strings) }
@@ -538,9 +502,7 @@ private fun CapLine(pool: QuotaPool, amounts: QuotaAmounts, total: BigDecimal, t
     }
 }
 
-// MARK: - Settings-style circle icon, console link row
 
-/** A filled glyph on a coloured circle - the Settings row badge style. */
 @Composable
 fun QuotaCircleIcon(icon: ImageVector, tint: Color, size: Int = 22) {
     Box(
@@ -557,10 +519,6 @@ fun scopeIcon(t: QuotaPoolBinding.Target): Pair<ImageVector, Color> = when (t) {
     is QuotaPoolBinding.Target.Product -> Icons.Filled.Inventory2 to Color(0xFF5856D6)
 }
 
-/**
- * [T-quota-console-links] "Usage on the provider's website" + its host, in
- * the Settings row-icon style; tapping opens the in-app browser.
- */
 @Composable
 fun QuotaConsoleLinkRow(url: String, onOpen: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current

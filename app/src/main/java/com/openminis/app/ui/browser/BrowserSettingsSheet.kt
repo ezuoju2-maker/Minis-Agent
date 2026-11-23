@@ -98,8 +98,6 @@ fun BrowserSettingsSheet(
     }
     val coroutineScope = rememberCoroutineScope()
 
-    // Viewport state — bound to the pool's flows so changes from other surfaces
-    // (e.g. the agent calling set_viewport) reflect in this sheet immediately.
     val customWidthFromPool by tabPool.customViewportWidth.collectAsState()
     val customHeightFromPool by tabPool.customViewportHeight.collectAsState()
     var viewportWidthText by remember(customWidthFromPool) {
@@ -109,23 +107,13 @@ fun BrowserSettingsSheet(
         mutableStateOf(if (customHeightFromPool > 0) customHeightFromPool.toString() else "")
     }
     val isCustomViewportActive = customWidthFromPool > 0 && customHeightFromPool > 0
-    // Bug 1: decouple radio selection from pool state. The radio reflects what the
-    // user picked *in the sheet*; Apply (or a preset tap) is what writes to the
-    // pool. Without this, tapping Custom with empty width/height fields was a
-    // no-op visually because isCustomViewportActive stayed false.
     var viewportMode by remember(isCustomViewportActive) {
         mutableStateOf(if (isCustomViewportActive) ViewportMode.CUSTOM else ViewportMode.DEFAULT)
     }
     var showCustomViewportEditor by remember { mutableStateOf(isCustomViewportActive) }
 
-    // Cookie filter (mirrors iOS `.searchable("Filter by domain")`).
     var cookieFilterText by remember { mutableStateOf("") }
 
-    // [ISS-040] The cookie section is STATE, re-read after every clear. It was
-    // a plain `CookieManager.hasCookies()` read during composition: clearing
-    // changed no state, so nothing recomposed and the sheet looked as if the
-    // tap did nothing. Bumping [cookieRevision] reloads it (off the main
-    // thread: the per-site probes are synchronous CookieManager reads).
     var cookieRevision by remember { mutableIntStateOf(0) }
     var cookieDeleteFailed by remember { mutableStateOf<String?>(null) }
     val cookieHistory = remember { com.openminis.app.browser.BrowserHistoryStore.getInstance(context) }
@@ -140,21 +128,12 @@ fun BrowserSettingsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                // [T-android-browser-settings-keyboard-overlap] imePadding
-                // shrinks the sheet's content frame when the keyboard
-                // opens; verticalScroll lets the user (or the focused-
-                // field bring-into-view) scroll the now-shorter content
-                // so the focused TextField isn't behind the keyboard.
-                // Previously the Column was a fixed Column with no
-                // scroll, so Width/Height/idle-timeout fields below the
-                // viewport stayed glued and the keyboard ate them.
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 32.dp)
                 .navigationBarsPadding(),
         ) {
-            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -170,7 +149,6 @@ fun BrowserSettingsSheet(
 
             Spacer(Modifier.height(16.dp))
 
-            // ── User Agent ──
             Text(
                 stringResource(R.string.browser_settings_user_agent),
                 style = MaterialTheme.typography.titleSmall,
@@ -239,7 +217,6 @@ fun BrowserSettingsSheet(
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
 
-            // ── Web Viewport (mirrors iOS BrowserManagementView.viewportSection) ──
             ViewportSection(
                 tabPool = tabPool,
                 selectedProfile = selectedProfile,
@@ -304,7 +281,6 @@ fun BrowserSettingsSheet(
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
 
-            // ── Idle Tab Eviction ──
             Text(
                 stringResource(R.string.browser_settings_idle_timeout),
                 style = MaterialTheme.typography.titleSmall,
@@ -325,10 +301,6 @@ fun BrowserSettingsSheet(
                     onValueChange = { new -> idleTimeoutText = new.filter { it.isDigit() }.take(3) },
                     label = { Text(stringResource(R.string.browser_settings_minutes_label)) },
                     singleLine = true,
-                    // [T-android-browser-settings-keyboard-overlap] this
-                    // field sits near the bottom of the sheet — without
-                    // scroll-into-view it sits behind the soft keyboard
-                    // every time the user taps it.
                     modifier = Modifier.weight(1f).bringIntoViewOnFocus(),
                     textStyle = MaterialTheme.typography.bodyMedium,
                 )
@@ -338,7 +310,6 @@ fun BrowserSettingsSheet(
                         val minutes = idleTimeoutText.toIntOrNull()
                             ?: BrowserTabPool.DEFAULT_IDLE_TIMEOUT_MINUTES
                         tabPool.setIdleTimeoutMinutes(minutes)
-                        // Reflect clamping back into the field.
                         idleTimeoutText = tabPool.idleTimeoutMinutes.toString()
                     },
                 ) { Text(stringResource(R.string.browser_settings_apply)) }
@@ -348,7 +319,6 @@ fun BrowserSettingsSheet(
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
 
-            // ── Cookies & Website Data ──
             Text(
                 stringResource(R.string.browser_settings_cookies_title),
                 style = MaterialTheme.typography.titleSmall,
@@ -356,7 +326,6 @@ fun BrowserSettingsSheet(
             )
             Spacer(Modifier.height(8.dp))
 
-            // Until the first load lands, show nothing rather than a guess.
             val hasCookies = cookieSection?.hasCookies ?: false
             val allDomains = cookieSection?.domains ?: emptyList()
             val domains = remember(allDomains, cookieFilterText) {
@@ -376,7 +345,6 @@ fun BrowserSettingsSheet(
             }
 
             if (cookieSection == null) {
-                // First load still running (a few ms): no text, not a wrong one.
             } else if (domains.isEmpty()) {
                 Text(
                     when {
@@ -401,9 +369,6 @@ fun BrowserSettingsSheet(
                             )
                             IconButton(
                                 onClick = {
-                                    // [ISS-040] Expire this site's cookies (setCookie(domain, "")
-                                    // was a no-op), then reload the section. Anything still
-                                    // present is reported below, never silently kept.
                                     coroutineScope.launch {
                                         val result = withContext(Dispatchers.IO) { SiteCookieCleaner.clear(domain) }
                                         cookieDeleteFailed = if (result.cleared) null else domain
@@ -453,11 +418,6 @@ fun BrowserSettingsSheet(
                 MinisTextButton(onClick = {
                     showClearConfirm = false
                     WebStorage.getInstance().deleteAllData()
-                    // [ISS-040] removeAllCookies is asynchronous: refresh the
-                    // section from its callback, not right after the call
-                    // (hasCookies() still reads true at that point). The
-                    // callback arrives on this (main) looper; launching on
-                    // Main keeps the state write there regardless.
                     CookieManager.getInstance().removeAllCookies { removed ->
                         CookieManager.getInstance().flush()
                         AppLogger.info("BrowserSettings", "removeAllCookies done removed=$removed")
@@ -479,33 +439,18 @@ fun BrowserSettingsSheet(
     }
 }
 
-/** Local UI state for the viewport radios — separate from the pool's
- *  customViewportWidth/Height because the radio reflects the user's *intent*
- *  (which option is highlighted), and the pool reflects the *committed*
- *  override. Tapping Custom flips the radio immediately even if no width/
- *  height has been entered yet. */
 private enum class ViewportMode { DEFAULT, CUSTOM }
 
-/** UA list subtitle: full UA string in monospace, or "Not set" when the
- *  Custom slot is empty. Mirrors the iOS sheet which shows the full UA below
- *  each radio so the user can verify exactly what's being sent. */
 private fun displayUA(profile: UserAgentProfile, customUA: String, notSetPlaceholder: String): String =
     when (profile) {
         UserAgentProfile.CUSTOM -> customUA.ifBlank { notSetPlaceholder }
         else -> profile.userAgentString.orEmpty()
     }
 
-// ── Viewport ──────────────────────────────────────────────────────────────
 
-/** Min / max permitted viewport dimensions. Wider than typical phone screens
- *  but bounded so the user can't accidentally enter `99999` and DOS the
- *  WebView's layout pass. Mirrors a similar implicit clamp on iOS where the
- *  user types into a 72pt-wide field. */
 private const val VIEWPORT_MIN = 200
 private const val VIEWPORT_MAX = 4096
 
-/** UA-vs-viewport breakpoint copied from iOS BrowserManagementView. Sites
- *  using UA-sniffing will hand back the wrong layout when these cross. */
 private const val VIEWPORT_UA_BREAKPOINT = 768
 
 private val viewportPresets = listOf(
@@ -540,7 +485,6 @@ private fun ViewportSection(
     )
     Spacer(Modifier.height(8.dp))
 
-    // Default row
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -562,7 +506,6 @@ private fun ViewportSection(
         }
     }
 
-    // Custom row
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -595,9 +538,6 @@ private fun ViewportSection(
                 onValueChange = onWidthChange,
                 label = { Text("Width") },
                 singleLine = true,
-                // [T-android-browser-settings-keyboard-overlap] focus →
-                // scroll-into-view so the soft keyboard doesn't cover
-                // the Custom viewport editor.
                 modifier = Modifier.width(110.dp).bringIntoViewOnFocus(),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -610,8 +550,6 @@ private fun ViewportSection(
                 onValueChange = onHeightChange,
                 label = { Text("Height") },
                 singleLine = true,
-                // [T-android-browser-settings-keyboard-overlap] focus →
-                // scroll-into-view; mirrors the Width field.
                 modifier = Modifier.width(110.dp).bringIntoViewOnFocus(),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -620,7 +558,6 @@ private fun ViewportSection(
             MinisTextButton(onClick = onApply) { Text(stringResource(R.string.browser_settings_apply)) }
         }
 
-        // UA mismatch banner — same 768px breakpoint as iOS.
         val warning = uaMismatchWarning(selectedProfile, widthText)
         if (warning != null) {
             Spacer(Modifier.height(8.dp))

@@ -15,13 +15,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 
-/**
- * [T-codex-account-id-refresh] GH #447 follow-ups to the account id claim fix
- * ([CodexAccountIdClaimTest]): a refresh keeps the id_token an old sign-in
- * needs for its backfill, a refresh that brings a new id_token updates the
- * account id, a backfilled value is written back, and the access_token is
- * read when the id_token has no claim. All tokens here are fake.
- */
 @RunWith(RobolectricTestRunner::class)
 class CodexAccountIdRefreshTest {
 
@@ -38,7 +31,6 @@ class CodexAccountIdRefreshTest {
 
     @Before
     fun setUp() {
-        // The OAuth store, as a plain prefs file: AndroidKeyStore does not exist on the JVM.
         EncryptedPrefsFactory.resetCacheForTest()
         prefs = ctx.getSharedPreferences("oauth_prefs_test", Context.MODE_PRIVATE)
         prefs.edit().clear().commit()
@@ -92,7 +84,6 @@ class CodexAccountIdRefreshTest {
         assertEquals("written back", "acct-nested", prefs.getString("oauth_account_id_$instanceId", null))
         assertEquals("team", manager.planType)
         assertEquals("team", prefs.getString("oauth_plan_type_$instanceId", null))
-        // Once written back it no longer depends on the token keeping its id_token.
         storeTokens(JSONObject().put("access_token", "opaque"))
         assertEquals("acct-nested", OpenAIOAuthManager(ctx, instanceId).accountId)
     }
@@ -110,7 +101,6 @@ class CodexAccountIdRefreshTest {
         manager.recordAccountClaims(JSONObject().put("access_token", "opaque").put("id_token", nested))
         assertEquals("acct-nested", manager.accountId)
         assertEquals("team", manager.planType)
-        // A token without the claim leaves what was stored.
         manager.recordAccountClaims(JSONObject().put("access_token", "opaque").put("id_token", neither))
         assertEquals("acct-nested", manager.accountId)
     }

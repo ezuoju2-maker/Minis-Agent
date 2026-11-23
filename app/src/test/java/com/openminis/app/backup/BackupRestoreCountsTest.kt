@@ -11,14 +11,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-b01-restore-counts] The providers category's restore counts follow what
- * the restore really changed, driven by the case file both platforms read:
- * `src/shared/backup-restore/b01_restore_counts.json`. On a Pixel 4a a restore
- * that put back a deleted group, a model's name and an API key reported
- * imported=0 updated=0 skipped=27 ("Up to date 27") and logged a false SHORT
- * warning.
- */
 class BackupRestoreCountsTest {
 
     private val doc: JSONObject by lazy {
@@ -52,14 +44,12 @@ class BackupRestoreCountsTest {
         )
     }
 
-    // ① identical backup -> up to date, never "updated" (fix 93cad55ae)
     @Test fun identicalBackupIsUpToDate() = check("identical")
 
     @Test fun localOnlyInstanceIsNotCounted() = check("local_only_instance_ignored")
 
     @Test fun createdAtPrecisionIsNotAChange() = check("created_at_precision_only")
 
-    // ② the backup changed a same-id instance's content -> updated
     @Test fun changedInstanceFieldsAreUpdated() = check("instance_field_changed")
 
     @Test fun changedModelParametersUpdateTheirInstance() {
@@ -72,19 +62,16 @@ class BackupRestoreCountsTest {
 
     @Test fun anInstanceChangedSeveralWaysCountsOnce() = check("instance_changed_several_ways")
 
-    // ③ groups: restored -> imported, changed or merged by name -> updated
     @Test fun restoredGroupIsImported() = check("group_restored")
 
     @Test fun changedGroupIsUpdated() = check("group_content_changed")
 
     @Test fun sameNameMergeIsUpdated() = check("same_name_merge")
 
-    // ④ not on this device -> imported
     @Test fun newInstanceIsImported() = check("new_instance")
 
     @Test fun deviceReproCountsWhatChanged() = check("device_repro_2026_10_15")
 
-    /** Every case in the shared file is exercised by a test above. */
     @Test fun everySharedCaseIsCovered() {
         val covered = setOf(
             "identical", "local_only_instance_ignored", "instance_field_changed",
@@ -96,7 +83,6 @@ class BackupRestoreCountsTest {
         assertEquals(covered, doc.getJSONObject("cases").keys().asSequence().toSet())
     }
 
-    // ⑤ SHORT warning
     @Test fun mergedProvidersDoNotWarnShort() {
         val r = BackupImporter.CategoryReport(BackupCategory.PROVIDERS.key, skipped = 27, declaredAccounted = 27)
         assertNull(BackupImporter.shortfallWarning(r, 27))
@@ -110,7 +96,6 @@ class BackupRestoreCountsTest {
     }
 
     @Test fun unreadableProviderConfigStillWarnsShort() {
-        // provider_config.json did not parse: nothing accounted for.
         val r = BackupImporter.CategoryReport(BackupCategory.PROVIDERS.key, unreadable = 1)
         assertNotNull(BackupImporter.shortfallWarning(r, 27))
     }
@@ -122,7 +107,6 @@ class BackupRestoreCountsTest {
         assertNull("no manifest count, no warning", BackupImporter.shortfallWarning(chats, null))
     }
 
-    /** The importer counts from the merge, after the credentials are restored. */
     @Test fun importerCountsFromTheMergeAfterCredentials() {
         val importer = ProductionSources.read("backup/BackupImporter.kt")
         val body = importer.substringAfter("private suspend fun importProviders(").substringBefore("\n    private ")

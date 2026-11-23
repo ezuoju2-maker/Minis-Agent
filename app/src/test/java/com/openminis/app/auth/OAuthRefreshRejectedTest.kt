@@ -4,12 +4,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-oauth-keep-credentials] A "rejected" verdict marks the instance for
- * re-login (it no longer deletes credentials), but a false positive still turns
- * a working login red and makes routing skip it — so the classifier must only
- * fire on a real rejection.
- */
 class OAuthRefreshRejectedTest {
 
     private val claudeCodes = setOf("invalid_grant", "invalid_token", "invalid_request", "unauthorized_client")
@@ -40,8 +34,6 @@ class OAuthRefreshRejectedTest {
 
     @Test
     fun benignMentionOfRefreshToken_isNotRejected() {
-        // The old Claude classifier matched the bare substring `refresh_token`,
-        // so this 5xx body counted as a revoked login.
         val body = """{"error":"overloaded","refresh_token_expiry_ms":3600000}"""
         assertFalse(OAuthManager.isRefreshRejected(529, body, claudeCodes))
     }

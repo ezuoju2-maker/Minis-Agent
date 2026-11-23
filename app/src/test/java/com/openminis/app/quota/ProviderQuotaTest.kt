@@ -16,11 +16,6 @@ import org.junit.Test
 import java.math.BigDecimal
 import java.util.Locale
 
-/**
- * [T-provider-quota] Port of iOS ProviderQuotaTests.swift (part A: model,
- * rules, adapters, persistence; part B: the wiring that has an Android
- * counterpart).
- */
 class ProviderQuotaTest {
 
     private fun dec(s: String) = BigDecimal(s)
@@ -63,7 +58,6 @@ class ProviderQuotaTest {
     private val cny by lazy { ds.pools.first { it.unit == QuotaUnit.Currency("CNY") } }
     private val usd by lazy { ds.pools.first { it.unit == QuotaUnit.Currency("USD") } }
 
-    // ── Decimal parsing ────────────────────────────────────────────────────
 
     @Test fun `decimal parsing never turns junk into zero`() {
         assertTrue(same(QuotaDecimalParser.parseString("110.00"), "110"))
@@ -76,7 +70,6 @@ class ProviderQuotaTest {
         assertNull(QuotaDecimalParser.parse(kotlinx.serialization.json.JsonNull))
     }
 
-    // ── DeepSeek ────────────────────────────────────────────────────────────
 
     @Test fun `DeepSeek keeps one pool per currency, never summed`() {
         assertEquals(2, ds.pools.size)
@@ -119,7 +112,6 @@ class ProviderQuotaTest {
         )
     }
 
-    // ── Moonshot / SiliconFlow / OpenRouter ─────────────────────────────────
 
     @Test fun `Moonshot and SiliconFlow`() {
         val ms = MoonshotQuotaAdapter.parse(
@@ -170,7 +162,6 @@ class ProviderQuotaTest {
         )
     }
 
-    // ── Percent derivation ─────────────────────────────────────────────────
 
     @Test fun `percent only with a reliable denominator`() {
         assertNull(QuotaAmounts(total = dec("100"), remaining = dec("40")).computedUtilization(QuotaPool.Kind.prepaidBalance, false))
@@ -187,7 +178,6 @@ class ProviderQuotaTest {
         assertTrue(same(c.percent, "70") && c.basis == QuotaUtilization.Basis.reportedComplement)
     }
 
-    // ── Windows ────────────────────────────────────────────────────────────
 
     private val windowed by lazy {
         pool(
@@ -207,7 +197,6 @@ class ProviderQuotaTest {
         )
     }
 
-    // ── Freshness ──────────────────────────────────────────────────────────
 
     @Test fun `freshness of balances`() {
         val fp = QuotaFreshnessPolicy()
@@ -217,7 +206,6 @@ class ProviderQuotaTest {
         assertEquals(QuotaFreshness.expired, fp.freshnessOfAmounts(b(25_200_000), now))
     }
 
-    // ── Refresh gate ───────────────────────────────────────────────────────
 
     @Test fun `refresh gate - interval, forced, Retry-After, backoff, attention`() {
         val pol = QuotaRefreshPolicy()
@@ -247,7 +235,6 @@ class ProviderQuotaTest {
         val f2 = QuotaRefreshGate.recordFailure(f1, err500, now, false)
         assertTrue(f1.nextAllowedAt == now + 300_000 && f2.nextAllowedAt == now + 600_000)
         assertEquals(QuotaRefreshDecision.Backoff(now + 300_000), QuotaRefreshGate.decide(f1, now + 30_000, false))
-        // [T-quota-attention-refresh]
         assertEquals(QuotaRefreshDecision.TooSoon(now + 3_600_000), QuotaRefreshGate.decide(ok, now + 600_000, false, attended = false))
         assertEquals(QuotaRefreshDecision.Allowed, QuotaRefreshGate.decide(ok, now + 3_600_000, false, attended = false))
         assertEquals(QuotaRefreshDecision.Allowed, QuotaRefreshGate.decide(ok, now + 600_000, false, attended = true))
@@ -278,7 +265,6 @@ class ProviderQuotaTest {
         )
     }
 
-    // ── Capability gate ────────────────────────────────────────────────────
 
     @Test fun `capability gate - 24 hours, manual re-check`() {
         val key = QuotaCapabilityKey("openAI", QuotaCapabilityKey.normalize("https://api.deepseek.com/v1/"))
@@ -290,7 +276,6 @@ class ProviderQuotaTest {
         assertTrue(QuotaCapabilityGate.shouldProbe(failed, now + 1_000, true))
     }
 
-    // ── Shared pools and merging ───────────────────────────────────────────
 
     @Test fun `shared pools de-duplicate across instances and models`() {
         val keyA = QuotaAccountKey.derive("sk-test-same-key-000001")
@@ -338,7 +323,6 @@ class ProviderQuotaTest {
         assertEquals("an adapter can never inject a manual binding", bindings, bb)
     }
 
-    // ── Persistence ────────────────────────────────────────────────────────
 
     @Test fun `store file round trip keeps decimals as strings and no credential`() {
         val ok = QuotaRefreshGate.recordSuccess(null, now, false)
@@ -358,7 +342,6 @@ class ProviderQuotaTest {
         assertNull("garbage", QuotaStoreFile.decode("{"))
     }
 
-    // ── Single flight ──────────────────────────────────────────────────────
 
     @Test fun `single flight shares one execution`() = runBlocking {
         var calls = 0
@@ -371,7 +354,6 @@ class ProviderQuotaTest {
         assertEquals(2, calls)
     }
 
-    // ── Vendor detection / fixed host ──────────────────────────────────────
 
     private fun desc(kind: QuotaInstanceDescriptor.ProviderKind, oauth: Boolean = false, base: String? = null) =
         QuotaInstanceDescriptor("i", "L", kind, oauth, true, base)
@@ -416,7 +398,6 @@ class ProviderQuotaTest {
         assertEquals(listOf("sk-secret"), fake.bearers)
     }
 
-    // ── Console links ──────────────────────────────────────────────────────
 
     @Test fun `console links are fixed per vendor`() {
         fun link(d: QuotaInstanceDescriptor) = QuotaConsoleLink.url(d)
@@ -441,7 +422,6 @@ class ProviderQuotaTest {
         assertNull("never built from a user URL", link(desc(openAI, base = "https://relay.example.com/v1")))
     }
 
-    // ── Quota low / levels ─────────────────────────────────────────────────
 
     private fun lowView(ps: List<QuotaPool>): Pair<ModelQuotaView, Map<QuotaPoolKey, QuotaPool>> {
         val dict = ps.associateBy { it.id }
@@ -486,7 +466,6 @@ class ProviderQuotaTest {
         assertEquals(QuotaLevel.normal, lvl(listOf(pool("c", QuotaPool.Kind.prepaidBalance, QuotaUnit.Credits(), QuotaAmounts(remaining = dec("5"))))))
     }
 
-    // ── Tone and bars ──────────────────────────────────────────────────────
 
     private fun ps(st: QuotaStatus, f: QuotaFreshness = QuotaFreshness.fresh, pct: String? = null) =
         PoolStatus(st, null, pct?.let { QuotaUtilization(dec(it), QuotaUtilization.Basis.computed) }, f)
@@ -513,7 +492,6 @@ class ProviderQuotaTest {
         assertNull(QuotaBarRules.fraction(null))
     }
 
-    // ── Formatting ─────────────────────────────────────────────────────────
 
     @Test fun `formatting`() {
         val en = Locale.US
@@ -528,7 +506,6 @@ class ProviderQuotaTest {
         assertEquals("Granted CN¥10.00 · Topped up CN¥100.00", QuotaFormat.breakdown(cny.amounts!!, cny.unit, en))
     }
 
-    // ── Wiring (source guards) ─────────────────────────────────────────────
 
     @Test fun `wiring - store, section placement, credentials`() {
         val store = ProductionSources.read("quota/QuotaStore.kt")
@@ -543,7 +520,7 @@ class ProviderQuotaTest {
         assertTrue(store.contains("attended = isWatched(instance.id)"))
 
         val detail = ProductionSources.read("ui/settings/ProviderDetailScreen.kt")
-        val statusIdx = detail.indexOf("// ─── Status ─")
+        val statusIdx = detail.indexOf("
         val quotaIdx = detail.indexOf("ui.quota.ProviderQuotaSection(instance = instance)")
         val thinkIdx = detail.indexOf("ThinkingRulesSection(instance = instance")
         assertTrue("Quota between Status and Thinking Rules", statusIdx in 0 until quotaIdx && quotaIdx < thinkIdx)
@@ -578,7 +555,6 @@ class ProviderQuotaTest {
 
     @Test fun `review - every iOS locale of a ported key exists on Android`() {
         val res = java.io.File(ProductionSources.mainRoot()!!, "../../../../res")
-        // Keys iOS translates beyond en / zh-Hans / zh-Hant (checked against Localizable.xcstrings).
         val wide = listOf("quota_source", "quota_done", "quota_status_unknown", "quota_status_low", "quota_updated")
         for (folder in listOf("values-de", "values-es", "values-fil", "values-fr", "values-hr", "values-in", "values-ja",
             "values-ko", "values-ms", "values-pl", "values-pt-rBR", "values-ro", "values-ru", "values-th", "values-tr")) {

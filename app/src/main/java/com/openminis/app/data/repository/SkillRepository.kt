@@ -32,14 +32,6 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
-/**
- * Manages skill metadata (SQLite) and SKILL.md files on disk.
- * Mirrors iOS SkillStore architecture:
- *   - Metadata in `skills.db` (name, description, version, source, enabled)
- *   - SKILL.md in `minis-global/skills/<id>/SKILL.md`
- *   - Session overrides in `session_skill_overrides` table
- *   - Prompt fragment generation for system prompt injection
- */
 class SkillRepository(private val context: Context) {
 
     companion object {
@@ -52,22 +44,12 @@ class SkillRepository(private val context: Context) {
         private const val RECENT_SLOTS = 10
         private const val NORMALIZE_THRESHOLD = 1000.0
 
-        /** [T-android-skill-export] How long an exported zip stays on disk
-         *  before the next export sweeps it. 24h matches iOS — long enough that
-         *  any Save-to-Files / AirDrop / upload consumer has finished. */
         private const val EXPORT_TTL_MS = 24L * 3600 * 1000
 
-        /** Pure SKILL.md frontmatter parser; lives on the companion so JVM unit
-         *  tests can drive it without a Context. */
         internal fun parseSkillMd(content: String): ParsedSkill? {
-            // CRLF / CR endings are already handled by `lines()` and `trim()`,
-            // but a leading UTF-8 BOM (Windows Notepad) is not whitespace to
-            // `trimStart()` and hid the opening fence, so the file was rejected.
             val trimmed = content.removePrefix("﻿").trimStart()
             if (!trimmed.startsWith("---")) return null
 
-            // Find the closing `---` on a line by itself (matches iOS — and avoids
-            // false matches against horizontal rules later in the document).
             val lines = trimmed.lines()
             var frontmatterEndLine = -1
             for (i in 1 until lines.size) {
@@ -90,16 +72,6 @@ class SkillRepository(private val context: Context) {
                 val key = line.substring(0, colonIdx).trim().lowercase()
                 val rawValue = line.substring(colonIdx + 1).trim()
 
-                // YAML block scalar: `|` keeps newlines, `>` folds them into spaces.
-                // Body lines continue while they are indented (or empty); a
-                // dedented line ends the block.
-                //
-                // T151: also accept the YAML chomping indicators `>-`, `>+`, `|-`,
-                // `|+` (and any explicit indentation digit suffix). Real-world
-                // skill frontmatter — qbt-hub, for one — opens its description
-                // with `description: >-` so trailing newlines are stripped, but
-                // the previous strict `==` match treated that as a plain string
-                // literal, leaving the renderer to display the raw `>-` marker.
                 val isBlockScalar = rawValue.startsWith("|") || rawValue.startsWith(">")
                 val resolved: String
                 if (isBlockScalar && i + 1 < frontmatterEndLine) {
@@ -147,19 +119,10 @@ class SkillRepository(private val context: Context) {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    // [FEAT-261021-16] Follows the default route in Settings > Network; the
-    // same client object when nothing is configured.
     private val httpClient: OkHttpClient get() = com.openminis.app.network.NetworkHttp.client(com.openminis.app.network.NetworkHttp.DEFAULT_TAG, baseHttpClient)
 
-    /**
-     * Repository-owned scope for fire-and-forget background work that must
-     * outlive the calling Composable / ViewModel — notably the sibling-file
-     * download that runs after a SKILL.md import. SupervisorJob so a single
-     * download failure doesn't poison the next one.
-     */
     private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    // -- Data Types --
 
     enum class ImportSource(val value: String) {
         URL("url"),
@@ -183,15 +146,12 @@ class SkillRepository(private val context: Context) {
         val installedAt: Long = System.currentTimeMillis(),
         val updatedAt: Long = System.currentTimeMillis(),
         val body: String = "",
-        /** Original GitHub URL when importSource is URL (null otherwise). */
         val sourceURL: String? = null,
-        /** Cumulative read count of this skill's SKILL.md; normalized to 0–100 after exceeding 1000. */
         val useCount: Double = 0.0,
     )
 
     enum class UsageFrequency { NEVER, LOW, REGULAR, HIGH }
 
-    // -- State --
 
     private val _skills = MutableStateFlow<List<Skill>>(emptyList())
     val skills: StateFlow<List<Skill>> = _skills.asStateFlow()
@@ -203,32 +163,13 @@ class SkillRepository(private val context: Context) {
     private val skillsDir: File
         get() = File(context.filesDir, "minis-global/skills")
 
-    // [T-android-skill-scan-parity] Declared before init{}: Kotlin initializes
-    // properties in source order and init{} already calls loadAll().
-    /** Every in-memory edit goes through [mutateSkills] so a background [loadAll] can tell whether the list changed under it. */
     private val skillsLock = Any()
-    private var mutationSeq = 0L // guarded by skillsLock
+    private var mutationSeq = 0L
     private val reloadRequests = Channel<String>(Channel.CONFLATED)
     private val forceReloadPending = AtomicBoolean(false)
     @Volatile private var lastDiskSignature: Long? = null
 
     init {
-        // [T-android-safemode-lateinit-crash-147] Never let a bad skill take
-        // the whole app down. This constructor runs inline in
-        // MinisApp.onCreate, BEFORE subsystemsInitialized is set, so anything
-        // escaping here aborts onCreate with the repositories half-assigned.
-        // The Application object is then permanently broken (onCreate never
-        // re-runs), every subsequent launch crashes on the first Compose frame
-        // with "lateinit property chatRepository has not been initialized",
-        // and each crash writes a log that re-trips the crash-burst detector —
-        // the self-sustaining loop reported in GH#147, where the user could
-        // only recover by reinstalling.
-        //
-        // loadAll() reads rows written by third-party skill imports and uses
-        // getColumnIndexOrThrow plus SKILL.md parsing, so a malformed skill
-        // from an external hub is exactly the kind of input that can throw.
-        // Degrading to "some skills missing from the list" is always better
-        // than an app that cannot start.
         runCatching { loadAll() }.onFailure {
             Log.e(TAG, "loadAll failed — continuing with ${_skills.value.size} skill(s): ${it.message}", it)
         }
@@ -238,7 +179,6 @@ class SkillRepository(private val context: Context) {
         startReloadWorker()
     }
 
-    // -- CRUD --
 
     fun add(name: String, description: String, body: String, version: String = "1.0.0", source: ImportSource = ImportSource.FILE, sourceURL: String? = null): Skill? {
         val id = slugify(name)
@@ -296,7 +236,6 @@ class SkillRepository(private val context: Context) {
         }
     }
 
-    // -- Session Overrides --
 
     fun isEnabledForSession(skillId: String, sessionId: String): Boolean {
         val cursor = db.rawQuery(
@@ -320,16 +259,6 @@ class SkillRepository(private val context: Context) {
         db.execSQL("DELETE FROM session_skill_overrides WHERE session_id=?", arrayOf(sessionId))
     }
 
-    /**
-     * [T-android-session-skill-override-init-timing] Re-point every
-     * `session_skill_overrides` row that was written against the draft
-     * session id ([fromDraft], e.g. `__new__<uuid>`) onto the persisted
-     * session id ([toReal]) once `ensureSession()` creates the real DB row.
-     * Without this hop, a pre-first-message skill toggle stays bound to the
-     * draft key and becomes invisible the next time the chat is opened
-     * under its real id — exactly the symptom a user reported. Paired with
-     * [MCPRepository.renameSessionOverrides].
-     */
     fun renameSessionOverrides(fromDraft: String, toReal: String) {
         if (fromDraft == toReal) return
         db.execSQL(
@@ -338,14 +267,7 @@ class SkillRepository(private val context: Context) {
         )
     }
 
-    // -- Prompt Fragment --
 
-    /**
-     * Build the system-prompt fragment that makes skills discoverable.
-     * Discloses up to [MAX_SKILLS_IN_PROMPT] skills with 3-tier priority
-     * (bundled > 7-day recent > most-used), matching iOS SkillStore.
-     * Returns null when the session has no enabled skills.
-     */
     fun skillPromptFragment(sessionId: String): String? {
         val enabled = _skills.value.filter { isEnabledForSession(it.id, sessionId) }
         if (enabled.isEmpty()) return null
@@ -358,11 +280,9 @@ class SkillRepository(private val context: Context) {
             selected = enabled.sortedByDescending { it.updatedAt }
             hasMore = false
         } else {
-            val picked = linkedMapOf<String, Skill>() // preserves insertion order + id dedupe
-            // Priority 1: bundled
+            val picked = linkedMapOf<String, Skill>()
             enabled.filter { it.importSource == ImportSource.BUNDLED }
                 .forEach { picked.putIfAbsent(it.id, it) }
-            // Priority 2: recently updated (within 7 days), up to RECENT_SLOTS more
             val cutoff = System.currentTimeMillis() - RECENT_WINDOW_MS
             val recentLimit = minOf(RECENT_SLOTS, MAX_SKILLS_IN_PROMPT - picked.size).coerceAtLeast(0)
             enabled.asSequence()
@@ -370,7 +290,6 @@ class SkillRepository(private val context: Context) {
                 .sortedByDescending { it.updatedAt }
                 .take(recentLimit)
                 .forEach { picked.putIfAbsent(it.id, it) }
-            // Priority 3: fill remaining slots by useCount (desc)
             if (picked.size < MAX_SKILLS_IN_PROMPT) {
                 val remaining = MAX_SKILLS_IN_PROMPT - picked.size
                 enabled.asSequence()
@@ -410,17 +329,11 @@ class SkillRepository(private val context: Context) {
                 val names = omitted.take(maxUndisclosed).joinToString(", ") { it.name }
                 append("\n\n")
                 append(omitted.size).append(" more skills not shown above: ").append(names)
-                // [T-prompt-search-neutral] Names no search tool (iOS parity).
                 append(". List or search /var/minis/skills/ to find the rest.")
             }
         }
     }
 
-    /**
-     * Record that a skill's SKILL.md was read. Matches iOS `SkillStore.recordSkillUse`:
-     * bumps `useCount` by 1 and normalizes all counts to 0–100 when any exceeds 1000,
-     * so long-lived installs don't drift into multi-thousand-read territory.
-     */
     fun recordSkillUse(skillId: String) {
         val current = _skills.value.find { it.id == skillId } ?: return
         val bumped = current.copy(useCount = current.useCount + 1.0)
@@ -453,7 +366,6 @@ class SkillRepository(private val context: Context) {
         return scaled
     }
 
-    /** Coarse-grained usage band for UI surfacing (matches iOS UsageFrequency). */
     fun usageFrequency(skillId: String): UsageFrequency {
         val skill = _skills.value.find { it.id == skillId } ?: return UsageFrequency.NEVER
         if (skill.useCount == 0.0) return UsageFrequency.NEVER
@@ -467,11 +379,6 @@ class SkillRepository(private val context: Context) {
         }
     }
 
-    /**
-     * Extract skill id from `/var/minis/skills/<id>/SKILL.md`. Returns null unless
-     * the path is exactly a SKILL.md read of a known skill — sub-resource reads
-     * under `scripts/` etc. don't count toward usage.
-     */
     fun skillIdFromPath(path: String): String? {
         val prefix = "/var/minis/skills/"
         if (!path.startsWith(prefix)) return null
@@ -483,17 +390,11 @@ class SkillRepository(private val context: Context) {
         return if (_skills.value.any { it.id == candidate }) candidate else null
     }
 
-    // -- Import from SKILL.md Content --
 
-    /**
-     * Parse SKILL.md content (YAML frontmatter + markdown body) and import.
-     * Returns the created Skill or null on failure.
-     */
     fun importFromContent(content: String, source: ImportSource = ImportSource.FILE, sourceURL: String? = null): Skill? {
         val parsed = parseSkillMd(content) ?: return null
         val id = slugify(parsed.name)
         if (id.isNotBlank() && _skills.value.any { it.id == id }) {
-            // Replace existing: update in place so URL updates refresh contents.
             val current = _skills.value.first { it.id == id }
             val replaced = current.copy(
                 name = parsed.name,
@@ -526,19 +427,9 @@ class SkillRepository(private val context: Context) {
         )
     }
 
-    /**
-     * Returns the SKILL.md file path for a given skill (for display in UI).
-     */
     fun skillMdPath(id: String): String = "/var/minis/skills/$id/SKILL.md"
 
-    // -- Import from Zip Archive --
 
-    /**
-     * Import a skill from a .zip archive (mirrors iOS `SkillStore.importFromArchive`).
-     * The archive must contain a `SKILL.md` at the root or one directory deep;
-     * bundled sibling files (scripts/, references/, assets/, etc.) are extracted
-     * alongside it into `skillsDir/<id>/`.
-     */
     fun importFromArchive(input: InputStream): Skill? {
         val entries = try { readZipEntries(input) } catch (e: Exception) {
             Log.w(TAG, "Failed to read zip archive: ${e.message}")
@@ -546,7 +437,6 @@ class SkillRepository(private val context: Context) {
         }
         if (entries.isEmpty()) return null
 
-        // Accept SKILL.md at root or one level deep (matches iOS behavior).
         val skillMdEntry = entries.firstOrNull { entry ->
             val name = entry.name
             name == "SKILL.md" || (name.endsWith("/SKILL.md") && name.count { it == '/' } == 1)
@@ -568,7 +458,6 @@ class SkillRepository(private val context: Context) {
                 relativePath = relativePath.drop(prefix.length)
             }
             if (relativePath == "SKILL.md" || relativePath.startsWith(".") || relativePath.isEmpty()) continue
-            // Guard against zip-slip: reject path traversal.
             if (relativePath.contains("..")) continue
 
             val destFile = File(skillDir, relativePath)
@@ -606,20 +495,14 @@ class SkillRepository(private val context: Context) {
         return out
     }
 
-    // -- Import from GitHub URL --
 
     data class GitHubInfo(
         val user: String,
         val repo: String,
         val branch: String,
-        /** Directory path (without SKILL.md leaf) */
         val dirPath: String,
     )
 
-    /**
-     * Download SKILL.md from a GitHub URL and recursively download sibling files
-     * from the same directory. Mirrors iOS SkillStore.importFromGitHub.
-     */
     suspend fun importFromGitHub(urlString: String): Skill? = withContext(Dispatchers.IO) {
         val rawURL = githubToRawURL(urlString) ?: return@withContext null
         val content = httpGetString(rawURL) ?: return@withContext null
@@ -627,11 +510,6 @@ class SkillRepository(private val context: Context) {
 
         val ghInfo = parseGitHubURL(urlString) ?: return@withContext skill
         val skillDir = File(skillsDir, skill.id)
-        // Detach the sibling-file download from the caller's coroutine scope.
-        // The previous design ran the recursion inline, so any navigation
-        // away from the import screen — or a ViewModel finishing its initial
-        // composition — would cancel the recursion mid-flight and leave the
-        // skill with only SKILL.md (T152 root cause).
         backgroundScope.launch {
             val outcome = downloadSiblingFiles(ghInfo, skillDir, skill)
             val bumped = skill.copy(updatedAt = System.currentTimeMillis())
@@ -647,26 +525,12 @@ class SkillRepository(private val context: Context) {
         skill
     }
 
-    /** Outcome of [updateFromURL]: either an updated skill or a human-readable reason. */
     sealed class UpdateResult {
         data class Success(val skill: Skill) : UpdateResult()
-        /**
-         * SKILL.md fetched + persisted, but the sibling-file recursion
-         * (scripts/, references/, …) ran into trouble. The skill is usable
-         * but its bundled resources may be incomplete. T152 fix: this state
-         * used to be silently squashed into a plain Success.
-         */
         data class PartialSuccess(val skill: Skill, val reason: String) : UpdateResult()
         data class Failure(val reason: String) : UpdateResult()
     }
 
-    /**
-     * Aggregate outcome of a sibling-file download walk — surfaced through
-     * [UpdateResult.PartialSuccess] when SKILL.md imported but sibling files
-     * (scripts/, references/, …) could not all be retrieved. `reason` is
-     * non-null only when [filesFailed] > 0 or the recursion bailed before
-     * listing the directory at all.
-     */
     data class SiblingDownloadOutcome(
         val filesWritten: Int,
         val filesFailed: Int,
@@ -675,13 +539,6 @@ class SkillRepository(private val context: Context) {
         val isComplete: Boolean get() = filesFailed == 0 && reason == null
     }
 
-    /**
-     * Re-fetch the SKILL.md for an existing URL-sourced skill and update its
-     * record in place — does NOT create a new skill. Also re-downloads sibling
-     * files from the same GitHub directory so bundled scripts/references stay
-     * in sync with upstream. Returns a typed result with an explicit reason on
-     * failure so the UI can surface *why* the update failed.
-     */
     suspend fun updateFromURL(skillId: String): UpdateResult = withContext(Dispatchers.IO) {
         val existing = _skills.value.find { it.id == skillId }
             ?: return@withContext UpdateResult.Failure("Skill not found")
@@ -690,8 +547,6 @@ class SkillRepository(private val context: Context) {
         }
         val urlString = existing.sourceURL
         if (urlString.isNullOrBlank()) {
-            // Older imports (pre-fix) never persisted the source URL. Users need
-            // to re-import the skill from Minis Skills so the URL gets saved.
             return@withContext UpdateResult.Failure(
                 "No source URL on file. Re-import this skill from Minis Skills to enable updates."
             )
@@ -716,12 +571,6 @@ class SkillRepository(private val context: Context) {
         )
         if (!ok) return@withContext UpdateResult.Failure("Failed to write updated skill")
 
-        // Re-download sibling files (scripts/, references/, etc.). Unlike
-        // importFromGitHub, the user invoked this synchronously and is
-        // looking at a spinner — so we await the outcome here and surface
-        // any failure as PartialSuccess so the UI can show *what* went
-        // wrong (e.g. "GitHub API 403 (likely rate limited)") instead of
-        // claiming success while scripts/ stays empty.
         val ghInfo = parseGitHubURL(urlString)
         var siblingOutcome: SiblingDownloadOutcome? = null
         if (ghInfo != null) {
@@ -740,35 +589,7 @@ class SkillRepository(private val context: Context) {
         UpdateResult.Success(fresh)
     }
 
-    // -- Export to Zip Archive --
 
-    /**
-     * [T-android-skill-export] Zip the whole `skillsDir/<id>/` directory for
-     * sharing. Android port of iOS `SkillDetailView.shareSkill`; the round-trip
-     * partner of [importFromArchive], which already accepts exactly this shape
-     * (SKILL.md at the archive root plus any sibling files).
-     *
-     * Three safeguards carried over from iOS, each of which fixed a real bug
-     * there — do not simplify them away:
-     *
-     *  1. **Unique per-export directory** (`share/skill-export-<uuid>/`).
-     *     Consecutive shares of the same skill must not overwrite or delete a
-     *     zip that an earlier share's consumer (Save to Files / Drive / a chat
-     *     app) may still be reading.
-     *  2. **Non-empty verification** before returning. iOS shipped an "exported
-     *     an empty file" bug precisely because a failed copy was swallowed;
-     *     here any failure throws or returns null rather than vending a zip
-     *     nobody can import.
-     *  3. **Stale sweep** of exports older than [EXPORT_TTL_MS], run before each
-     *     new export instead of deleting on share-sheet dismissal — by then any
-     *     pending consumer of an older export has long finished.
-     *
-     * Written under `cacheDir/share/` because that is a root already declared
-     * in `file_provider_paths.xml`; a file outside a declared root makes
-     * `FileProvider.getUriForFile` throw and the user just sees a share failure.
-     *
-     * @return the zip file, or null when the skill has no directory / no files.
-     */
     fun exportSkillToZip(skillId: String): File? {
         val skill = _skills.value.find { it.id == skillId }
         val dir = File(skillsDir, skillId)
@@ -789,7 +610,6 @@ class SkillRepository(private val context: Context) {
             Log.w(TAG, "exportSkillToZip: could not create $exportDir")
             return null
         }
-        // Filesystem-safe, single-component zip name (mirrors iOS's sanitizing).
         val safeName = (skill?.name ?: skillId)
             .replace('/', '-')
             .replace(':', '-')
@@ -803,14 +623,11 @@ class SkillRepository(private val context: Context) {
                 for (rel in relPaths) {
                     val src = File(dir, rel)
                     if (!src.isFile) continue
-                    // Store entries with forward slashes — the portable
-                    // separator every unzip tool (and importFromArchive) expects.
                     zos.putNextEntry(ZipEntry(rel.replace(File.separatorChar, '/')))
                     FileInputStream(src).buffered().use { it.copyTo(zos) }
                     zos.closeEntry()
                 }
             }
-            // Safeguard 2: never vend an empty/missing archive.
             if (!zipFile.isFile || zipFile.length() <= 0L) {
                 Log.w(TAG, "exportSkillToZip: produced an empty zip for $skillId")
                 zipFile.delete()
@@ -825,12 +642,6 @@ class SkillRepository(private val context: Context) {
         }
     }
 
-    /**
-     * Safeguard 3: delete `skill-export-*` directories older than
-     * [EXPORT_TTL_MS]. Called before each new export rather than when the share
-     * sheet closes, so a consumer still reading a previous export is never
-     * pulled out from under.
-     */
     private fun sweepStaleExports() {
         val root = File(context.cacheDir, "share")
         val now = System.currentTimeMillis()
@@ -843,11 +654,6 @@ class SkillRepository(private val context: Context) {
         }
     }
 
-    /**
-     * List every file inside `skillsDir/<id>/` (recursive). Returns relative
-     * paths from the skill root, with SKILL.md first and the rest sorted by
-     * name. Used by the Skill detail UI to enumerate bundled scripts.
-     */
     fun listSkillFiles(skillId: String): List<String> {
         val dir = File(skillsDir, skillId)
         if (!dir.isDirectory) return emptyList()
@@ -862,26 +668,13 @@ class SkillRepository(private val context: Context) {
         ))
     }
 
-    /** Absolute host path for a file inside a skill's directory. */
     fun skillFileHostPath(skillId: String, relativePath: String): String =
         File(File(skillsDir, skillId), relativePath).absolutePath
 
-    /**
-     * Re-read SKILL.md from disk and push any frontmatter changes back into the
-     * DB + in-memory state. Call after the agent (or user) edits SKILL.md on
-     * disk so the store reflects the new name/description/version/body.
-     * Returns the refreshed skill or null if the file is gone or malformed.
-     */
     fun rescanFromDisk(skillId: String): Skill? {
         val current = _skills.value.find { it.id == skillId } ?: return null
         val file = File(File(skillsDir, skillId), "SKILL.md")
         if (!file.exists()) {
-            // [T-android-skill-orphan-db-row] A rescan that finds nothing on
-            // disk used to only paint "SKILL.md missing or invalid" and leave
-            // the record in place, so the one action explicitly meant to
-            // reconcile with disk detected the orphan and still refused to act
-            // on it. Drop it here too — same BUNDLED exemption as loadAll(),
-            // since a bundled skill's file is restored by installBundledSkills.
             if (current.importSource != ImportSource.BUNDLED) {
                 delete(skillId)
                 Log.i(TAG, "Rescan found no SKILL.md — removed orphan skill: $skillId")
@@ -904,11 +697,6 @@ class SkillRepository(private val context: Context) {
         return refreshed
     }
 
-    /**
-     * Rename a skill in place — updates the `name:` line in frontmatter and DB
-     * but keeps the slugged id (and therefore the path) stable so references
-     * from existing sessions don't break.
-     */
     fun renameSkill(skillId: String, newName: String): Boolean {
         val current = _skills.value.find { it.id == skillId } ?: return false
         val trimmed = newName.trim()
@@ -928,7 +716,6 @@ class SkillRepository(private val context: Context) {
         return true
     }
 
-    /** Read an arbitrary file inside a skill's directory (e.g. scripts/foo.py). */
     fun readSkillFile(skillId: String, relativePath: String): String? {
         if (relativePath.contains("..")) return null
         val file = File(File(skillsDir, skillId), relativePath)
@@ -936,14 +723,12 @@ class SkillRepository(private val context: Context) {
         return try { file.readText() } catch (_: Exception) { null }
     }
 
-    /** Write an arbitrary file inside a skill's directory. Creates parents. */
     fun writeSkillFile(skillId: String, relativePath: String, content: String): Boolean {
         if (relativePath.contains("..")) return false
         val file = File(File(skillsDir, skillId), relativePath)
         file.parentFile?.mkdirs()
         return try {
             file.writeText(content)
-            // SKILL.md edits must flow back to DB metadata.
             if (relativePath.equals("SKILL.md", ignoreCase = true)) rescanFromDisk(skillId)
             true
         } catch (_: Exception) { false }
@@ -968,12 +753,6 @@ class SkillRepository(private val context: Context) {
         return SiblingDownloadOutcome(agg.filesWritten, agg.filesFailed, finalReason)
     }
 
-    /**
-     * Mutable accumulator threaded through the recursion. Tracks a
-     * machine-friendly count plus the FIRST human-readable reason so the UI
-     * can show one specific cause (e.g. "GitHub API 403 (rate limited)")
-     * rather than a generic "some files failed".
-     */
     private class AggregateOutcome {
         var filesWritten = 0
         var filesFailed = 0
@@ -1007,17 +786,11 @@ class SkillRepository(private val context: Context) {
         val encodedPath = URLEncoder.encode(remotePath, "UTF-8").replace("+", "%20").replace("%2F", "/")
         val apiURL = "https://api.github.com/repos/$user/$repo/contents/$encodedPath?ref=$branch"
 
-        // 1-shot retry on transient failure (HTTP 403 rate-limited, network
-        // exception). The retry waits 1.5s — enough to clear short-lived
-        // OkHttp connection-pool issues, not enough to fix a real rate-limit
-        // window (which is per-hour) but cheap enough that it's worth trying.
         val body = fetchContentsWithRetry(apiURL, outcome) ?: return
 
         val items = try {
             JSONArray(body)
         } catch (e: Exception) {
-            // Some endpoints return a JSON object on error (e.g. {"message":...})
-            // even with HTTP 200. Capture the first-line snippet for triage.
             val snippet = body.lineSequence().firstOrNull()?.take(160) ?: "(empty)"
             val msg = "GitHub contents API returned non-array JSON for $remotePath: $snippet"
             Log.w(TAG, "[siblings] $msg (${e.javaClass.simpleName}: ${e.message})")
@@ -1043,7 +816,6 @@ class SkillRepository(private val context: Context) {
             }
 
             if (type != "file") continue
-            // Skip SKILL.md at root (already imported)
             if (relativeTo.isEmpty() && name.equals("SKILL.md", ignoreCase = true)) continue
             val downloadURL = item.optString("download_url")
             if (downloadURL.isEmpty()) {
@@ -1072,12 +844,6 @@ class SkillRepository(private val context: Context) {
         }
     }
 
-    /**
-     * Fetch a GitHub Contents-API URL, retrying once on transient failure
-     * (HTTP 403/429/5xx, IOException). Returns the response body string on
-     * success, or null after both attempts fail — in which case the failure
-     * reason is recorded into [outcome] so the UI can surface it.
-     */
     private suspend fun fetchContentsWithRetry(apiURL: String, outcome: AggregateOutcome): String? {
         var lastReason: String? = null
         repeat(2) { attempt ->
@@ -1094,8 +860,6 @@ class SkillRepository(private val context: Context) {
                         lastReason = "GitHub contents API returned empty body"
                     } else {
                         val isTransient = resp.code == 403 || resp.code == 429 || resp.code in 500..599
-                        // 403 from api.github.com is almost always rate-limit;
-                        // call it out specifically so users know waiting helps.
                         val hint = if (resp.code == 403) " (likely anonymous rate limit — wait an hour or sign in)" else ""
                         lastReason = "GitHub contents API HTTP ${resp.code}$hint for $apiURL"
                         if (!isTransient) {
@@ -1118,7 +882,6 @@ class SkillRepository(private val context: Context) {
         return null
     }
 
-    /** Same retry policy as [fetchContentsWithRetry], for raw file blobs. */
     private suspend fun fetchBytesWithRetry(url: String): ByteArray? {
         repeat(2) { attempt ->
             try {
@@ -1142,12 +905,6 @@ class SkillRepository(private val context: Context) {
         return null
     }
 
-    /**
-     * Parse a GitHub URL into components. Returns null for non-GitHub URLs.
-     * Supports:
-     *   - github.com/user/repo/blob|tree/branch/path/SKILL.md
-     *   - raw.githubusercontent.com/user/repo/branch/path/SKILL.md
-     */
     private fun parseGitHubURL(urlString: String): GitHubInfo? {
         val normalized = normalizeURL(urlString)
         val uri = try { Uri.parse(normalized) } catch (_: Exception) { return null }
@@ -1155,7 +912,6 @@ class SkillRepository(private val context: Context) {
         val parts = uri.pathSegments.filter { it.isNotEmpty() }
 
         if (host == "raw.githubusercontent.com") {
-            // /user/repo/branch/path/to/SKILL.md
             if (parts.size < 3) return null
             val user = parts[0]; val repo = parts[1]; val branch = parts[2]
             val dirParts = parts.drop(3).toMutableList()
@@ -1166,7 +922,6 @@ class SkillRepository(private val context: Context) {
         }
 
         if (host != "github.com") return null
-        // /user/repo/blob|tree/branch/path/...
         if (parts.size < 4) return null
         val user = parts[0]; val repo = parts[1]; val branch = parts[3]
         val dirParts = parts.drop(4).toMutableList()
@@ -1176,10 +931,6 @@ class SkillRepository(private val context: Context) {
         return GitHubInfo(user, repo, branch, dirParts.joinToString("/"))
     }
 
-    /**
-     * Convert a GitHub URL to a raw.githubusercontent.com SKILL.md URL.
-     * Returns null if the URL cannot be parsed.
-     */
     private fun githubToRawURL(urlString: String): String? {
         val normalized = normalizeURL(urlString)
         val uri = try { Uri.parse(normalized) } catch (_: Exception) { return null }
@@ -1233,19 +984,16 @@ class SkillRepository(private val context: Context) {
     }
 
 
-    // -- Bundled Skills --
 
     private fun installBundledSkills() {
         val bundledId = "skill-creator"
         val bundledVersion = "2.0.0"
         val existing = _skills.value.find { it.id == bundledId }
 
-        // Skip if local version is same or newer
         if (existing != null && existing.version >= bundledVersion) return
 
         val parsed = parseSkillMd(SKILL_CREATOR_CONTENT) ?: return
         if (existing != null) {
-            // Upgrade existing
             val updated = existing.copy(
                 description = parsed.description,
                 version = bundledVersion,
@@ -1260,7 +1008,6 @@ class SkillRepository(private val context: Context) {
             mutateSkills { list -> list.map { if (it.id == bundledId) updated else it } }
             Log.i(TAG, "Upgraded bundled skill: $bundledId → v$bundledVersion")
         } else {
-            // Fresh install
             add(
                 name = parsed.name,
                 description = parsed.description,
@@ -1271,38 +1018,11 @@ class SkillRepository(private val context: Context) {
         }
     }
 
-    // -- Reload --
 
-    /**
-     * Re-scan `skillsDir` and the SQLite registry, re-publishing the
-     * resulting list via the [skills] StateFlow. Mirrors iOS
-     * `SkillStore.reload()` (Agent/Session/SkillStore.swift). Use this after
-     * an out-of-band install (agent shell `git clone`, agent file_write of a
-     * SKILL.md, on Skills screen entry) so newly dropped directories are
-     * promoted from disk into the registry without requiring an app restart.
-     *
-     * Compat: does not delete or reset enabled state — DB rows are the
-     * source of truth for `is_enabled`, and disk-only directories are
-     * auto-discovered as ImportSource.SESSION (matching the existing init
-     * path), not overwriting any preserved DB toggle.
-     */
     fun reloadFromDisk() {
         requestReload("reloadFromDisk", force = true)
     }
 
-    /**
-     * [T-android-skill-scan-parity] Queue a background rescan. Mirrors how iOS
-     * keeps disk work off the send path: SkillStore.skillPromptFragment() only
-     * reads the in-memory list, and disk is reconciled on discrete events
-     * (foreground, file_write/file_edit of a SKILL.md, the debounced fakefs
-     * notifier after shell activity, backup restore).
-     *
-     * Requests are conflated and served one at a time on [Dispatchers.IO].
-     * With [force] false the scan is skipped unless [SkillDiskSignature]
-     * differs from the one taken at the last scan — one stat per skill
-     * directory, so a shell command that never touched /var/minis/skills costs
-     * a few milliseconds off the main thread instead of a full reload on it.
-     */
     fun requestReload(reason: String, force: Boolean = false) {
         if (force) forceReloadPending.set(true)
         reloadRequests.trySend(reason)
@@ -1326,7 +1046,6 @@ class SkillRepository(private val context: Context) {
         }
     }
 
-    // -- Internal --
 
     private inline fun mutateSkills(transform: (List<Skill>) -> List<Skill>) {
         synchronized(skillsLock) {
@@ -1335,13 +1054,6 @@ class SkillRepository(private val context: Context) {
         }
     }
 
-    /**
-     * Run [loadAll] until its result can be published without discarding a
-     * concurrent [mutateSkills]. A scan that raced an add/update simply runs
-     * again — it then reads the DB row that edit wrote. Three attempts cover
-     * any realistic burst; after that the last scan wins, and the DB (which
-     * every edit wrote first) is still correct for the next reload.
-     */
     private fun loadAllCommitted() {
         repeat(3) { if (loadAll(requireSeq = true)) return }
         loadAll(requireSeq = false)
@@ -1349,14 +1061,7 @@ class SkillRepository(private val context: Context) {
 
     private fun loadAll(requireSeq: Boolean = false): Boolean {
         val seqAtStart = synchronized(skillsLock) { mutationSeq }
-        // Load from DB
         val dbSkills = mutableListOf<Skill>()
-        // [T-android-skill-scan-parity] One listing of skillsDir up front, then
-        // set lookups. The circuit breaker used to re-query every row and stat
-        // every SKILL.md once PER missing skill — O(missing x total). A user
-        // with 283 of 490 skills missing paid ~139k stat() calls plus 283
-        // Log.e lines per load, about two seconds, and that ran on the main
-        // thread on every send.
         val storageReady = skillsDir.isDirectory
         val onDisk = SkillDiskSignature.skillIdsOnDisk(skillsDir)
         val customIds = mutableListOf<String>()
@@ -1374,43 +1079,11 @@ class SkillRepository(private val context: Context) {
                 Log.e(TAG, "Circuit breaker tripped ($missingCustom / ${customIds.size} missing). Keeping all orphan rows to prevent mass data wipe.")
             }
         }
-        // [T-android-safemode-lateinit-crash-147] `use` so the cursor is closed
-        // even when a row throws — the old code only reached close() on the
-        // success path and leaked on any failure.
         db.rawQuery("SELECT * FROM skills ORDER BY installed_at DESC", null).use { cursor ->
         while (cursor.moveToNext()) {
-            // [T-android-safemode-lateinit-crash-147] Per-row isolation: one
-            // malformed skill (a third-party import with a missing column or
-            // an unparseable SKILL.md) must not discard every OTHER skill, and
-            // must not escape into MinisApp.onCreate. Skip the bad row, keep
-            // the rest.
             try {
             val id = cursor.getString(cursor.getColumnIndexOrThrow("id"))
             val importSource = ImportSource.from(cursor.getString(cursor.getColumnIndexOrThrow("import_source")))
-            // [T-android-skill-orphan-db-row] Prune rows whose skill directory
-            // is gone. The agent deletes skills with `rm -rf` from the shell,
-            // which never reaches delete() — so the DB row survived and this
-            // merge, which only ever ADDED disk-only skills (the auto-discover
-            // pass below), read the orphan straight back into _skills on every
-            // load. The entry stayed in the settings list through screen
-            // re-entry AND cold start, was still navigable, and — worse than
-            // cosmetic — skillPromptFragment() kept advertising it to the model
-            // with a dead /var/minis/skills/<id>/SKILL.md path. Mirrors iOS
-            // SkillStore.loadSkills(), which does dbDeleteSkill(id:)+continue
-            // when SKILL.md is missing.
-            //
-            // BUNDLED is exempt on purpose: init{} runs loadAll() BEFORE
-            // installBundledSkills(), so on the first load after a fresh
-            // install the skill-creator row legitimately exists with nothing on
-            // disk yet. Pruning it here would discard its use_count moments
-            // before the installer re-materializes the file.
-            //
-            // Only one location to check, unlike iOS's Library+rootfs pair:
-            // PRootKernel.registerGlobalBindMounts binds /var/minis/skills
-            // straight to this same filesDir/minis-global/skills.
-            // [T-android-skill-circuit-breaker] Pruning is decided once per load
-            // (pruneAllowed above), never when storage is unready or when a
-            // large share of custom skills is missing at once.
             if (importSource != ImportSource.BUNDLED && id !in onDisk && pruneAllowed) {
                 db.execSQL("DELETE FROM skills WHERE id=?", arrayOf(id))
                 db.execSQL("DELETE FROM session_skill_overrides WHERE skill_id=?", arrayOf(id))
@@ -1423,70 +1096,18 @@ class SkillRepository(private val context: Context) {
             var description = cursor.getString(cursor.getColumnIndexOrThrow("description"))
             var name = cursor.getString(cursor.getColumnIndexOrThrow("name"))
             var version = cursor.getString(cursor.getColumnIndexOrThrow("version"))
-            // Self-heal rows persisted by an earlier parser that treated YAML
-            // block scalars (`|` and `>`) as literal one-character description
-            // values. Re-parse the on-disk SKILL.md whenever the stored
-            // description is stale and update the row in place so the skills
-            // list shows the real frontmatter description.
-            //
-            // [T-android-skill-empty-description-never-refreshes] GH#215
-            // (iOS 7d0cc49a7): an EMPTY description is stale too, not just the
-            // literal "|" / ">" leftovers the original check knew about.
-            //
-            // How a skill gets stuck: the agent writes SKILL.md from the shell,
-            // and the skill can be registered while that file is still being
-            // written and has no `description:` line yet. "" is persisted, and
-            // because the stale test only matched "|" / ">", every later load
-            // trusted that "" forever. Since the DB row is keyed by directory
-            // name it survives delete-and-recreate, so touching the file,
-            // rewriting the frontmatter and even `rm -rf` + recreate all fail
-            // to heal it — only renaming the skill works, because that mints a
-            // new row id.
-            // [T-android-skill-stale-name] The NAME is stale-checked too, and
-            // independently of the description.
-            //
-            // Before, healing was gated entirely on the description: a row
-            // whose description was fine but whose name was empty never
-            // entered this block at all, and even when it did, the name was
-            // only filled in `if (name.isBlank())` — inside a branch that
-            // additionally required a non-blank re-parsed description. A skill
-            // could therefore sit with a good description and a blank name
-            // forever, showing as an empty row in the skills list while the
-            // real name sat in SKILL.md one directory away.
-            //
-            // Note on scope: the iOS report (e4af3ad81) described names stuck
-            // at the literal "Untitled Skill". That constant is iOS-only —
-            // grep finds no such string in this codebase, and Android's
-            // parseSkillMd `return null`s on a missing name rather than
-            // substituting a placeholder, so a row can only ever be stuck
-            // BLANK here, never at that literal. The check below is written
-            // against blankness for that reason; adding the iOS literal would
-            // be matching a value this platform cannot produce.
             val nameStale = name.isBlank()
             val descStale = description == ">" || description == "|" || description.isBlank()
             if (descStale || nameStale) {
                 val skillMd = File(skillsDir, "$id/SKILL.md")
                 if (skillMd.exists()) {
                     val reparsed = parseSkillMd(runCatching { skillMd.readText() }.getOrNull() ?: "")
-                    // Only ever REPLACE an empty/placeholder value with a real
-                    // one, never the reverse. A mid-edit or malformed SKILL.md
-                    // parses to null or yields an empty description, and
-                    // writing that back would wipe good metadata — the exact
-                    // hazard that kept this check narrow in the first place.
-                    // Combined with the guards above (the stored value must be
-                    // blank or a block-scalar leftover to get here), a name or
-                    // description the user deliberately set can never be
-                    // overwritten.
                     if (reparsed != null) {
                         var changed = false
                         if (descStale && reparsed.description.isNotBlank()) {
                             description = reparsed.description
                             changed = true
                         }
-                        // parseSkillMd returns null unless it found a non-blank
-                        // name, so reparsed.name is always real here — but the
-                        // isNotBlank() guard is kept so this stays correct if
-                        // that parser contract ever loosens.
                         if (nameStale && reparsed.name.isNotBlank()) {
                             name = reparsed.name
                             changed = true
@@ -1524,15 +1145,11 @@ class SkillRepository(private val context: Context) {
         }
         }
 
-        // Auto-discover skills on disk without DB entries
         val known = dbSkills.mapTo(HashSet(dbSkills.size)) { it.id }
         for (dirName in onDisk) {
             val dir = File(skillsDir, dirName)
             val skillMd = File(dir, "SKILL.md")
             if (dirName !in known) {
-                // The listing was taken at the top of loadAll; on the background
-                // worker a shell `rm -rf` can land in between, so a vanished
-                // file skips this entry instead of aborting the whole reload.
                 val parsed = runCatching { parseSkillMd(skillMd.readText()) }.getOrNull()
                 if (parsed != null) {
                     val skill = Skill(
@@ -1597,37 +1214,6 @@ class SkillRepository(private val context: Context) {
         val body: String,
     )
 
-    /**
-     * Parse a SKILL.md file into [ParsedSkill]. Mirrors iOS SkillStore.parse(skillMD:).
-     *
-     * Recognized YAML frontmatter forms (delimited by `---` … `---`):
-     *
-     *   description: short text
-     *   description: |
-     *     line one
-     *     line two           ← preserved with newlines
-     *   description: >
-     *     line one
-     *     line two           ← folded into a single space-joined line
-     *
-     * The block-scalar variants (`|` and `>`) matter in practice — many
-     * authored SKILL.md files (e.g. hyperframes, bilibili-hub) use
-     * `description: >` to either fold a multi-line description or as a
-     * placeholder with an empty body. The previous parser stored the
-     * literal string `">"` for those skills, which is what surfaced in the
-     * skills list as a confusing single-character description.
-     *
-     * Returns null only if the document doesn't start with `---` or if
-     * the closing `---` is missing — caller treats null as "not a SKILL.md".
-     * If frontmatter parses but `name` is blank we also return null so
-     * import paths can fall back (e.g. derive name from the GitHub URL).
-     */
-    /**
-     * Public re-exposure for the "Update from File" UI. Same parser, same
-     * `null = invalid SKILL.md` contract. Lives on the instance for symmetry
-     * with the rest of the API surface, even though the parse itself is
-     * stateless.
-     */
     fun parseSkillMdPublic(content: String): ParsedSkill? = parseSkillMd(content)
 
     private fun slugify(name: String): String =
@@ -1640,7 +1226,6 @@ class SkillRepository(private val context: Context) {
             .replace("<", "&lt;")
             .replace(">", "&gt;")
 
-    // -- Database Helper --
 
     private class SkillDbHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
         override fun onCreate(db: SQLiteDatabase) {
@@ -1672,18 +1257,17 @@ class SkillRepository(private val context: Context) {
             if (oldVersion < 2) {
                 try {
                     db.execSQL("ALTER TABLE skills ADD COLUMN source_url TEXT")
-                } catch (_: Exception) { /* column may already exist */ }
+                } catch (_: Exception) {  }
             }
             if (oldVersion < 3) {
                 try {
                     db.execSQL("ALTER TABLE skills ADD COLUMN use_count REAL NOT NULL DEFAULT 0")
-                } catch (_: Exception) { /* column may already exist */ }
+                } catch (_: Exception) {  }
             }
         }
     }
 }
 
-// Bundled skill-creator content (matches iOS SkillStore.skillCreatorContent)
 private val SKILL_CREATOR_CONTENT = """
 ---
 name: skill-creator

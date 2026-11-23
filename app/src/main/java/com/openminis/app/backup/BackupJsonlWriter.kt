@@ -7,17 +7,6 @@ import kotlinx.serialization.json.buildJsonObject
 import java.io.BufferedOutputStream
 import java.io.File
 
-/**
- * Append-only JSONL writer with automatic shard rollover (§2), mirroring
- * `src/ios/Agent/Backup/BackupJSONLWriter.swift`.
- *
- * Every record is one self-contained line, so the importer can parse
- * line-by-line and skip a bad record without losing the file (§2.2 rule 3).
- * Writes go straight to a stream — nothing accumulates in memory, which is
- * what lets a 100k-message export stay flat.
- *
- * @param baseName `messages` → `messages.jsonl`, then `messages-0002.jsonl`.
- */
 class BackupJsonlWriter(
     private val directory: File,
     private val baseName: String,
@@ -34,13 +23,8 @@ class BackupJsonlWriter(
         private set
     val shardPaths = mutableListOf<String>()
 
-    /** True when nothing was ever written, so the caller can avoid emitting an empty category. */
     val isEmpty: Boolean get() = writtenRecords == 0
 
-    /**
-     * Write one record wrapped in the §2.2 rule-3 envelope: `t` dispatches on
-     * the way in, `v` allows per-record migration.
-     */
     fun write(type: String, version: Int = 1, payload: JsonElement) {
         val envelope = buildJsonObject {
             put("t", JsonPrimitive(type))

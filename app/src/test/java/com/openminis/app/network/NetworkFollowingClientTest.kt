@@ -12,11 +12,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [FEAT-261021-08] NetworkHttp.following: one long-lived client that asks
- * the current route on every connection - used for MCP sign-in's token
- * exchange and refresh, as on iOS.
- */
 class NetworkFollowingClientTest {
 
     @Before fun reset() {
@@ -38,7 +33,6 @@ class NetworkFollowingClientTest {
     fun withoutARouteItAnswersExactlyAsTheBase() {
         val c = NetworkHttp.following("mcp", base)
         assertEquals("the system proxy still applies", listOf(systemProxy), c.proxySelector.select(uri))
-        // Entry up, MCP direct, Tailscale off: still the base.
         NetworkRuntime.publish(NetworkRuntime.Snapshot(port = 1, httpPort = 2, password = "pw"))
         assertEquals(listOf(systemProxy), c.proxySelector.select(uri))
     }
@@ -47,12 +41,10 @@ class NetworkFollowingClientTest {
     fun theSameClientFollowsARouteSetLater() {
         val c = NetworkHttp.following("mcp", base)
         assertEquals(listOf(systemProxy), c.proxySelector.select(uri))
-        // Port 1 on loopback: nothing listens, a proxy route still names the entry (it fails, never goes around it).
         NetworkRuntime.publish(NetworkRuntime.Snapshot(port = 1, httpPort = 1, password = "pw", tagRoutes = mapOf("mcp" to "proxy:a")))
         val routed = c.proxySelector.select(uri)
         assertEquals(1, routed.size)
         assertEquals(1, (routed.single().address() as InetSocketAddress).port)
-        // Back to direct: the base again, on the same client object.
         NetworkRuntime.publish(NetworkRuntime.Snapshot())
         assertEquals(listOf(systemProxy), c.proxySelector.select(uri))
     }

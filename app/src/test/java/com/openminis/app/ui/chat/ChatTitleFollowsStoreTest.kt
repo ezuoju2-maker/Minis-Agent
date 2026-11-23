@@ -22,11 +22,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.util.concurrent.CopyOnWriteArrayList
 
-/**
- * [T-android-chat-title-follows-store] After Regenerate Title (or a rename) in
- * the session list, an already-created chat's top bar showed the old title.
- * The chat now follows the stored title.
- */
 @RunWith(RobolectricTestRunner::class)
 class ChatTitleFollowsStoreTest {
 
@@ -60,17 +55,14 @@ class ChatTitleFollowsStoreTest {
         awaitSize(seen, 1)
         assertEquals(SessionTitleRow("Old title", null), seen[0])
 
-        // What the session list's Regenerate Title does (SessionListViewModel).
         repo.updateSessionTitleAndCategory(session.id, "Regenerated title", "coding")
         awaitSize(seen, 2)
         assertEquals(SessionTitleRow("Regenerated title", "coding"), seen[1])
 
-        // A manual rename from the list.
         repo.updateSessionTitle(session.id, "Renamed by hand")
         awaitSize(seen, 3)
         assertEquals(SessionTitleRow("Renamed by hand", "coding"), seen[2])
 
-        // Another session changing, or the same value written again, is not a change here.
         repo.updateSessionTitle(other.id, "Other renamed")
         repo.updateSessionTitle(session.id, "Renamed by hand")
         delay(400)
@@ -98,16 +90,12 @@ class ChatTitleFollowsStoreTest {
         assertTrue(follow.contains("_sessionTitle.value = SessionTitleRules.display(row.title, UNTITLED_SESSION_TITLE)"))
         assertTrue(follow.contains("_sessionCategory.value = row.category"))
         assertTrue("one observer per ViewModel", follow.contains("storedTitleJob?.cancel()"))
-        // A stored session: from loadSession. A draft: when ensureSession creates its row.
         assertTrue(vm.contains("followStoredTitle(sessionId)"))
         assertTrue(vm.contains("realSessionId = session.id\n        followStoredTitle(session.id)"))
         assertEquals(2, Regex("""followStoredTitle\((sessionId|session\.id)\)""").findAll(vm).count())
-        // The auto title checks the STORED title right before it writes.
         val write = vm.indexOf("chatRepository.updateSessionTitleAndCategory(sid, title, category)\n                    withContext(Dispatchers.Main) {")
         val guard = vm.indexOf("if (!SessionTitleRules.autoTitleMayReplace(storedNow, UNTITLED_SESSION_TITLE)) {")
         assertTrue(guard in 1 until write && write - guard < 500)
-        // The list's regenerate still writes through the repository the chat observes.
-        // [T-sessions-cli-update] Regenerate Title moved to SessionTitleRegenerator.
         val list = ProductionSources.read("ui/sessions/SessionTitleRegenerator.kt")
         assertTrue(list.contains("chatRepository.updateSessionTitleAndCategory(id, title, category)"))
     }

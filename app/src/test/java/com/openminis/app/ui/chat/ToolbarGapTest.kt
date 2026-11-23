@@ -7,10 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-toolbar-gap] The last row sits the same distance above the
- * floating tool bar whether or not Tool preview draws its thumbnail.
- */
 class ToolbarGapTest {
 
     private fun reserve(preview: Boolean) =

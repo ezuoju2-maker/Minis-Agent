@@ -6,19 +6,6 @@ import com.openminis.app.data.model.AgentToolParam
 import com.openminis.app.data.repository.SkillRepository
 import org.json.JSONObject
 
-/**
- * [self-improvement] Turns a *proven, reusable* procedure into a durable skill
- * so the agent gets better over time (Voyager-style skill library / Anthropic
- * Agent Skills "progressive disclosure"). The agent calls this after it has
- * actually solved a non-trivial, repeatable task, writing a compact SKILL.md
- * that a future session can reload with `skill_load` in one cheap step instead
- * of rediscovering the whole procedure.
- *
- * Deliberately gated by the tool description (only reusable methods, not
- * one-off facts) so we don't flood the skill catalog with noise or burn tokens
- * on every turn. Skills are tagged [SkillRepository.ImportSource.SESSION] to
- * distinguish agent-authored skills from imported ones.
- */
 object SkillSaveTool {
 
     const val NAME = "skill_save"

@@ -16,29 +16,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Ignore
 import org.junit.Test
 
-/**
- * Image-pipeline repro, Android: the ingest numbers of each scenario and the
- * single gate (ImageBudget.prepareForUpload) — where it runs, what bypasses
- * it, and what the request-level planner measures.
- *
- * P-a4 probe: a real BMP is a KNOWN-unaccepted format, and on the JVM the
- * BitmapFactory-backed transcode fails, so the gate returns null and the
- * caller must emit [ImageBudget.UNSENDABLE_IMAGE_PLACEHOLDER]. Seeing that
- * placeholder (and no image) in a body proves the gate ran at that call site;
- * seeing the BMP bytes proves it did not.
- */
 class ImageReproGateTest {
 
     private val mb = 1024 * 1024
 
-    // ── ingest: raw originals and what each production step makes of them ──
 
-    /**
-     * (A) S1/S3/S5 ingest facts. Raw originals are real images generated
-     * here; the device-side outputs come from the production arithmetic. On
-     * the JVM every BitmapFactory-backed step is a no-op — pinned below so no
-     * reader mistakes the JVM pass-through for device behaviour.
-     */
     @Test fun `ingest - raw originals, device target sizes per producer, JVM decode stub`() {
         val t0 = System.nanoTime()
         val longPng = ImageReproFixtures.png(2760, 21891)
@@ -57,7 +39,6 @@ class ImageReproGateTest {
                     "| browser/read_image (floor) -> ${floor?.let { "${it.first}x${it.second}" }} jpeg q85 " +
                     "| JVM downscaleForModel=${ImageBudget.downscaleForModel(raw)} (stub)",
             )
-            // On the JVM the decode stub makes every resize a no-op.
             assertNull(ImageBudget.downscaleForModel(raw))
             assertTrue(ImageBudget.compressBytes(raw) === raw)
         }
@@ -67,14 +48,7 @@ class ImageReproGateTest {
         println("[REPRO] ingest generation time ${genMs}ms")
     }
 
-    /**
-     * (A) N4: the two resize rules disagree by a pixel. The composer, reload
-     * and gate round (fitWithin); browser and read_image floor. Same original
-     * → 66×2000 via an attachment, 65×2000 via a screenshot/read_image.
-     */
     @Test fun `N4 floor vs round - 1080x32768 is 66x2000 as an attachment, 65x2000 as a tool image`() {
-        // resizeJpegToMaxEdge 已从 ChatViewModel 下沉到 ImageBudget；锚点跟随实现迁移，
-        // floor 取整（toInt）与算式的语义不变。
         val budget = ProductionSources.read("provider/ImageBudget.kt")
         val tool = ProductionSources.read("tools/ReadImageTool.kt")
         val resize = budget.substringAfter("fun resizeJpegToMaxEdge(").substringBefore("\n    }\n")
@@ -86,7 +60,6 @@ class ImageReproGateTest {
         assertEquals(65, (1080 * s).toInt())
     }
 
-    // ── P-a4: where the gate runs ───────────────────────────────────────────
 
     private val bmp by lazy { ImageReproFixtures.bmp() }
 
@@ -100,7 +73,6 @@ class ImageReproGateTest {
         }
     }
 
-    /** (A) P-a4: the gate runs for ImageData, ToolResult images, legacy imageParts and top-level imageParts, on all four. */
     @Test fun `P-a4 gate runs at every image site of all four serializers`() {
         probe("contentParts.ImageData", listOf(ImageReproWire.liveUserTurn("x", bmp, "image/bmp", null)))
         probe("ToolResult.imageData", listOf(ImageReproWire.leadingUser()) +
@@ -108,16 +80,6 @@ class ImageReproGateTest {
         probe("top-level imageParts argument", listOf(ImageReproWire.leadingUser("x")), top = listOf(LLMMessage.ImagePart(bmp, "image/bmp")))
     }
 
-    /**
-     * (A) N5: a message holding images ONLY in its own `imageParts` (no
-     * contentParts). Measured with a real JPEG: NONE of the four serializers
-     * sends them — each reads contentParts, or the TOP-LEVEL imageParts
-     * argument, never `msg.imageParts`. Every ChatViewModel user turn also has
-     * contentParts, so in the agent loop `LLMMessage.imageParts` only ever
-     * feeds the token estimate (P-a1); a direct caller that builds
-     * `LLMMessage(imageParts=…)` without contentParts loses the image silently,
-     * with no placeholder.
-     */
     @Test fun `N5 message-level imageParts without contentParts are dropped by all four serializers`() {
         val jpg = ImageReproFixtures.jpeg(64, 32)
         val msg = LLMMessage(LLMMessage.Role.USER, "x", imageParts = listOf(LLMMessage.ImagePart(jpg, "image/jpeg")))
@@ -128,13 +90,11 @@ class ImageReproGateTest {
             assertEquals("$p", 0, n)
             assertEquals("$p: and nothing says an image was there", 0, placeholders)
         }
-        // The same parts passed top-level DO go out (that is the only arm that reads them).
         val top = ImageReproWire.all(listOf(ImageReproWire.leadingUser("x")), msg.imageParts)
             .mapValues { ImageReproFixtures.wireImages(it.value).size }
         assertEquals(mapOf("anthropic" to 1, "openai.chat" to 1, "openai.responses" to 1, "gemini" to 1), top)
     }
 
-    /** (A) P-a4: the gate also fixes the LABEL — JPEG bytes declared image/heic go out as image/jpeg everywhere. */
     @Test fun `P-a4 gate relabels jpeg bytes declared image-heic on all four`() {
         val jpg = ImageReproFixtures.jpeg(64, 32)
         for ((p, body) in ImageReproWire.all(listOf(ImageReproWire.liveUserTurn("x", jpg, "image/heic", null)))) {
@@ -144,7 +104,6 @@ class ImageReproGateTest {
         }
     }
 
-    /** (A) P-a4: editImage posts the input bytes as they are — no format gate, no fit, no budget. */
     @Test fun `P-a4 editImage sends a BMP raw - the gate is bypassed`() {
         val raw = sendEditImage(bmp, "image/png")
         println("[REPRO] P-a4 editImage | body ${raw.length}B contains BMP header=${raw.indexOf("BM", 0) >= 0}")
@@ -152,7 +111,6 @@ class ImageReproGateTest {
         assertFalse(raw.contains(ImageBudget.UNSENDABLE_IMAGE_PLACEHOLDER))
     }
 
-    /** (B) P-a4: editImage should only ever send an accepted, gated image. */
     @Ignore("known gap P-a4: OpenAIProvider.editImage posts img.data straight into the multipart body")
     @Test fun `desired - editImage never posts an unaccepted format`() {
         val raw = sendEditImage(bmp, "image/png").toByteArray(Charsets.ISO_8859_1)
@@ -180,13 +138,7 @@ class ImageReproGateTest {
         return false
     }
 
-    // ── P-a5: what the request-level planner measures ───────────────────────
 
-    /**
-     * (A) P-a5: the planner charges the PRE-gate size. Six 6 MB-raw long PNGs
-     * are charged 5 MB each (the per-image clamp) and one is elided, although
-     * on a device the gate would send each as a 252×2000 image of a few KB.
-     */
     @Test fun `P-a5 planner charges pre-gate bytes - oversize originals are elided though they would gate small`() {
         val header = ImageReproFixtures.png(2760, 21891).copyOf(64)
         val big = (0 until 6).map { i -> ImageBudget.BudgetImage(header + ByteArray(6 * mb + i), "/var/minis/attachments/uploads/l$i.png", "image/png") }
@@ -196,7 +148,6 @@ class ImageReproGateTest {
         assertEquals(5 * ImageBudget.MAX_PER_IMAGE_BYTES, plan.keptBytes)
     }
 
-    /** (A) P-a5: the planner's id is the array's identity hash — equal bytes in two arrays are two images, one array listed twice is one. */
     @Ignore("P-a5 请求预算已重构：ChatViewModel 改为委托 ImageBudget.applyRequestBudget，按 post-gate 的 wireBytes 计量并按消息/部件位置索引（T-request-budget-post-gate），不再用数组 identityHashCode，也不再有 'planner 前不过 gate' 的前提；旧的源锚点已不存在。ImagePartId 的运行时语义仍由本文件其它用例覆盖。")
     @Test fun `P-a5 planner id is System identityHashCode of the array`() {
         val a = ByteArray(16) { 7 }
@@ -211,7 +162,6 @@ class ImageReproGateTest {
         assertTrue("only contentParts are scanned", budget.contains("msg.contentParts.forEachIndexed") && !budget.contains("imageParts"))
     }
 
-    /** (B) P-a5: images the gate would send small are not elided by the request budget. */
     @Ignore("known gap P-a5: planRequestBudget measures the pre-gate bytes (and keys by identityHashCode)")
     @Test fun `desired - planner measures what the gate sends`() {
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
@@ -219,18 +169,7 @@ class ImageReproGateTest {
         assertTrue(budget.contains("prepareForUpload"))
     }
 
-    // ── P-a6 / P-a7: decode path ────────────────────────────────────────────
 
-    /**
-     * (A) P-a6, static half: no image path reads EXIF or uses ImageDecoder.
-     * The runtime half (BitmapFactory ignores orientation 6; a transparent PNG
-     * encoded as JPEG turns black) needs real Android decoders — NOT verifiable
-     * on the JVM; it was measured on a Pixel 4a.
-     *
-     * 图像管线已重构：BitmapFactory/Bitmap 调用统一收拢到 ImageBudget 的
-     * ImageCodec/AndroidImageCodec，ReadImageTool 通过 codec.decodeFile 解码。
-     * 锚点跟随抽象层迁移，"无 EXIF/ImageDecoder"与"输出格式规则"的语义不变。
-     */
     @Test fun `P-a6 no decode path reads EXIF or uses ImageDecoder`() {
         val budget = ProductionSources.read("provider/ImageBudget.kt")
         val tool = ProductionSources.read("tools/ReadImageTool.kt")
@@ -245,15 +184,11 @@ class ImageReproGateTest {
         assertFalse(resize.contains("Exif") || resize.contains("ImageDecoder"))
         val browser = ProductionSources.read("browser/BrowserUseManager.kt")
         assertFalse(browser.contains("ExifInterface") || browser.contains("ImageDecoder"))
-        // Transparent PNG → JPEG happens only where the output is forced to JPEG.
         assertTrue("compressBytes always writes JPEG", budget.contains("codec.compress(out, png = false, quality = q.coerceIn(1, 100), out = baos)"))
         assertTrue("downscaleForModel keeps PNG as PNG", budget.contains("val png = sniffFormat(input) == ImageFormat.PNG") && budget.contains("codec.compress(scaled, png = png, quality = 85, out = baos)"))
     }
 
-    /** (A) P-a7: ReadImageTool and resizeJpegToMaxEdge decode at full size; downscaleForModel samples. */
     @Test fun `P-a7 read_image and browser resize decode the full image, no inSampleSize`() {
-        // 解码调用下沉到 ImageCodec/AndroidImageCodec；锚点跟随迁移，
-        // "全尺寸解码 vs 先采样"的语义不变。
         val budget = ProductionSources.read("provider/ImageBudget.kt")
         val tool = ProductionSources.read("tools/ReadImageTool.kt")
         assertTrue(tool.contains("codec.decodeFile(file.absolutePath)"))
@@ -262,19 +197,16 @@ class ImageReproGateTest {
         val resize = budget.substringAfter("fun resizeJpegToMaxEdge(").substringBefore("\n    }\n")
         assertTrue(resize.contains("codec.decode(data)"))
         assertFalse(resize.contains("inSampleSize"))
-        // 只有 downscaleForModel 先算 sample 再经 codec.decode(input, sample) 采样解码。
         assertTrue(budget.contains("val decoded = codec.decode(input, sample)"))
         assertTrue(budget.contains("BitmapFactory.Options().apply { this.inSampleSize = inSampleSize }"))
     }
 
-    /** (B) P-a6: the gate applies EXIF orientation before scaling. */
     @Ignore("known gap P-a6: BitmapFactory path ignores EXIF orientation; no ExifInterface/ImageDecoder in ImageBudget")
     @Test fun `desired - gate applies EXIF orientation`() {
         val src = ProductionSources.read("provider/ImageBudget.kt")
         assertTrue(src.contains("ImageDecoder") || src.contains("ExifInterface"))
     }
 
-    /** (B) P-a7: tool-side decodes are sampled to the target size. */
     @Ignore("known gap P-a7: ReadImageTool.decodeFile and resizeJpegToMaxEdge decode at full size")
     @Test fun `desired - read_image and browser resize decode sampled`() {
         assertTrue(ProductionSources.read("tools/ReadImageTool.kt").contains("inSampleSize"))
@@ -286,7 +218,7 @@ class ImageReproGateTest {
         assertEquals("bmp", ImageReproFixtures.dims(bmp)!!.format)
         assertEquals(ImageBudget.ImageFormat.BMP, ImageBudget.sniffFormat(bmp))
         val alpha = ImageReproFixtures.png(4, 4, alpha = true)
-        assertEquals(6, alpha[25].toInt()) // IHDR colour type RGBA
+        assertEquals(6, alpha[25].toInt())
         assertTrue(AgentContentPart.ImageData(alpha, "image/png") == AgentContentPart.ImageData(alpha.copyOf(), "image/png"))
     }
 }

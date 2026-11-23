@@ -16,13 +16,6 @@ import org.junit.Assert.fail
 import org.junit.Test
 import kotlin.coroutines.cancellation.CancellationException
 
-/**
- * [T-voice-correction-fallback] A user log (iOS, 2026-10-15): every manual
- * correction failed with Anthropic's "credit balance is too low" and returned
- * the original text, while the chat on the same device moved to the next model
- * of the group. Android had the same single call: the sub group's first
- * available member, else the primary's, and give up on its first error.
- */
 class CorrectionFallbackTest {
 
     private fun entry(id: String) = ModelEntry(
@@ -43,7 +36,6 @@ class CorrectionFallbackTest {
         httpStatus = 400,
     )
 
-    /** A strategy over fake models: [answers] maps a model id to its reply or error. */
     private fun strategy(
         models: List<CorrectionModel>,
         calls: MutableList<String>,
@@ -56,7 +48,6 @@ class CorrectionFallbackTest {
             answers(m.entry.model.id)
         },
         callBudgetMs = budgetMs,
-        // The chat's ladder has three steps; no real waiting in a unit test.
         retryDelaysMs = listOf(0L, 0L, 0L),
     )
 
@@ -73,7 +64,6 @@ class CorrectionFallbackTest {
     private fun engine(strategy: CorrectionStrategy) =
         VoiceCorrectionEngine(emptyList(), strategy, null, { it.chunked(2) }) { false }
 
-    // ── the user's case ──────────────────────────────────────────────────
 
     @Test
     fun `a model out of credit falls back to the next one`() = runBlocking {
@@ -112,7 +102,6 @@ class CorrectionFallbackTest {
         assertEquals(listOf("a", "b"), calls)
     }
 
-    // ── what a failure does: the group's fallback strategy ──────────────
 
     @Test
     fun `Always Fall Back moves on at once, whatever the error`() = runBlocking {
@@ -125,7 +114,6 @@ class CorrectionFallbackTest {
             }
         }
         assertEquals("好", s.correct("x", emptyList(), ConversationContext.EMPTY, "zh").correctedText)
-        // No same-model retry of the network error, no stop on the empty answer.
         assertEquals(listOf("net", "blank", "ok"), calls)
     }
 
@@ -133,7 +121,6 @@ class CorrectionFallbackTest {
     fun `default strategy retries a network error on the same model, then stops`() = runBlocking {
         val calls = mutableListOf<String>()
         val e = failsWith(strategy(listOf(model("a"), model("b")), calls) { throw network })
-        // 1 call + the chat's 3 retries; a network error is not fallbackable.
         assertEquals(listOf("a", "a", "a", "a"), calls)
         assertEquals(1, e.attempts.size)
     }
@@ -180,8 +167,6 @@ class CorrectionFallbackTest {
     @Test
     fun `the strategy of the failed model's own group decides`() = runBlocking {
         val calls = mutableListOf<String>()
-        // Sub group on Always, primary on default: the sub member's network
-        // error moves on at once, the primary member's is retried and stops.
         failsWith(strategy(listOf(always("s"), model("p", "primary")), calls) { throw network })
         assertEquals(listOf("s", "p", "p", "p", "p"), calls)
     }
@@ -206,7 +191,6 @@ class CorrectionFallbackTest {
         assertEquals(listOf(1000L, 2000L, 4000L), CorrectionFallback.SAME_MODEL_RETRY_DELAYS_MS)
     }
 
-    // ── time: 15 s per call, not per correction ──────────────────────────
 
     @Test
     fun `a call past its budget moves on to the next model, whatever the strategy`() = runBlocking {
@@ -238,7 +222,6 @@ class CorrectionFallbackTest {
     @Test
     fun `the budget is per call, so the chain may run past one budget`() = runBlocking {
         val calls = mutableListOf<String>()
-        // Each call takes 300 ms under a 400 ms budget; the first two fail.
         val s = strategy(listOf(model("a"), model("b"), model("c")), calls, budgetMs = 400) { id ->
             delay(300)
             if (id == "c") "好" else throw creditTooLow
@@ -284,11 +267,9 @@ class CorrectionFallbackTest {
     fun `no candidate means no model available`() = runBlocking {
         val suggestion = engine(strategy(emptyList(), mutableListOf()) { "unused" }).correct("我在背景")
         assertEquals("llm_error:NoModelAvailable", suggestion.rejectedReason)
-        // Not a recognisable outage: the panel says only "failed".
         assertNull(CorrectionFailureReason.res(suggestion))
     }
 
-    // ── order ────────────────────────────────────────────────────────────
 
     @Test
     fun `sub members first, then primary members not already listed`() {
@@ -316,9 +297,6 @@ class CorrectionFallbackTest {
 
     @Test
     fun `the voice panel drops a correction for text that is no longer on screen`() {
-        // [T-voice-correction-stale-result] With per-model budgets a result can
-        // land minutes later; applied blindly it overwrote newer dictation or
-        // put a sent message back in the composer.
         val src = ProductionSources.read("ui/chat/voice/InlineVoiceInputPanel.kt")
         val run = src.substringAfter("fun runCorrection() {").substringBefore("\n    fun stopCapture()")
         val guard = "if (transcript.trim() != text || VoiceSendGate.generation != startGeneration) {"

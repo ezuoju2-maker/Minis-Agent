@@ -5,12 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [GH #453] android-location's getCurrentLocation callback runs where it is
- * delivered. It made a fresh newSingleThreadExecutor() per provider per call
- * (up to 3 a call) and never shut it down, so each idle worker thread lived
- * until a GC finalised its executor.
- */
 class LocationCallbackExecutorTest {
     private val src = ProductionSources.read("sandbox/offload/LocationOffloadHandler.kt")
 

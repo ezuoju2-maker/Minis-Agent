@@ -10,12 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-config-readable] Sentences the renderer builds per formatter, against a
- * fake name source and the English keys (no Android resources). Covers the
- * list-diff clauses, secrets, long text, numbers, images, the DNS string list
- * and the generic fallback.
- */
 class ConfigReadableRendererTest {
 
     private val fakeNames = object : ReadableNameSource {
@@ -164,7 +158,6 @@ class ConfigReadableRendererTest {
             "Field: “a” → (empty)",
             text("x.y", ConfigReadable.generic("test"), ConfigValue.Str("a"), ConfigValue.Str("")),
         )
-        // A formatter that throws must not block the write.
         val boom = ConfigReadable(ConfigValueFormatter.Sentence { _, _ -> error("boom") })
         assertEquals("Field: (none) → 3", text("x.y", boom, ConfigValue.Null, ConfigValue.Int(3)))
     }
@@ -182,8 +175,6 @@ class ConfigReadableRendererTest {
 
     @Test
     fun `launch validation runs off the main thread`() {
-        // ConfigRegistry.init runs in Application.onCreate; expanding a
-        // collection child reads the database, so the check must not block.
         val init = com.openminis.app.ProductionSources.read("config/ConfigRegistry.kt").substringAfter("fun init(")
         val call = init.indexOf("validateRegistry(r.allFieldsForValidation())")
         assertTrue(call > 0)

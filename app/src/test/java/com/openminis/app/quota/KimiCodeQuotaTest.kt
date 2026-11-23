@@ -10,18 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.math.BigDecimal
 
-/**
- * [ISS-031] Kimi Code subscription usage (GET {base}/usages, from the official
- * MoonshotAI/kimi-cli `/usage` command), plus the MiniMax / OpenCode console
- * links. Port of iOS MinisTests/Standalone/KimiCodeQuotaTests.swift
- * (d7fa94168): the same 52 checks, in the same order, each assertion message
- * naming the iOS check it mirrors.
- *
- *   A. The adapter driven with the response shapes the CLI's parser accepts
- *      (NOT captured replies - the real response is unverified).
- *   B. Vendor routing and console links.
- *   C. Store wiring (source), Android-specific where the platform differs.
- */
 class KimiCodeQuotaTest {
 
     private val now = 1_800_000_000_000L
@@ -39,7 +27,6 @@ class KimiCodeQuotaTest {
          "limits":[{"detail":{"limit":200,"used":150,"reset_in":3600},"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"}}]}
     """.trimIndent()
 
-    // ── A. Response shapes the official CLI parses ──────────────────────────
 
     @Test fun `full shape - pool, provenance, ids, counts, basis, resets, deciding window`() {
         val snap = parse(full).getOrThrow()
@@ -122,7 +109,6 @@ class KimiCodeQuotaTest {
         )
     }
 
-    // ── A. Never an invented number ─────────────────────────────────────────
 
     @Test fun `never an invented number`() {
         assertEquals(
@@ -158,7 +144,6 @@ class KimiCodeQuotaTest {
         )
     }
 
-    // ── A. Request ──────────────────────────────────────────────────────────
 
     private class FakeTransport(private val status: Int, private val body: String) : QuotaHttpTransport {
         val urls = mutableListOf<String>()
@@ -206,9 +191,6 @@ class KimiCodeQuotaTest {
             "27 a (DEBUG-only) endpoint override replaces the URL and nothing else",
             ovFake.urls == listOf("http://10.0.0.5:18931/coding/v1/usages") && ovFake.sentHeaders == okFake.sentHeaders,
         )
-        // Android differs from iOS here: OkHttp would otherwise send its own
-        // `okhttp/<version>` UA, so the adapter sets Minis's own explicitly -
-        // and that is the ONLY header (no borrowed client identity).
         assertEquals(
             "28 no extra headers: only Minis's own User-Agent, no borrowed client identity",
             listOf(mapOf("User-Agent" to minisUA)), okFake.sentHeaders,
@@ -239,8 +221,6 @@ class KimiCodeQuotaTest {
     }
 
     @Test fun `the real UA is Minis's own, never a Kimi or other client identity`() {
-        // Android-only check (iOS relies on URLSession's default UA): the
-        // production provider is the app's branded MinisUserAgent.
         val src = ProductionSources.read("quota/QuotaAdapters.kt")
         val adapter = src.substringAfter("object KimiCodeQuotaAdapter").substringBefore("object QuotaResponseShape")
         assertTrue(adapter.contains("internal var userAgent: () -> String = { com.openminis.app.provider.MinisUserAgent.DEFAULT }"))
@@ -252,7 +232,6 @@ class KimiCodeQuotaTest {
         assertTrue(ua.contains("\"Minis/\${BuildConfig.VERSION_NAME} (Android \$release; \$model)\""))
     }
 
-    // ── B. Vendor routing ───────────────────────────────────────────────────
 
     private fun cap(d: QuotaInstanceDescriptor) = QuotaAdapterRegistry.adapter(d).capability(d)
 
@@ -301,7 +280,6 @@ class KimiCodeQuotaTest {
         )
     }
 
-    // ── B. Console links ────────────────────────────────────────────────────
 
     @Test fun `console links`() {
         fun link(d: QuotaInstanceDescriptor) = QuotaConsoleLink.url(d)
@@ -324,7 +302,6 @@ class KimiCodeQuotaTest {
         )
     }
 
-    // ── C. Store wiring (source) ────────────────────────────────────────────
 
     private val store = ProductionSources.read("quota/QuotaStore.kt")
 
@@ -359,7 +336,6 @@ class KimiCodeQuotaTest {
         )
     }
 
-    // ── Android-only additions ──────────────────────────────────────────────
 
     @Test fun `DEV_TOOLS is a compile-time false in release, so the override cannot run there`() {
         val gradle = java.io.File(ProductionSources.mainRoot()!!.path.substringBefore("/src/main/") + "/build.gradle.kts").readText()

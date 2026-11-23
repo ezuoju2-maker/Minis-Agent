@@ -53,45 +53,19 @@ import com.openminis.app.data.repository.ProviderRepository
 import com.openminis.app.provider.effectiveMaxThinkingLevel
 import com.openminis.app.tools.AgentToolSwitch
 
-/** [T-sub-agents-v1] Sentinel id for a definition being created. */
 internal const val DRAFT_AGENT_ID = "__new__"
 
-/**
- * [T-sub-agents-v1] Settings › Sub Agents — the roster the main model delegates
- * to by name.
- *
- * Port of iOS HelperSettingsView. The list is the disclosure order the model
- * sees, and the built-in is always first and cannot be deleted, so the roster
- * can never be empty — `subagent_task.agent` always has at least one valid
- * value.
- */
 @Composable
 fun SubAgentsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
     val context = LocalContext.current
     val repo = remember { (context.applicationContext as MinisApp).providerRepository }
-    // Re-read on every recomposition rather than caching: an edit made on the
-    // detail screen must be visible on the way back, and the roster is bounded
-    // at 10 so re-normalising is free.
     var generation by remember { mutableStateOf(0) }
     val roster = remember(generation) { repo.subAgents }
 
-    // [T-android-subagent-settings-parity] This page OWNS the agents switch,
-    // matching iOS HelperSettingsView: one place to look, no cross-reference to
-    // keep in sync with Settings > Tools.
     var agentsEnabled by remember { mutableStateOf(AgentToolSwitch.AGENTS.isEnabled(context)) }
 
     SettingsScaffold(title = stringResource(R.string.sub_agents_title), onBack = onBack) {
         SettingsSection(footer = stringResource(R.string.agent_settings_allow_footer)) {
-            // Local title row rather than SettingsSwitchRow, because this row
-            // carries a SECOND line — the tool's wire name — under the title,
-            // and that component's `title` is a plain String with no slot for
-            // it. Everything else (metrics, colours, the switch) matches what
-            // SettingsRow/SettingsSwitchRow produce, so the card still reads as
-            // one of the standard rows.
-            //
-            // [T-android-subagent-exp-badge] It was originally local to seat an
-            // "Exp" badge inline with the title; that badge is gone, but the
-            // second line still keeps it local.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -103,17 +77,11 @@ fun SubAgentsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    // [T-android-subagent-exp-badge] The title stands alone now.
-                    // The Row and its Spacer existed only to seat an "Exp" chip
-                    // beside it; sub agents ship on by default, so the chip and
-                    // its wrapper are gone rather than left as an empty layer.
                     Text(
                         stringResource(R.string.sub_agents_title),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
-                    // The tool's wire name, as iOS shows it: the reader can
-                    // match what they see here against a transcript.
                     Text(
                         SubAgentDefinition.TOOL_NAME,
                         style = MaterialTheme.typography.bodySmall,
@@ -131,9 +99,6 @@ fun SubAgentsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                 )
             }
         }
-        // Dimmed but still editable when the switch is off: off means "not
-        // offered to the model", not "cannot be configured" — the same rule the
-        // other tool switches follow. Matches iOS's .opacity(enabled ? 1 : 0.5).
         Column(Modifier.alpha(if (agentsEnabled) 1f else 0.5f)) {
         SettingsSection(
             header = stringResource(R.string.sub_agents_list_header),
@@ -152,16 +117,6 @@ fun SubAgentsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                             showDivider = i < roster.lastIndex,
                         )
                     }
-                    // [T-android-subagent-settings-parity] Order IS meaningful:
-                    // it is the order the roster is disclosed to the model, so
-                    // iOS exposes drag-to-reorder. Up/down buttons instead of a
-                    // drag handle because this screen is a plain settings list,
-                    // not the reorderable LazyColumn Model Groups is built on —
-                    // the capability is what matters, and the repo API
-                    // (reorderSubAgents) already existed with no caller.
-                    //
-                    // The built-in is pinned to index 0 by normalize(), so it
-                    // can neither move nor be displaced by the row below it.
                     if (roster.size > 1 && !def.isBuiltIn) {
                         IconButton(
                             onClick = { move(repo, roster, i, i - 1); generation++ },
@@ -192,12 +147,6 @@ fun SubAgentsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                     value = "",
                     icon = Icons.Default.Add,
                     onClick = {
-                        // [T-sub-agents-v1] Nothing is persisted yet: a
-                        // nameless definition is dropped by normalize (the name
-                        // is the tool schema's enum value), so writing one here
-                        // and reading the roster back would lose the row the
-                        // editor is about to open. The editor persists on the
-                        // first valid save instead.
                         onOpen(DRAFT_AGENT_ID)
                     },
                     showDivider = false,
@@ -217,14 +166,6 @@ fun SubAgentsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
     }
 }
 
-/**
- * [T-sub-agents-v1] One definition's editor.
- *
- * The built-in's name and description are read-only: they are the tool-schema
- * enum value and the roster text the model reads, and both are canonical
- * English restored on every load. Its model and instructions ARE editable —
- * those are the user's own choices.
- */
 @Composable
 fun SubAgentDetailScreen(agentId: String, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -238,7 +179,6 @@ fun SubAgentDetailScreen(agentId: String, onBack: () -> Unit) {
         }
     }
     if (original == null) {
-        // Deleted from another screen while this one was open.
         SettingsScaffold(title = stringResource(R.string.sub_agents_title), onBack = onBack) {}
         return
     }
@@ -256,7 +196,6 @@ fun SubAgentDetailScreen(agentId: String, onBack: () -> Unit) {
 
     fun persist() {
         if (original.isBuiltIn) {
-            // Name and description are fixed; only the user's own fields move.
             repo.upsertSubAgent(
                 original.copy(
                     instructions = instructions,
@@ -269,8 +208,6 @@ fun SubAgentDetailScreen(agentId: String, onBack: () -> Unit) {
         }
         val trimmed = name.trim()
         if (trimmed.isEmpty()) { error = nameRequired; return }
-        // The name is an identifier the model emits, so a duplicate would make
-        // resolution ambiguous — first match wins and the user cannot tell why.
         val clash = repo.subAgents.any {
             it.id != original.id && SubAgentRoster.nameKey(it.name) == SubAgentRoster.nameKey(trimmed)
         }
@@ -327,11 +264,6 @@ fun SubAgentDetailScreen(agentId: String, onBack: () -> Unit) {
             }
         }
 
-        // [T-android-subagent-settings-parity] Two footers, as iOS has: the
-        // built-in's instructions are the default for EVERY delegation that
-        // names no agent, while a custom agent's apply only to itself. Without
-        // saying so, a user would reasonably read the built-in's box as a
-        // global prefix — it deliberately is not.
         SettingsSection(
             footer = stringResource(
                 if (original.isBuiltIn) R.string.sub_agent_instructions_footer_builtin
@@ -369,8 +301,6 @@ fun SubAgentDetailScreen(agentId: String, onBack: () -> Unit) {
             }
         }
 
-        // [T-subagent-thinking-override] Same shape as a Model Group's Session
-        // Defaults: a switch for "set one at all", then an intensity picker.
         SettingsSection(
             header = stringResource(R.string.sub_agent_reasoning),
             footer = stringResource(
@@ -391,11 +321,6 @@ fun SubAgentDetailScreen(agentId: String, onBack: () -> Unit) {
                 showDivider = on,
             )
             if (on) {
-                // Ceiling from the pinned group's reasoning-capable members,
-                // derived as ModelGroupDetailScreen derives it so the two lists
-                // agree. On Auto there is no group to ask — the delegating model
-                // picks one per task — so every tier is offered and the request
-                // path clamps per model as it already does.
                 val entries = remember { repo.config.value.modelEntries.toList() }
                 val ceiling = remember(groupId, entries) {
                     val members = groupId?.let { gid -> groups.find { it.id == gid } }?.memberEntryIds
@@ -429,25 +354,6 @@ fun SubAgentDetailScreen(agentId: String, onBack: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 6.dp),
                     )
-                    // [T-android-thinking-segment-overflow] Six segments do not
-                    // fit a phone's width with Material3's defaults: each
-                    // SegmentedButton reserves an icon slot for the selected
-                    // check plus its own horizontal padding, leaving so little
-                    // room for the label that "Medium" wrapped to "Medi/um" and
-                    // "XHigh" to "XHig/h" — the labels visibly broke mid-word
-                    // and spilled past their segments.
-                    //
-                    // Two changes, both about giving the text the width:
-                    //   - drop the icon slot (`icon = {}`) — the selected
-                    //     segment is already filled, so the check was spending
-                    //     ~24dp per segment to repeat what the fill says;
-                    //   - a 10sp label with maxLines=1 and softWrap=false, so
-                    //     the text can never break mid-word again. Six segments
-                    //     leave ~55dp each, and labelSmall's 11sp still made
-                    //     "Medium" the widest thing in the row.
-                    //
-                    // SegmentedButton takes no contentPadding in this Material3
-                    // version, so the width has to come from the label itself.
                     SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                         cases.forEachIndexed { idx, (level, label) ->
                             SegmentedButton(
@@ -461,9 +367,6 @@ fun SubAgentDetailScreen(agentId: String, onBack: () -> Unit) {
                             ) {
                                 Text(
                                     label,
-                                    // One size below labelSmall: six segments on a phone leave
-                                    // ~55dp each, and labelSmall's 11sp still made
-                                    // "Medium" the widest thing in the row.
                                     fontSize = 10.sp,
                                     lineHeight = 12.sp,
                                     maxLines = 1,
@@ -490,16 +393,6 @@ fun SubAgentDetailScreen(agentId: String, onBack: () -> Unit) {
     }
 }
 
-/**
- * [T-android-subagent-settings-parity] `count/limit` under a bounded field,
- * as iOS shows.
- *
- * These limits are not arbitrary: the roster goes into the main conversation's
- * system prompt on EVERY turn, so description length is a recurring per-request
- * cost. Silently truncating at the limit (which onValueChange already does)
- * leaves the user wondering where their text went; showing the count is what
- * makes the ceiling legible before they hit it.
- */
 @Composable
 private fun FieldCounter(count: Int, limit: Int) {
     Text(
@@ -511,14 +404,6 @@ private fun FieldCounter(count: Int, limit: Int) {
     )
 }
 
-/**
- * [T-android-subagent-settings-parity] Swap two roster entries and persist.
- *
- * Guarded rather than trusting the caller's enabled-state: index 0 is the
- * built-in, which normalize() pins to the front, so a move that would displace
- * it is silently a no-op instead of a write the loader would undo on the next
- * read.
- */
 private fun move(
     repo: ProviderRepository,
     roster: List<SubAgentDefinition>,
@@ -532,17 +417,6 @@ private fun move(
     repo.reorderSubAgents(ids)
 }
 
-/**
- * [T-android-subagent-page-parity] One roster row, laid out like iOS's.
- *
- * `SettingsValueRow` cannot express this: iOS puts a "Built-in" chip INLINE
- * with the name (so the undeletable entry is identifiable at a glance) and
- * stacks the model label as a third line under the description, rather than
- * putting it on the right where a value normally goes. Android was rendering
- * the model as a trailing value and dropping the chip entirely, so the
- * built-in looked like any other row until you opened it and found the name
- * field read-only.
- */
 @Composable
 private fun SubAgentRosterRow(
     name: String,
@@ -579,12 +453,6 @@ private fun SubAgentRosterRow(
                 Text(
                     stringResource(R.string.sub_agent_builtin_badge),
                     fontSize = 10.sp,
-                    // [T-android-settings-chip-height] A chip should hug its
-                    // text. `vertical = 1.dp` already said so, but a Compose
-                    // Text carries includeFontPadding plus the font's own line
-                    // spacing, so a 10sp label occupied noticeably more than
-                    // 10sp and the pill read as a button. lineHeight pins the
-                    // box to the glyph; the padding is what remains visible.
                     lineHeight = 11.sp,
                     style = LocalTextStyle.current.copy(
                         platformStyle = PlatformTextStyle(includeFontPadding = false),

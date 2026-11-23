@@ -9,12 +9,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-md-inline-html] Round 2: one-line previews (session list, search snippet,
- * skill subtitle, scheduled task, read-aloud) treat the tag whitelist the way
- * the renderer does, and the three ways to show a tag literally - code, a
- * backslash, an entity - work the same on screen, in previews and in copy.
- */
 class InlineHtmlPreviewTest {
 
     private fun strip(s: String) = InlineHtmlTags.stripForPreview(s)
@@ -23,7 +17,6 @@ class InlineHtmlPreviewTest {
 
     private fun preview(text: String) = ChatRepository.extractTextPreview(parts(text))
 
-    // ── the preview stripper ───────────────────────────────────────────────
 
     @Test
     fun `br is a space and whitelisted tags go, open or close`() {
@@ -31,7 +24,6 @@ class InlineHtmlPreviewTest {
         assertEquals("a b c d", strip("a<br/>b<BR />c<br >d"))
         assertEquals("粗 斜下 删", strip("<b>粗</b> <i>斜</i><u>下</u> <s>删</s>"))
         assertEquals("H2O x2 code", strip("H<sub>2</sub>O x<sup>2</sup> <code>code</code>"))
-        // Open or close alone are removed too - a preview has no pairing to wait for.
         assertEquals("半截", strip("<b>半截"))
         assertEquals("x", strip("x</strong>"))
         assertEquals("a b ", strip("<strong>a</strong> <em>b</em> <del>"))
@@ -56,9 +48,7 @@ class InlineHtmlPreviewTest {
         assertEquals("前 \n```html\na<br><b>b</b>\n```\n后粗", strip(fenced))
         val tilde = "~~~\n<br>\n~~~\n<br>"
         assertEquals("~~~\n<br>\n~~~\n ", strip(tilde))
-        // An indented code block: after a blank line, four spaces or a tab.
         assertEquals("p\n\n    a<br>b\n\tc<b>d</b>\nq ", strip("p\n\n    a<br>b\n\tc<b>d</b>\nq<br>"))
-        // Four spaces continuing a paragraph are not code.
         assertEquals("p\n    a b", strip("p\n    a<br>b"))
     }
 
@@ -71,7 +61,6 @@ class InlineHtmlPreviewTest {
         assertEquals("<br>", strip("&#60;br&#x3E;"))
         assertEquals("a & b", strip("a &amp; b"))
         assertEquals("&unknown; &", strip("&unknown; &"))
-        // An entity inside code stays as written.
         assertEquals("`&lt;br&gt;`", strip("`&lt;br&gt;`"))
     }
 
@@ -81,7 +70,6 @@ class InlineHtmlPreviewTest {
         assertTrue(strip(s) === s)
     }
 
-    // ── the surfaces that use it ───────────────────────────────────────────
 
     @Test
     fun `session list preview`() {
@@ -96,13 +84,11 @@ class InlineHtmlPreviewTest {
     fun `search snippet`() {
         val json = parts("前言\n结果是 <b>重点</b><br>下一句")
         assertEquals("结果是 重点 下一句", SessionSearch.searchSnippet(json, listOf("重点")))
-        // A search for the tag itself still finds its line in the raw text.
         assertTrue(SessionSearch.searchSnippet(json, listOf("<b>"))!!.contains("<b>"))
         val code = parts("```\nx<br>y 命中\n```")
         assertTrue(SessionSearch.searchSnippet(code, listOf("命中"))!!.contains("x<br>y"))
     }
 
-    // ── the same three literal forms on screen and in copy ─────────────────
 
     @Test
     fun `renderer shows the literal forms literally`() {

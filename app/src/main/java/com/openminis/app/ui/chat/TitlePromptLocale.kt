@@ -2,30 +2,9 @@ package com.openminis.app.ui.chat
 
 import java.util.Locale
 
-/**
- * Shared system prompt for session title generation. Used by BOTH the auto
- * path (ChatViewModel.generateSessionTitleIfNeeded) and the manual Regenerate
- * path (SessionListViewModel.regenerateTitle) so the two never drift. Matches
- * iOS callSubModelForTitle's system prompt verbatim.
- *
- * Callers pass this as the bare `systemPrompt`; for OAuth Anthropic instances
- * AnthropicProvider.resolveSystemPrompt force-prepends the Claude Code prefix
- * block at the provider layer (and strips a caller-supplied one), so callers
- * do NOT need to prepend it themselves.
- */
 internal const val TITLE_GEN_SYSTEM_PROMPT: String =
     "You generate concise titles for conversations. You MUST respond with a single valid JSON object: {\"title\": \"...\", \"category\": \"...\"}. No other text."
 
-/**
- * Build the bilingual language directive appended to the title-generation
- * user prompt so the model produces a title in the user's UI language even
- * when the conversation contents are in another language.
- *
- * Resolution: `Locale.getDefault()` — the app does not currently expose an
- * in-app language override. If parsing the locale ever fails, falls back to
- * "en" / "English" rather than throwing, so title generation never breaks
- * over a malformed locale.
- */
 internal fun titleLanguageDirective(locale: Locale = Locale.getDefault()): String {
     val (code, human) = resolveTitleLanguageCode(locale)
     return buildString {
@@ -42,8 +21,6 @@ internal fun titleLanguageDirective(locale: Locale = Locale.getDefault()): Strin
 private fun resolveTitleLanguageCode(locale: Locale): Pair<String, String> {
     return try {
         val lang = locale.language.takeIf { it.isNotEmpty() } ?: return "en" to "English"
-        // Distinguish Simplified vs Traditional Chinese — both render as "zh"
-        // bare, but title style differs meaningfully between them.
         if (lang == "zh") {
             val script = locale.script
             val region = locale.country

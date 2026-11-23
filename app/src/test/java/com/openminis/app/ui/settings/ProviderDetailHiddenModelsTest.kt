@@ -7,15 +7,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-android-hidden-models-group] (#462 / #442) The provider detail screen
- * lists only visible models; hidden ones sit in a collapsible "Hidden models
- * (N)" group at the bottom, where each can be shown again or deleted. Delete
- * is offered for every model, not only custom ones, as on iOS.
- *
- * Source guard: a Compose test would need the whole SettingsScaffold and a
- * ProviderRepository for what is list selection plus one menu condition.
- */
 class ProviderDetailHiddenModelsTest {
 
     private val src = File("src/main/java/com/openminis/app/ui/settings/ProviderDetailScreen.kt").readText()
@@ -30,7 +21,6 @@ class ProviderDetailHiddenModelsTest {
         assertTrue(models.contains("R.string.provider_detail_hidden_models_group, hiddenEntries.size"))
         assertTrue("hidden rows only when expanded", models.contains("if (hiddenExpanded) {"))
         assertTrue(models.contains("hiddenEntries.forEachIndexed"))
-        // Folded per provider: opening another provider starts collapsed.
         assertTrue(src.contains("var hiddenExpanded by remember(instanceId) { mutableStateOf(false) }"))
     }
 

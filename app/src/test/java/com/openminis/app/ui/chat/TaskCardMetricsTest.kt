@@ -5,11 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-sched-card-metrics] The scheduled-task card and the sub-agent card share
- * one skeleton (TaskCardFrame), so their height and inner metrics match and
- * cannot drift apart again.
- */
 class TaskCardMetricsTest {
 
     private val scheduled = ProductionSources.read("ui/chat/ScheduledTaskCard.kt")
@@ -33,7 +28,6 @@ class TaskCardMetricsTest {
         assertFalse("a TextButton (40dp min height) made the card tall", card.contains("TextButton("))
         assertTrue("cancel is a 24dp disc in the action slot", card.contains("TaskCardActionDisc("))
         assertTrue("with an accessible label", card.contains("label = cancelLabel"))
-        // The status line is always present and fixed-height, like the helper's.
         assertTrue(card.contains("                subline,"))
         assertTrue(card.contains("lineHeight = TaskCardMetrics.subtitleLineHeight"))
         assertTrue(card.contains("maxLines = 1"))
@@ -52,8 +46,6 @@ class TaskCardMetricsTest {
 
     @Test
     fun `rows use a measured CJK minimum height, never a fixed height that clips`() {
-        // A fixed row height clipped the top of CJK glyphs on a Pixel 4a; a
-        // CJK line is taller than a Latin one at the same lineHeight.
         assertTrue(frame.contains("measurer.measure(\"\\u56FDAg\", style, maxLines = 1)"))
         assertTrue(frame.contains("Modifier.heightIn(min = maxOf(title, chip))"))
         assertTrue(frame.contains("Modifier.heightIn(min = h)"))

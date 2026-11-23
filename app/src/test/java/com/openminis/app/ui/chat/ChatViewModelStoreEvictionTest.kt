@@ -4,22 +4,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-android-vm-store-leak] ChatViewModelStore is a process-level cache that
- * had no bound and only one eviction path — release(), called solely when a
- * session is DELETED. Navigating away never dropped anything, so every session
- * opened in a process lifetime stayed resident with its agent history and
- * rendered rows.
- *
- * A device log over ~3 hours recorded ten allocations and zero releases; heap
- * climbed 5% -> 85% of a 512MB cap and RSS to 3.3GB, after which almost every
- * allocation hit a blocking GC (~230/min, 1.4s stalls, 149-frame drops, hot
- * phone).
- *
- * The store is an Android-runtime object this JVM test cannot instantiate, so
- * these pin the invariants as source facts — enough to fail the build if the
- * bound or its two carve-outs are dropped.
- */
 class ChatViewModelStoreEvictionTest {
 
     private val src: String by lazy {
@@ -59,9 +43,6 @@ class ChatViewModelStoreEvictionTest {
 
     @Test
     fun `a streaming session is never evicted`() {
-        // Clearing a busy session's store cancels viewModelScope and kills the
-        // agent loop mid-flight — precisely what this cache exists to prevent.
-        // The cap is therefore soft: it may be exceeded rather than break a run.
         assertTrue(
             "trim must consult SessionActivityTracker.activeSessions",
             src.contains("SessionActivityTracker.activeSessions"),

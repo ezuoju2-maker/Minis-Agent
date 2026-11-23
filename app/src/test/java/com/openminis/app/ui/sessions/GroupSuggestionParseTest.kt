@@ -6,14 +6,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-group-ai-suggest] Unit tests for the "✨ AI Suggest" reply parser.
- *
- * This is the part of the feature that meets untrusted model output, and the
- * iOS original accumulated its rules from real failures (a "merge" naming a
- * folder that never existed, JSON wrapped in prose, duplicate folder names).
- * Each of those is pinned here so the Android port cannot regress past them.
- */
 class GroupSuggestionParseTest {
 
     private fun folder(id: String, name: String, updatedAt: Long = 0L) = FolderEntity(
@@ -48,8 +40,6 @@ class GroupSuggestionParseTest {
 
     @Test
     fun `duplicate folder names tie-break on most recently updated`() {
-        // Two devices each created "Work" offline — both rows survive, so the
-        // merge must land on a predictable one rather than list order.
         val dupes = listOf(
             folder("f-old", "Work", updatedAt = 10L),
             folder("f-new", "Work", updatedAt = 999L),
@@ -63,8 +53,6 @@ class GroupSuggestionParseTest {
 
     @Test
     fun `merge naming a nonexistent folder degrades to create`() {
-        // iOS behaviour: never invent a membership, but still hand the user a
-        // one-tap path with the model's string prefilled.
         val r = SessionListViewModel.parseGroupSuggestion(
             """{"decision": "merge", "folder": "Nonexistent"}""",
             folders,
@@ -138,8 +126,6 @@ class GroupSuggestionParseTest {
 
     @Test
     fun `truncated json yields null instead of throwing`() {
-        // A reasoning model that burns its budget mid-emit produces exactly
-        // this; it must degrade to "failed — try again", never crash.
         val r = SessionListViewModel.parseGroupSuggestion(
             """{"decision": "create", "name": "Tra""",
             folders,

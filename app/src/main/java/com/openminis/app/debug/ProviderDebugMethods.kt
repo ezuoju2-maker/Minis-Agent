@@ -9,29 +9,11 @@ import com.openminis.app.data.repository.ProviderRepository
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Read-only `provider.*` and `provider.groups.*` RPC handlers — Phase 1.
- *
- * Mirrors the read shape from `docs/debug-server-api.md`. Mutation handlers
- * (`provider.instances.create/update/delete/test`, `provider.models.*`,
- * `provider.groups.create/update/delete/setDefault`) land in Phase 2.
- *
- * Field naming is kept 1:1 with the iOS docs so the same automation scripts
- * work cross-platform; Android-only fields that have no iOS analogue (e.g.
- * `useResponsesAPI` on a single instance) are surfaced inline.
- */
 internal object ProviderDebugMethods {
 
     private fun repo(context: Context): ProviderRepository {
         val app = context.applicationContext as? MinisApp
             ?: throw RPCException(-32000, "MinisApp not initialized")
-        // Force the lazy load HERE, once, for every provider.* handler. These
-        // handlers read `config.value` directly, and ProviderRepository loads
-        // config lazily on first mutation/access — so on a cold process (app
-        // just launched, user still on the session list) every read returned
-        // an empty config. `provider.instances.list` answering `count: 0` for
-        // a device with 20 configured providers looks exactly like data loss,
-        // which is a far worse failure than a slow first call.
         app.providerRepository.ensureConfigLoaded()
         return app.providerRepository
     }
@@ -45,9 +27,6 @@ internal object ProviderDebugMethods {
     }
 
     private fun typeSpec(type: ProviderType): JSONObject {
-        // Cross-reference iOS doc shape. Some fields don't have a direct
-        // Android equivalent and are reported as null/absent rather than
-        // synthesized — keeps "what's missing" honest for callers.
         val supportedCreds = JSONArray().apply {
             put("apiKey")
             if (type == ProviderType.anthropic || type == ProviderType.openAI) put("oauth")
@@ -55,11 +34,6 @@ internal object ProviderDebugMethods {
         val builtInIds = JSONArray()
         for (m in type.builtInModels) builtInIds.put(m.id)
 
-        // T192: Anthropic now supports custom base URL too (Anthropic-
-        // compatible endpoints like DeepSeek-anthropic, Bailian-anthropic).
-        // iOS LLMProviderFactory.makeAnthropicProvider has always allowed
-        // this — Android was the only platform reporting the field as
-        // unsupported via RPC `provider.types`.
         val customBaseSupported = type == ProviderType.openAI || type == ProviderType.anthropic
         return JSONObject().apply {
             put("id", type.name)
@@ -85,8 +59,6 @@ internal object ProviderDebugMethods {
         ProviderType.xAI -> "https://api.x.ai/v1"
         ProviderType.kimiCode -> "https://api.kimi.com/coding/v1"
         ProviderType.githubCopilot -> com.openminis.app.auth.CopilotDeviceFlow.API_BASE
-        // [T-android-provider-type-parity] Responses API shares the OpenAI
-        // host; undrivable types have no canonical base to report.
         ProviderType.openAIResponses -> "https://api.openai.com"
         ProviderType.workBuddy -> com.openminis.app.auth.WorkBuddyApi.DOMESTIC_BACKEND
         ProviderType.qoder -> com.openminis.app.auth.QoderApi.DEFAULT_CHAT_BASE
@@ -101,9 +73,6 @@ internal object ProviderDebugMethods {
         val arr = JSONArray()
         for (inst in cfg.instances) {
             if (!includeDisabled && !inst.isEnabled) continue
-            // [T-empty-key-compat-endpoints] Mirror what routing sees:
-            // usableApiKey returns "" (usable) for keyless third-party
-            // compatible endpoints, null only when genuinely unusable.
             val hasKey = repo.usableApiKey(inst) != null
             val entryCount = cfg.modelEntries.count { it.providerInstanceId == inst.id }
             arr.put(JSONObject().apply {
@@ -115,8 +84,6 @@ internal object ProviderDebugMethods {
                 put("customBaseURL", inst.customBaseURL ?: JSONObject.NULL)
                 put("appendV1Suffix", inst.appendV1Suffix)
                 put("useResponsesAPI", inst.useResponsesAPI)
-                // [GH#68] Surface the image-endpoint picker state so harnesses
-                // can verify persistence across restarts.
                 put("imageEndpointMode", inst.imageEndpointMode.name)
                 put("imageEndpointResolved", inst.imageEndpointResolved?.name ?: JSONObject.NULL)
                 put("customUserAgent", inst.customUserAgent ?: JSONObject.NULL)
@@ -170,13 +137,6 @@ internal object ProviderDebugMethods {
         }
     }
 
-    /**
-     * Export a provider instance + its model entries + stored credential as a
-     * portable JSON document. Mirrors the UI Share button. The API key is
-     * base64-wrapped (same as ProviderRepository.exportInstanceJSON) — that's
-     * to survive JSON-string escaping of arbitrary key bytes, not for
-     * security; callers of the 5321 RPC are trusted by definition.
-     */
     fun export(context: Context, params: JSONObject): JSONObject {
         val instanceId = params.optString("instanceId", "").ifEmpty {
             throw RPCException(-32602, "Missing 'instanceId' param")
@@ -186,8 +146,6 @@ internal object ProviderDebugMethods {
             ?: throw RPCException(-32602, "Instance not found: $instanceId")
         val raw = repo.exportInstanceJSON(instanceId)
             ?: throw RPCException(-32000, "Export failed for instance $instanceId")
-        // Wrap the underlying JSON document under a versioned envelope so
-        // forward-compatible importers can detect the schema explicitly.
         val payload = JSONObject(raw)
         return JSONObject().apply {
             put("version", 1)
@@ -199,17 +157,7 @@ internal object ProviderDebugMethods {
         }
     }
 
-    /**
-     * Import a provider instance from an export envelope (or the raw inner
-     * config JSON, for cross-platform compatibility). The implementation
-     * always allocates a new instance UUID — duplicate label is auto-renamed
-     * by the repository.
-     */
     fun import(context: Context, params: JSONObject): JSONObject {
-        // Accept either the new envelope (`{version,config:{...}}`) or the
-        // raw legacy config JSON. Be liberal on input — the export contract
-        // is symmetric on the value side, and harnesses that capture from
-        // older builds should still load.
         val raw = params.optString("configJson", "").ifEmpty {
             throw RPCException(-32602, "Missing 'configJson' param")
         }
@@ -224,7 +172,6 @@ internal object ProviderDebugMethods {
         val repo = repo(context)
         val resolvedLabel = repo.importInstanceJSON(configJson)
             ?: throw RPCException(-32000, "Import failed — invalid or unsupported configJson")
-        // Find the freshly-created instance so we can return its id.
         val newInstance = repo.config.value.instances.lastOrNull { it.label == resolvedLabel }
             ?: throw RPCException(-32000, "Import succeeded but instance lookup failed")
         return JSONObject().apply {
@@ -256,11 +203,6 @@ internal object ProviderDebugMethods {
             if (includeMembers) {
                 val members = JSONArray()
                 for (memberId in group.memberEntryIds) {
-                    // SystemVoiceEntries fallback: the default voice groups are
-                    // seeded with "__builtin_system_speech__/…" members that are
-                    // synthesized on demand and never stored in modelEntries, so
-                    // matching modelEntries alone reported `members: []` for both
-                    // voice groups while memberEntryIds listed two.
                     val entry = cfg.modelEntries.find { it.id == memberId }
                         ?: com.openminis.app.data.model.SystemVoiceEntries.resolve(memberId)
                         ?: continue
@@ -283,22 +225,6 @@ internal object ProviderDebugMethods {
         }
     }
 
-    /**
-     * [T-android-debug-quicktest] `provider.quickTest` — run the UI Quick Test
-     * sheet's checks headlessly. Port of the iOS debug server's
-     * `debug.providers.quickTest`, which Android lacked: verifying that N voice
-     * models actually synthesize or transcribe otherwise meant N manual trips
-     * through the picker, and there was no way to regression-test a fleet of
-     * ASR/TTS providers at all.
-     *
-     * Calls the SAME `performTest` the sheet calls (made internal for this),
-     * rather than reimplementing the probes — a second copy would drift and
-     * then "passes over RPC, fails in the app" becomes possible.
-     *
-     * Audio/image payloads are reported as byte counts, not base64 blobs: the
-     * question this answers is "did it produce output", and a 200KB WAV per
-     * model would swamp a fleet run.
-     */
     suspend fun quickTest(context: Context, params: JSONObject): JSONObject {
         val entryId = params.optString("entryId")
         if (entryId.isEmpty()) throw RPCException(-32602, "Invalid params: 'entryId' is required")

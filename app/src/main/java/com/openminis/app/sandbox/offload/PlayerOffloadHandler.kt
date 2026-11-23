@@ -5,24 +5,9 @@ import com.openminis.app.sandbox.NativeOffloadHandler
 import com.openminis.app.sandbox.NativeOffloadRequest
 import com.openminis.app.sandbox.NativeOffloadResult
 
-/**
- * android-player — control audio playback.
- *
- * Usage:
- *   android-player play <session> <path>
- *   android-player pause <session>
- *   android-player resume <session>
- *   android-player seek <session> <position_ms>
- *   android-player stop <session>
- *   android-player status <session>
- *   android-player list
- */
 class PlayerOffloadHandler : NativeOffloadHandler {
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
         val args = OffloadArgs(request.argv.drop(1))
-        // [T-offload-defaults-batch-android] Help only on explicit
-        // --help/-h; no subcommand defaults to `list` (NOT `status`, which
-        // requires a <session> id and would exit 2 with zero args).
         if (args.hasFlag("h", "help")) {
             return NativeOffloadResult(0, HELP)
         }

@@ -24,31 +24,6 @@ import androidx.compose.ui.unit.dp
 import com.openminis.app.R
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * [T-copilot-disclaimer] Risk notice shown BEFORE the GitHub Device Flow can
- * start. Cancelling returns without any network call being made.
- *
- * This is a gate, not a banner: the caller opens it instead of beginning
- * sign-in, and only [onAccept] starts the flow. Keeping the two actions that
- * far apart is deliberate — a notice the user can scroll past while the login
- * is already running would be decoration.
- *
- * [T-android-copilot-disclaimer-parity] The body is iOS's notice, point for
- * point and in the same order: unofficial status, borrowed client identity,
- * access may be withdrawn, account-termination risk, not for work accounts,
- * where the token goes, and the as-is clause.
- *
- * Each risk is its own bullet rather than a paragraph of prose. They differ in
- * KIND — one is about provenance, one about your account, one about your data —
- * and a reader skimming a block of small grey text takes none of them in. That
- * is iOS's reasoning and it applies unchanged here; Android previously ran the
- * same content together as three paragraphs and omitted the as-is clause
- * entirely.
- *
- * Scrollable because the text overflows a small screen, and a truncated
- * disclaimer is worse than none: the points most worth reading (account risk,
- * not for org accounts) sit in the middle and at the end.
- */
 @Composable
 fun CopilotDisclaimerDialog(
     onAccept: () -> Unit,
@@ -88,7 +63,6 @@ fun CopilotDisclaimerDialog(
     )
 }
 
-/** The notice, in iOS's order. */
 private val disclaimerPoints = listOf(
     R.string.copilot_disclaimer_p1,
     R.string.copilot_disclaimer_p2,
@@ -99,7 +73,6 @@ private val disclaimerPoints = listOf(
     R.string.copilot_disclaimer_p7,
 )
 
-/** One bullet of the notice — mirrors iOS `disclaimerPoint`. */
 @Composable
 private fun DisclaimerBullet(text: String) {
     Row(verticalAlignment = Alignment.Top) {

@@ -6,20 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-freeze-edge-flash-regress] A streamed table rendered, then for one
- * parse went back to raw `|---|` pipes the moment its last row landed (Pixel 6
- * recording 2026-10-18: every freeze edge logged `FreezeEdge paint=preview`).
- *
- * UsageTapBandRowScope (#414) wrapped the reply's last row in a Box and passed
- * every other row through bare. The streaming tail flips isLastRow at the same
- * instant its fragment freezes, so the row's content changed group, Compose
- * rebuilt the MarkdownBlock, and its live-parse carry-over (the guard against
- * exactly this flash) was thrown away with it.
- *
- * The group shape cannot be checked without a device; this pins it: one
- * `content()` call site, no branch or early return in front of it.
- */
 class UsageTapBandRowShapeTest {
     private val body by lazy {
         File("src/main/java/com/openminis/app/ui/chat/UsageTapBand.kt").readText()

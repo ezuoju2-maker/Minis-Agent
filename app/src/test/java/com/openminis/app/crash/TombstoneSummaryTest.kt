@@ -7,13 +7,6 @@ import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
-/**
- * [GH #453] The exitinfo tombstone summary. The protobuf here is built by hand
- * with tombstone.proto's field numbers (Tombstone.pid 5, tid 6, abort_message
- * 14, threads 16 as map entries {key 1, value 2 -> Thread{id 1, name 2}},
- * memory_mappings 17, open_fds 19), so the test pins the numbers the parser
- * relies on.
- */
 class TombstoneSummaryTest {
 
     private class Proto {
@@ -30,7 +23,7 @@ class TombstoneSummaryTest {
 
     private fun tombstone(threadNames: List<String>, maps: Int, fds: Int, abort: String? = "Scudo ERROR: internal map failure"): ByteArray =
         Proto().apply {
-            u(1, 2) // arch
+            u(1, 2)
             str(2, "Xiaomi/popsicle/popsicle:16/BP2A/...")
             u(5, 488); u(6, 9001); u(7, 10428)
             str(9, "com.openminis.app")
@@ -41,7 +34,6 @@ class TombstoneSummaryTest {
                     msg(2) {
                         u(1, 9000L + i)
                         str(2, n)
-                        // A register and a backtrace frame, so the name is not the last field.
                         msg(3) { str(1, "x0"); u(2, 0x1234) }
                         msg(4) { u(1, 0x70000000); str(4, "libc.so") }
                         fixed64(6)
@@ -97,7 +89,7 @@ class TombstoneSummaryTest {
     }
 
     @Test fun `garbage is reported as not summarised and the raw head is still complete`() {
-        val junk = ByteArray(300_000) { (it * 31 + 7).toByte() }.also { it[0] = 0x0F } // wire type 7 straight away
+        val junk = ByteArray(300_000) { (it * 31 + 7).toByte() }.also { it[0] = 0x0F }
         val r = TombstoneSummary.read(ByteArrayInputStream(junk), 256 * 1024)
         assertTrue(r.summary, r.summary.startsWith("(not summarised"))
         assertArrayEquals(junk.copyOf(256 * 1024), r.head)

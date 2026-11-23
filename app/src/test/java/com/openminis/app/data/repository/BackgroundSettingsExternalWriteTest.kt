@@ -9,11 +9,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
-/**
- * `minis-config set background.*` writes the prefs file directly, not through
- * the repository's setters. The repository's flows - what the foreground
- * service reads - must follow such a write without an app restart.
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class BackgroundSettingsExternalWriteTest {
@@ -26,7 +21,6 @@ class BackgroundSettingsExternalWriteTest {
         repo.setBackgroundOverlayEnabled(true)
         assertTrue(repo.taskNotificationsEnabled.value)
 
-        // What ConfigBuiltins' PrefsBoolField does.
         ctx.getSharedPreferences("background_settings", Context.MODE_PRIVATE).edit()
             .putBoolean("dynamicIslandEnabled", false)
             .putBoolean("backgroundOverlayEnabled", false)

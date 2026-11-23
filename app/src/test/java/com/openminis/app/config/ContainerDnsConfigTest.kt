@@ -10,12 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * [T-container-network-dns] (OpenMinis#396) `minis-config` binding for the
- * sandbox DNS: `get` / `set network.dnsMode` and `network.dnsCustomServers`,
- * driven through a real [ConfigRegistry] and the real fields, with the prefs
- * swapped for an in-memory store.
- */
 class ContainerDnsConfigTest {
 
     private class MemStore : ContainerDns.Store {
@@ -37,7 +31,6 @@ class ContainerDnsConfigTest {
 
     private fun field(path: String) = registry.resolveField(path) ?: error("unregistered: $path")
 
-    /** What `minis-config set <path> <value-json>` does after the gate. */
     private fun set(path: String, valueJson: String) {
         val v = ConfigValue.decode(valueJson) ?: throw ConfigError.InvalidValue("unparseable: $valueJson")
         field(path).write(v)
@@ -93,11 +86,9 @@ class ContainerDnsConfigTest {
 
     @Test
     fun `set dnsCustomServers as a quoted list, mixed IPv4 and IPv6`() {
-        // JSON escape for a newline, as typed on the CLI.
         set("network.dnsCustomServers", "\"223.5.5.5, 2400:3200::1\\n8.8.8.8\"")
         assertEquals("223.5.5.5\n2400:3200::1\n8.8.8.8", get("network.dnsCustomServers"))
         assertEquals(1, applied)
-        // Setting servers does not switch the mode by itself.
         assertEquals(DnsMode.AUTO, store.m)
     }
 
@@ -135,17 +126,13 @@ class ContainerDnsConfigTest {
         assertEquals(ContainerDns.Plan.Custom(listOf("223.5.5.5")), ContainerDns.plan(store.m, store.raw))
     }
 
-    // ── value decoding on the CLI ───────────────────────────────────────────
 
     @Test
     fun `an unquoted value with leftover text is an error, not a silent truncation`() {
-        // org.json stops an unquoted value at the first , : ; etc. These used
-        // to store "223.5.5.5", "2400" and "https" and report success.
         assertNull(ConfigValue.decode("223.5.5.5,8.8.8.8"))
         assertNull(ConfigValue.decode("2400:3200::1"))
         assertNull(ConfigValue.decode("https://example.com"))
         assertNull(ConfigValue.decode("\"a\" trailing"))
-        // Everything that was valid still is.
         assertEquals(ConfigValue.Str("custom"), ConfigValue.decode("custom"))
         assertEquals(ConfigValue.Str("223.5.5.5"), ConfigValue.decode("223.5.5.5"))
         assertEquals(ConfigValue.Str("2400:3200::1"), ConfigValue.decode("\"2400:3200::1\""))
@@ -161,7 +148,6 @@ class ContainerDnsConfigTest {
         assertTrue(builtins.contains("registerNetwork(r, context, envVarRepo)"))
         assertTrue(builtins.contains("ContainerDnsFields.build(ContainerDns.PrefsStore(context))"))
         assertTrue(builtins.contains("RootfsManager.getInstance(context).refreshDns()"))
-        // The UI writes the same keys.
         val dns = ProductionSources.read("sandbox/ContainerDns.kt")
         assertTrue(dns.contains("const val KEY_MODE = \"network.dnsMode\""))
         assertTrue(dns.contains("const val KEY_SERVERS = \"network.dnsCustomServers\""))

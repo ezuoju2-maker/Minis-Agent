@@ -34,28 +34,6 @@ import androidx.compose.ui.window.DialogProperties
 import com.openminis.app.R
 import com.openminis.app.ui.theme.ChatColors
 
-/**
- * [T-stop-choice] "What should stop?" - shown instead of an immediate Stop
- * when the conversation has background work a Stop would also end (sub
- * agents, scheduled tasks; [StopSummary.hasBackground]).
- *
- * Lists what is running and how many of each, then offers:
- *  - Stop Current Tool Only ([onToolOnly], the safe primary choice, nearest the
- *    thumb) - only when this chat's own turn is running ([canStopToolOnly]);
- *    with only background work there is no "current tool" to stop;
- *  - Stop All ([onStopAll], destructive);
- *  - Cancel.
- *
- * Also used by New Chat's "a task is running" guard, with its own title and
- * button labels and the [body] override.
- *
- * Drawn as the iOS action sheet the same choice uses (ChatSendButton
- * `.confirmationDialog`): a card at the bottom with the centred title and
- * message over full-width, centred buttons divided by hairlines - the safe
- * choice in the accent colour, Stop All in red - and Cancel, bold, on a card
- * of its own below. The Material alert it replaces stacked three text
- * buttons at the right edge under a left-aligned body.
- */
 @Composable
 internal fun StopChoiceDialog(
     summary: StopSummary,
@@ -119,8 +97,6 @@ private fun StopActionSheet(
     actions: List<SheetAction>,
 ) {
     val dark = ChatColors.isDark
-    // iOS system colours for an action sheet: the grouped card, the tint and
-    // the destructive red, in each appearance.
     val card = if (dark) Color(0xFF2C2C2E) else Color(0xFFF9F9F9)
     val accent = if (dark) Color(0xFF0A84FF) else Color(0xFF007AFF)
     val red = if (dark) Color(0xFFFF453A) else Color(0xFFFF3B30)
@@ -132,8 +108,6 @@ private fun StopActionSheet(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        // Full-window so the sheet can sit at the bottom; a tap above it
-        // dismisses, as outside an iOS action sheet.
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -147,15 +121,8 @@ private fun StopActionSheet(
                     .statusBarsPadding()
                     .navigationBarsPadding()
                     .padding(horizontal = 8.dp, vertical = 8.dp)
-                    // Taps on the sheet itself do not dismiss it.
                     .clickable(interactionSource = noRipple, indication = null, onClick = {}),
             ) {
-                // [T-stop-sheet-fits] In landscape or at a large font scale the
-                // sheet can be taller than the window. Cancel is measured first
-                // (this card is weighted, not filling), and inside the card the
-                // buttons come before the title and message, which scroll in
-                // what is left - as the platform alert dialog does. Before,
-                // the bottom buttons laid out past the window edge.
                 Column(
                     modifier = Modifier
                         .weight(1f, fill = false)

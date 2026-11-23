@@ -20,36 +20,9 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * minis-browser-use — expose the agent's browser_use tool as a CLI inside the
- * PRoot sandbox.
- *
- * Output contract mirrors iOS `BrowserUseOffload.m` / `NativeOffloadUtils.m`:
- * every invocation emits a JSON envelope
- *   `{ ok, tool, action, data | error, timestamp }`
- * (pretty-printed by default; minified with `--compact`; data-only with `-q`).
- * Screenshots are persisted under `/var/minis/browser/` and referenced via
- * `image_path` + `minis_url` — raw base64 is only included when the caller
- * explicitly passes `--with-base64`, matching iOS.
- *
- * [T-android-browser-cli-own-pool] Runs on the CALLING chat's tab pool (the one
- * its `browser_use` tool drives), resolved by [BrowserCliPools] from the
- * shell's `MINIS_CHAT_SESSION_ID`; mirrors iOS BrowserUseOffloadBridge. It used
- * to run every chat's calls on one process-wide pool, so concurrent chats
- * navigated each other's page. Screenshots and downloads go to the caller's
- * own `/var/minis/browser/`.
- *
- * Hard 90-second timeout via `withTimeout` so a hanging navigation can't lock
- * the shell indefinitely. Exits 0 for success, 1 for runtime errors, 2 for
- * bad arguments. Bare invocation prints help and exits 0 (matches iOS).
- */
 class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler {
 
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
-        // Declared-boolean flags: without this set, the shared OffloadArgs
-        // parser would greedily consume the next positional token (typically
-        // the action name) as a value, e.g. `--compact navigate` would store
-        // `compact=navigate` and drop `navigate` from positional args.
         val args = OffloadArgs(
             request.argv.drop(1),
             booleanFlags = BOOLEAN_FLAGS,
@@ -58,19 +31,10 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
         val quiet = args.hasFlag("q", "quiet")
         val withBase64 = args.hasFlag("with-base64", "with_base64")
 
-        // Bare invocation / --help: exit 0 with help (matches iOS). iOS writes
-        // help to stderr; stdout vs stderr is not separable across this native
-        // offload boundary, so we return help in `output` with exit 0.
         if (request.argv.size <= 1 || args.hasFlag("h", "help")) {
             return NativeOffloadResult(0, HELP)
         }
 
-        // [T-tools-granular-switches] The CLI is a second door to the same
-        // capability: a shell_execute call can reach minis-browser-use even
-        // when browser_use was removed from the tool schema. Gate it here too,
-        // or turning the tool off would only hide it. Mirrors iOS
-        // BrowserUseOffloadBridge's AgentToolSwitch.browser guard. Checked
-        // AFTER --help so documentation stays readable while it is off.
         if (!com.openminis.app.tools.AgentToolSwitch.BROWSER.isEnabled(app)) {
             return emitError(
                 action = "execute", code = ERR_DISABLED,
@@ -79,7 +43,6 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
             )
         }
 
-        // Parse args into the browser_use input shape.
         val inputJson = try {
             buildInputJson(args)
         } catch (e: IllegalArgumentException) {
@@ -95,7 +58,6 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
 
         val actionName = input.action.value
 
-        // [T-android-browser-cli-own-pool] The caller's pool, not a shared one.
         val pool = when (val r = BrowserCliPools.resolve(app, request.sessionId)) {
             is BrowserCliPools.Resolution.Found -> {
                 Log.i(TAG, "action=$actionName sid=${request.sessionId?.take(8)} pool=${r.via}")
@@ -107,35 +69,17 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
                 compact = compact, quiet = quiet, exit = 1,
             )
         }
-        // The session whose /var/minis is mounted for this shell (the parent,
-        // for a sub agent), so files land where the caller can read them.
         val filesSid = request.sessionId?.let {
             com.openminis.app.sandbox.ExecutionCoordinator.mountedSessionIdFor(it)
         }
 
-        // [T-bg-overlay phase 2 fix] Surface browser sub-action progress
-        // to SessionActivityTracker.currentToolStatus so the background
-        // overlay capsule + FGS notification show what the agent is
-        // actually doing — "browser_use: navigate https://example.com"
-        // instead of the static "Running: browser_use".
         com.openminis.app.service.SessionActivityTracker.updateToolStatus(
             statusForBrowserAction(actionName, inputJson),
         )
 
-        // Execute under a 90s hard timeout. A hanging navigation in a tab
-        // pool shouldn't be able to block the entire shell forever.
         val result: BrowserActionResult = try {
             runBlocking {
                 withTimeout(EXECUTE_TIMEOUT_MS) {
-                    // [T-browser-readaction-follow-tab-and-yolo-android] The CLI
-                    // (`minis-browser-use`) is a serial human/script driver:
-                    // navigate → execute_js / get_text / … all expect the page
-                    // just navigated to, not a fanned-out grace tab. Drive in
-                    // YOLO single-tab mode so every tab-less action sticks to the
-                    // selected tab. Explicit --tab-id still routes normally.
-                    // Mirrors iOS BrowserUseOffloadBridge passing singleTab=true.
-                    // No owner, as on iOS: the chat drives its own pool with
-                    // full access.
                     pool.execute(input, singleTab = true)
                 }
             }
@@ -161,10 +105,8 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
         return NativeOffloadResult(0, emit(envelope, data, compact = compact, quiet = quiet))
     }
 
-    // ── Input parsing ────────────────────────────────────────────────────
 
     private fun buildInputJson(args: OffloadArgs): JSONObject {
-        // Explicit --json wins; action/flags are ignored in that case.
         args.get("json")?.let { raw ->
             return try {
                 JSONObject(raw)
@@ -188,28 +130,19 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
         args.get("user-agent", "user_agent", "ua")?.let { obj.put("user_agent", it) }
         args.getInt("max-depth", "max_depth")?.let { obj.put("max_depth", it) }
         args.getInt("tab-id", "tab_id")?.let { obj.put("tab_id", it) }
-        // set_viewport parameters
         args.getInt("width")?.let { obj.put("viewport_width", it) }
         args.getInt("height")?.let { obj.put("viewport_height", it) }
         if (args.hasFlag("reset")) obj.put("reset", true)
-        // get_cookies / scroll_and_collect parameters
         args.get("item-selector", "item_selector")?.let { obj.put("item_selector", it) }
         args.getInt("scroll-count", "scroll_count")?.let { obj.put("scroll_count", it) }
         args.getInt("timeout")?.let { obj.put("timeout", it) }
         if (args.hasFlag("fuzzy")) obj.put("fuzzy", true)
         args.get("keywords")?.let { raw ->
-            // Comma- or whitespace-separated list.
             val tokens = raw.split(Regex("[,\\s]+"))
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
             if (tokens.isNotEmpty()) obj.put("keywords", JSONArray(tokens))
         }
-        // set_cookies: a JSON array of cookie objects. Either inline via
-        // --cookies '<json>' or, to dodge busybox-ash shell mangling of the
-        // JSON's quotes / braces / colons, from a file via --cookies-file <path>
-        // (mirrors `minis-config set --file`). Parse failures throw so the
-        // handler surfaces an explicit invalid_args error instead of silently
-        // dropping the array (which used to reach set_cookies as empty).
         val cookiesFile = args.get("cookies-file", "cookies_file")
         val cookiesRaw: String? = if (cookiesFile != null) {
             val host = PRootKernel.resolveHostPath(cookiesFile)
@@ -220,7 +153,6 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
             args.get("cookies")
         }
         cookiesRaw?.let { raw ->
-            // JSON array first; otherwise accept a Netscape cookies.txt export.
             val arr = runCatching { JSONArray(raw) }.getOrNull()
                 ?: parseNetscapeCookies(raw)
                 ?: throw IllegalArgumentException(
@@ -238,14 +170,6 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
         return obj
     }
 
-    /**
-     * Parse a Netscape-format cookie file (curl/wget/browser export) into the
-     * JSON array `set_cookies` consumes. Returns null if it doesn't look like
-     * Netscape, so the caller falls through to the JSON error. Format: 7
-     * TAB-separated fields per line — domain, includeSubdomains, path, secure,
-     * expires, name, value. `#` lines are comments, except curl's `#HttpOnly_`
-     * domain prefix which marks an HttpOnly cookie.
-     */
     private fun parseNetscapeCookies(text: String): JSONArray? {
         val out = JSONArray()
         for (line in text.lineSequence()) {
@@ -275,7 +199,6 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
         return if (out.length() > 0) out else null
     }
 
-    // ── Data encoding (iOS BrowserUseOffloadBridge.encode counterpart) ────
 
     private fun encodeData(r: BrowserActionResult, withBase64: Boolean, filesSid: String?): JSONObject {
         val out = JSONObject()
@@ -283,18 +206,11 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
         out.put("success", r.success)
         r.pageURL?.takeIf { it.isNotEmpty() }?.let { out.put("page_url", it) }
 
-        // Persist screenshot bytes under /var/minis/browser/ so shells can
-        // reference the JPEG via image_path + minis_url instead of piping
-        // base64 through stdout.
-        // [T-android-browser-cli-own-pool] The caller's own browser dir
-        // (minis-sessions/<sid>/browser is what /var/minis/browser mounts for
-        // that chat). The process-wide mount table only knows the last shell
-        // that set it up, so another chat's folder could get the file.
         val browserHostDir: File? = (
             filesSid?.let { com.openminis.app.sandbox.SessionMounts.sessionDir(app.filesDir, it, "browser") }
                 ?: PRootKernel.resolveHostPath(VAR_MINIS_BROWSER)
             )?.also {
-            try { it.mkdirs() } catch (_: Throwable) { /* non-fatal — write will fail below */ }
+            try { it.mkdirs() } catch (_: Throwable) {  }
         }
 
         var persistedImagePath: String? = null
@@ -318,7 +234,6 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
             Log.w(TAG, "No /var/minis/browser mount — falling back to base64-only output")
         }
 
-        // Fall back to the in-memory host path only when we couldn't persist.
         if (persistedImagePath == null) {
             r.imageFilePath?.takeIf { it.isNotEmpty() }?.let { out.put("image_path", it) }
         }
@@ -327,7 +242,6 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
             out.put("image_base64", base64)
         }
 
-        // Fetched file bytes (fetch action)
         val fname = r.fetchedFileName
         if (!fname.isNullOrEmpty()) {
             out.put("fetched_file", fname)
@@ -349,7 +263,6 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
         return out
     }
 
-    // ── JSON envelope helpers (mirror NativeOffloadUtils.m) ──────────────
 
     private fun envelope(action: String, data: JSONObject): JSONObject = JSONObject()
         .put("ok", true)
@@ -377,7 +290,6 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
         exit: Int,
     ): NativeOffloadResult {
         val env = errorEnvelope(action, code, message)
-        // In quiet mode, error emits just the `error` sub-object.
         val payload = if (quiet) env.optJSONObject("error") ?: env else env
         return NativeOffloadResult(exit, serialize(payload, compact) + "\n")
     }
@@ -399,12 +311,6 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
         return fmt.format(Date())
     }
 
-    /**
-     * [T-bg-overlay phase 2 fix] Human-readable browser sub-action status
-     * surfaced to the background overlay + FGS notification. Falls back to
-     * a bare action name when no rich detail is available — keeps the
-     * overlay text useful for any future BrowserAction values too.
-     */
     private fun statusForBrowserAction(action: String, input: org.json.JSONObject): String {
         val url = input.optString("url", "").takeIf { it.isNotBlank() }
         val sel = input.optString("selector", "").takeIf { it.isNotBlank() }
@@ -438,20 +344,12 @@ class BrowserUseOffloadHandler(private val app: MinisApp) : NativeOffloadHandler
         private const val VAR_MINIS_BROWSER = "/var/minis/browser"
         private const val EXECUTE_TIMEOUT_MS = 90_000L
 
-        /**
-         * Long-option flags this handler treats as booleans (no value expected).
-         * Passed to [OffloadArgs] so the shared parser doesn't greedily consume
-         * the next token — e.g. `--compact navigate` would otherwise record
-         * `compact=navigate`.
-         */
         private val BOOLEAN_FLAGS = setOf(
             "compact", "quiet", "with-base64", "with_base64",
             "reset", "fuzzy", "help",
         )
 
-        // Error codes — match iOS NOFF_ERR_* constants.
         private const val ERR_INVALID_ARGS = "invalid_args"
-        /** [T-tools-granular-switches] The user turned browser_use off. */
         private const val ERR_DISABLED = "tool_disabled"
         private const val ERR_INTERNAL = "internal_error"
 

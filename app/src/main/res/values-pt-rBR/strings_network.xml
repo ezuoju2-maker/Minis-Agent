@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Settings > Network. Translations shared with iOS come from its Localizable.xcstrings; locales without one fall back to English. -->
 <resources>
     <string name="network_title">Rede</string>
     <string name="network_default_route">Rota padrão</string>
@@ -51,6 +49,5 @@
     <string name="network_log_in">Entrar</string>
     <string name="network_provider_route">Rede</string>
     <string name="network_provider_route_footer">Como as solicitações deste provedor se conectam. Configure o Tailscale e os proxies em Ajustes &gt; Rede.</string>
-    <!-- [FEAT-261021-04] Settings > Network section -->
     <string name="network_routing_title">Roteamento de rede</string>
 </resources>

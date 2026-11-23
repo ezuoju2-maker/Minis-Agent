@@ -6,17 +6,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-restore-report-severity] Restore-report lines are split into
- * errors (red) and notices (amber).
- *
- * Reported: files the source device deliberately left out of the backup — over
- * the size cap, or never downloaded there — showed in the error colour after a
- * restore, reading as if the restore had broken.
- *
- * The classification is tested as data. The composable only maps it to strings
- * and colours; the source guards at the bottom pin that mapping.
- */
 class RestoreReportSeverityTest {
 
     private fun report(vararg cats: BackupImporter.CategoryReport) =
@@ -26,7 +15,6 @@ class RestoreReportSeverityTest {
     private fun severities(r: BackupImporter.Report) =
         restoreIssues(r).associate { it.kind to it.severity }
 
-    // ── the reported case ────────────────────────────────────────────────
 
     @Test
     fun `size-capped files are a notice, not an error`() {
@@ -43,7 +31,6 @@ class RestoreReportSeverityTest {
         assertEquals(RestoreIssueSeverity.NOTICE, restoreIssues(r).single().severity)
     }
 
-    // ── what stays an error ──────────────────────────────────────────────
 
     @Test
     fun `a category that threw is an error and keeps its message`() {
@@ -61,15 +48,10 @@ class RestoreReportSeverityTest {
 
     @Test
     fun `a blob missing from the package is an error, not a notice`() {
-        // The easy mistake. It is "a file not being there", like the two
-        // notices, but the index lists it with NO tombstone: nobody chose to
-        // leave it out, the package is damaged. Calling it amber would tell
-        // the user a broken backup is fine.
         val r = report(BackupImporter.CategoryReport("chats", missingBlobs = 4))
         assertEquals(RestoreIssueSeverity.ERROR, restoreIssues(r).single().severity)
     }
 
-    // ── mixed reports ────────────────────────────────────────────────────
 
     @Test
     fun `every counter lands in the right bucket in one report`() {
@@ -130,12 +112,10 @@ class RestoreReportSeverityTest {
 
     @Test
     fun `zero counts produce no lines`() {
-        // Every counter defaults to 0; none of them may leak a "0 files" line.
         val r = report(BackupImporter.CategoryReport("chats"))
         assertTrue(restoreIssues(r).isEmpty())
     }
 
-    // ── the screen's mapping ─────────────────────────────────────────────
 
     private val screen by lazy {
         ProductionSources.read("ui/settings/backup/BackupAndRestoreScreen.kt")
@@ -144,7 +124,6 @@ class RestoreReportSeverityTest {
     @Test
     fun `the screen classifies through restoreIssues, not its own rules`() {
         assertTrue(screen.contains("val issues = restoreIssues(report)"))
-        // The old single list painted everything in the error colour.
         assertTrue("the single problems list must be gone", !screen.contains("val problems = buildList"))
     }
 
@@ -165,16 +144,12 @@ class RestoreReportSeverityTest {
     fun `report warnings read as notices, not errors`() {
         val notices = screen.substringAfter("val notices =").substringBefore("if (errors.isNotEmpty())")
         assertTrue(notices.contains("report.warnings"))
-        // The expression line only: the comment that follows it names
-        // report.warnings, and a region check would match the comment.
         val errors = screen.substringAfter("val errors =").substringBefore("\n")
         assertTrue(!errors.contains("report.warnings"))
     }
 
     @Test
     fun `the amber stays readable in light mode`() {
-        // #E6A23C measures 2.19:1 on a light surface, far under the 4.5:1 that
-        // small text needs. The light-mode value must be the darker amber.
         val fn = screen.substringAfter("private fun reportNoticeColor()")
         assertTrue("light-mode amber must be #B45309", fn.contains("Color(0xFFB45309)"))
         assertTrue("dark-mode amber must be #FFB74D", fn.contains("Color(0xFFFFB74D)"))

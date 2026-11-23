@@ -9,10 +9,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Ignore
 import org.junit.Test
 
-/**
- * [T-port-user-ask] The pure user_ask core, with the vectors of iOS
- * MinisTests/Standalone/UserAskCoreTests.swift (final, no-policy state).
- */
 class UserAskCoreTest {
 
     private fun args(vararg qs: Map<String, Any?>): JSONObject =
@@ -37,7 +33,6 @@ class UserAskCoreTest {
 
     private val t0 = 1_000_000_000L
 
-    // ── 1. Parsing and validation ──────────────────────────────────────────
 
     @Test fun `bad calls are rejected with a message that says how to fix them`() {
         assertTrue(err(JSONObject().put("questions", JSONArray())).contains("call user_ask again with 1-4 question objects, each with `type` and `question`"))
@@ -54,9 +49,6 @@ class UserAskCoreTest {
         assertTrue("unparseable json", UserAskParser.parse("{nope").isFailure)
     }
 
-    // ── [T-android-user-ask-infer-type] missing / unknown type, inferred ────
-    // The 9 checks of iOS UserAskCoreTests (021a988c1), plus Android's
-    // string-encoded options.
 
     private val twoOpts = listOf(
         mapOf("label" to "我的 Mac", "description" to "SSH"),
@@ -64,7 +56,6 @@ class UserAskCoreTest {
     )
 
     @Test fun `missing type + options infers options - the 2026-10-07 deepseek-flash call`() {
-        // The call as sent: question, header, two labelled options, no type.
         val r = q(mapOf("question" to "用哪种方式签名？", "header" to "签名方式", "options" to twoOpts))
         assertEquals(UserAskQuestionType.OPTIONS, r.type)
         assertEquals(2, r.options?.size)
@@ -115,7 +106,6 @@ class UserAskCoreTest {
         val r = q(mapOf("question" to "x", "options" to JSONArray(twoOpts.map { JSONObject(it) }).toString()))
         assertEquals(UserAskQuestionType.OPTIONS, r.type)
         assertEquals(2, r.options?.size)
-        // A string that is not a JSON array is no evidence: still the type error.
         assertTrue(err(args(mapOf("question" to "x", "options" to "not json"))).contains("type must be"))
     }
 
@@ -139,7 +129,6 @@ class UserAskCoreTest {
         assertNull("impact only on confirm", q(mapOf("type" to "options", "question" to "x", "impact" to "ignored")).impact)
     }
 
-    // ── 2. Timeout: the app takes no action ────────────────────────────────
 
     private fun to(question: UserAskQuestion) = UserAskResolver.encode(listOf(UserAskResolver.timedOut(question, 0, 5)))
     private val noteFor5 = "No answer within 5 min. Nothing was applied or approved."
@@ -157,7 +146,6 @@ class UserAskCoreTest {
         assertEquals("No answer within 7 min. Nothing was applied or approved.", UserAskResolver.timedOut(highNone, 0, 7).note)
     }
 
-    // ── 3. Answers -> results ──────────────────────────────────────────────
 
     private fun a(question: UserAskQuestion, ans: UserAskAnswer) = UserAskResolver.answered(question, 0, ans)
 
@@ -199,7 +187,6 @@ class UserAskCoreTest {
         assertTrue(UserAskResolver.parseResults(null).isEmpty())
     }
 
-    // ── 4. State machine ───────────────────────────────────────────────────
 
     @Test fun `deadline, interaction, first resolution wins`() {
         var p = PendingAsk.create("r1", "s", "tc1", listOf(opt, medCancel), t0, 5)
@@ -220,7 +207,7 @@ class UserAskCoreTest {
     @Test fun `a partial timeout keeps submitted answers and never sends a draft`() {
         var p = PendingAsk.create("r2", "s", "tc2", listOf(opt, optNoDefault, medApprove), t0, 5)
         p = p.setAnswer(UserAskAnswer(selected = listOf(1)), 0).copy(submitted = setOf(0))
-        p = p.setAnswer(UserAskAnswer(selected = listOf(0)), 1)   // drafted, not submitted
+        p = p.setAnswer(UserAskAnswer(selected = listOf(0)), 1)
         p = p.resolveTimedOut()!!
         assertEquals(listOf(UserAskResultStatus.ANSWERED, UserAskResultStatus.TIMEOUT, UserAskResultStatus.TIMEOUT), p.resultStatuses)
         assertFalse(p.resultJson!!.contains("\"answer\":\"A\""))
@@ -239,7 +226,6 @@ class UserAskCoreTest {
         assertEquals("no countdown to restart", forever, forever.noteInteraction(t0 + 5))
     }
 
-    // ── 5. Wizard navigation ───────────────────────────────────────────────
 
     private fun f(o: UserAskSubmitOutcome) = when (o) {
         UserAskSubmitOutcome.Rejected -> "rejected"
@@ -303,15 +289,11 @@ class UserAskCoreTest {
         assertEquals("preselection is not an interaction", p.expiresAtMs, PendingAsk.preselectRecommended(p, 0).expiresAtMs)
     }
 
-    // ── 6. Prompt text and definition ──────────────────────────────────────
 
     @Test fun `prompt text is iOS's final version, English only, said once`() {
         val all = UserAskPromptText.TOOL_LIST_LINE + UserAskPromptText.TOOL_DESCRIPTION
         assertFalse("no CJK", all.any { it.code in 0x2E80..0x9FFF || it.code in 0xFF00..0xFFEF })
         assertEquals(1, all.split("ask with this tool rather than in plain text").size - 1)
-        // [T-user-ask-prompt-converge] iOS 4715e2313: "wait for the answer" read
-        // as "only ask while the user is watching"; the bar is for asking, not
-        // for the card; a vague request is not an approval.
         assertFalse(all.contains("wait for the answer"))
         assertFalse(all.contains("prefer this over"))
         assertTrue(UserAskPromptText.TOOL_DESCRIPTION.contains("\n\nWhether to ask: only when the answer changes what you do next."))
@@ -324,9 +306,6 @@ class UserAskCoreTest {
     }
 
     @Test fun `the general rules no longer tell the model not to confirm`() {
-        // [T-user-ask-prompt-converge] The "Tool call style" tail "...or asking
-        // the user to confirm" contradicted user_ask's confirm rule. When to ask
-        // lives only in the tool description, so the general rules name no tool.
         val vm = com.openminis.app.ProductionSources.read("ui/chat/ChatViewModel.kt")
         assertTrue(vm.contains("- When a tool exists for an action, use it directly instead of explaining what you plan to do.\n"))
         assertFalse(vm.contains("asking the user to confirm"))
@@ -338,10 +317,8 @@ class UserAskCoreTest {
         val cfg = com.openminis.app.ProductionSources.read("config/ConfigBuiltins.kt")
         val desc = cfg.substringAfter("path = \"agentTools.userAsk.enabled\"").substringBefore("prefs = prefs")
         assertFalse(desc.contains("wait for the answer"))
-        // Nothing tells the model to avoid risky actions when the switch is off.
         assertFalse(desc.contains("told not to perform risky actions"))
         assertTrue(desc.contains("When off, the tool is removed."))
-        // [T-user-ask-deferred] iOS's text: unwatched runs get the card in deferred mode.
         assertTrue(desc.contains("Never offered to sub agents. In a run you are not watching, the card stays open and your answer is sent as your next message."))
     }
 
@@ -349,9 +326,9 @@ class UserAskCoreTest {
     @Test fun `the description is byte-identical to iOS`() {
         val ios = com.openminis.app.ProductionSources.mainRoot()?.let { root ->
             var dir: java.io.File? = root
-            repeat(8) { dir = dir?.parentFile }   // .../src/android/app/src/main/java/com/openminis/app -> .../src
+            repeat(8) { dir = dir?.parentFile }
             java.io.File(dir, "ios/Agent/Chat/UserAskCore.swift").takeIf { it.exists() }?.readText()
-        } ?: return   // iOS sources absent (Android-only checkout)
+        } ?: return
         val block = ios.substringAfter("static let toolDescription = \"\"\"\n").substringBefore("\n    \"\"\"")
         val swift = block.lines().joinToString("\n") { it.removePrefix("    ") }
         assertEquals(swift, UserAskPromptText.TOOL_DESCRIPTION)
@@ -375,7 +352,6 @@ class UserAskCoreTest {
         assertTrue(UserAskExposure.decision(enabled = true, isHelper = false, interactive = true).exposed)
         assertFalse(UserAskExposure.decision(enabled = false, isHelper = false, interactive = true).exposed)
         assertFalse(UserAskExposure.decision(enabled = true, isHelper = true, interactive = true).exposed)
-        // [T-user-ask-deferred] A headless run now has the tool, in deferred mode.
         val headless = UserAskExposure.decision(enabled = true, isHelper = false, interactive = false)
         assertTrue(headless.exposed && headless.deferred)
         assertEquals(listOf(1, 2, 5, 10, 30, 60, 0), UserAskSettingsSpec.TIMEOUT_CHOICES)

@@ -6,26 +6,6 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * GOLDEN SNAPSHOT for the Gemini and Anthropic thinking shapes — the Phase 2 §1
- * counterpart to [ThinkingWireGoldenSnapshotTest] (which covers the OpenAI family).
- *
- * WHY: Phase 1 deliberately left these two providers out of [ThinkingRuleResolver]
- * (their logic lived in `GeminiProvider.buildThinkingConfig` and `AnthropicProvider`'s
- * budget/effort helpers). Phase 2 §1 migrates them in. The acceptance criterion is the
- * same as Phase 1's: byte-for-byte identical behaviour. This file is generated against
- * the PRE-migration implementations and committed before the migration, so it is an
- * oracle rather than a rubber stamp.
- *
- * NOT ROW-COMPARABLE WITH THE iOS SNAPSHOT. Android's Gemini rules genuinely differ from
- * iOS's in two places, and those differences are PRE-EXISTING, not introduced here:
- *   • 3.x at MAX/ULTRA — Android's `when` falls to `else -> "low"`, iOS maps to "high".
- *   • Unknown/latest ids (e.g. `gemini-flash-latest`) — Android returns null (no
- *     thinkingConfig at all), iOS has a conservative 128-floor fallback table.
- * Phase 2 §1 is a pure refactor, so each platform keeps its own behaviour and each
- * snapshot is an oracle for its own side. Unifying them is a deliberate behaviour change
- * and belongs in its own commit.
- */
 class ThinkingWireGeminiAnthropicSnapshotTest {
 
     private fun canonical(v: Any?): String = when (v) {
@@ -40,17 +20,8 @@ class ThinkingWireGeminiAnthropicSnapshotTest {
         "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite",
         "gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-flash-latest",
         "gemini-2.5-pro-exp-0827", "gemini-2.0-tts", "gemini-2.5-embedding",
-        // [OpenMinis#226] Specialized ids that ALSO match a family pattern. Android had
-        // no specialized-modality test at all, so these were answered by the family
-        // branch and shipped a thinking parameter Gemini rejects with 400. The plain
-        // `gemini-2.0-tts` above never caught it: matching no family, it already fell
-        // through to null.
         "gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts",
         "gemini-2.5-pro-preview-tts", "gemini-3-pro-image-preview",
-        // [T-gemini37-minimal-400] 3.6 vs 3.7 pins the OFF-floor split: everything
-        // through 3.6 accepts thinkingLevel "minimal", 3.7 rejects it with a 400 and
-        // must fall back to "low". The golden previously had no 3.5/3.6/3.7 entry at
-        // all, which is why the unusable-at-Off regression reached users.
         "gemini-3.6-flash", "gemini-3.7-flash",
         "unknown-gemini-model",
     )
@@ -99,7 +70,6 @@ class ThinkingWireGeminiAnthropicSnapshotTest {
     }
 
     companion object {
-        /** Generated from the PRE-migration implementations. See the class doc. */
         private val EXPECTED = """
 gemini/gemini-2.5-pro/OFF -> {thinkingBudget:128}
 gemini/gemini-2.5-pro/LOW -> {includeThoughts:true,thinkingBudget:2048}

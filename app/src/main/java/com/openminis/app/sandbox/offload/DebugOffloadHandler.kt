@@ -15,20 +15,6 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
 
-/**
- * minis-debug — DEBUG-ONLY CLI wrapper for the local DebugServer JSON-RPC
- * endpoint at 127.0.0.1:5321.
- *
- * Lets a user (or agent) in the PRoot shell drive the in-app debug RPC
- * without hand-rolling curl + JSON. Each subcommand maps to one RPC
- * method registered in DebugMethodRegistry; the response envelope from
- * the server is forwarded verbatim through OffloadOutput so the standard
- * `--compact` / `-q` / `--quiet` flags work the same way as every other
- * `android-*` / `minis-*` offload.
- *
- * Registration is guarded by `BuildConfig.DEBUG` in MinisApp.kt so the
- * Release APK contains no trace of this command.
- */
 class DebugOffloadHandler(@Suppress("UNUSED_PARAMETER") context: Context) : NativeOffloadHandler {
 
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
@@ -37,10 +23,6 @@ class DebugOffloadHandler(@Suppress("UNUSED_PARAMETER") context: Context) : Nati
             return NativeOffloadResult(if (request.argv.size <= 1) 2 else 0, HELP)
         }
 
-        // Per-subcommand --help: `minis-debug ls --help` prints the same
-        // top-level help so the user discovers the full surface either
-        // way. Cheaper than per-subcommand help strings; the help text
-        // already enumerates every subcommand's flags.
         if (args.hasFlag("h", "help")) {
             return NativeOffloadResult(0, HELP)
         }
@@ -56,10 +38,6 @@ class DebugOffloadHandler(@Suppress("UNUSED_PARAMETER") context: Context) : Nati
 
         return try {
             val response = postJsonRpc(rpc.method, rpc.params)
-            // DebugServer returns a JSON-RPC 2.0 envelope: {jsonrpc, id, result|error}.
-            // We pass it through formatBody so --compact / -q work; -q strips to
-            // the iOS-style {ok, data, error} envelope when present, otherwise
-            // returns the raw object. Exit code reflects RPC error.
             val obj = try { JSONObject(response) } catch (_: Exception) { null }
             val isError = obj?.has("error") == true
             NativeOffloadResult(
@@ -88,7 +66,6 @@ class DebugOffloadHandler(@Suppress("UNUSED_PARAMETER") context: Context) : Nati
         }
     }
 
-    // ── Subcommand → JSON-RPC mapping ────────────────────────────────────────
 
     private data class RpcCall(val method: String, val params: JSONObject)
     private class BadArgsException(msg: String) : RuntimeException(msg)
@@ -140,15 +117,9 @@ class DebugOffloadHandler(@Suppress("UNUSED_PARAMETER") context: Context) : Nati
                 RpcCall("debug.shellExecute", JSONObject().put("command", command))
             }
 
-            // Android-only debug-build methods, exposed because they live
-            // in DEBUG_ONLY_METHODS of DebugMethodRegistry and are useful
-            // from a shell context. Both take an `args` JSON array; we
-            // accept either a positional command line or `--args '["a","b"]'`.
             "shizuku" -> RpcCall("debug.shizuku.exec", buildExecForwarder(rest, args))
             "model-use", "modelUse" -> RpcCall("debug.modelUse.exec", buildExecForwarder(rest, args))
 
-            // Generic escape hatch — call any registered method directly.
-            // `minis-debug call <method> [--params '<json>']`
             "call" -> {
                 val method = rest.firstOrNull()
                     ?: throw BadArgsException("missing <method>")
@@ -165,12 +136,6 @@ class DebugOffloadHandler(@Suppress("UNUSED_PARAMETER") context: Context) : Nati
         }
     }
 
-    /**
-     * Build the `{args: [...]}` envelope expected by `debug.shizuku.exec` /
-     * `debug.modelUse.exec`. If the user passes `--args '["foo","bar"]'`
-     * we take that verbatim; otherwise we use the remaining positional
-     * arguments as the argv slice.
-     */
     private fun buildExecForwarder(rest: List<String>, args: OffloadArgs): JSONObject {
         val explicit = args.get("args")
         val argvArr = if (explicit != null) {
@@ -182,17 +147,9 @@ class DebugOffloadHandler(@Suppress("UNUSED_PARAMETER") context: Context) : Nati
         return JSONObject().put("args", argvArr)
     }
 
-    // ── Raw HTTP POST over Socket ────────────────────────────────────────────
 
     private class ConnectionRefused(cause: Throwable) : IOException(cause)
 
-    /**
-     * Hand-rolled HTTP/1.1 POST so we don't pull in OkHttp or HttpURLConnection's
-     * connection-pool quirks for what is a single localhost round-trip.
-     * DebugServer reads exactly Content-Length bytes off the wire and writes
-     * an HTTP/1.1 response with its own Content-Length header — see
-     * DebugServer.handleConnection.
-     */
     private fun postJsonRpc(method: String, params: JSONObject): String {
         val body = JSONObject()
             .put("jsonrpc", "2.0")
@@ -230,13 +187,7 @@ class DebugOffloadHandler(@Suppress("UNUSED_PARAMETER") context: Context) : Nati
         }
     }
 
-    /**
-     * Minimal HTTP/1.1 response parser: status line, headers, then body
-     * sized by Content-Length (DebugServer always sends one). We don't
-     * support chunked transfer because DebugServer doesn't emit it.
-     */
     private fun readHttpResponse(input: BufferedInputStream): String {
-        // Read header section: bytes up to and including "\r\n\r\n".
         val headerBuf = ByteArrayOutputStream()
         var prev = -1
         var prev2 = -1
@@ -260,8 +211,6 @@ class DebugOffloadHandler(@Suppress("UNUSED_PARAMETER") context: Context) : Nati
             }
         }
         if (contentLength < 0) {
-            // Fall back to read-to-EOF — DebugServer normally sets the
-            // header, but we'd rather degrade than fail outright.
             val rest = ByteArrayOutputStream()
             val buf = ByteArray(4096)
             while (true) {
@@ -287,11 +236,6 @@ class DebugOffloadHandler(@Suppress("UNUSED_PARAMETER") context: Context) : Nati
         private const val DEBUG_SERVER_PORT = 5321
         private const val TIMEOUT_MS = 30_000
 
-        /**
-         * Declared boolean flags so OffloadArgs doesn't greedily consume the
-         * following positional token as a value. e.g. `--recursive /sdcard`
-         * must parse as flag + positional, not `--recursive=/sdcard`.
-         */
         private val BOOLEAN_FLAGS = setOf("recursive", "base64")
 
         private const val HELP = """minis-debug — CLI for the in-app DebugServer JSON-RPC (debug builds only)

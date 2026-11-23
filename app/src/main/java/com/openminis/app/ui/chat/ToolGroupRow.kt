@@ -30,12 +30,6 @@ import com.openminis.app.R
 import com.openminis.app.ui.theme.ChatColors
 import com.openminis.app.ui.util.expandToggleClickable
 
-/**
- * [T-port-fold-tools] The "› Ran N tools · 38s · 1 failed · 2 cancelled" row
- * a folded run of tool calls shows as (iOS ToolGroupRowView): 13 sp secondary
- * text, a 28 dp row, the chevron turned down while open, "failed" in red.
- * Tapping toggles the run open or closed in place.
- */
 @Composable
 internal fun ToolGroupRow(item: FlatChatItem.AssistantToolGroup, onToggle: () -> Unit) {
     val title = stringResource(R.string.tool_fold_ran_n_tools, item.toolCount)
@@ -70,12 +64,7 @@ internal fun ToolGroupRow(item: FlatChatItem.AssistantToolGroup, onToggle: () ->
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .height(28.dp)
-                // [ISS-017] Expand/collapse row: no ripple (expandToggleClickable).
                 .expandToggleClickable(onClick = onToggle)
-                // [T-fold-row-chevron-align] No start inset: the chevron's
-                // visible left edge sits on the same line as the reply text and
-                // the tool pills above and below. The 4 dp moved to the end, so
-                // the tap target keeps its old width (was 4 + content + 4).
                 .padding(start = 0.dp, end = 8.dp)
                 .clearAndSetSemantics {
                     contentDescription = spoken
@@ -97,14 +86,6 @@ internal fun ToolGroupRow(item: FlatChatItem.AssistantToolGroup, onToggle: () ->
     }
 }
 
-/**
- * [T-fold-row-chevron-align] The "›" drawn edge to edge in its own box, so its
- * visible left edge is the box's left edge. Material's KeyboardArrowRight
- * carries ~3-4 dp of empty space at 14 dp, which pushed the glyph right of the
- * text column. Rotated in graphicsLayer around the box centre, which is the
- * chevron's own centre, so it turns in place when the run opens (iOS
- * chevron.right, rotationEffect 90°).
- */
 @Composable
 private fun FoldChevron(angle: Float, color: androidx.compose.ui.graphics.Color) {
     androidx.compose.foundation.Canvas(
@@ -113,8 +94,6 @@ private fun FoldChevron(angle: Float, color: androidx.compose.ui.graphics.Color)
             .graphicsLayer { rotationZ = angle },
     ) {
         val stroke = FoldChevronStroke.toPx()
-        // Inset by half the stroke, so the round caps end exactly on the box
-        // edges: the leftmost painted pixel is x = 0.
         val inset = stroke / 2f
         val path = androidx.compose.ui.graphics.Path().apply {
             moveTo(inset, inset)
@@ -133,7 +112,6 @@ private fun FoldChevron(angle: Float, color: androidx.compose.ui.graphics.Color)
     }
 }
 
-/** Visible size of the chevron (iOS chevron.right at 10 pt semibold). */
 internal val FoldChevronWidth = 5.5.dp
 internal val FoldChevronHeight = 10.dp
 private val FoldChevronStroke = 1.6.dp

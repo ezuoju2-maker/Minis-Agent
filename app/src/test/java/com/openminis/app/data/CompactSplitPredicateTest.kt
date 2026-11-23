@@ -9,23 +9,11 @@ import org.junit.Test
 import java.io.IOException
 import java.net.SocketTimeoutException
 
-/**
- * [T-android-compact-runaway] Which failures justify retrying a compaction with
- * a halved payload.
- *
- * The predicate used to answer "everything except cancellation and IO", which
- * meant a 429 or a 5xx — neither caused by request size — fanned a single
- * failure out into up to 15 sequential model calls. With a slow or
- * rate-limited model that is the 15-20 minute hang users reported. Splitting is
- * now reserved for failures a smaller request could plausibly fix.
- */
 class CompactSplitPredicateTest {
 
-    // ── Must NOT split: retrying smaller cannot help ────────────────────
 
     @Test
     fun `rate limiting does not split`() {
-        // The regression that mattered most: 429 is about quota, not length.
         assertFalse(shouldSplitOnError(LLMError.RateLimited()))
     }
 
@@ -49,17 +37,12 @@ class CompactSplitPredicateTest {
     fun `network failures do not split`() {
         assertFalse(shouldSplitOnError(LLMError.NetworkError(IOException("offline"))))
         assertFalse(shouldSplitOnError(IOException("connection reset")))
-        // A socket timeout is an IOException — payload size is not the cause,
-        // so halving would only double the waiting.
         assertFalse(shouldSplitOnError(SocketTimeoutException("read timed out")))
     }
 
-    // ── Must split: a smaller request plausibly succeeds ────────────────
 
     @Test
     fun `over-length provider refusals still split`() {
-        // This is the case the whole split mechanism exists for. Providers word
-        // it inconsistently and it arrives untyped, so it must stay retryable.
         assertTrue(
             shouldSplitOnError(
                 LLMError.ProviderError(
@@ -72,20 +55,14 @@ class CompactSplitPredicateTest {
 
     @Test
     fun `unclassified errors still split`() {
-        // Burden of proof stays on NOT retrying: a summary built from halves
-        // beats no summary, and the call budget bounds the downside.
         assertTrue(shouldSplitOnError(LLMError.Unknown(RuntimeException("???"))))
         assertTrue(shouldSplitOnError(LLMError.DecodingError(RuntimeException("bad json"))))
         assertTrue(shouldSplitOnError(IllegalStateException("something odd")))
     }
 
-    // ── [OpenMinis#377] parameter rejections: refused, not too big ───────
 
     @Test
     fun `an unsupported-parameter 400 does not split`() {
-        // Issue #377: compaction sent `reasoning.effort:"none"` to a model that
-        // does not accept it and halved 963 → 481 → 240 → 120 messages, failing
-        // four times on one unchanged parameter. Halving cannot fix a parameter.
         assertFalse(
             shouldSplitOnError(
                 LLMError.ProviderError(
@@ -111,9 +88,6 @@ class CompactSplitPredicateTest {
 
     @Test
     fun `an over-length 400 still splits`() {
-        // The critical non-regression. Over-length refusals are ALSO HTTP 400 —
-        // keying the rule on the status code alone would have disabled
-        // splitting for the exact case it exists to serve.
         assertTrue(
             shouldSplitOnError(
                 LLMError.ProviderError(
@@ -134,8 +108,6 @@ class CompactSplitPredicateTest {
 
     @Test
     fun `a message mixing both signals errs towards splitting`() {
-        // Burden of proof stays on NOT retrying: anything that looks even
-        // slightly like a size problem keeps the split path.
         assertTrue(
             shouldSplitOnError(
                 LLMError.ProviderError(
@@ -154,8 +126,6 @@ class CompactSplitPredicateTest {
 
     @Test
     fun `the amplification path is closed for the reported failure modes`() {
-        // Spelled out as the regression guard: each of these previously
-        // returned true and could become 15 sequential slow calls.
         val previouslyAmplified = listOf<Throwable>(
             LLMError.RateLimited(),
             LLMError.TransientError("503"),

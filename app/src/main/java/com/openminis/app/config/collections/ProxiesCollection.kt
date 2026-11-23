@@ -16,13 +16,6 @@ import com.openminis.app.data.repository.EnvVarRepository
 import com.openminis.app.network.NetworkHub
 import com.openminis.app.network.ProxyServer
 
-/**
- * [FEAT-261021-03] `proxies.<id>.*` - Settings > Network > Proxies (port of
- * iOS ProxiesCollection, FEAT-261019-01). Passwords go to the encrypted store
- * through NetworkHub.saveProxy and are write-only here, like provider API
- * keys; `password` is in ConfigValue.SECRET_KEYS, so an add payload and a
- * password write are masked in the confirmation dialog and the audit log.
- */
 class ProxiesCollection(private val envVars: EnvVarRepository) : ConfigCollection {
     override val basePath: String get() = "proxies"
     override val displayName: String get() = "Proxies"
@@ -32,7 +25,6 @@ class ProxiesCollection(private val envVars: EnvVarRepository) : ConfigCollectio
             "that used it back to direct / default."
     override val risk: ConfigRisk get() = ConfigRisk.SENSITIVE
 
-    /** {"type": "socks5|http|https", "host": "…", "port": 1080, "name"?, "username"?, "password"?, "bypass"?: […]} */
     override val addPayloadSchema: ConfigSchema get() = ConfigSchema.Json
 
     override fun childIds(): List<String> = NetworkHub.settings.value.proxies.map { it.id }
@@ -117,13 +109,11 @@ class ProxiesCollection(private val envVars: EnvVarRepository) : ConfigCollectio
         NetworkHub.deleteProxy(id)
     }
 
-    // -- Readable descriptions --
 
     override val readableSubjectFormat: String get() = "Proxy “%1\$@” – %2\$@"
 
     override fun entityLabel(id: String): String? = proxy(id)?.displayName
 
-    /** The payload is already masked: a password shows only as given or not. */
     override fun readableForAdd(payload: RedactedConfigValue): List<ReadableLine> {
         val d = (payload.value as? ConfigValue.Obj)?.value ?: return emptyList()
         fun text(key: String) = (d[key] as? ConfigValue.Str)?.value?.takeIf { it.isNotEmpty() }
@@ -142,11 +132,9 @@ class ProxiesCollection(private val envVars: EnvVarRepository) : ConfigCollectio
         return listOf(ReadableLine("Delete proxy “%@”; routes that used it connect directly", listOf(ReadableArg.Text(p.displayName))))
     }
 
-    // -- Helpers --
 
     private fun proxy(id: String): ProxyServer? = NetworkHub.settings.value.proxies.firstOrNull { it.id == id }
 
-    /** Saves through the hub, keeping the stored password (null = untouched). */
     private fun mutate(id: String, change: (ProxyServer) -> ProxyServer) {
         val p = proxy(id) ?: throw ConfigError.UnknownPath("proxies.$id")
         NetworkHub.saveProxy(change(p), null)
@@ -179,7 +167,6 @@ class ProxiesCollection(private val envVars: EnvVarRepository) : ConfigCollectio
     )
 
     companion object {
-        /** A proxy from an `add` payload (pure; the password is handled by [add]). */
         internal fun proxyFromPayload(payload: ConfigValue): ProxyServer {
             val d = (payload as? ConfigValue.Obj)?.value
                 ?: throw ConfigError.TypeMismatch("object, e.g. {\"type\":\"socks5\",\"host\":\"10.0.0.2\",\"port\":1080}")
@@ -214,7 +201,6 @@ class ProxiesCollection(private val envVars: EnvVarRepository) : ConfigCollectio
             )
         }
 
-        /** A comma/newline-separated string or an array -> trimmed, non-empty entries. */
         internal fun normalizeBypass(v: ConfigValue): ConfigValue = when (v) {
             is ConfigValue.Str -> ConfigValue.Arr(splitList(v.value).map { ConfigValue.Str(it) })
             is ConfigValue.Arr -> ConfigValue.Arr(

@@ -38,19 +38,6 @@ import com.openminis.app.ui.components.MinisTextButton
 import com.openminis.app.ui.settings.SettingsScaffold
 import com.openminis.app.ui.settings.SettingsSection
 
-/**
- * [T-backup-destination-browse] What is actually stored on one destination.
- *
- * Reached by tapping a destination in a backup record, so "did this really
- * land?" is answerable without hunting through Settings for the server —
- * which is the question a user opens an old record to ask.
- *
- * Scoped deliberately to browsing and deleting. iOS's
- * `BackupDestinationDetailView` also edits the connection, renames, tests and
- * removes the destination; Android already has those under Manage
- * Destinations, and duplicating them here would give the same server two
- * places to be edited from.
- */
 @Composable
 fun BackupDestinationBrowseScreen(
     remote: RcloneRemoteStore.Remote,
@@ -107,8 +94,6 @@ fun BackupDestinationBrowseScreen(
                 }
             }
         }
-        // A failed delete leaves the list unchanged, so without this the user
-        // sees the file still there and no reason why.
         error?.let {
             Text(
                 it,
@@ -124,8 +109,6 @@ fun BackupDestinationBrowseScreen(
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text(stringResource(R.string.backup_dest_delete_title)) },
-            // A deleted package cannot be recovered, and this is the copy the
-            // record points at — say so before it goes.
             text = { Text(stringResource(R.string.backup_dest_delete_note, pkg.displayName)) },
             confirmButton = {
                 MinisTextButton(

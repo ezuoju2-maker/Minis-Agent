@@ -32,12 +32,6 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
-/**
- * [T-mcp-oauth-signin-android] The browser sign-in end to end, against a mock
- * MCP server + authorization server, with a fake "browser" that answers the
- * loopback redirect the way the real page does (iOS #432; Windows
- * mcp_oauth.rs sign_in tests).
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class McpOAuthSignInTest {
@@ -49,10 +43,8 @@ class McpOAuthSignInTest {
     private val registrations = AtomicInteger()
     private val tokenForms = CopyOnWriteArrayList<String>()
 
-    /** What the token endpoint answers, by call number (1-based). */
     private var tokenAnswer: (Int) -> MockResponse = { ok("access-$it") }
 
-    /** What the fake browser sends back to the loopback. */
     private var browser: (authUrl: String) -> String? = { url -> "code=the-code&state=${param(url, "state")}" }
 
     private lateinit var secrets: FakeMcpOAuthSecrets

@@ -11,26 +11,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * [T-compact-idle-timeout] Behaviour of the idle-timeout stream operator.
- *
- * The constants in CompactBudgetTest only pin arithmetic; this exercises the
- * operator itself, which is where the concurrency risk actually is. The
- * property that matters — and the one the old total-elapsed budget got wrong —
- * is the first test: total duration far beyond the limit is fine as long as no
- * single gap exceeds it.
- *
- * Uses runTest's virtual clock, so "10 minutes of streaming" costs no real
- * wall-clock time and the timings are exact rather than flaky.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class IdleTimeoutFlowTest {
 
     @Test
     fun `a slow but continuous stream survives far past the idle limit`() = runTest {
-        // 600 chunks, one per second = 600s total, with a 100s idle limit.
-        // Under the old total-elapsed budget this is the exact shape that got
-        // cancelled at 150s despite being perfectly healthy.
         val idleMs = 100_000L
         val received = flow {
             repeat(600) {
@@ -56,7 +41,7 @@ class IdleTimeoutFlowTest {
             flow {
                 emit(1)
                 emit(2)
-                delay(idleMs * 2) // silence
+                delay(idleMs * 2)
                 emit(3)
             }.withIdleTimeout(idleMs) { timedOutAfter = it; throw IllegalStateException("idle") }
                 .toList()
@@ -70,9 +55,6 @@ class IdleTimeoutFlowTest {
 
     @Test
     fun `the timer resets per chunk rather than accumulating`() = runTest {
-        // Each gap is just under the limit, so none should fire even though
-        // their sum is several times over it. This is the reset behaviour the
-        // fix depends on; without it this stream would die on the third chunk.
         val idleMs = 10_000L
         val received = flow {
             repeat(5) {
@@ -88,9 +70,6 @@ class IdleTimeoutFlowTest {
 
     @Test
     fun `an upstream error propagates instead of looking like a clean end`() = runTest {
-        // The channel-based implementation closes the channel on upstream
-        // failure; if the cause were dropped the collector would see a normal
-        // completion and silently compact a truncated summary.
         try {
             flow<Int> {
                 emit(1)

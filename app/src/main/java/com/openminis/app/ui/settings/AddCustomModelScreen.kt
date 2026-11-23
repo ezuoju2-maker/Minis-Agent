@@ -24,11 +24,6 @@ import com.openminis.app.ui.components.SectionTextField
 import com.openminis.app.R
 import com.openminis.app.ui.components.MinisButton
 
-/**
- * Add Custom Model — adopts the SettingsScaffold/SettingsSection toolkit
- * (T78). Single Identity section grouping the Model ID + Display Name
- * fields, with a footer caption explaining what the fields are for.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddCustomModelScreen(

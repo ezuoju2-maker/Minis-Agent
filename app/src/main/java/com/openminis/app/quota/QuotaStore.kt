@@ -27,46 +27,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-// [T-provider-quota] Owns upstream quota state: resolves provider instances to
-// quota subjects, runs adapter fetches under the refresh / capability gates
-// with per-subject single flight, merges snapshots, persists a secret-free
-// cache locally, and schedules foreground refreshes. Port of iOS QuotaStore.
-//
-// Rate rules:
-// - [T-quota-attention-refresh] attention decides the interval. A provider is
-//   WATCHED while a view showing its quota is on screen: the chat's nav bar
-//   dot (the current model), a picker section header or Model Group member
-//   pill scrolled into view, the provider page, the quota sheet. Coming into
-//   view refreshes it if due, and while watched it keeps the normal interval
-//   below. Everything else is refreshed at most once an hour;
-// - normal refresh: at most every 10 minutes per subject (one subject = one
-//   credential = one canonical pool set);
-// - no automatic request for a subject is ever sooner than 5 minutes after the
-//   previous one, failures included (backoff starts at 5 min);
-// - forced refresh (the user's button) bypasses the 10-minute cache but not
-//   Retry-After, the single-flight lock, or a 30 s debounce;
-// - capability: a failed probe (404 / unreadable answer) blocks queries for
-//   that provider type + base URL for 24 h, unless the user re-checks;
-// - foreground only: on start (after a 3 s settle) and then on a 60 s tick,
-//   every eligible subject that is due is refreshed. Nothing runs in the
-//   background.
-//
-// Never logs or persists a credential, an Authorization header or a raw
-// response body.
 
 private const val TAG = "Quota"
 
-/** What the detail section shows for one instance. */
 sealed class QuotaInstanceDisplay {
-    /** Hidden: disabled instance or no credential (the credential section already asks for one). */
     data object Hidden : QuotaInstanceDisplay()
     data class Unsupported(val reason: QuotaSubject.UnsupportedReason) : QuotaInstanceDisplay()
     data object Loading : QuotaInstanceDisplay()
 
-    /** Queried; upstream reported no pool for this credential. */
     data class Empty(val subjectId: QuotaSubjectID) : QuotaInstanceDisplay()
 
-    /** Queried and failed, nothing cached to show. */
     data class Failed(val error: QuotaError) : QuotaInstanceDisplay()
     data class Pools(val subjectId: QuotaSubjectID) : QuotaInstanceDisplay()
 }
@@ -80,7 +50,6 @@ sealed class QuotaRefreshResult {
     data object CapabilityFailed : QuotaRefreshResult()
 }
 
-/** Everything the UI reads. Immutable: every change publishes a new value. */
 data class QuotaState(
     val subjects: Map<QuotaSubjectID, QuotaSubject> = emptyMap(),
     val pools: Map<QuotaPoolKey, QuotaPool> = emptyMap(),
@@ -88,12 +57,9 @@ data class QuotaState(
     val capabilities: Map<QuotaCapabilityKey, QuotaCapabilityRecord> = emptyMap(),
     val summaries: Map<String, QuotaSnapshotSummary> = emptyMap(),
     val instanceSubjects: Map<String, QuotaSubjectID> = emptyMap(),
-    /** Not persisted: why the last refresh of an instance did not reach a subject. */
     val instanceNotes: Map<String, QuotaSubject.NotConfiguredReason> = emptyMap(),
-    /** Instances whose subject is being fetched right now. */
     val refreshingInstanceIds: Set<String> = emptySet(),
 ) {
-    /** Each canonical pool of a subject exactly once, stable order. */
     fun poolsOf(subject: QuotaSubjectID): List<QuotaPool> =
         pools.values.filter { it.subjectId == subject }
             .sortedWith(compareBy<QuotaPool> { kindOrder(it.kind) }.thenBy { it.id.rawValue })
@@ -103,7 +69,6 @@ data class QuotaState(
 
     fun isRefreshing(instanceId: String): Boolean = instanceId in refreshingInstanceIds
 
-    /** Other instances resolving to the same account (for the "don't add them up" note). */
     fun sharingInstanceIds(instanceId: String): List<String> {
         val sid = instanceSubjects[instanceId] ?: return emptyList()
         val s = subjects[sid] ?: return emptyList()
@@ -113,10 +78,6 @@ data class QuotaState(
     fun poolStatus(pool: QuotaPool, now: Long = System.currentTimeMillis()): PoolStatus =
         QuotaStatusRules.poolStatus(pool, now, QuotaStore.freshnessPolicy, QuotaStore.thresholds)
 
-    /**
-     * The model's view over every pool that applies to it.
-     * [T-quota-no-manual-mapping] Upstream bindings only.
-     */
     fun modelView(instanceId: String, modelId: String, now: Long = System.currentTimeMillis()): ModelQuotaView =
         QuotaModelResolver.view(
             instanceId = instanceId, modelId = modelId, subjectId = instanceSubjects[instanceId],
@@ -124,23 +85,16 @@ data class QuotaState(
             freshness = QuotaStore.freshnessPolicy, thresholds = QuotaStore.thresholds,
         )
 
-    /** [T-quota-tag-level] The account's level over ALL its pools (picker header tag). */
     fun subjectLevel(instanceId: String, now: Long = System.currentTimeMillis()): QuotaLevel {
         val sid = instanceSubjects[instanceId] ?: return QuotaLevel.normal
         return QuotaLevelRules.level(poolsOf(sid).map { poolStatus(it, now) to it })
     }
 
-    /** The pool that best represents the instance's account in one short line. */
     fun headline(instanceId: String, now: Long = System.currentTimeMillis()): Pair<QuotaPool, PoolStatus>? {
         val sid = instanceSubjects[instanceId] ?: return null
         return QuotaHeadline.pick(poolsOf(sid), now, QuotaStore.freshnessPolicy, QuotaStore.thresholds)
     }
 
-    /**
-     * [T-quota-relay-probe] What the last probe of this relay found, for the
-     * details: "Sub2API · /v1/usage", or why nothing was found. null for
-     * non-relays and relays not probed yet.
-     */
     data class RelayDetection(val text: String, val found: Boolean, val at: Long)
 
     fun relayDetection(d: QuotaInstanceDescriptor): RelayDetection? {
@@ -196,7 +150,6 @@ object QuotaStore {
     private const val FOREGROUND_TICK_MS = 60_000L
     private const val POST_FOREGROUND_SETTLE_MS = 3_000L
 
-    /** Credential change: re-resolve instances seen within this window. */
     private const val RECENT_USE_WINDOW_MS = 30 * 60_000L
 
     private val _state = MutableStateFlow(QuotaState())
@@ -210,7 +163,6 @@ object QuotaStore {
     private val lock = Any()
     private val lastViewed = HashMap<String, Long>()
 
-    /** [T-quota-attention-refresh] Instance id -> on-screen views showing its quota right now. */
     private val watchCounts = HashMap<String, Int>()
 
     @Volatile private var loaded = false
@@ -218,9 +170,7 @@ object QuotaStore {
     private var persistJob: Job? = null
     private var foregroundJob: Job? = null
 
-    // MARK: - Lifecycle
 
-    /** Called once at launch. Refreshes run only while the app is in the foreground. */
     fun start(context: Context, repository: ProviderRepository) {
         synchronized(lock) {
             if (started) return
@@ -234,8 +184,6 @@ object QuotaStore {
                 override fun onStop(owner: LifecycleOwner) = resignedActive()
             })
         }
-        // The cache file is read off the main thread (start runs in
-        // Application.onCreate); every mutation path calls ensureLoaded first.
         scope.launch(Dispatchers.IO) {
             ensureLoaded()
             AppLogger.info(TAG, "[Quota] started - subjects=${_state.value.subjects.size} pools=${_state.value.pools.size}")
@@ -259,15 +207,9 @@ object QuotaStore {
     private fun resignedActive() {
         foregroundJob?.cancel()
         foregroundJob = null
-        // onStop arrives on the main thread: write the file off it.
         scope.launch(Dispatchers.IO) { flushPersist() }
     }
 
-    /**
-     * A key was added, changed or removed: forget "no credential" notes so the
-     * section can reappear, and re-resolve instances the user looked at
-     * recently (a new key is a new subject, so its gate is open).
-     */
     fun credentialsChanged() {
         if (!started) return
         _state.update { it.copy(instanceNotes = emptyMap()) }
@@ -279,17 +221,11 @@ object QuotaStore {
         }
     }
 
-    // MARK: - Attention
 
     fun noteViewed(instanceId: String) {
         synchronized(lock) { lastViewed[instanceId] = System.currentTimeMillis() }
     }
 
-    /**
-     * [T-quota-attention-refresh] A view showing this instance's quota came on
-     * screen: from now on it refreshes on the watched interval, and right away
-     * when due. Balanced by [endWatching].
-     */
     fun beginWatching(instanceId: String, reason: String) {
         synchronized(lock) { watchCounts[instanceId] = (watchCounts[instanceId] ?: 0) + 1 }
         refreshIfDue(instanceId, reason)
@@ -305,16 +241,8 @@ object QuotaStore {
 
     fun isWatched(instanceId: String): Boolean = synchronized(lock) { watchCounts.containsKey(instanceId) }
 
-    /**
-     * Mark the instance as in use and refresh only when its subject is due. A
-     * subject known to be within its gate is skipped without a credential read,
-     * so showing a quota costs nothing when the data is current.
-     */
     fun refreshIfDue(instanceId: String, reason: String) {
         if (!started) return
-        // No ensureLoaded() here: this runs on the main thread from a
-        // composition effect. Before the cache is loaded the subject is
-        // unknown, so the launched refresh (which loads it) applies the gate.
         noteViewed(instanceId)
         val instance = instance(instanceId) ?: return
         if (!instance.isEnabled) return
@@ -329,25 +257,12 @@ object QuotaStore {
         scope.launch { refresh(instanceId, forced = false, reason = reason) }
     }
 
-    // MARK: - Refresh
 
-    /**
-     * Refresh the instance's subject. `forced` = the user's refresh / re-check
-     * button: bypasses the 10-minute cache and the daily capability limit,
-     * never Retry-After, the in-flight lock, or the 30 s debounce.
-     * `attended == false` (the scheduler, for a provider not on screen) adds
-     * the unattended hour to the gate.
-     */
     suspend fun refresh(instanceId: String, forced: Boolean, reason: String, attended: Boolean = true): QuotaRefreshResult =
-        // Callers include UI coroutines on the main thread (the refresh
-        // buttons); the credential read (EncryptedSharedPreferences), the
-        // cache load and response parsing must not run there.
         withContext(Dispatchers.Default) { refreshOffMain(instanceId, forced, reason, attended) }
 
     private suspend fun refreshOffMain(instanceId: String, forced: Boolean, reason: String, attended: Boolean): QuotaRefreshResult {
         ensureLoaded()
-        // Before the provider config has loaded every instance looks deleted;
-        // detaching then would drop a live instance's cached quota.
         if (repository?.configLoaded?.value != true) {
             return QuotaRefreshResult.NotConfigured(QuotaSubject.NotConfiguredReason.instanceDisabled)
         }
@@ -360,10 +275,6 @@ object QuotaStore {
         if (!adapter.capability(d).active) return QuotaRefreshResult.Unsupported
         if (!instance.isEnabled) return note(instanceId, QuotaSubject.NotConfiguredReason.instanceDisabled)
 
-        // [T-quota-claude-subscription] An OAuth subscription is keyed by its
-        // instance: the access token rotates on every refresh, so hashing it
-        // would move the data to a new subject each time. Its token is only
-        // fetched (possibly refreshed) once the gates below allow a request.
         val subjectId: QuotaSubjectID
         val credentialSource: suspend () -> String?
         val ctx = appContext
@@ -383,10 +294,6 @@ object QuotaStore {
                 }
             }
             adapter.vendor == QuotaVendor.kimiCode && d.isOAuth && ctx != null -> {
-                // [ISS-031] Same token the Kimi Code chat requests use
-                // (ProviderFactory, ProviderType.kimiCode): a pasted bearer
-                // token first, else the device-flow token (refreshed when due).
-                // Keyed by instance: the device-flow token rotates. Never logged.
                 subjectId = subscriptionSubject(adapter.vendor, instanceId)
                 attach(instanceId, subjectId, "OAuth")
                 credentialSource = {
@@ -446,8 +353,6 @@ object QuotaStore {
         try {
             val started = System.currentTimeMillis()
             AppLogger.info(TAG, "[Quota] 🔄 fetch ${adapter.adapterId} subject=$subjectId forced=$forced reason=$reason")
-            // [T-quota-relay-probe] Reuse the type found by a probe less than a
-            // day old; otherwise (none yet, stale, or last probe failed) probe.
             val relayHint = if (adapter.vendor == QuotaVendor.customRelay) {
                 _state.value.capabilities[d.capabilityKey]?.takeIf {
                     it.status == QuotaCapabilityRecord.Status.supported &&
@@ -456,9 +361,6 @@ object QuotaStore {
             } else {
                 null
             }
-            // [ISS-031] DEV_TOOLS builds only (BuildConfig.DEV_TOOLS is a
-            // compile-time false in release, so this branch is not in a
-            // release APK): point ONE instance's query at a fake server.
             val endpointOverride = if (com.openminis.app.BuildConfig.DEV_TOOLS) debugEndpointOverride(d.instanceId) else null
             if (endpointOverride != null) {
                 AppLogger.warning(TAG, "[Quota] ⚠️ DEBUG endpoint override for ${adapter.adapterId} instance=${d.instanceId} → $endpointOverride")
@@ -531,8 +433,6 @@ object QuotaStore {
             for (e in outcome.partialErrors) {
                 AppLogger.warning(TAG, "[Quota] partial failure $subjectId: ${e.kind.name} ${e.detail}")
             }
-            // [ISS-031] Field names + types only (no values), once per adapter
-            // per launch: lets an installed build confirm an unverified shape.
             outcome.responseShape?.let { shape ->
                 if (loggedResponseShapes.add(adapter.adapterId)) {
                     AppLogger.info(TAG, "[Quota] 🧩 ${adapter.adapterId} response shape: $shape")
@@ -550,17 +450,8 @@ object QuotaStore {
         }
     }
 
-    /** [ISS-031] Adapters whose response shape was already logged this launch. */
     private val loggedResponseShapes: MutableSet<String> = java.util.Collections.synchronizedSet(HashSet())
 
-    /**
-     * [ISS-031] DEV_TOOLS builds only: `<cacheDir>/quota-debug-endpoints.json`,
-     * `{"<instanceId>": "<http(s) URL>"}`, points ONE instance's query at a fake
-     * server (on-device verification of the Kimi Code `/usages` parser). Keyed
-     * by instance, never by vendor, so a real account's token on the same
-     * device never goes to the fake server. No file = no override. Callers
-     * gate on BuildConfig.DEV_TOOLS.
-     */
     private fun debugEndpointOverride(instanceId: String): String? {
         val dir = appContext?.cacheDir ?: return null
         val file = File(dir, "quota-debug-endpoints.json")
@@ -574,11 +465,8 @@ object QuotaStore {
         return raw
     }
 
-    /** Identity headers an undocumented usage endpoint expects. Never logged. */
     private fun extraHeaders(vendor: QuotaVendor, d: QuotaInstanceDescriptor): Map<String, String> = when (vendor) {
-        // The usage endpoint answers the official CLI; send its fingerprint.
         QuotaVendor.claudeSubscription -> com.openminis.app.auth.ClaudeCliMimicryHeaders.ALL.toMap()
-        // Same identity the Codex chat requests send (OpenAIProvider).
         QuotaVendor.codexSubscription -> buildMap {
             val version = com.openminis.app.provider.openai.OpenAIProvider.CODEX_CLIENT_VERSION
             put("User-Agent", "codex_cli_rs/$version (Android; arm64)")
@@ -608,10 +496,6 @@ object QuotaStore {
                 lastRefresh = lastRefresh,
                 state = if (st.poolsOf(subjectId).isEmpty()) QuotaSubject.State.Failed else QuotaSubject.State.Available,
             )
-            // An endpoint that does not exist or answers something unreadable is
-            // a capability failure for this provider type + base URL: stop until
-            // the next daily probe or a user re-check. Auth failures are the
-            // key's problem, not the endpoint's.
             val capabilities = if (QuotaCapabilityRules.failureDisablesEndpoint(fe.kind, subjectId.vendor)) {
                 st.capabilities + (
                     capKey to QuotaCapabilityRecord(
@@ -649,10 +533,6 @@ object QuotaStore {
 
     private fun newSubject(id: QuotaSubjectID) = QuotaSubject(id = id)
 
-    /**
-     * Point the instance at [subjectId]; when its key changed, leave the old
-     * subject and drop it (with its pools) once no instance uses it.
-     */
     private fun attach(instanceId: String, subjectId: QuotaSubjectID, maskedKey: String) {
         var changed = false
         _state.update { st0 ->
@@ -699,27 +579,17 @@ object QuotaStore {
         )
     }
 
-    /** Instances deleted since the cache was written leave nothing behind. */
     private fun pruneDeletedInstances() {
         val repo = repository ?: return
         val live = repo.config.value.instances.map { it.id }.toSet()
         _state.value.instanceSubjects.keys.filter { it !in live }.forEach(::detach)
     }
 
-    // MARK: - Passive observation (response headers)
 
     fun subscriptionSubject(vendor: QuotaVendor, instanceId: String) = QuotaSubjectID(vendor, "instance:$instanceId")
 
-    /** Diagnostic: instances whose first observed header set was logged verbatim. */
     private val loggedObservationInstances = HashSet<String>()
 
-    /**
-     * A reply from an OAuth Claude instance carried
-     * `anthropic-ratelimit-unified-*` headers (or a Codex reply `x-codex-*`):
-     * merge them in as the same pools / windows the active query writes, and
-     * count them as a refresh so the scheduler does not query again within
-     * the 5-minute window.
-     */
     fun observeSubscriptionHeaders(instanceId: String, vendor: QuotaVendor, headers: Map<String, String>) {
         if (!started) return
         ensureLoaded()
@@ -727,8 +597,6 @@ object QuotaStore {
         if (!instance.isEnabled || QuotaVendorDetector.vendor(descriptor(instance)) != vendor) return
         val firstTime = synchronized(lock) { loggedObservationInstances.add(instanceId) }
         if (firstTime) {
-            // Header names and values only (usage fractions, reset times,
-            // status); no credential is ever part of these response headers.
             val line = headers.entries.sortedBy { it.key }.joinToString(" ") { "${it.key}=${it.value}" }
             AppLogger.info(TAG, "[Quota][SubscriptionHeaders] first observation vendor=${vendor.name} instance=${instanceId.take(8)} $line")
         }
@@ -764,24 +632,16 @@ object QuotaStore {
         schedulePersist()
     }
 
-    // MARK: - Scheduling
 
-    /**
-     * Refresh every eligible instance whose subject is due: on the watched
-     * interval when on screen, else on the unattended hour. Instances sharing
-     * a subject collapse into one request. At most two fetches run at once.
-     */
     private suspend fun refreshDue(reason: String) {
         val repo = repository ?: return
         val now = System.currentTimeMillis()
         val st = _state.value
         val candidates = repo.config.value.instances.filter { instance ->
             if (!instance.isEnabled) return@filter false
-            // Known to have no credential: nothing to send until a key is added.
             if (st.instanceNotes[instance.id] != null) return@filter false
             val d = descriptor(instance)
             if (!QuotaAdapterRegistry.adapter(d).capability(d).active) return@filter false
-            // Skip without a credential read when the known subject is not due.
             val sid = st.instanceSubjects[instance.id]
             !(
                 sid != null && !QuotaRefreshGate.decide(
@@ -802,7 +662,6 @@ object QuotaStore {
         }
     }
 
-    // MARK: - Persistence
 
     private fun storeFile(): File? = appContext?.let { File(File(it.noBackupFilesDir, "quota"), "store.json") }
 
@@ -869,9 +728,7 @@ object QuotaStore {
         }
     }
 
-    // MARK: - Instance -> descriptor / credential
 
-    /** Rate policy per vendor (subscriptions refresh on a 5-minute window). */
     fun policy(vendor: QuotaVendor): QuotaRefreshPolicy = QuotaRefreshPolicy.forVendor(vendor)
 
     private fun instance(id: String): ProviderInstance? = repository?.config?.value?.instances?.find { it.id == id }
@@ -889,9 +746,7 @@ object QuotaStore {
             ProviderType.xAI -> QuotaInstanceDescriptor.ProviderKind.xAI
             ProviderType.kimiCode -> QuotaInstanceDescriptor.ProviderKind.kimiCode
             ProviderType.githubCopilot -> QuotaInstanceDescriptor.ProviderKind.githubCopilot
-            // [T-workbuddy] no dedicated quota vendor yet; treat as generic.
             ProviderType.workBuddy -> QuotaInstanceDescriptor.ProviderKind.unsupported
-            // [T-builtin-accounts] quota lives on the platform screen instead.
             ProviderType.qoder, ProviderType.minimaxCode ->
                 QuotaInstanceDescriptor.ProviderKind.unsupported
             ProviderType.unsupported -> QuotaInstanceDescriptor.ProviderKind.unsupported
@@ -902,13 +757,6 @@ object QuotaStore {
         isOpenCodeChannel = isOpenCodeChannel(instance),
     )
 
-    /**
-     * [ISS-031] The app's own OpenCode detection (the one that gates the
-     * `x-opencode-session` header), limited like iOS's
-     * `ProviderInstance.isOpenCodeChannel` to OpenAI-protocol provider types:
-     * OpenCode speaks only that protocol, so a relay hostname can never pull,
-     * say, an Anthropic or Gemini instance into this vendor.
-     */
     fun isOpenCodeChannel(instance: ProviderInstance): Boolean = when (instance.providerType) {
         ProviderType.openAI, ProviderType.openAIResponses, ProviderType.openRouter, ProviderType.xAI,
         ProviderType.kimiCode, ProviderType.githubCopilot ->
@@ -917,10 +765,6 @@ object QuotaStore {
         ProviderType.workBuddy, ProviderType.qoder, ProviderType.minimaxCode -> false
     }
 
-    /**
-     * The bearer credential for an active balance query: the API key, else a
-     * manually pasted token.
-     */
     private fun credential(instance: ProviderInstance): String? {
         val repo = repository ?: return null
         repo.loadApiKey(instance.id)?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
@@ -929,12 +773,6 @@ object QuotaStore {
     }
 }
 
-/**
- * [T-quota-claude-subscription] Entry point for the providers: called on the
- * network thread for every response of an OAuth Claude / Codex instance.
- * Filters on the calling thread and allocates nothing unless the response
- * carries usage headers; only then hands them to the store.
- */
 object QuotaObservationSink {
     fun recordAnthropicResponse(instanceId: String?, headers: okhttp3.Headers) {
         instanceId ?: return
@@ -949,7 +787,6 @@ object QuotaObservationSink {
         observe(instanceId, QuotaVendor.claudeSubscription, h)
     }
 
-    /** [T-quota-codex-subscription] Codex replies (OpenAIProvider streaming path, errors included). */
     fun recordCodexResponse(instanceId: String?, headers: okhttp3.Headers) {
         instanceId ?: return
         var found: HashMap<String, String>? = null
@@ -963,13 +800,6 @@ object QuotaObservationSink {
         observe(instanceId, QuotaVendor.codexSubscription, h)
     }
 
-    /**
-     * [T-quota-subscription-crossreview] The sink runs inside the chat
-     * request, before the reply body is read (iOS hands off to the main actor
-     * instead, so its bookkeeping can never touch the request). Quota
-     * bookkeeping must never fail a chat: anything it throws is logged and
-     * dropped here.
-     */
     private fun observe(instanceId: String, vendor: QuotaVendor, headers: Map<String, String>) {
         try {
             QuotaStore.observeSubscriptionHeaders(instanceId, vendor, headers)

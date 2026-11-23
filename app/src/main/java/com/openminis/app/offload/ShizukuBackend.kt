@@ -10,37 +10,6 @@ import rikka.sui.Sui
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * [T-android-privileged-backend] Shizuku-protocol privileged-execution backend.
- *
- * Three providers speak the SAME Shizuku binder protocol and push their binder
- * into the SAME client-side [rikka.shizuku.ShizukuProvider]:
- *   • official Shizuku manager (`moe.shizuku.privileged.api`, RikkaApps) — APK
- *   • AXManager (`frb.axeron.manager`, Axeron) — APK
- *   • Sui (RikkaApps) — a Magisk/KernelSU **module**, usually NO APK at all
- *
- * The `rikka.shizuku.Shizuku` singleton is therefore a single slot, owned by
- * whichever provider the user authorized — the SDK and this class are unaware
- * of (and indifferent to) which one is running. The earlier two-backend split
- * confused detection because both `ShizukuBackend` and `AxeronBackend`
- * reported state off the same shared singleton; that abstraction has been
- * removed and must NOT come back for Sui either.
- *
- * [T-android-sui-support] (GH#110 / GH#97) Detection is **binder-first**: a
- * live binder means we are usable, full stop. The installed-package scan is
- * only consulted when the binder is DOWN, to explain why and pick the right
- * install guidance. The previous package-first order hard-blocked Sui: Sui
- * ships no APK, so the whitelist scan returned "not installed" and
- * short-circuited before `pingBinder()` was ever called — a live, authorized
- * Sui rendered as "Manager Not Installed".
- *
- * No Sui-specific dependency or init is needed: `dev.rikka.shizuku:provider`
- * calls `Sui.init(packageName)` automatically from `ShizukuProvider.onCreate`
- * (verified in the 13.1.5 bytecode), and `rikka.sui.Sui` ships inside
- * `dev.rikka.shizuku:api`. [Sui.isSui] is used for LABELS ONLY — never for
- * state decisions (there is no supported way to identify the binder's sender;
- * see the reverted probe in 09f12761).
- */
 class ShizukuBackend(private val appContext: Context) {
 
     @Volatile private var onStateChanged: (() -> Unit)? = null
@@ -63,30 +32,10 @@ class ShizukuBackend(private val appContext: Context) {
             onStateChanged?.invoke()
         }
 
-    /**
-     * Any known Shizuku-protocol **manager APK** installed?
-     *
-     * [T-android-sui-support] NOTE: this is NOT "is a privileged backend
-     * available" — Sui provides the binder with no APK to find. Never gate
-     * binder work on this; use [snapshot] / [isPermissionGranted] instead.
-     * It survives only to drive install guidance and the "open manager app"
-     * affordance.
-     */
     fun isInstalled(): Boolean = installedManagerPackage() != null
 
-    /**
-     * [T-android-sui-support] True when the live binder is provided by Sui
-     * (root module) rather than a manager APK. Display-only: it picks labels
-     * and hides the meaningless "Open Manager App" row for Sui users. It must
-     * never influence state resolution — see [decideState].
-     */
     fun isSui(): Boolean = runCatching { Sui.isSui() }.getOrDefault(false)
 
-    /**
-     * The first installed Shizuku-protocol manager package (in preference
-     * order: official Shizuku, then AXManager), or null if none installed.
-     * Used to drive "open the manager app" actions.
-     */
     fun installedManagerPackage(): String? = SHIZUKU_COMPATIBLE_PACKAGES.firstOrNull { pkg ->
         runCatching { appContext.packageManager.getPackageInfo(pkg, 0); true }.getOrDefault(false)
     }
@@ -127,16 +76,6 @@ class ShizukuBackend(private val appContext: Context) {
         onStateChanged?.invoke()
     }
 
-    /**
-     * Launch the installed manager app (Shizuku or AXManager — whichever is
-     * present). If none is installed, falls back to an install page; the
-     * multi-option install UI lives in the Settings screen, not here.
-     *
-     * [T-android-sui-support] Sui has no launcher activity, so a Sui user has
-     * nothing to open. The UI hides this row for them; if it is somehow
-     * reached anyway, send them to Sui's page rather than to Shizuku's
-     * releases (which is what the old unconditional fallback did).
-     */
     fun openManagerApp(context: Context) {
         val pkg = installedManagerPackage()
         if (pkg != null) {
@@ -176,9 +115,6 @@ class ShizukuBackend(private val appContext: Context) {
         if (Shizuku.pingBinder()) Shizuku.getUid() else -1
     }.getOrDefault(-1)
 
-    /**
-     * Shizuku-SDK process path (reflection-based `Shizuku.newProcess`).
-     */
     fun runProcess(
         argv: Array<String>,
         env: Array<String>?,
@@ -192,12 +128,6 @@ class ShizukuBackend(private val appContext: Context) {
                 stderr = "shizuku not ready (state=${snapshot().state})",
             )
         }
-        // Shizuku.newProcess is hidden API — invoke via reflection so the
-        // SDK upgrade doesn't break our build. The returned object is a
-        // ShizukuRemoteProcess which extends java.lang.Process, so once we
-        // have it, treat it as a normal Process and use the standard
-        // waitFor(timeout, unit) API rather than reflecting for a
-        // nonexistent `waitForTimeout` method (T343).
         val procAny = runCatching {
             val m = Shizuku::class.java.getDeclaredMethod(
                 "newProcess",
@@ -234,15 +164,12 @@ class ShizukuBackend(private val appContext: Context) {
             }
         }
         outThread.isDaemon = true; errThread.isDaemon = true
-        // GH #453: per-name thread counts.
         outThread.name = com.openminis.app.diagnostics.ThreadNames.of("shizuku-out"); errThread.name = com.openminis.app.diagnostics.ThreadNames.of("shizuku-err")
         outThread.start(); errThread.start()
 
         val exited: Boolean = try {
             proc.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
         } catch (t: IllegalArgumentException) {
-            // Shizuku v13 RemoteProcess.waitFor(long, TimeUnit) throws IllegalArgumentException
-            // ("process hasn't exited") instead of blocking. Fall back to polling exitValue().
             if (polledFallbackLogged.compareAndSet(false, true)) {
                 AppLogger.info(TAG, "Using polling fallback for Shizuku RemoteProcess.waitFor(timeout) (SDK bug — throws IllegalArgumentException)")
             }
@@ -274,7 +201,6 @@ class ShizukuBackend(private val appContext: Context) {
             runCatching { proc.destroy() }
             runCatching { outThread.join(2000) }
             runCatching { errThread.join(2000) }
-            // Linux convention: 124 = command timed out (coreutils `timeout`).
             return ShizukuManager.ProcessResult(124, out.toString().trimEnd('\n'), err.toString().trimEnd('\n'))
         }
 
@@ -287,10 +213,6 @@ class ShizukuBackend(private val appContext: Context) {
     companion object {
         private const val TAG = "ShizukuBackend"
 
-        // Known Shizuku-protocol manager packages. Order = UI install-preference.
-        // Sui is deliberately ABSENT: it is a root module, not an APK, and
-        // adding a package name for it would re-create the very whitelist trap
-        // that hid it (GH#110). Sui is detected purely by its live binder.
         const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
         const val AXMANAGER_PACKAGE = "frb.axeron.manager"
         val SHIZUKU_COMPATIBLE_PACKAGES = listOf(SHIZUKU_PACKAGE, AXMANAGER_PACKAGE)
@@ -303,24 +225,6 @@ class ShizukuBackend(private val appContext: Context) {
 
         private val polledFallbackLogged = AtomicBoolean(false)
 
-        /**
-         * [T-android-sui-support] The binder-first decision, extracted as a
-         * PURE function so every branch is unit-testable without a device, a
-         * root environment, or the Shizuku SDK's static singleton
-         * (ShizukuBackendStateTest).
-         *
-         * Order matters and is the whole fix:
-         *   1. binder alive?  → READY / NEED_PERMISSION. Whoever supplied it
-         *      (Shizuku APK, AXManager, or Sui module) is irrelevant — this is
-         *      what makes Sui work with zero Sui-specific plumbing.
-         *   2. binder down, manager APK present → NOT_RUNNING ("start it").
-         *   3. binder down, nothing installed → NOT_INSTALLED ("install one").
-         *
-         * NOT_INSTALLED keeps its name for call-site compatibility but now
-         * means "no binder AND no manager APK" — with Sui in the picture it
-         * reads as "no privileged backend available", which is what the UI
-         * copy says.
-         */
         fun decideState(
             binderAlive: Boolean,
             permissionGranted: Boolean,

@@ -8,12 +8,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-port-sched-overlay-waiting] Between two fires of a scheduled task, the
- * floating capsule shows the wait - "Next run · 2/3" counting down - instead
- * of lingering five minutes as "completed" with the last run's reply (iOS
- * fa7adaf9e turns the Live Activity card into a countdown card).
- */
 class ScheduledOverlayWaitingTest {
 
     private val wait = ScheduledWait("chat-1", "task", "tick", nextRunMs = 2_000_000L, runCounter = "2/3")

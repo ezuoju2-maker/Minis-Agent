@@ -8,20 +8,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [GH#306] The OpenAI emitter must be able to emit every wire format the rule editor
- * lets a user pick.
- *
- * Before this, `CustomPath`, `BooleanToggle` and `ExtraBodyToggle` were selectable,
- * saved fine, and then threw from inside `buildRequestBody`:
- *
- *     IllegalStateException: ThinkingWireFormat CustomPath(path=extra_body.thinking.mode,
- *     ...) is not emitted on the OpenAI path in Phase 1
- *
- * Reproduced on a Pixel 6: zero requests reached the network, the chat showed a red
- * error bubble, and Retry failed identically — the model was unusable until the rule
- * was deleted.
- */
 class CustomPathEmitTest {
 
     @After
@@ -59,7 +45,6 @@ class CustomPathEmitTest {
         return body
     }
 
-    // ── the crash itself ────────────────────────────────────────────────────
 
     @Test
     fun `a CustomPath rule no longer throws and writes its nested value`() {
@@ -86,9 +71,6 @@ class CustomPathEmitTest {
 
     @Test
     fun `BooleanToggle and ExtraBodyToggle are emitted too`() {
-        // Same `else ->` branch, same crash. The issue named CustomPath, but a
-        // gemini_budget rule reproduced it identically on device, so the fix has to
-        // cover every format the editor offers, not just the reported one.
         assertTrue(emit(ThinkingWireFormat.BooleanToggle("enable_thinking")).getBoolean("enable_thinking"))
         assertTrue(
             emit(ThinkingWireFormat.ExtraBodyToggle("extra_body.thinking.enabled"))
@@ -96,13 +78,9 @@ class CustomPathEmitTest {
         )
     }
 
-    // ── tier selection ──────────────────────────────────────────────────────
 
     @Test
     fun `a tier with no value of its own falls back to HIGH`() {
-        // Mirrors iOS `values[ctx.level] ?? values[.high]`: a rule authored with one
-        // value is a rule that applies at every enabled tier, not one that silently
-        // does nothing on MEDIUM.
         val body = emit(
             ThinkingWireFormat.CustomPath("a.b", mapOf(ThinkingLevel.HIGH to "hi"), null),
             level = ThinkingLevel.MEDIUM,
@@ -118,8 +96,6 @@ class CustomPathEmitTest {
         )
         assertEquals("bye", withOff.getJSONObject("a").getString("b"))
 
-        // No offValue means "say nothing" — distinct from "send a falsey value", which
-        // is load-bearing for vendors whose switch defaults ON when the key is absent.
         val withoutOff = emit(
             ThinkingWireFormat.CustomPath("a.b", mapOf(ThinkingLevel.HIGH to "hi"), null),
             level = ThinkingLevel.OFF,
@@ -127,7 +103,6 @@ class CustomPathEmitTest {
         assertFalse(withoutOff.has("a"))
     }
 
-    // ── the safety guard (stricter than iOS, deliberately) ──────────────────
 
     @Test
     fun `a reserved root key is refused rather than corrupting the request`() {
@@ -141,8 +116,6 @@ class CustomPathEmitTest {
 
     @Test
     fun `reserved words are only reserved at the ROOT`() {
-        // `extra_body.model` is a vendor's own nested field and none of our business;
-        // only a root `model` would retarget the request.
         val body = emit(
             ThinkingWireFormat.CustomPath("extra_body.model", mapOf(ThinkingLevel.HIGH to "x"), null),
         )
@@ -156,8 +129,6 @@ class CustomPathEmitTest {
         )
         val body = JSONObject()
         val trace = ThinkingRuleResolver.apply(body, ctx(ThinkingLevel.HIGH))
-        // The rule must not claim a key it never wrote, or the trace would tell the
-        // user it worked.
         assertTrue("trace must report no emitted keys", trace.emittedKeys.isEmpty())
 
         assertFalse(
@@ -167,8 +138,6 @@ class CustomPathEmitTest {
 
     @Test
     fun `a scalar sitting where the path needs to nest is replaced`() {
-        // The alternative is failing the whole send because some other rule put a
-        // scalar at `extra_body`; the user's explicit rule should win.
         ThinkingRuleResolver.setAllCustomRules(
             ruleWith(ThinkingWireFormat.CustomPath("extra_body.x", mapOf(ThinkingLevel.HIGH to "v"), null)),
         )

@@ -6,11 +6,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-voice-correction] JVM-testable parts of the phonetic layer:
- * locale folding, Levenshtein and similarity. The pinyin transform itself needs
- * android.icu and is covered by the instrumented test.
- */
 class PhoneticNormalizerTest {
 
     @Test
@@ -18,7 +13,6 @@ class PhoneticNormalizerTest {
         assertEquals("zh", PhoneticNormalizerRegistry.normalizedLocaleKey("zh"))
         assertEquals("zh", PhoneticNormalizerRegistry.normalizedLocaleKey("zh-Hans"))
         assertEquals("zh", PhoneticNormalizerRegistry.normalizedLocaleKey("zh_CN"))
-        // Traditional must fold to the SAME key so the dictionary isn't split.
         assertEquals("zh", PhoneticNormalizerRegistry.normalizedLocaleKey("zh-Hant"))
         assertEquals("en", PhoneticNormalizerRegistry.normalizedLocaleKey("en-US"))
     }
@@ -26,7 +20,6 @@ class PhoneticNormalizerTest {
     @Test
     fun `only zh has a normalizer today`() {
         assertNotNull(PhoneticNormalizerRegistry.normalizer("zh-Hans"))
-        // null means "cannot compare phonetically" — callers must degrade.
         assertNull(PhoneticNormalizerRegistry.normalizer("en-US"))
         assertNull(PhoneticNormalizerRegistry.normalizer("ja"))
     }
@@ -48,7 +41,6 @@ class PhoneticNormalizerTest {
 
     @Test
     fun `near-homophone keys clear the correction threshold`() {
-        // 张山 -> zhangshan vs 张三 -> zhangsan
         val s = PinyinNormalizer.similarity("zhangshan", "zhangsan")
         assertTrue(
             "similarity=$s should clear ${VoiceCorrectionConfig.PHONETIC_SIMILARITY_THRESHOLD}",
@@ -58,7 +50,6 @@ class PhoneticNormalizerTest {
 
     @Test
     fun `unrelated words fall below the correction threshold`() {
-        // 吃饭 -> chifan vs 看电影 -> kandianying
         val s = PinyinNormalizer.similarity("chifan", "kandianying")
         assertTrue(
             "similarity=$s should fall below ${VoiceCorrectionConfig.PHONETIC_SIMILARITY_THRESHOLD}",
@@ -68,11 +59,9 @@ class PhoneticNormalizerTest {
 
     @Test
     fun `confidence formula matches iOS`() {
-        // f / (f + 2n): a rejection costs double a confirmation.
         assertEquals(1.0, VoiceCorrectionDb.confidence(3, 0), 0.0001)
         assertEquals(0.6, VoiceCorrectionDb.confidence(3, 1), 0.0001)
         assertEquals(0.5, VoiceCorrectionDb.confidence(0, 0), 0.0001)
-        // Thrice-rejected drops below the 0.3 retrieval floor and stops being offered.
         assertTrue(VoiceCorrectionDb.confidence(1, 3) < VoiceCorrectionConfig.MIN_CONFUSION_CONFIDENCE)
     }
 
@@ -80,7 +69,6 @@ class PhoneticNormalizerTest {
     fun `variants json round-trips`() {
         val encoded = VoiceCorrectionDb.encodeVariants(listOf("张山", "章三"))
         assertEquals(listOf("张山", "章三"), VoiceCorrectionDb.decodeVariants(encoded))
-        // Malformed JSON degrades to empty rather than throwing.
         assertEquals(emptyList<String>(), VoiceCorrectionDb.decodeVariants("not json"))
     }
 }

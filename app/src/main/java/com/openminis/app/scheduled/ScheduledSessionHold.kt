@@ -15,41 +15,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
 
-/**
- * [T-scheduled-active-session-android] Which chats a scheduled task keeps
- * ACTIVE between its fires: they are not finished, they are waiting to be
- * woken. Port of iOS `AgentJobRegistry.sessionsKeptActiveBySchedule`
- * (f2891c01b).
- *
- * Only a task that comes back into the chat it was created in counts - a
- * follow-up ([ScheduledTargetMode.AppendToSession]) whose target is its own
- * [ScheduledTask.creatorSessionId] - because only then is "this chat is still
- * working" true from the user's side. A task made outside any chat, or one
- * that lands in a new chat, a different chat, a hidden child run or a rerun,
- * makes no chat active (iOS: new-chat, child, rerun, other-session and
- * creator-less jobs do not count). An on-completion task counts only while its
- * upstream still exists and is unfinished; otherwise it waits for something
- * that will never happen.
- *
- * The result feeds [com.openminis.app.service.SessionActivityTracker], which
- * unions it with the running loops into the one "processing" set that
- * keep-alive, Stop, the list spinner and the notification read.
- */
 object ScheduledSessionHold {
 
-    // BEGIN heldSession
-    /**
-     * The chat [task] keeps active at [now], or null. [upstreamUnfinished]
-     * answers for an on-completion task's upstream id.
-     *
-     * [FIX-261025-03] [leadMs] is Settings > Background's "scheduled task
-     * countdown": a timed task holds its chat only once its next run is at
-     * most [leadMs] away (0 = never). Before, it held it for the whole wait,
-     * so a daily task kept the foreground service, its notification and the
-     * Live Updates chip up all day. The alarm starts the service itself when
-     * the run is due, so nothing needs the hold before that. An on-completion
-     * task has no clock: it holds unless the countdown is off.
-     */
     fun heldSession(
         task: ScheduledTask,
         now: Long,
@@ -66,8 +33,6 @@ object ScheduledSessionHold {
                 val upstream = task.onCompletionOf ?: return null
                 if (!upstreamUnfinished(upstream)) return null
             }
-            // Disabled at its last fire (ONCE, AFTER, an INTERVAL's last of
-            // --count), or no slot left (past the end date, no custom days).
             else -> {
                 val next = task.nextTriggerMs(now) ?: return null
                 if (next - now > leadMs) return null
@@ -76,11 +41,6 @@ object ScheduledSessionHold {
         return creator
     }
 
-    /**
-     * [FIX-261025-03] The next instant at which a timed task enters its
-     * [leadMs] window, so the held set can be re-derived then (nothing else
-     * changes at that moment), or null when no task is waiting outside it.
-     */
     fun nextWindowStart(tasks: List<ScheduledTask>, now: Long, leadMs: Long): Long? {
         if (leadMs <= 0L || leadMs == Long.MAX_VALUE) return null
         return tasks.asSequence()
@@ -91,10 +51,6 @@ object ScheduledSessionHold {
             .minOrNull()
     }
 
-    /**
-     * [FIX-261025-03] [derive] for every change of the inputs, and again each
-     * time a task enters its countdown window.
-     */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     internal fun <I, T> windowed(
         inputs: Flow<I>,
@@ -107,18 +63,11 @@ object ScheduledSessionHold {
                 val now = System.currentTimeMillis()
                 emit(derive(i, now))
                 val next = nextWindowStart(tasksOf(i), now, leadOf(i)) ?: break
-                // A little past the boundary so `next - now <= lead` holds.
                 delay((next - System.currentTimeMillis()).coerceAtLeast(0L) + 50L)
             }
         }
     }
-    // END heldSession
 
-    /**
-     * Whether [task] would still fire (iOS `liveScheduledJobs`: enabled and
-     * pending): enabled with a next slot, or an enabled on-completion task
-     * still waiting. What Stop turns off, and what its confirmation counts.
-     */
     fun isLive(task: ScheduledTask, now: Long): Boolean =
         task.enabled && (task.triggerKind == ScheduledTriggerKind.ON_COMPLETION || task.nextTriggerMs(now) != null)
 
@@ -130,13 +79,6 @@ object ScheduledSessionHold {
     ): Set<String> =
         tasks.mapNotNullTo(LinkedHashSet()) { heldSession(it, now, upstreamUnfinished, leadMs) }
 
-    /**
-     * Whether the upstream [id] of an on-completion task is still to finish:
-     * a scheduled task being run right now, a scheduled task still due (an
-     * enabled on-completion one is itself waiting), or an agent job still
-     * pending or running. Agent jobs live in memory, so one from a previous
-     * process is gone - and its dependents never fire, so they hold nothing.
-     */
     fun upstreamUnfinished(
         id: String,
         tasks: List<ScheduledTask>,
@@ -152,13 +94,6 @@ object ScheduledSessionHold {
         return jobs[id]?.isActive == true
     }
 
-    /**
-     * Tasks whose fire is being run right now (alarm received → agent loop
-     * finished), by task id, counted per run. [ScheduledAgentRunner.run] holds
-     * it for the whole run, which covers the two moments the store alone
-     * cannot: the handoff before the turn starts, and the LAST fire of a task
-     * that the alarm already disabled.
-     */
     private val _runningRuns = MutableStateFlow<Map<String, Int>>(emptyMap())
     val runningTaskIds: StateFlow<Map<String, Int>> = _runningRuns.asStateFlow()
 
@@ -173,13 +108,6 @@ object ScheduledSessionHold {
         }
     }
 
-    /**
-     * The chats scheduled tasks keep active, re-derived on every change to the
-     * persisted task list (create, edit, enable / disable, delete, each fire's
-     * bookkeeping), to the runs in flight and to the agent jobs an
-     * on-completion task may wait on. Persisted input, so it is right again
-     * from the first emission after a process restart.
-     */
     fun observe(context: Context): Flow<Set<String>> =
         windowed(
             combine(
@@ -194,7 +122,6 @@ object ScheduledSessionHold {
             leadOf = { it.leadMs },
         ) { i, now -> heldNow(i.tasks, i.runningIds, i.jobs, now, i.leadMs) }.distinctUntilChanged()
 
-    /** [FIX-261025-03] One emission of the observed inputs. */
     internal data class Inputs(
         val tasks: List<ScheduledTask>,
         val runningIds: Set<String>,
@@ -202,12 +129,6 @@ object ScheduledSessionHold {
         val leadMs: Long,
     )
 
-    /**
-     * [T-port-sched-wait-hold-gap] What [observe] emits for one set of inputs:
-     * the chats held by their schedule, plus the chat of every task whose fire
-     * is being run right now. Pure, so a whole fire sequence can be replayed
-     * in tests.
-     */
     fun heldNow(
         tasks: List<ScheduledTask>,
         runningIds: Set<String>,
@@ -218,11 +139,6 @@ object ScheduledSessionHold {
         heldSessions(tasks, now, { upstreamUnfinished(it, tasks, runningIds, jobs, now) }, leadMs) +
             tasks.filter { it.id in runningIds }.mapNotNull(::runHold)
 
-    /**
-     * The chat a task keeps active while one of its fires is being run, enabled
-     * or not (the alarm disables a task at its last fire, before the run): the
-     * same follow-up-to-creator test as [heldSession], without the schedule.
-     */
     fun runHold(task: ScheduledTask): String? {
         val target = task.targetMode as? ScheduledTargetMode.AppendToSession ?: return null
         return target.sessionId.takeIf { it == task.creatorSessionId }

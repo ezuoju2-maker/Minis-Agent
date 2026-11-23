@@ -2,7 +2,6 @@ package com.openminis.app.mcp.oauth
 
 import org.json.JSONObject
 
-/** In-memory [McpOAuthSecrets] for tests (the real one needs EncryptedSharedPreferences). */
 class FakeMcpOAuthSecrets : McpOAuthSecrets {
     val clientSecrets = mutableMapOf<String, String>()
     val tokenMap = mutableMapOf<String, MCPOAuthStore.StoredTokens>()
@@ -22,7 +21,6 @@ class FakeMcpOAuthSecrets : McpOAuthSecrets {
     }
 }
 
-/** In-memory [McpDcrCache]; stores copies, like the prefs-backed one. */
 class FakeMcpDcrCache : McpDcrCache {
     var v1Raw: String? = null
     var v2Raw: String? = null

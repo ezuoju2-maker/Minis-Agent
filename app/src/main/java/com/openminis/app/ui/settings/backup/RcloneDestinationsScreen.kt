@@ -60,12 +60,6 @@ import com.openminis.app.ui.settings.SettingsRow
 import com.openminis.app.ui.settings.SettingsSwitch
 import com.openminis.app.ui.settings.SettingsSwitchRow
 
-/**
- * [T-android-rclone-ui] Backup destinations — the Android peer of iOS
- * BackupDestinationPicker + RcloneAddServerView. Lists saved rclone remotes
- * (toggle on/off, remove) and hosts the add-server flow (pick backend → fill
- * connection fields → connect → browse/create a destination folder → save).
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RcloneDestinationsScreen(onBack: () -> Unit) {
@@ -76,27 +70,15 @@ fun RcloneDestinationsScreen(onBack: () -> Unit) {
     val browse by vm.browse.collectAsState()
 
     var adding by remember { mutableStateOf(false) }
-    // [T-android-backup-dest-edit] The destination whose detail page is open.
     val detail = remember { DestinationDetailNav() }
     BackHandler(enabled = detail.isOpen) { detail.back(vm) }
-    // Name of the destination saved by the last completed save, so the list
-    // can confirm it. Cleared once acknowledged.
     var justSaved by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
-    // [T-android-backup-local-folder] Pick a folder on this device as a
-    // destination. Unlike the mount picker in MountedFoldersScreen, ANY
-    // document provider is accepted here — a backup is written with
-    // ContentResolver, so it never needs a POSIX path, and rejecting
-    // Drive/Dropbox would remove the case where a local destination is most
-    // useful (an off-device copy with no server to configure).
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        // Without a PERSISTED grant the URI dies with this process, and the
-        // next backup would fail on a destination the user believes is saved.
-        // Refuse to save one we cannot hold on to.
         if (!SafMountHelper.handlePickerResult(context, uri)) {
             Toast.makeText(
                 context,
@@ -119,9 +101,6 @@ fun RcloneDestinationsScreen(onBack: () -> Unit) {
         }
 
         if (browse != null) {
-            // Returning to the list on success is the whole point: the form
-            // used to stay put, so a successful save looked identical to one
-            // that silently failed and users re-saved the same destination.
             FolderBrowser(vm) { savedName ->
                 adding = false
                 justSaved = savedName
@@ -158,16 +137,10 @@ fun RcloneDestinationsScreen(onBack: () -> Unit) {
                 )
             } else {
                 remotes.forEachIndexed { i, r ->
-                    // [T-android-backup-dest-edit] Tapping the row opens the
-                    // destination's detail page (rename, folder, connection,
-                    // remove); the switch keeps its own on/off job.
                     SettingsRow(
                         title = r.name,
                         subtitle = stringResource(
                             R.string.backup_dest_row_subtitle,
-                            // A local folder has no protocol to name, and
-                            // "LOCAL-FOLDER" as a pseudo-protocol reads like a
-                            // bug. Use the localized label instead.
                             if (RcloneRemoteStore.isLocalFolder(r.backend)) {
                                 stringResource(R.string.backup_dest_kind_local_folder)
                             } else {
@@ -197,20 +170,12 @@ fun RcloneDestinationsScreen(onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(stringResource(R.string.backup_dest_add_server)) }
 
-            // [T-android-backup-local-folder] Second, equal-weight entry point:
-            // a destination can be a folder on this device, not only a server.
-            // Outlined rather than filled so "Add Server…" stays the primary
-            // action for the remote-backup case the screen was built for.
             Spacer(Modifier.height(8.dp))
             MinisOutlinedButton(
                 onClick = { folderPicker.safeLaunchPicker(null, context, "RcloneDestinations") },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(stringResource(R.string.backup_dest_add_local_folder)) }
 
-            // [T-android-backup-dest-edit] No per-destination "Remove X"
-            // buttons here any more: removing lives on the detail page, behind
-            // a confirmation, as on iOS. One button per destination under the
-            // list also read as removing them in bulk.
 
             error?.let {
                 Text(
@@ -225,27 +190,11 @@ fun RcloneDestinationsScreen(onBack: () -> Unit) {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-// [T-android-restore-server-list] `internal`, not `private`: the
-// Restore-from-Server list hosts this SAME form rather than growing a second
-// copy of a 150-line screen with its own backend catalog, TLS opt-in and
-// validation. One form, two hosts.
 @Composable
 internal fun AddServerForm(
     vm: RcloneDestinationsViewModel,
     onCancel: () -> Unit,
-    // [T-android-connect-and-save] Does a successful connection END here, or
-    // continue into the folder picker?
-    //
-    // For a BACKUP DESTINATION the folder is where files will be written, so
-    // it has to be chosen — true.
-    //
-    // For a RESTORE SOURCE it is only where browsing starts, and the user
-    // browses for the .minisbak afterwards regardless. Making them pick a
-    // folder first asked a question whose answer did not matter, in a picker
-    // that looked like it was saving something. Connect saves the server and
-    // hands straight back — false.
     pickFolder: Boolean = true,
-    /** Called with the saved name when [pickFolder] is false. */
     onSaved: (String) -> Unit = {},
 ) {
     val busy by vm.busy.collectAsState()
@@ -256,21 +205,10 @@ internal fun AddServerForm(
     var backend by remember { mutableStateOf(RcloneBackendCatalog.all.first()) }
     var displayName by remember { mutableStateOf("") }
     val fieldValues = remember { mutableStateMapOf<String, String>() }
-    // [T-android-rclone-tls-timeout] Opt-in to trusting a self-signed
-    // certificate. Not persisted here — it rides along to connectAndBrowse and
-    // is stored with the remote only if the connection actually succeeds.
     var allowInsecureTLS by remember { mutableStateOf(false) }
-    // Absolute path field — the SFTP-absolute-path lesson: always offer a
-    // free-text path so a non-chrooted server can start anywhere, not just home.
     var startPath by remember { mutableStateOf("") }
 
-    // NO verticalScroll here — SettingsScaffold already wraps its content in a
-    // scrolling Column, and nesting a second verticalScroll gives this child an
-    // infinite max-height constraint, which Compose throws on ("Vertically
-    // scrollable component was measured with an infinity maximum height").
-    // That crash fired every time "Add Server" was opened.
     Column(Modifier.padding(16.dp)) {
-        // Backend picker
         ExposedDropdownMenuBox(
             expanded = backendExpanded,
             onExpandedChange = { backendExpanded = it },
@@ -330,11 +268,6 @@ internal fun AddServerForm(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        // [T-android-rclone-tls-timeout] Shown ONLY after the server has been
-        // refused on certificate grounds. A permanently visible "don't verify
-        // certificates" switch sitting next to a password field invites turning
-        // off a protection that was never in the way; surfacing it at the moment
-        // it would actually help keeps the choice informed.
         if (certificateRejected) {
             Spacer(Modifier.height(16.dp))
             TrustCertificateRow(
@@ -355,10 +288,6 @@ internal fun AddServerForm(
                     values = fieldValues.toMap(),
                     startPath = startPath.trim(),
                     allowInsecureTLS = allowInsecureTLS,
-                    // [T-android-connect-and-save] Restore mode: a successful
-                    // connection IS the confirmation, so persist it here and
-                    // return. Nothing is saved when the connection fails —
-                    // this runs only on success.
                     onConnected = if (pickFolder) null else {
                         { vm.saveConnected(onSaved) }
                     },
@@ -368,9 +297,6 @@ internal fun AddServerForm(
             modifier = Modifier.fillMaxWidth(),
         ) {
             if (busy) {
-                // size(), not height() — see BackupAndRestoreScreen: an
-                // unconstrained width falls back to the 40.dp default and
-                // overflows the button.
                 CircularProgressIndicator(
                     modifier = Modifier.size(18.dp), strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.onPrimary,
@@ -378,8 +304,6 @@ internal fun AddServerForm(
             } else {
                 Text(
                     stringResource(
-                        // "Connect" alone did not say what happens next, and
-                        // what happened next differed by host.
                         if (pickFolder) R.string.backup_dest_connect
                         else R.string.backup_dest_connect_and_save,
                     ),
@@ -411,11 +335,6 @@ internal fun AddServerForm(
     }
 }
 
-/**
- * One connection field of a server form. Shared by [AddServerForm] and the
- * connection editor so the two cannot drift apart: same labels, same
- * "(optional)" marking, same masking of the secret.
- */
 @Composable
 internal fun ServerFieldInput(
     field: RcloneBackendCatalog.Field,
@@ -443,7 +362,6 @@ internal fun ServerFieldInput(
     )
 }
 
-/** The self-signed certificate opt-in, offered only after a TLS refusal. */
 @Composable
 internal fun TrustCertificateRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit, enabled: Boolean) {
     SettingsSwitchRow(
@@ -456,18 +374,6 @@ internal fun TrustCertificateRow(checked: Boolean, onCheckedChange: (Boolean) ->
     )
 }
 
-// [T-android-restore-server-list] internal for the same reason as
-// [AddServerForm] — saving a destination goes through this folder step from
-// either host.
-/**
- * [T-android-folder-picker-ios-parity] One row of the folder picker: icon,
- * left-aligned label, optional right-aligned detail.
- *
- * Left-aligned deliberately. These rows were `Button`s, which centre their
- * content, so every folder name floated at a different x depending on its
- * length — there was no common edge to read down, and scanning the list meant
- * re-finding where each name began.
- */
 @Composable
 private fun FolderPickerRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -530,11 +436,6 @@ internal fun FolderBrowser(vm: RcloneDestinationsViewModel, onSaved: (String) ->
     Column(Modifier.padding(16.dp)) {
         Text(stringResource(R.string.backup_dest_choose_folder), style = MaterialTheme.typography.titleMedium)
 
-        // [T-android-folder-picker-ios-parity] Path + New Folder on one line,
-        // matching iOS: the path reads as a pill and the only action that
-        // belongs to it — create a folder HERE — sits at the far end as an
-        // icon. It used to be a full-width button far below the list, which
-        // separated it from the path it acts on and cost a row of height.
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -543,9 +444,6 @@ internal fun FolderBrowser(vm: RcloneDestinationsViewModel, onSaved: (String) ->
                 "/${b.path.trimStart('/')}",
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
-                // Truncate the FRONT: the deepest component is the one that
-                // says where you are, and a long path's leading segments are
-                // the least informative part to keep.
                 overflow = TextOverflow.StartEllipsis,
                 modifier = Modifier
                     .weight(1f)
@@ -562,9 +460,6 @@ internal fun FolderBrowser(vm: RcloneDestinationsViewModel, onSaved: (String) ->
             }
         }
 
-        // One card holding "up one level" and the folders, as on iOS — rather
-        // than a stack of full-width outlined buttons, which gave every row
-        // the visual weight of an action and left folder names centred.
         Column(
             Modifier
                 .fillMaxWidth()
@@ -572,8 +467,6 @@ internal fun FolderBrowser(vm: RcloneDestinationsViewModel, onSaved: (String) ->
                 .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
         ) {
-            // First row in the list, not a separate button above it: going up
-            // is navigation of the same kind as going down.
             if (b.path.isNotEmpty()) {
                 FolderPickerRow(
                     icon = Icons.Outlined.NorthWest,
@@ -592,8 +485,6 @@ internal fun FolderBrowser(vm: RcloneDestinationsViewModel, onSaved: (String) ->
                     tint = MaterialTheme.colorScheme.primary,
                     enabled = !busy,
                     showDivider = i < b.entries.lastIndex,
-                    // Right-hand column: when the backend reports one. Several
-                    // do not for directories — see [RcloneBrowser.Entry].
                     trailing = entry.modified?.let { formatTimestamp(it) },
                     onClick = { vm.navigateTo(entry.path) },
                 )
@@ -611,12 +502,7 @@ internal fun FolderBrowser(vm: RcloneDestinationsViewModel, onSaved: (String) ->
 
         Spacer(Modifier.height(12.dp))
         MinisButton(
-            // savePending only invokes this on success (the catch sets _error
-            // instead), so leaving the form here cannot strand a failed save
-            // on a screen the user has already been navigated away from.
             onClick = {
-                // [T-android-backup-dest-edit] A saved destination being
-                // re-pointed updates its path; a new one is added.
                 if (b.existing) vm.applyFolder(b.path) { onSaved(it.name) }
                 else vm.savePending(b.path) { onSaved(b.remote.name) }
             },
@@ -653,10 +539,6 @@ internal fun FolderBrowser(vm: RcloneDestinationsViewModel, onSaved: (String) ->
                 )
             },
             confirmButton = {
-                // Create is always rendered (greyed when empty) — an Android
-                // AlertDialog button, unlike a SwiftUI alert action, is not
-                // omitted when disabled, so the iOS "Create button missing"
-                // trap (e747b6da1) cannot occur here.
                 MinisTextButton(
                     onClick = {
                         vm.createFolder(newFolderName.trim())

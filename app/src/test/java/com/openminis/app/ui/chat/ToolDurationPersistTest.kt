@@ -8,16 +8,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-tool-duration-persist] The folded "Ran N tools" row and each tool pill
- * lost their time after any reload: AssistantBlock.durationMs was set only in
- * memory during the live run, never written with the result and never read
- * back. It is now persisted as iOS's `snapshot.duration` (seconds) and
- * restored in ms.
- */
 class ToolDurationPersistTest {
 
-    /** The toolResult part exactly as ChatViewModel.persistToolResultMessage writes it (guarded below). */
     private fun persistedPart(id: String, output: String, durationMs: Long?): String {
         val q = { s: String -> JSONObject.quote(s) }
         return """{"type":"toolResult","value":{"toolUseId":${q(id)},"name":"shell_execute","output":${q(output)},"success":true,"snapshot":{"type":"text","text":${q(output)}${ToolDurationWire.snapshotField(durationMs)}}}}"""
@@ -61,16 +53,13 @@ class ToolDurationPersistTest {
         assertEquals("", ToolDurationWire.snapshotField(0))
         assertEquals("", ToolDurationWire.snapshotField(-5))
         assertFalse(persistedPart("t", "x", null).contains("duration"))
-        // A row written before this change.
         assertEquals(0L, reload("""[{"type":"toolResult","value":{"toolUseId":"t","output":"x","success":true,"snapshot":{"type":"text","text":"x"}}}]""")["t"])
-        // Even older: no snapshot at all.
         assertEquals(0L, reload("""[{"type":"toolResult","value":{"toolUseId":"t","output":"x","success":true}}]""")["t"])
         for (bad in listOf("null", "0", "-1.5", "\"abc\"", "{}")) {
             val row = """[{"type":"toolResult","value":{"toolUseId":"t","output":"x","success":true,"snapshot":{"type":"text","duration":$bad}}}]"""
             assertEquals("duration=$bad", 0L, reload(row)["t"])
         }
         assertEquals(0L, ToolDurationWire.restoreMs(null))
-        // No time recorded on reload: the fold shows none (unchanged behaviour).
         val blocks = listOf(
             AssistantBlock(id = "a", kind = "tool_use", toolStatus = ToolBlockStatus.SUCCESS, toolName = "shell_execute", durationMs = 0),
             AssistantBlock(id = "b", kind = "tool_use", toolStatus = ToolBlockStatus.SUCCESS, toolName = "shell_execute", durationMs = 0),
@@ -80,11 +69,9 @@ class ToolDurationPersistTest {
     }
 
     @Test fun `an iOS row carries its duration to Android`() {
-        // ToolResult as iOS's synthesized Codable writes it (ChatStoreModels ToolSnapshot.duration: TimeInterval?).
         val ios = """[{"type":"toolResult","value":{"toolUseId":"toolu_01","output":"done","success":true,"mediaRef":null,"pageURL":null,"status":"success",
             "snapshot":{"type":"text","text":"done","mediaRef":null,"duration":9.4217}}}]"""
         assertEquals(9422L, reload(ios)["toolu_01"])
-        // An integral TimeInterval may be encoded without a fraction.
         assertEquals(3000L, reload(ios.replace("9.4217", "3"))["toolu_01"])
     }
 
@@ -97,10 +84,6 @@ class ToolDurationPersistTest {
     @Test fun `ChatViewModel persists the measured time and restores it onto the block`() {
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
         assertTrue(vm.contains("persistToolResultMessage(resultParts, blockMeta.mapValues { it.value.durationMs })"))
-        // [T-image-real-tests] persistToolResultMessage builds its parts JSON through
-        // ChatPartsJson.toolResultPartsJson (same file); the template is checked there.
-        // [T-ctx-builder] ...through ToolResultWrap.persist (same file), which the agent loop's
-        // persistToolResultMessage delegates to with the repository as writer.
         assertTrue(vm.substringAfter("private suspend fun persistToolResultMessage(").substringBefore("\n    private ")
             .contains("ToolResultWrap.persist(parts, durationsMs, { realSessionId.ifEmpty { sessionId } })"))
         assertTrue(vm.substringAfter("internal object ToolResultWrap {").substringBefore("\n}\n")

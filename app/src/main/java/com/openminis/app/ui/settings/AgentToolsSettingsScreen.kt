@@ -10,19 +10,6 @@ import androidx.compose.ui.res.stringResource
 import com.openminis.app.R
 import com.openminis.app.tools.AgentToolSwitch
 
-/**
- * [T-tools-granular-switches] Settings › Agent Runtime › Tools — port of iOS
- * `ToolsSettingsView`.
- *
- * One switch per optional capability. The switches gate the tool SCHEMA, so a
- * disabled tool is not merely refused at call time — the model never sees it
- * and cannot plan around it. The remaining tools (shell, files, memory) are
- * core to the agent and deliberately have no switch.
- *
- * The title stays "Tools" in English to sit alongside Skills and Memory in the
- * Agent Runtime section; locales whose bare "tools" reads as hardware render
- * it as "available tools" instead.
- */
 @Composable
 fun AgentToolsSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -52,9 +39,6 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
                 showDivider = false,
             )
         }
-        // [T-port-user-ask] user_ask: on/off plus how long a question waits
-        // (iOS ToolsSettingsView.userAskSections), and whether a question asked
-        // while the app is away is posted as a notification.
         SettingsSection(footer = stringResource(R.string.user_ask_setting_footer)) {
             SettingsSwitchRow(
                 title = stringResource(R.string.user_ask_setting_title),
@@ -111,17 +95,9 @@ fun AgentToolsSettingsScreen(onBack: () -> Unit) {
                 },
             )
         }
-        // [T-android-subagent-settings-parity] The agents switch is NOT here.
-        //
-        // It lives on Settings > Agents > Sub Agents, which is also where the
-        // roster is configured — one place to look, and no second copy of the
-        // switch to drift out of sync with it. Mirrors iOS, whose
-        // ToolsSettingsView likewise only migrates the legacy key and shows no
-        // agents row.
     }
 }
 
-/** "5 min", or "Indefinitely" for 0. */
 @Composable
 private fun userAskWaitLabel(minutes: Int): String =
     if (minutes == 0) stringResource(R.string.user_ask_setting_indefinitely)

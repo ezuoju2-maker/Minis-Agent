@@ -8,24 +8,12 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-b13-empty-fallback] An empty (or thinking-only) turn in a model group
- * moves to the next member instead of ending the run (iOS B13 f1d0c3beb,
- * 488fb0128, 1086b19a9; B15 wording 6ba931405).
- *
- * The agent loop needs a Context, Room and live providers, so the decision is
- * the pure [EmptyTurnFallback.route] and the walk below replays the loop's
- * empty-turn branch over a fake group with the same selection rule as
- * production (members after the current one in group order, minus every
- * member already spent); the wiring is pinned as source facts.
- */
 class EmptyTurnFallbackTest {
 
     @Test
     fun `the route table`() {
         val d = FallbackStrategy.default
         val a = FallbackStrategy.always
-        // strategy, inGroup, reminderDue, hasNext -> route
         val table = listOf(
             listOf(a, true, true, true) to Route.NEXT_MEMBER_WITH_REMINDER,
             listOf(a, true, false, true) to Route.NEXT_MEMBER,
@@ -35,7 +23,6 @@ class EmptyTurnFallbackTest {
             listOf(d, true, false, true) to Route.NEXT_MEMBER,
             listOf(d, true, true, false) to Route.SAME_MODEL_REMINDER,
             listOf(d, true, false, false) to Route.GIVE_UP,
-            // A session pinned to one model never leaves it (as on iOS).
             listOf(a, false, true, true) to Route.SAME_MODEL_REMINDER,
             listOf(a, false, false, true) to Route.GIVE_UP,
             listOf(d, false, false, true) to Route.GIVE_UP,
@@ -67,15 +54,8 @@ class EmptyTurnFallbackTest {
         }
     }
 
-    /** One request of the walk: which member answered and whether it carried the reminder. */
     private data class Req(val member: String, val reminder: Boolean)
 
-    /**
-     * Replays the loop's empty-turn branch. [answers] = members that reply with
-     * content; everyone else comes back empty. The reminder is due on the
-     * first empty turn of the run only (the once-per-run flag), and once
-     * injected it stays in the history.
-     */
     private fun walk(
         members: List<String>,
         strategy: FallbackStrategy,
@@ -156,7 +136,6 @@ class EmptyTurnFallbackTest {
         assertEquals(listOf("B", "C", "A"), reqs.map { it.member })
     }
 
-    // ── production wiring ──────────────────────────────────────────────────
 
     private val loop by lazy {
         ProductionSources.read("ui/chat/ChatViewModel.kt").substringAfter("private suspend fun runAgentLoop(")
@@ -167,10 +146,8 @@ class EmptyTurnFallbackTest {
     fun `the empty-turn branch routes through the group`() {
         assertTrue(branch.contains("EmptyTurnFallback.route(\n                        loopFallbackStrategy, inGroup, plan !is EmptyTurnRecovery.Plan.GiveUp, hasNextMember = true,"))
         assertTrue(branch.contains("val inGroup = _selectedGroupId.value != null"))
-        // Never a member spent in this empty streak or failed in this error streak.
         assertTrue(branch.contains("it.entryId !in emptyStreakEntryIds && it.entryId !in triedEntryIds"))
         assertTrue(branch.contains("_activeEntryId.value?.let { emptyStreakEntryIds.add(it) }"))
-        // The next member really serves the next request, with its own identity and prompt.
         val sw = branch.substringAfter("val next = emptyNext.provider")
         for (line in listOf(
             "currentProvider = next",
@@ -182,7 +159,6 @@ class EmptyTurnFallbackTest {
         )) assertTrue(line, sw.contains(line) || branch.contains(line))
         assertTrue(sw.indexOf("fallbackReasons.add(") < sw.indexOf("currentProvider = next"))
         assertTrue(sw.substringBefore("continue\n").isNotEmpty())
-        // The same request goes to the next member without the empty assistant turn.
         assertTrue(branch.contains("agentHistory.removeAt(agentHistory.size - 1)\n                        }\n                        val next = emptyNext.provider"))
     }
 

@@ -11,43 +11,14 @@ import android.webkit.MimeTypeMap
 import java.io.File
 import java.io.FileNotFoundException
 
-/**
- * Exposes `<filesDir>/minis-global/{memory,skills,shared}` to the system
- * Files app as a storage root. Mirrors iOS `FileProviderExtension`
- * (spec_FileMount §1). Runs in the main app process — no IPC / no
- * independent extension target needed on Android.
- *
- * Capabilities match iOS:
- *   - `memory/` and `skills/` are read-only (tools own their content)
- *   - `shared/` accepts new subitems and in-place edits
- *   - root itself is read-only (can't create a new top-level folder)
- *
- * **Manifest registration is not yet wired.** AndroidManifest.xml has
- * pre-existing in-flight edits this commit can't touch — once that file
- * gets its own cleanup commit, add:
- * ```xml
- * <provider android:name=".providers.MinisDocumentsProvider"
- *     android:authorities="com.openminis.minis.documents"
- *     android:exported="true"
- *     android:grantUriPermissions="true"
- *     android:permission="android.permission.MANAGE_DOCUMENTS">
- *   <intent-filter>
- *     <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
- *   </intent-filter>
- * </provider>
- * ```
- * Until then this class compiles cleanly but is unreachable by the
- * Files app.
- */
 class MinisDocumentsProvider : DocumentsProvider() {
 
     companion object {
         const val AUTHORITY = "com.openminis.minis.documents"
         private const val ROOT_ID = "minis-root"
-        private const val ROOT_DOC_ID = ""        // empty = providerRoot
+        private const val ROOT_DOC_ID = ""
         private val TOP_LEVEL = listOf("memory", "skills", "shared")
         private val READ_ONLY_TOP = setOf("memory", "skills")
-        /** Never expose internal metadata that happens to sit in filesDir. */
         private val METADATA_BLACKLIST = setOf(
             "mounted-folders.json",
             "logs",
@@ -98,13 +69,12 @@ class MinisDocumentsProvider : DocumentsProvider() {
     }
 
     private fun flagsFor(documentId: String, file: File): Int {
-        if (documentId.isEmpty()) return 0 // root is immutable through SAF
+        if (documentId.isEmpty()) return 0
         val topLevel = documentId.substringBefore('/')
         val isTop = documentId.indexOf('/') < 0
         if (topLevel in READ_ONLY_TOP) {
             return if (isTop && file.isDirectory) Document.FLAG_DIR_PREFERS_LAST_MODIFIED else 0
         }
-        // `shared/` tree is writable.
         var flags = 0
         if (file.isDirectory) flags = flags or Document.FLAG_DIR_SUPPORTS_CREATE
         else flags = flags or Document.FLAG_SUPPORTS_WRITE
@@ -177,8 +147,6 @@ class MinisDocumentsProvider : DocumentsProvider() {
     ): ParcelFileDescriptor {
         val file = resolveDoc(documentId)
         val parcelMode = ParcelFileDescriptor.parseMode(mode)
-        // Reject writes against the read-only subtrees even if the client
-        // ignored the flags cursor — belt + suspenders for AI skills.
         if (parcelMode and ParcelFileDescriptor.MODE_WRITE_ONLY != 0 ||
             parcelMode and ParcelFileDescriptor.MODE_READ_WRITE != 0
         ) {

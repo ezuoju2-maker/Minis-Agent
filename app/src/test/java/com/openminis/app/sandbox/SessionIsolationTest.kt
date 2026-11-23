@@ -10,15 +10,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-session-private-mounts] Per-session `/var/minis` directories go
- * only into the owning shell's argv; the global mount table never holds them.
- *
- * The regression this guards: every shell build wrote its session's dirs into
- * the process-global PRootKernel.bindMounts, so the last session to run a
- * command decided what `/var/minis/workspace` meant for the terminal and for
- * every path lookup without a session.
- */
 class SessionIsolationTest {
 
     private val filesDir: File = Files.createTempDirectory("minis-files").toFile()
@@ -29,7 +20,6 @@ class SessionIsolationTest {
         for (sub in SessionMounts.SESSION_SUBDIRS) PRootKernel.bindMounts.remove("/var/minis/$sub")
     }
 
-    // ── SessionMounts ─────────────────────────────────────────────────────
 
     @Test
     fun `a session gets its own four dirs plus the four global ones, all created`() {
@@ -73,7 +63,6 @@ class SessionIsolationTest {
 
     @Test
     fun `a dir that cannot be created is skipped and reported, not bound`() {
-        // A regular file where the directory should be makes mkdirs fail.
         File(filesDir, "minis-sessions/A").mkdirs()
         File(filesDir, "minis-sessions/A/workspace").writeText("not a directory")
         val built = SessionMounts.build(filesDir, "A")
@@ -95,7 +84,6 @@ class SessionIsolationTest {
         assertEquals(listOf("-b", "/h/ws:/var/minis/workspace", "-b", "/h/sh:/var/minis/shared"), args)
     }
 
-    // ── PRootKernel global table ──────────────────────────────────────────
 
     @Test
     fun `the global table refuses per-session mounts and accepts global ones`() {
@@ -124,12 +112,10 @@ class SessionIsolationTest {
         val f = PRootKernel.resolveHostPath("/var/minis/attachments/cat.png")
         assertEquals(File(filesDir, "minis-sessions/B/attachments/cat.png").absolutePath, f?.absolutePath)
         assertEquals(before + 1, PRootKernel.legacyResolveCount)
-        // A session-aware lookup is unaffected by the hint.
         val scoped = SessionMounts.sessionDir(filesDir, "A", "attachments")
         assertEquals(File(filesDir, "minis-sessions/A/attachments").absolutePath, scoped.absolutePath)
     }
 
-    // ── Wiring ────────────────────────────────────────────────────────────
 
     private fun src(path: String) = File("src/main/java/com/openminis/app/$path").readText()
 
@@ -138,7 +124,6 @@ class SessionIsolationTest {
         val coord = src("sandbox/ExecutionCoordinator.kt")
         assertFalse(coord.contains("PRootKernel.addBindMount("))
         assertTrue(coord.contains("SessionMounts.forContext(appContext, sessionId)"))
-        // Both shell types take their -b argv from the private map only.
         assertTrue(src("sandbox/PersistentShell.kt").contains("for ((linuxPath, hostPath) in sessionBindMounts)"))
         assertTrue(src("sandbox/FreshProcessShell.kt").contains("for ((linuxPath, hostPath) in sessionBindMounts)"))
     }

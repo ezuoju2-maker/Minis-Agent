@@ -19,37 +19,12 @@ import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * android-calendar — list, create, update, delete events; query free/busy.
- *
- * Mirrors apple-calendar (NativeOffloads/CalendarOffload.m) — same flag
- * names and subcommands so prompts and the agent loop are platform-
- * agnostic. Aliases are preserved for backwards compatibility with older
- * prompts (--max ↔ --limit, --description ↔ --notes).
- *
- * Usage:
- *   android-calendar list [--today | --days N | --start S --end E]
- *                          [--limit N] [--calendar NAME]
- *   android-calendar create --title T --start S [--end E]
- *                          [--notes N] [--location L] [--all-day]
- *                          [--alarm <minutes>] [--calendar NAME | --calendar-id ID]
- *   android-calendar update --id <event_id> [--title ...] [--start ...] [--end ...]
- *                          [--all-day] [--notes ...] [--location ...] [--alarm <minutes>]
- *                          [--calendar NAME | --calendar-id ID]
- *   android-calendar delete --id <event_id>
- *   android-calendar freebusy --start <ISO> --end <ISO>
- *   android-calendar calendars                List writable calendars
- */
 class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandler {
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
         val args = OffloadArgs(request.argv.drop(1), booleanFlags = setOf("today", "all-day"))
-        // [T-offload-defaults-batch-android] Help only on explicit
-        // --help/-h; no subcommand defaults to `list` (resolveDateRange
-        // already defaults to the last-24h..now window with no flags).
         if (args.hasFlag("h", "help")) {
             return NativeOffloadResult(0, HELP)
         }
-        // T330: tri-state agent gate before any work.
         OffloadGate.enforce("calendar", "android-calendar", args, request)?.let { return it }
 
         return try {
@@ -76,13 +51,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
     private fun hasWrite() = ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) ==
         PackageManager.PERMISSION_GRANTED
 
-    /**
-     * Request one or more calendar permissions if not yet granted, blocking
-     * the tool invocation until the user responds (or permanently denies).
-     * Mirrors the location handler's pattern: system dialog → settings gate.
-     * Returns null if permission ends up granted; otherwise a ready-to-return
-     * error [NativeOffloadResult] describing why we gave up.
-     */
     private fun ensurePermission(
         permissions: List<String>,
         satisfied: () -> Boolean,
@@ -154,7 +122,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
                 2,
                 "android-calendar list: invalid or missing date range. Use --today, --days N, or --start/--end (ISO 8601 or YYYY-MM-DD).\n",
             )
-        // --limit is the apple-calendar name; --max kept as alias.
         val limit = args.getInt("limit") ?: args.getInt("max") ?: DEFAULT_LIMIT
         val calFilter = args.get("calendar")
 
@@ -170,9 +137,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
             CalendarContract.Events.CALENDAR_DISPLAY_NAME,
         )
         val selection = "${CalendarContract.Events.DTSTART} >= ? AND ${CalendarContract.Events.DTSTART} <= ?"
-        // [T-android-calendar-update-all-day] One day of slack each side: an
-        // all-day event's DTSTART is a UTC midnight, which is up to a day away
-        // from its local date. The rows are filtered on their LOCAL start below.
         val selArgs = arrayOf((startMs - DAY_MS).toString(), (endMs + DAY_MS).toString())
         val sort = "${CalendarContract.Events.DTSTART} ASC"
 
@@ -186,19 +150,11 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
             return NativeOffloadResult(1, providerErrorJson(e, args))
         } ?: return NativeOffloadResult(1, providerErrorJson(null, args))
 
-        // Two-pass: gather all matches (so we can compute total_available
-        // before truncating to --limit, matching apple-calendar's
-        // _warning + total_available shape).
         val rows = ArrayList<Pair<Long, JSONObject>>()
         cursor.use {
             while (it.moveToNext()) {
                 val calName = it.getString(8) ?: ""
                 if (calFilter != null && !calName.contains(calFilter, ignoreCase = true)) continue
-                // [T-android-calendar-update-all-day] All-day rows are stored as
-                // UTC midnights; report and filter them as the local days they
-                // are (00:00:00 .. 23:59:59), as create/update and iOS do.
-                // Formatting the raw value printed 08:00 -> 08:00 next day in
-                // UTC+8, and west of UTC filed the event under the day before.
                 val allDay = it.getInt(6) == 1
                 val rawEnd = if (it.isNull(3)) null else it.getLong(3)
                 val (s0, e0) = if (allDay) allDayLocalRange(it.getLong(2), rawEnd)
@@ -215,15 +171,12 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
                         .put("location", it.getString(4) ?: "")
                         .put("notes", it.getString(5) ?: "")
                         .put("description", it.getString(5) ?: "")
-                        // iOS emits `is_all_day`; `all_day` kept as an alias so
-                        // an existing script reading the old key still works.
                         .put("is_all_day", it.getInt(6) == 1)
                         .put("all_day", it.getInt(6) == 1)
                         .put("calendar_id", it.getLong(7))
                         .put("calendar", calName)
             }
         }
-        // Sorted by LOCAL start (the SQL order is by raw DTSTART).
         val matches = JSONArray()
         rows.sortedBy { it.first }.forEach { matches.put(it.second) }
 
@@ -233,8 +186,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         for (i in 0 until minOf(total, limit)) events.put(matches.getJSONObject(i))
 
         if (events.length() == 0) {
-            // Check whether the user actually has any writable calendar account —
-            // if not, the "no events" answer is misleading. Report the real reason.
             val accounts = listWritableCalendars()
             if (accounts.length() == 0) {
                 return NativeOffloadResult(
@@ -276,21 +227,11 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
             ?: return NativeOffloadResult(2, "android-calendar create: --start is required\n")
         val startMs = parseDate(startStr)
             ?: return NativeOffloadResult(2, "android-calendar: invalid --start '$startStr'\n")
-        // Reject a malformed --end outright rather than silently substituting
-        // start+1h: the caller asked for a specific range, and quietly filing
-        // an hour-long event is the same class of silent-wrong-answer as the
-        // lenient parsing above.
         val endArg = args.get("end")
         val endParsed = endArg?.let { parseDate(it) }
         if (endArg != null && endParsed == null) {
             return NativeOffloadResult(2, "android-calendar: invalid --end '$endArg'\n")
         }
-        // [T-android-calendar-all-day] All-day when asked explicitly, or when
-        // BOTH bounds are bare dates — a date with no time cannot describe a
-        // timed event, so treating "2026-12-01" as a zero-length event at
-        // midnight was never what the caller meant. Matches iOS
-        // CalendarOffload.m's rule exactly, including that a bare start with a
-        // timed end stays a timed event.
         val allDay = args.hasFlag("all-day") ||
             (isDateOnly(startStr) && isDateOnly(endArg))
         val startMsFinal: Long
@@ -303,7 +244,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
             startMsFinal = startMs
             endMs = endParsed ?: (startMs + 60 * 60 * 1000L)
         }
-        // Notes — apple-calendar uses --notes; --description kept as alias.
         val notes = args.get("notes") ?: args.get("description")
         val alarmMinutes = args.getInt("alarm")
 
@@ -342,8 +282,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
                     .put("start", formatIso(startMsFinal))
                     .put("end", formatIso(endMs))
                     .putCalendar((target as? Target.Found)?.cal ?: calendarById(calendarId))
-                    // Same key `list` emits, so both shapes agree — iOS puts
-                    // is_all_day on both too.
                     .put("is_all_day", allDay)
                 if (notes != null) data.put("notes", notes)
                 if (alarmMinutes != null && alarmMinutes >= 0) data.put("alarm_minutes_before", alarmMinutes)
@@ -356,7 +294,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         }
     }
 
-    // ── update ──────────────────────────────────────────────────────────
 
     private fun doUpdate(args: OffloadArgs): NativeOffloadResult {
         ensurePermission(
@@ -370,7 +307,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         val id = args.getLong("id")
             ?: return NativeOffloadResult(2, "android-calendar update: --id <event_id> is required\n")
 
-        // Build a sparse ContentValues with only the fields the caller supplied.
         val values = ContentValues()
         args.get("title")?.let { values.put(CalendarContract.Events.TITLE, it) }
         val startStr = args.get("start")
@@ -381,12 +317,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         val newEnd = endStr?.let { e ->
             parseDate(e) ?: return NativeOffloadResult(2, "android-calendar update: invalid --end '$e'\n")
         }
-        // [T-android-calendar-update-all-day] iOS parity (fe7a01bc5,
-        // 86e91526e). Same rule create applies, over the arguments actually
-        // PASSED: all-day when asked (--all-day) or when every date given is a
-        // bare YYYY-MM-DD — inferring from an absent argument would turn a
-        // timed event all-day on an unrelated --title edit. Back to timed is
-        // --start/--end with a real time; no --not-all-day flag.
         val sawDate = startStr != null || endStr != null
         val allBare = sawDate &&
             (startStr == null || isDateOnly(startStr)) && (endStr == null || isDateOnly(endStr))
@@ -403,9 +333,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
                     "android-calendar update: event $id repeats; switching a recurring event between all-day and timed is not supported\n",
                 )
             }
-            // The event's CURRENT range in local wall-clock terms, so a lone
-            // --all-day (no dates) snaps the bounds the event already has, and a
-            // lone --start keeps the end it has.
             val (curStart, curEnd) = if (cur.allDay) {
                 allDayLocalRange(cur.dtStart, cur.dtEnd)
             } else {
@@ -417,10 +344,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
                     putAllDay(values, s0, e0)
                 }
                 cur.allDay && carriesTime -> {
-                    // Back to timed. The stored all-day range is UTC midnights,
-                    // so every field moves together: flag off, local zone back,
-                    // real times — a DTSTART write alone under ALL_DAY=1 would
-                    // be snapped back to a midnight by the provider.
                     val s0 = newStart ?: curStart
                     var e0 = newEnd ?: curEnd
                     if (e0 <= s0) e0 = s0 + HOUR_MS
@@ -439,10 +362,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         (args.get("notes") ?: args.get("description"))?.let {
             values.put(CalendarContract.Events.DESCRIPTION, it)
         }
-        // --calendar / --calendar-id: move the event. No flag = stay put; a
-        // target that does not resolve refuses the whole update instead of
-        // moving the event to the default calendar
-        // ([T-android-calendar-exact-target]).
         when (val target = resolveTarget(args, "update")) {
             is Target.Failed -> return target.result
             is Target.Found -> values.put(CalendarContract.Events.CALENDAR_ID, target.cal.id)
@@ -469,10 +388,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
                 .put("updated", updated > 0 || alarmMinutes != null)
                 .put("rows", updated)
                 .putCalendar(calendarOfEvent(id))
-            // [T-android-calendar-update-all-day] Echo the event as stored, so
-            // the caller sees whether it is all-day and the range it landed on
-            // (all-day as local 00:00:00 - 23:59:59, the shape create and iOS
-            // report).
             readTiming(id)?.let { t ->
                 val (s0, e0) = if (t.allDay) allDayLocalRange(t.dtStart, t.dtEnd)
                     else t.dtStart to (t.dtEnd ?: t.dtStart)
@@ -487,7 +402,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         }
     }
 
-    // ── delete ──────────────────────────────────────────────────────────
 
     private fun doDelete(args: OffloadArgs): NativeOffloadResult {
         ensurePermission(
@@ -504,7 +418,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         return try {
             val uri = CalendarContract.Events.CONTENT_URI.buildUpon()
                 .appendPath(id.toString()).build()
-            // Captured before the row is gone.
             val cal = calendarOfEvent(id)
             val rows = context.contentResolver.delete(uri, null, null)
             if (rows <= 0) {
@@ -524,7 +437,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         }
     }
 
-    // ── freebusy ────────────────────────────────────────────────────────
 
     private fun doFreebusy(args: OffloadArgs): NativeOffloadResult {
         ensurePermission(
@@ -565,7 +477,7 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         cursor.use {
             while (it.moveToNext()) {
                 val isAllDay = it.getInt(3) == 1
-                if (isAllDay) continue // skip all-day per apple-calendar
+                if (isAllDay) continue
                 busy.put(
                     JSONObject()
                         .put("title", it.getString(0) ?: "")
@@ -575,10 +487,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
             }
         }
 
-        // Compute free slots in [startMs, endMs] from the busy list.
-        // The busy list is already sorted by start; we still cap each busy
-        // segment to the query window so an event that straddles the window
-        // doesn't poison the cursor walk.
         val free = JSONArray()
         var cursorMs = startMs
         for (i in 0 until busy.length()) {
@@ -601,15 +509,7 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         return NativeOffloadResult(0, OffloadOutput.formatBody(data.toString(2), args) + "\n")
     }
 
-    // ── Reminders helpers (calendar alarms) ─────────────────────────────
 
-    /**
-     * Insert a single reminder row for [eventId] at [minutesBefore]. Mirrors
-     * iOS EKAlarm.alarmWithRelativeOffset(-N * 60). Reminders.METHOD_ALERT
-     * is the standard reminder type; ContentResolver.insert returns null on
-     * provider failure, which we silently swallow — the event itself is
-     * already created/updated.
-     */
     private fun insertReminder(eventId: Long, minutesBefore: Int) {
         val values = ContentValues().apply {
             put(CalendarContract.Reminders.EVENT_ID, eventId)
@@ -623,7 +523,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         }
     }
 
-    /** Remove existing reminders for [eventId] then insert one at [minutesBefore]. */
     private fun replaceReminder(eventId: Long, minutesBefore: Int) {
         try {
             context.contentResolver.delete(
@@ -649,14 +548,7 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         return NativeOffloadResult(0, OffloadOutput.formatBody(arr.toString(2), args) + "\n")
     }
 
-    // ── Range / calendar resolution ─────────────────────────────────────
 
-    /**
-     * Mirror apple-calendar resolve_date_range: --today (today only, [00:00,
-     * +24h)) → --days N (last N days through now, with start at 00:00) →
-     * --start/--end (explicit, defaults to last 24h on either side). Returns
-     * null only when --start/--end are supplied but unparseable.
-     */
     private fun resolveDateRange(args: OffloadArgs): Pair<Long, Long>? {
         val now = System.currentTimeMillis()
         if (args.hasFlag("today")) {
@@ -682,24 +574,9 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
                       else now - 24 * 60 * 60 * 1000L
         val endMs = if (endStr != null) parseDate(endStr) ?: return null
                     else now
-        // EventStore predicates don't tolerate start > end on iOS; mirror that.
         return if (startMs > endMs) endMs to startMs else startMs to endMs
     }
 
-    /**
-     * [T-android-calendar-exact-target] The calendar a write targets, from
-     * --calendar-id or --calendar. Port of iOS 8200eeb81 (issue #282).
-     *
-     * --calendar used to match by substring ("Work" could land in "Workout")
-     * and, on a miss, silently fell back to the auto-picked calendar while
-     * still reporting success - for `update` that meant MOVING the event to
-     * the default calendar because of a typo. Now a name is an exact,
-     * case-insensitive match against the writable calendars; a miss, or two
-     * calendars with the same name, fails with every candidate listed; and
-     * --calendar-id must name a writable calendar. The `list --calendar`
-     * filter keeps substring matching - "show things in calendars containing
-     * Work" is a legitimate query, as on iOS.
-     */
     private sealed class Target {
         object NotRequested : Target()
         class Found(val cal: CalRef) : Target()
@@ -744,8 +621,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         }
     }
 
-    /** The calendar an event is in, for the write echo; null when unreadable. */
-    /** What update needs to know about an event's current timing. */
     private data class EventTiming(val dtStart: Long, val dtEnd: Long?, val allDay: Boolean, val rrule: String?)
 
     private fun readTiming(eventId: Long): EventTiming? = try {
@@ -791,12 +666,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         null
     }
 
-    /**
-     * [T-android-calendar-exact-target] Every write names WHERE it landed,
-     * not only a title: calendar titles are not unique (the reporter of iOS
-     * issue #282 had two calendars called "Work"). Mirrors iOS 381e59dc7's
-     * calendar_id / calendar_source.
-     */
     private fun JSONObject.putCalendar(cal: CalRef?): JSONObject {
         if (cal == null) return this
         put("calendar_id", cal.id)
@@ -817,20 +686,12 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
             ) + "\n",
         )
 
-    /** ISO 8601 with offset (e.g. 2026-04-26T13:51:00+08:00). Matches
-     *  apple-calendar noff_format_date so cross-platform consumers see
-     *  identical strings. */
     private fun formatIso(ms: Long): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
         return sdf.format(java.util.Date(ms))
     }
 
-    // ── Calendar account selection ───────────────────────────────────────
 
-    /**
-     * Enumerate writable calendars (CALENDAR_ACCESS_LEVEL >= 500 = OWNER/CONTRIBUTOR).
-     * Used by `create` for pick-best and by `calendars` subcommand for debugging.
-     */
     private fun listWritableCalendars(): JSONArray {
         val projection = arrayOf(
             CalendarContract.Calendars._ID,
@@ -867,13 +728,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         return arr
     }
 
-    /**
-     * Pick the best calendar for new events:
-     *   1. IS_PRIMARY=1 on a com.google account (avoids Samsung-Calendar-only inserts on One UI)
-     *   2. Any com.google account
-     *   3. Any IS_PRIMARY=1
-     *   4. First writable calendar
-     */
     private fun pickWritableCalendar(): Long? {
         val cals = listWritableCalendars()
         if (cals.length() == 0) return null
@@ -881,7 +735,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
             var s = 0
             if (obj.optString("account_type") == "com.google") s += 100
             if (obj.optBoolean("is_primary")) s += 50
-            // Prefer owner over contributor
             if (obj.optInt("access_level") >= CalendarContract.Calendars.CAL_ACCESS_OWNER) s += 10
             return s
         }
@@ -894,7 +747,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         return cals.getJSONObject(bestIdx).optLong("id", -1L).takeIf { it > 0 }
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────
 
     private fun providerBlockedJson(perm: String, e: SecurityException, args: OffloadArgs): String {
         val body = JSONObject().put("error", "provider_blocked")
@@ -912,14 +764,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
 
 
     companion object {
-        /**
-         * [T-android-calendar-all-day] True for a bare `YYYY-MM-DD` with no time.
-         *
-         * Positional rather than formatter-based, mirroring iOS
-         * `noff_is_date_only_string`: a formatter is lenient about trailing text
-         * and would also accept the date PREFIX of a datetime, which is exactly
-         * the case this has to reject.
-         */
         internal fun isDateOnly(s: String?): Boolean {
             val t = s?.trim() ?: return false
             if (t.length != 10) return false
@@ -930,30 +774,9 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
             return parseDate(t) != null
         }
 
-        /**
-         * [T-android-calendar-all-day] Snap a range onto whole local days:
-         * 00:00:00.000 of the start day through 23:59:59 of the end day.
-         *
-         * Mirrors iOS `noff_all_day_bounds`, including the two edge rules: an end
-         * before the start collapses to a single day, and the last second is
-         * computed as (next midnight - 1s) via calendar arithmetic so a 23h or 25h
-         * DST day still lands on its own last second rather than an hour adrift.
-         */
         private const val HOUR_MS = 60 * 60 * 1000L
         private const val DAY_MS = 24 * HOUR_MS
 
-        /**
-         * [T-android-calendar-update-all-day] Put an all-day range into
-         * [values] in the form the calendar provider requires: ALL_DAY=1,
-         * EVENT_TIMEZONE=UTC, DTSTART the UTC midnight of the first day and
-         * DTEND the UTC midnight after the last day (exclusive). [localStart]
-         * / [localEnd] are the local day bounds from [allDayBounds].
-         *
-         * Storing LOCAL midnight (what create did) is not a midnight in UTC:
-         * in Asia/Shanghai it is 16:00Z of the previous day, which the
-         * provider then snaps down to that previous day's midnight — the event
-         * landed a day early. See allDayStoredRange.
-         */
         internal fun putAllDay(values: ContentValues, localStart: Long, localEnd: Long) {
             val (s, e) = allDayStoredRange(localStart, localEnd)
             values.put(CalendarContract.Events.ALL_DAY, 1)
@@ -962,12 +785,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
             values.put(CalendarContract.Events.DTEND, e)
         }
 
-        /**
-         * The provider's all-day storage for the LOCAL days containing
-         * [localStartMs] .. [localEndMs]: UTC midnight of the first local date,
-         * and UTC midnight of the day after the last (exclusive end). An end
-         * before the start collapses to one day, as in [allDayBounds].
-         */
         internal fun allDayStoredRange(
             localStartMs: Long,
             localEndMs: Long?,
@@ -983,15 +800,9 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
             val s = utcMidnightOfLocalDay(localStartMs)
             var e = utcMidnightOfLocalDay(localEndMs ?: localStartMs)
             if (e < s) e = s
-            // UTC has no DST, so a day is always 24 h here.
             return s to (e + DAY_MS)
         }
 
-        /**
-         * Inverse of [allDayStoredRange]: a stored all-day range back to local
-         * day bounds (00:00:00 of the first day .. 23:59:59 of the last), the
-         * shape create's output and iOS report.
-         */
         internal fun allDayLocalRange(
             dtStartUtc: Long,
             dtEndUtc: Long?,
@@ -1030,7 +841,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
         }
 
         internal fun parseDate(s: String): Long? {
-            // Relative offsets (apple-calendar parity): "-7d", "-2h", "+30m".
             val rel = Regex("""^([+-]?)(\d+)([dhm])$""").matchEntire(s.trim())
             if (rel != null) {
                 val sign = if (rel.groupValues[1] == "-") -1L else 1L
@@ -1050,16 +860,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
                 "yyyy-MM-dd'T'HH:mm",
                 "yyyy-MM-dd",
             )
-            // [T-android-calendar-strict-date] isLenient=false + a full-length parse.
-            //
-            // SimpleDateFormat is lenient by default and rolls out-of-range fields
-            // over instead of rejecting them: "2026-13-45" parsed as 2027-02-14 and
-            // "…T99:99:99" as four days later at 04:40. Both then created a real
-            // event, silently, at a time the caller never asked for — worse than an
-            // error, because nothing surfaces. Lenient parsing also stops at the
-            // first unparseable character, so a trailing-garbage string matched on
-            // its prefix; ParsePosition makes the whole string load-bearing.
-            // iOS gets this from NSISO8601DateFormatter, which is strict already.
             val trimmed = s.trim()
             for (f in formats) {
                 try {
@@ -1074,7 +874,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
             }
             return null
         }
-        /** A writable calendar as the target matcher sees it. */
         internal data class CalRef(val id: Long, val name: String, val account: String) {
             fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("account", account)
         }
@@ -1085,7 +884,6 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
             data class Ambiguous(val message: String, val matches: List<CalRef>) : CalPick()
         }
 
-        /** [T-android-calendar-exact-target] Exact, case-insensitive, trimmed. */
         internal fun pickCalendarByName(name: String, cals: List<CalRef>): CalPick {
             val want = name.trim()
             val matches = cals.filter { it.name.trim().equals(want, ignoreCase = true) }

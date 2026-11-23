@@ -8,12 +8,6 @@ import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 
-/**
- * [PAR-261022-03] GLOBAL.md is writable through file_edit on every platform,
- * so nothing the model reads may call it read-only: a tester's agent took the
- * old "read-only, user-maintained" wording literally and refused to edit it.
- * Same wording as iOS and Windows.
- */
 class GlobalMemoryWritableWordingTest {
 
     @Test

@@ -16,17 +16,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.UUID
 
-/**
- * [T-kimi-oauth] Kimi Code OAuth manager — RFC 8628 Device Authorization
- * Grant (no browser redirect / callback server; the user enters a short code
- * on auth.kimi.com and we poll the token endpoint). Port of iOS
- * `KimiOAuthManager` with the Android Claude/Gemini refresh-race machinery
- * (per-instance Mutex + RefreshOutcome + expire_at coalescing) PLUS the iOS
- * 36d506ca compare-before-delete guard.
- *
- * The inherited PKCE / callback-server surface from [OAuthManager] is unused
- * — only the token storage helpers and logout are shared.
- */
 class KimiOAuthManager(
     context: Context,
     instanceId: String,
@@ -35,33 +24,14 @@ class KimiOAuthManager(
     companion object {
         private const val TAG = "KimiOAuth"
 
-        /**
-         * Official Kimi Code CLI OAuth client id (observed in CLIProxyAPI's
-         * public source). It is not issued to Minis, so it may be rotated,
-         * rate-limited or revoked upstream. Overridable via AndroidManifest
-         * meta-data
-         * "KimiOAuthClientID" (the Android analog of iOS's Info.plist key);
-         * when the meta-data is absent we fall back to this value rather
-         * than disabling login (iOS lesson: an empty placeholder made the
-         * login button a silent no-op).
-         */
         const val OFFICIAL_CLIENT_ID = "17e5f671-d194-4dfb-9706-5516cb48c098"
 
-        /** 5-minute proactive-refresh buffer (Claude/Gemini/iOS parity). */
         private const val REFRESH_BUFFER_MS = 5 * 60 * 1000L
 
-        /** Per-instance refresh mutex — single-flight (see ClaudeOAuthManager). */
         private val refreshMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
         private fun mutexFor(instanceId: String): Mutex =
             refreshMutexes.getOrPut(instanceId) { Mutex() }
 
-        /**
-         * Full device-code login flow. Suspends until the user approves (or
-         * a terminal failure). [onDeviceCode] fires as soon as the device
-         * code is issued so the UI can show the user code + verification URL
-         * — the login is NOT complete at that point; polling continues.
-         * Returns the access token and mirrors it to `apikey_<id>`.
-         */
         suspend fun login(
             context: Context,
             instanceId: String,
@@ -75,11 +45,8 @@ class KimiOAuthManager(
         }
     }
 
-    /** Same classification enum shape as ClaudeOAuthManager. */
     enum class RefreshOutcome { SUCCESS, INVALID_GRANT, TRANSIENT, NO_TOKEN }
 
-    // Base-class abstract surface. Only tokenURL/clientId matter for the
-    // device flow; the redirect/PKCE fields are inert placeholders.
     override val authURL = KimiDeviceFlow.AUTH_HOST
     override val tokenURL = KimiDeviceFlow.TOKEN_URL
     override val clientId: String
@@ -91,22 +58,16 @@ class KimiOAuthManager(
             } catch (_: Exception) {
                 null
             }
-            // Explicit empty override disables login; absent → official value.
             return meta ?: OFFICIAL_CLIENT_ID
         }
     override val clientSecret: String? = null
     override val callbackPort = 0
     override val redirectPath = ""
-    override val scopes = "" // Kimi rejects ANY explicit scope — never sent.
+    override val scopes = ""
 
     val isLoginAvailable: Boolean get() = clientId.isNotEmpty()
 
-    // ── Device flow ─────────────────────────────────────────────────────
 
-    /**
-     * POST a form-urlencoded body (the ONLY body shape auth.kimi.com
-     * accepts — JSON gets "client_id is required"). Returns (httpStatus, json).
-     */
     private fun postForm(url: String, params: Map<String, String>): Pair<Int, JSONObject> {
         val formBody = params.entries.joinToString("&") { "${it.key}=${Uri.encode(it.value)}" }
         val request = Request.Builder()
@@ -121,14 +82,12 @@ class KimiOAuthManager(
         return code to json
     }
 
-    /** Step 1: request a device code. */
     suspend fun requestDeviceAuthorization(): KimiDeviceFlow.DeviceAuthorization =
         withContext(Dispatchers.IO) {
             if (!isLoginAvailable) {
                 throw Exception("Kimi login unavailable — client id override is empty")
             }
             Log.i(TAG, "Requesting device authorization (instance: $instanceId)")
-            // client_id ONLY — no scope (server rejects any explicit scope).
             val (status, json) = postForm(
                 KimiDeviceFlow.DEVICE_AUTHORIZATION_URL,
                 mapOf("client_id" to clientId),
@@ -144,13 +103,11 @@ class KimiOAuthManager(
                     .also { Log.e(TAG, "device_authorization parse failure: ${sanitizeBody(json.toString())}") }
         }
 
-    /** Step 2: poll the token endpoint until approval / terminal failure. */
     suspend fun pollForToken(auth: KimiDeviceFlow.DeviceAuthorization): String =
         withContext(Dispatchers.IO) {
             val deadline = System.currentTimeMillis() + auth.expiresInSeconds * 1000
             var interval = auth.intervalSeconds
             while (System.currentTimeMillis() < deadline) {
-                // Sleep first, then poll (RFC 8628 §3.4 + iOS parity).
                 delay(interval * 1000)
                 val (status, json) = postForm(
                     tokenURL,
@@ -166,7 +123,7 @@ class KimiOAuthManager(
                         Log.i(TAG, "Device login success (instance: $instanceId)")
                         return@withContext result.accessToken
                     }
-                    KimiDeviceFlow.PollResult.Pending -> Unit // keep polling
+                    KimiDeviceFlow.PollResult.Pending -> Unit
                     KimiDeviceFlow.PollResult.SlowDown -> {
                         interval = KimiDeviceFlow.bumpedInterval(interval)
                         Log.d(TAG, "slow_down — interval now ${interval}s")
@@ -182,7 +139,6 @@ class KimiOAuthManager(
             throw Exception("Kimi login timed out")
         }
 
-    /** Steps 1+2 chained; [onDeviceCode] surfaces the code/URL to the UI. */
     suspend fun performDeviceLogin(
         onDeviceCode: (KimiDeviceFlow.DeviceAuthorization) -> Unit,
     ): String {
@@ -199,15 +155,12 @@ class KimiOAuthManager(
             result.expiresInSeconds?.let {
                 put("expire_at", System.currentTimeMillis() + it * 1000)
             }
-            // Client-generated device identity, carried across refreshes but
-            // never sent in request bodies (iOS parity).
             put("device_id", UUID.randomUUID().toString())
             put("last_refresh", System.currentTimeMillis())
         }
         saveOAuthString("tokens", json.toString())
     }
 
-    // ── Refresh (single-flight + compare-before-delete) ─────────────────
 
     suspend fun refreshTokenClassified(): RefreshOutcome = withContext(Dispatchers.IO) {
         val mutex = mutexFor(instanceId)
@@ -216,9 +169,6 @@ class KimiOAuthManager(
             val refreshTokenValue = stored.optString("refresh_token", "")
                 .ifEmpty { return@withLock RefreshOutcome.NO_TOKEN }
 
-            // Coalesce concurrent refreshers (see ClaudeOAuthManager): if a
-            // fresher token landed while we were blocked on the mutex, skip
-            // the network round-trip entirely.
             val priorExpireAt = stored.optLong("expire_at", 0)
             val freshCheck = loadStoredTokens()?.optLong("expire_at", 0) ?: 0
             if (freshCheck > priorExpireAt && freshCheck > System.currentTimeMillis()) {
@@ -236,7 +186,6 @@ class KimiOAuthManager(
                     ),
                 )
                 if (status in 200..299 && json.optString("access_token", "").isNotEmpty()) {
-                    // Non-rotating servers may omit refresh_token — keep old.
                     if (!json.has("refresh_token") || json.optString("refresh_token").isEmpty()) {
                         json.put("refresh_token", refreshTokenValue)
                     }
@@ -244,7 +193,6 @@ class KimiOAuthManager(
                     if (expiresIn > 0) {
                         json.put("expire_at", System.currentTimeMillis() + expiresIn * 1000)
                     }
-                    // Carry the device identity + stamp last_refresh.
                     json.put("device_id", stored.optString("device_id", UUID.randomUUID().toString()))
                     json.put("last_refresh", System.currentTimeMillis())
                     saveOAuthString("tokens", json.toString())
@@ -252,25 +200,16 @@ class KimiOAuthManager(
                     return@withLock RefreshOutcome.SUCCESS
                 }
 
-                // Classify like ClaudeOAuthManager: hard 4xx auth failures or
-                // an explicit invalid-grant marker → INVALID_GRANT; 5xx /
-                // anything else → TRANSIENT (credentials kept).
                 val bodyLower = json.toString().lowercase()
                 val isInvalidGrant = status == 400 || status == 401 || status == 403 ||
                     bodyLower.contains("invalid_grant") ||
                     bodyLower.contains("refresh_token_reused")
                 if (isInvalidGrant) {
-                    // [T-oauth-refresh-race] Compare-before-delete: only clear
-                    // credentials when the persisted refresh token is STILL
-                    // the one this failed request used. A concurrent winner
-                    // may have rotated it — deleting then would destroy the
-                    // fresh login (iOS 36d506ca).
                     val currentStored = loadStoredTokens()?.optString("refresh_token", "")
                     if (!KimiDeviceFlow.shouldDeleteAfterInvalidGrant(refreshTokenValue, currentStored)) {
                         Log.w(TAG, "Stale invalid_grant ignored — refresh token was rotated concurrently; keeping new credentials")
                         return@withLock RefreshOutcome.SUCCESS
                     }
-                    // [T-oauth-keep-credentials] Never delete: mark for re-login.
                     Log.e(TAG, "Refresh token invalid — marking for re-login, credentials kept")
                     markNeedsReauth(refreshTokenValue)
                     return@withLock RefreshOutcome.INVALID_GRANT
@@ -284,7 +223,6 @@ class KimiOAuthManager(
         }
     }
 
-    /** 5-minute-buffered valid token (Claude parity, overrides the 4h base). */
     override suspend fun validAccessToken(): String? = withContext(Dispatchers.IO) {
         loadManualBearerToken()?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
         val stored = loadStoredTokens() ?: return@withContext null
@@ -299,7 +237,7 @@ class KimiOAuthManager(
         when (refreshTokenClassified()) {
             RefreshOutcome.SUCCESS ->
                 loadStoredTokens()?.optString("access_token", "")?.ifEmpty { null }
-            RefreshOutcome.INVALID_GRANT -> null // marked for re-login, credentials kept
+            RefreshOutcome.INVALID_GRANT -> null
             RefreshOutcome.TRANSIENT ->
                 if (expireAt in 1..now) null else token
             RefreshOutcome.NO_TOKEN -> null

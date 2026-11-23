@@ -63,14 +63,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * [T-builtin-accounts] One screen for every platform that signs in with an
- * account and then hands out its own models (Qoder, MiniMax Code).
- *
- * All displayed values come from the platform APIs — model catalogue, plan and
- * credit rows — nothing is hardcoded. The sign-in itself happens in the SYSTEM
- * browser (device code / PKCE page); the app only polls the token endpoint.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BuiltInAccountScreen(
@@ -83,11 +75,6 @@ fun BuiltInAccountScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val instanceId = "builtin-$platform"
-    // [FIX-builtin-provider-type] 必须按平台显式映射到真实 ProviderType。
-    // 之前这里用 spec?.providerType ?: unsupported，而 builtInPlatforms 注册表
-    // 从未给 qoder/minimax 填 providerType，导致写进配置的实例类型是 unsupported，
-    // 模型刷新命中 "unsupported -> emptyList()"，modelEntries 为空，
-    // 「选择模型」弹窗就看不到 Qoder / MiniMax Code。
     val providerType: ProviderType = when (platform) {
         "qoder" -> ProviderType.qoder
         "minimax" -> ProviderType.minimaxCode
@@ -129,8 +116,6 @@ fun BuiltInAccountScreen(
         val acc = account ?: return
         checkinBusy = true
         val r = a.claimCheckin(acc)
-        // The claim result is shown once via `status` above the card. Clearing
-        // it here prevents the same text from also appearing in the card footer.
         checkin = r.copy(message = null)
         checkinBusy = false
         r.message?.let { status = it }
@@ -156,10 +141,6 @@ fun BuiltInAccountScreen(
         }
     }
 
-    // [FIX-builtin-provider-type] 保证内置实例以正确的 ProviderType 注册/修复。
-    // 老版本把 qoder / minimax 注册成 unsupported，模型刷新走空分支，
-    // 导致这两个平台不出现在「选择模型」弹窗。进入页面与登录时都调用它校正。
-    // 返回是否发生了类型/enabled 变更（变更时需要重新拉模型）。
     fun ensureProviderInstance(accessToken: String): Boolean {
         if (providerType == ProviderType.unsupported) return false
         val existing = providerRepository.instance(instanceId)
@@ -198,7 +179,6 @@ fun BuiltInAccountScreen(
         status = null
         userCode = null
         if (acc0 != null) {
-            // 老用户账号已在，但存量实例类型可能是错的 —— 校正后重拉模型。
             val repaired = ensureProviderInstance(acc0.accessToken)
             reload()
             if (repaired) providerRepository.triggerAsyncModelReconcile(instanceId, forceRefresh = true)
@@ -268,9 +248,6 @@ fun BuiltInAccountScreen(
                 }
                 BuiltInAccountStore.save(context, acc)
                 account = acc
-                // Register (or repair) the provider so its models show up in the
-                // chat picker. ensureProviderInstance also fixes older installs
-                // that registered qoder/minimax as ProviderType.unsupported.
                 ensureProviderInstance(acc.accessToken)
                 providerRepository.triggerAsyncModelReconcile(instanceId, forceRefresh = true)
                 status = "登录成功，正在拉取模型目录…"
@@ -328,9 +305,6 @@ fun BuiltInAccountScreen(
         }
     }
 
-    // ── Derive quota figures from whatever the upstream returned ──────
-    // Qoder / MiniMax expose different shapes; read the friendly labels the
-    // API layer normalised, never invent a number.
     fun q(label: String): Double? = quotaRows.firstOrNull { it.first == label }?.second
         ?.replace(",", "")?.toDoubleOrNull()
     val qRemain = q("剩余额度") ?: q("remaining") ?: q("remain")
@@ -344,7 +318,6 @@ fun BuiltInAccountScreen(
     val progress: Float? = qRemainPct?.let { (it / 100.0).toFloat() }
 
     SettingsScaffold(title = spec?.name ?: platform, onBack = onBack) {
-        // ── Region switcher (only for vendors that run two separate sites) ──
         if (regions.size > 1) {
             Row(
                 modifier = Modifier
@@ -402,7 +375,6 @@ fun BuiltInAccountScreen(
             )
         }
 
-        // ── Account card (WorkBuddy-style) ─────────────────────────────
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -476,10 +448,6 @@ fun BuiltInAccountScreen(
                     )
                 }
 
-                // Quota bar — show a real percentage when the upstream gave one.
-                // Credit-based plans (MiniMax: no hard cap) have no denominator,
-                // so show a full "sufficient" bar instead of hiding the whole
-                // block — that is why this page looked different from others.
                 if (progress != null || (qRemain != null && qTotal == null)) {
                     val p = progress ?: 1f
                     Spacer(Modifier.height(12.dp))
@@ -507,7 +475,6 @@ fun BuiltInAccountScreen(
                     )
                 }
 
-                // Detail rows: uid copy / site / last sync (WorkBuddy-style).
                 Spacer(Modifier.height(10.dp))
                 if (account?.uid?.isNotBlank() == true) {
                     Row(
@@ -557,7 +524,6 @@ fun BuiltInAccountScreen(
             }
         }
 
-        // Device-code hint (MiniMax): the browser page asks for this code.
         userCode?.let { code ->
             Column(
                 modifier = Modifier
@@ -589,7 +555,6 @@ fun BuiltInAccountScreen(
             }
         }
 
-        // ── Messages ────────────────────────────────────────────────────
         error?.let { e ->
             Column(
                 modifier = Modifier
@@ -658,7 +623,6 @@ fun BuiltInAccountScreen(
             return@SettingsScaffold
         }
 
-        // ── Actions (WorkBuddy-style: refresh + daily check-in) ──────────
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -681,7 +645,6 @@ fun BuiltInAccountScreen(
             }
         }
 
-        // ── Daily check-in panel (WorkBuddy-style 7-day grid) ────────────
         if (supportsCheckin && checkin != null) {
             val ci = checkin!!
             SettingsSection(header = "每日签到") {
@@ -743,10 +706,6 @@ fun BuiltInAccountScreen(
                             }
                         }
                     }
-                    // Hide messages that merely restate the status chip already
-                    // shown above ("今日已签到（+N）", "今日有可领取的签到积分",
-                    // "签到成功…"). Keep genuinely informative notes such as
-                    // "当前没有可领取的签到活动…".
                     val note = ci.message?.takeIf { m ->
                         !m.startsWith("今日已签到") &&
                             !m.startsWith("今日有可领取") &&
@@ -765,7 +724,6 @@ fun BuiltInAccountScreen(
             }
         }
 
-        // ── Models ─────────────────────────────────────────────────────
         Row(
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -829,7 +787,6 @@ fun BuiltInAccountScreen(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
         )
 
-        // ── Footer: re-login + sign-out (WorkBuddy-style) ────────────────
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -851,7 +808,6 @@ fun BuiltInAccountScreen(
     }
 }
 
-/** One catalogue row — mirrors WorkBuddy's ModelRow (name + badges + id line). */
 @Composable
 private fun ModelRow(m: BuiltInModel) {
     Column(
@@ -899,7 +855,6 @@ private fun ModelRow(m: BuiltInModel) {
                 modifier = Modifier.weight(1f, fill = false),
             )
             Spacer(Modifier.width(6.dp))
-            // Same badge set/colors as WorkBuddy's ModelRow.
             if (m.recommended) BadgeSmall("推荐", Color(0xFF0EC8A9))
             if (m.free) BadgeSmall("免费", Color(0xFF34C759))
             if (m.vision) BadgeSmall("视觉", Color(0xFF3B82F6))
@@ -959,7 +914,6 @@ private fun fmt(v: Double): String =
 
 private fun trimNum(v: Double): String = fmt(v)
 
-/** Compact reward text that always fits a narrow 7-day grid cell. */
 private fun compactPoints(v: Int): String = when {
     v <= 0 -> "+0"
     v >= 1000 && v % 1000 == 0 -> "+${v / 1000}k"
@@ -967,6 +921,5 @@ private fun compactPoints(v: Int): String = when {
     else -> "+$v"
 }
 
-/** Display label of a region id; single-site platforms show nothing. */
 private fun regionLabel(regions: List<com.openminis.app.auth.BuiltInRegion>, id: String): String =
     regions.firstOrNull { it.id == id }?.label?.takeIf { it.isNotBlank() } ?: "默认站点"

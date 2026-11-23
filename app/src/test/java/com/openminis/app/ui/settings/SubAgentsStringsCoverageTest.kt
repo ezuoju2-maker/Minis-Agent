@@ -5,16 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-subagent-strings] Port of iOS 348f1b528: the Sub Agents settings
- * page rendered several languages at once (a Spanish UI showed English
- * "Sub Agents" / "Add Sub Agent" and footers next to translated "Integrado").
- *
- * The page's strings must exist in every locale iOS translates them into
- * (zh-Hans, zh-Hant, ja, ko, de, es, fr); Croatian is complete too. Other
- * locales deliberately fall back to English rather than a machine
- * translation.
- */
 class SubAgentsStringsCoverageTest {
 
     private val res = java.io.File(ProductionSources.mainRoot()!!.parentFile.parentFile.parentFile.parentFile, "res")

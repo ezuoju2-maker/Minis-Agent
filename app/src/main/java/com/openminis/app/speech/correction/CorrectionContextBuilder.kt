@@ -3,39 +3,16 @@ package com.openminis.app.speech.correction
 import android.util.Log
 import com.openminis.app.shared.SentenceSplitter
 
-/**
- * [T-android-voice-correction] Scores how "rare" a term is, i.e. how likely a
- * speech recognizer is to get it wrong. Port of iOS `RareContentScorer`.
- *
- * The common-hanzi set is inlined rather than loaded from a resource — it is
- * needed on the correction critical path and this avoids any I/O. The last two
- * chunks are deliberately app-domain-tuned (网络服务器数据配置…、闪挂载屏幕键盘…):
- * treating our own technical vocabulary as COMMON stops it from flooding the
- * rare-content digest, where it would crowd out the user's actual proper nouns.
- */
 object RareContentScorer {
 
-    /** A term at or above this enters the rare-content digest. */
     const val DIGEST_THRESHOLD = 40
 
-    /** A sentence containing a term at or above this "carries rare content". */
     const val STRONG_THRESHOLD = 60
 
-    /** A plain Latin word (`Issue`, `commit`) on its own: the zh word list cannot judge it. */
     const val PLAIN_LATIN_SCORE = 20
 
-    /**
-     * [T-android-voice-mixed-term-restore] A plain Latin word that RECURS in a
-     * Chinese conversation is a term the user is talking about, and exactly what
-     * a Chinese recognizer transliterates into look-alike hanzi ("Issue" ->
-     * "遗穴"). On iOS, "Issue" appeared 10+ times in the scanned turns and never
-     * reached the digest, while ordinary words built from common hanzi (状态,
-     * 彻底) did at 40. Promoted to this score: above those, below the 90 of
-     * identifier-shaped tokens. Port of iOS 8622ea275.
-     */
     const val RECURRING_LATIN_SCORE = 50
 
-    /** Occurrences across the scanned messages before a plain Latin word is promoted. */
     const val RECURRING_LATIN_MIN_COUNT = 3
 
     private val COMMON_HANZI: Set<Char> = buildSet {
@@ -54,13 +31,6 @@ object RareContentScorer {
 
     fun isRareCjkChar(c: Char): Boolean = isCjk(c) && c !in COMMON_HANZI
 
-    /**
-     * Rarity score for [term].
-     *
-     * [rank] is a NEGATIVE signal only: a term present in the background list is
-     * ordinary and scores 0. Absence proves nothing (the list is short by
-     * design), so being out-of-vocabulary never *by itself* makes a term rare.
-     */
     fun score(term: String, rank: (String) -> Int?): Int {
         val t = term.trim()
         if (t.isEmpty() || t.length > 24) return 0
@@ -80,9 +50,6 @@ object RareContentScorer {
             val allCaps = letters.length >= 2 && letters.all { it.isUpperCase() }
             val hasJoiner = t.any { it in "-_./" }
             if (interiorUpper || allCaps || hasJoiner) return 90
-            // A plain word scores below DIGEST_THRESHOLD on purpose: only
-            // technically-shaped Latin belongs in the digest, unless it recurs
-            // (RECURRING_LATIN_SCORE, applied by the builder).
             return PLAIN_LATIN_SCORE
         }
         if (!hasCjk) return 0
@@ -97,11 +64,9 @@ object RareContentScorer {
     private fun Char.isAsciiDigit(): Boolean = this in '0'..'9'
 }
 
-/** Conversation evidence handed to the correction prompt. */
 data class ConversationContext(
     val rareTermsDigest: String? = null,
     val recentExcerpts: List<String> = emptyList(),
-    /** [T-android-voice-viewport-context] What is on screen; null when unavailable. */
     val screen: ScreenContext? = null,
 ) {
     val isEmpty: Boolean
@@ -112,19 +77,10 @@ data class ConversationContext(
     }
 }
 
-/**
- * A message the builder may draw context from. `text` is expected to already
- * have attachment markup stripped by the caller.
- */
 data class CorrectionSourceMessage(val role: Role, val text: String) {
-    /** Raw values are rendered directly into the prompt. */
     enum class Role(val label: String) { USER("用户"), ASSISTANT("AI") }
 }
 
-/**
- * [T-android-voice-correction] Builds the budgeted conversation context.
- * Port of iOS `Agent/Speech/CorrectionContextBuilder.swift`.
- */
 object CorrectionContextBuilder {
 
     private const val TAG = "CorrectionContext"
@@ -144,17 +100,10 @@ object CorrectionContextBuilder {
         if (messages.isEmpty()) return ConversationContext.EMPTY
         val started = System.currentTimeMillis()
 
-        // Newest first; index 0 is the newest message.
         val scanned = messages.takeLast(CorrectionContextBudget.MAX_MESSAGES_SCANNED).reversed()
 
-        // term.lowercase() -> (score, count, display) so WGHome/wghome merge
-        // while the first-seen casing is what gets shown.
         val rareTerms = HashMap<String, Triple<Int, Int, String>>()
         val scannedMessages = mutableListOf<ScannedMessage>()
-        // [T-android-voice-mixed-term-restore] Plain Latin words, counted for the
-        // recurring-term promotion below. Promotion only makes sense where Latin
-        // words stand out: in an English chat "file" and "code" recur too and are
-        // not terms, so it is gated on CJK terms outnumbering plain Latin ones.
         val plainLatin = HashMap<String, kotlin.Pair<Int, String>>()
         var cjkTermCount = 0
         var plainLatinTotal = 0
@@ -217,7 +166,6 @@ object CorrectionContextBuilder {
         return ConversationContext(rareTermsDigest = digest, recentExcerpts = excerpts)
     }
 
-    /** Rarest first, then most frequent, then longest. */
     private fun buildDigest(rareTerms: Map<String, Triple<Int, Int, String>>): String? {
         val ranked = rareTerms.values.sortedWith(
             compareByDescending<Triple<Int, Int, String>> { it.first }
@@ -227,9 +175,7 @@ object CorrectionContextBuilder {
         val terms = mutableListOf<String>()
         var chars = 0
         for (entry in ranked) {
-            val cost = entry.third.length + if (terms.isEmpty()) 0 else 1 // +1 for "、"
-            // `continue`, NOT `break`: a term too long to fit is skipped so
-            // shorter later terms can still be packed in.
+            val cost = entry.third.length + if (terms.isEmpty()) 0 else 1
             if (chars + cost > CorrectionContextBudget.RARE_DIGEST) continue
             terms.add(entry.third)
             chars += cost
@@ -237,12 +183,6 @@ object CorrectionContextBuilder {
         return if (terms.isEmpty()) null else terms.joinToString("、")
     }
 
-    /**
-     * Walk newest → oldest. The two newest turns always contribute plain
-     * lead-in grounding; older messages earn a slot ONLY via sentences that
-     * carry rare content. Output is re-sorted oldest → newest so the model
-     * reads chronologically.
-     */
     private fun buildExcerpts(scannedMessages: List<ScannedMessage>): List<String> {
         var budget = CorrectionContextBudget.MESSAGE_EXCERPTS
         val rendered = mutableListOf<Pair<Int, String>>()
@@ -258,12 +198,9 @@ object CorrectionContextBuilder {
 
             val picked = mutableListOf<String>()
             var used = 0
-            // Returns false to stop taking from this message.
             fun take(sentence: String): Boolean {
                 var s = sentence
                 if (s.length > perMessageCap - used) {
-                    // Truncation is allowed only for the FIRST sentence taken;
-                    // otherwise we'd cut mid-thought with room already spent.
                     if (picked.isNotEmpty()) return false
                     s = s.take(maxOf(0, perMessageCap - used - 1)) + "…"
                 }
@@ -282,10 +219,6 @@ object CorrectionContextBuilder {
 
             val position = if (m.newestIndex == 0) "最新" else "前第${m.newestIndex + 1}条"
             val line = "【${m.role.label}·$position】${picked.joinToString("")}"
-            // The per-message cap bounds the SENTENCES, but the rendered line
-            // also carries the role label, so a line can still overshoot the
-            // remaining budget. Drop it rather than exceed the total — the
-            // budget is a promise to the prompt assembler, not a suggestion.
             if (line.length > budget) continue
             rendered.add(m.newestIndex to line)
             budget -= line.length

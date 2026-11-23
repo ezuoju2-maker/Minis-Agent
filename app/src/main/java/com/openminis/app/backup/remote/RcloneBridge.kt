@@ -4,31 +4,13 @@ import com.openminis.app.logging.AppLogger
 import com.openminis.rclone.gomobile.Gomobile
 import org.json.JSONObject
 
-/**
- * Kotlin access to the bundled rclone library, mirroring
- * `src/ios/Agent/Backup/Remote/RcloneBridge.swift`.
- *
- * Everything rclone can do goes through ONE entry point — a JSON-RPC call:
- *
- *     RcloneBridge.rpc("operations/list", mapOf("fs" to "remote:", "remote" to "dir"))
- *
- * That is rclone's own librclone API, not an interface invented here. The
- * binding comes from `deps/rclone-mobile/gomobile`, built by
- * `deps/build_rclone_android.sh`; backends linked in are decided by
- * `deps/rclone-mobile/backends/backends.go` — the same list the iOS build uses,
- * so a remote configured on one platform behaves identically on the other.
- *
- * Every call blocks on network I/O. Callers must be off the main thread.
- */
 object RcloneBridge {
 
     private const val TAG = "Rclone"
 
-    /** rclone's RPC returns an HTTP-style status; anything but 200 is a failure. */
     class RPCException(val status: Int, payload: String) :
         Exception(extractMessage(status, payload)) {
         companion object {
-            // rclone puts a human-readable reason in `error` when it can.
             private fun extractMessage(status: Int, payload: String): String =
                 runCatching { JSONObject(payload).optString("error").takeIf { it.isNotEmpty() } }
                     .getOrNull() ?: "rclone RPC failed (status $status)"
@@ -38,7 +20,6 @@ object RcloneBridge {
     @Volatile
     private var initialised = false
 
-    /** Idempotent. Must run before any RPC; safe to call from anywhere. */
     @Synchronized
     fun initializeIfNeeded() {
         if (initialised) return
@@ -49,24 +30,6 @@ object RcloneBridge {
         AppLogger.info(TAG, "[Rclone] initialised")
     }
 
-    /**
-     * [T-net-android-phase3] Settings > Network, "Backup" scope (iOS
-     * `RcloneBridge.applyNetworkProxy`, a1cf633da..b379a4e6f).
-     *
-     * rclone's global HTTPProxy (fs/fshttp/http.go) is set to the local SOCKS5
-     * entry with the backup tag, or cleared when the route is direct or the
-     * entry is down. It covers HTTP-based backends (WebDAV, S3). A remote
-     * rclone already built keeps its transport until its fs cache entry
-     * expires. Never called with "" before a proxy was set, so an
-     * unconfigured app sends rclone exactly the options it did before.
-     *
-     * [FEAT-261021-19, iOS d72a2b261 G2] SFTP and FTP dial through rclone's
-     * own dialer, not an http.Transport, so HTTPProxy never reached them. The
-     * same entry is now their `socks_proxy` (deps/rclone-mobile/rcloneroute,
-     * as `--sftp-socks-proxy` would set it), and a change clears rclone's fs
-     * cache so built remotes reconnect on the new route. SMB has no proxy
-     * option in rclone and stays direct (owner's decision, 2026-10-21).
-     */
     @Synchronized
     fun applyNetworkProxy() {
         val ep = com.openminis.app.network.NetworkRuntime.endpoint(com.openminis.app.network.NetworkScope.BACKUP.tag)
@@ -84,11 +47,6 @@ object RcloneBridge {
 
     private var lastAppliedProxy = ""
 
-    /**
-     * SFTP / FTP `socks_proxy`: "user:pass@host:port", "" = unset (direct).
-     * Only calls Go when the value changes, so an unconfigured app never
-     * touches rclone's backend options.
-     */
     private fun applySocksProxy(socks: String) {
         if (socks == lastAppliedSocks) return
         val reply = runCatching { Gomobile.rcloneSetSocks(socks) }.getOrElse { "{\"ok\":false,\"error\":\"${it.javaClass.simpleName}\"}" }
@@ -105,61 +63,19 @@ object RcloneBridge {
 
     private var lastAppliedSocks = ""
 
-    /** Re-applies the backup route after a Settings > Network change, only if rclone already runs. */
     fun applyNetworkProxyIfInitialised() {
         if (initialised) applyNetworkProxy()
     }
 
-    /** How long to wait for a server to accept a connection. */
     const val CONNECT_TIMEOUT_SECONDS = 20L
 
-    /**
-     * [T-android-backup-webdav-deadline] rclone's `Timeout`, which becomes Go's
-     * `http.Transport.ResponseHeaderTimeout` (fs/fshttp/http.go).
-     *
-     * It is NOT a stall timeout, whatever this comment used to say. The timer
-     * starts once the request body has been fully WRITTEN and is a flat
-     * deadline that never resets while the server works. For a WebDAV `PUT`
-     * to a gateway in front of a cloud drive (AList/OpenList), the server
-     * re-uploads the whole file to the cloud before it answers, so 45 s meant
-     * "must answer within 45 s after receiving everything", and those servers
-     * failed EVERY backup even at full speed.
-     *
-     * Measured on a Pixel 4a against a WebDAV server that stalls 60 s after the
-     * body arrives: 45 s failed each attempt 46 s after the body landed ("i/o
-     * timeout"), twice, 92 s in all; 300 s succeeds at 60 s. Same finding and
-     * value as iOS (ceac9df0b). 300 s is rclone's own default.
-     *
-     * A per-size value is no fix: the delay follows the BACKEND (a local disk
-     * answers at once, a cloud relay takes minutes), not the byte count.
-     * What bounds a server that is down is [CONNECT_TIMEOUT_SECONDS]; what
-     * ends a genuinely wedged transfer is Stop, which reaches an upload in
-     * flight through `job/stop` (RcloneChunkedUpload).
-     */
     const val IO_TIMEOUT_SECONDS = 300L
 
-    /**
-     * Low-level and high-level retry budgets.
-     *
-     * Kept at one each: retries multiply every wait above, and rclone's
-     * defaults (10 low-level) would turn one slow server into minutes of
-     * apparent hang. The uploader adds its own single, backed-off retry.
-     */
     const val LOW_LEVEL_RETRIES = 1L
     const val RETRIES = 1L
 
-    /** Nanoseconds, as rclone's int64 Duration options expect. */
     fun durationNanos(seconds: Long): Long = seconds * 1_000_000_000L
 
-    /**
-     * The `options/set` payload for the global transfer budget.
-     *
-     * Split out from [applyGlobalOptions] so the unit tests can assert the
-     * exact wire values — the nanosecond conversion is the easiest thing here
-     * to get wrong by three orders of magnitude, and a `Timeout` of 45 (ns
-     * interpreted as 45 billionths of a second) would fail every transfer
-     * instantly rather than obviously.
-     */
     fun globalTimeoutOptions(): Map<String, Any> = mapOf(
         "Timeout" to durationNanos(IO_TIMEOUT_SECONDS),
         "ConnectTimeout" to durationNanos(CONNECT_TIMEOUT_SECONDS),
@@ -167,19 +83,6 @@ object RcloneBridge {
         "Retries" to RETRIES,
     )
 
-    /**
-     * rclone's defaults are tuned for a desktop batch job, not a phone.
-     *
-     * `Gomobile.rcloneRPC` is a BLOCKING call into the Go runtime — nothing on
-     * the Kotlin side can interrupt it, so whatever rclone decides to wait for,
-     * the calling thread waits too. Out of the box that is a 300s IO timeout
-     * with 10 low-level retries, i.e. a server that accepts a connection and
-     * then stops responding can hold the caller for the better part of an hour.
-     * On a user's device that reads as "backup frozen" rather than "backup
-     * failed, try again".
-     *
-     * Mirrors iOS `RcloneBridge.applyGlobalOptions` (a28f8721b).
-     */
     fun applyGlobalOptions() {
         runCatching {
             rpcUnchecked("options/set", mapOf("main" to globalTimeoutOptions()))
@@ -194,18 +97,6 @@ object RcloneBridge {
         }
     }
 
-    /**
-     * Whether to accept self-signed / untrusted TLS certificates.
-     *
-     * Applied GLOBALLY rather than per-remote on purpose: of the backends this
-     * app offers, only FTP exposes a `no_check_certificate` option — WebDAV and
-     * S3 have none, and their verification is governed by rclone's global
-     * `InsecureSkipVerify`. A per-remote toggle would therefore be a lie for
-     * exactly the backends most likely to need it (a NAS serving HTTPS WebDAV
-     * with its own certificate).
-     *
-     * Mirrors iOS `RcloneBridge.setInsecureTLS` (a28f8721b).
-     */
     fun setInsecureTLS(allow: Boolean) {
         runCatching {
             rpcUnchecked("options/set", mapOf("main" to mapOf("InsecureSkipVerify" to allow)))
@@ -219,16 +110,6 @@ object RcloneBridge {
         }
     }
 
-    /**
-     * `rpc` without the initialise guard — for calls made DURING
-     * initialisation.
-     *
-     * [initializeIfNeeded] sets `initialised = true` before calling these, so
-     * the guard would not actually recurse; going straight to the RPC keeps
-     * that ordering from being load-bearing, so reordering the init sequence
-     * later cannot silently reintroduce a re-entrant
-     * `Gomobile.rcloneInitialize()`.
-     */
     private fun rpcUnchecked(method: String, params: Map<String, Any?>): JSONObject {
         val input = JSONObject(params.mapValues { toJsonValue(it.value) }).toString()
         val result = RcloneRpcTracker.track(method) { Gomobile.rcloneRPC(method, input) }
@@ -237,20 +118,11 @@ object RcloneBridge {
         return runCatching { JSONObject(output) }.getOrDefault(JSONObject())
     }
 
-    /**
-     * One RPC call. [params] is encoded to JSON; the reply is decoded from it.
-     *
-     * Values may be primitives, maps, or lists — `config/create` needs a nested
-     * object for `parameters` and `opt`, so a flat string map isn't enough.
-     */
     fun rpc(method: String, params: Map<String, Any?> = emptyMap()): JSONObject {
         initializeIfNeeded()
         val input = JSONObject(params.mapValues { toJsonValue(it.value) }).toString()
-        // [T-rclone-rpc-concurrency-diag] Counted, never serialised: a lock here
-        // would let a call stalled for IO_TIMEOUT_SECONDS hold back job/stop.
         val result = RcloneRpcTracker.track(method) { Gomobile.rcloneRPC(method, input) }
         val output = result.output ?: ""
-        // gobind maps Go's int to a Java long here.
         if (result.status != 200L) throw RPCException(result.status.toInt(), output)
         return runCatching { JSONObject(output) }.getOrDefault(JSONObject())
     }
@@ -262,13 +134,6 @@ object RcloneBridge {
         else -> value
     }
 
-    /**
-     * Smoke test: prove the Go runtime starts and answers on-device.
-     *
-     * `core/version` needs no config, no network and no credentials, so a
-     * successful reply isolates exactly one thing — that the linked-in Go
-     * runtime is alive inside this app, next to PRoot.
-     */
     fun smokeTest(): String = try {
         val v = rpc("core/version")
         val version = v.optString("version", "?")
@@ -281,7 +146,6 @@ object RcloneBridge {
         "FAILED: ${e.message}"
     }
 
-    /** Backends actually compiled in — confirms the trim did what it claims. */
     fun supportedBackends(): List<String> = runCatching {
         val providers = rpc("config/providers").optJSONArray("providers") ?: return emptyList()
         (0 until providers.length())

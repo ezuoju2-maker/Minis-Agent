@@ -13,16 +13,6 @@ import com.openminis.app.sandbox.NativeOffloadResult
 import org.json.JSONObject
 import java.io.File
 
-/**
- * android-device — device model, OS version, battery, and storage info.
- *
- * Usage:
- *   android-device                Same as `all`
- *   android-device info
- *   android-device battery
- *   android-device storage
- *   android-device all
- */
 class DeviceOffloadHandler(private val context: Context) : NativeOffloadHandler {
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
         val args = OffloadArgs(request.argv.drop(1))
@@ -102,8 +92,6 @@ class DeviceOffloadHandler(private val context: Context) : NativeOffloadHandler 
         val temp = bi.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)
         if (temp > 0) {
             val c = temp / 10.0
-            // Clamp to plausible range; devices that report in K or in raw °C
-            // would otherwise surface a wildly wrong number.
             if (c in -20.0..80.0) json.put("temperature_celsius", c)
             else json.put("temperature_celsius_raw", temp)
         }
@@ -136,17 +124,6 @@ class DeviceOffloadHandler(private val context: Context) : NativeOffloadHandler 
         return json
     }
 
-    /**
-     * [T-android-storage-symlink-inflation] Fourth copy of the sizing walk,
-     * found by the sweep that followed 754e65eac. Same following-walk defect:
-     * `walkTopDown()`, `isFile` and `length()` all resolve symlinks, so a
-     * directory link had its subtree counted again.
-     *
-     * Worth fixing even though this is "only" a diagnostic: the number goes to
-     * the MODEL as `app_data_mb`, and an agent reasoning about whether to free
-     * space from a figure several times the truth is worse than one with no
-     * figure at all.
-     */
     private fun dirSize(dir: File): Long =
         com.openminis.app.data.session.SessionStorage.directorySize(dir)
 

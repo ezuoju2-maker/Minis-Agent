@@ -6,10 +6,6 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/**
- * [code-ability] file_edit's real execute path appends a bounded diff preview;
- * the pure edit() default keeps its exact-output contract for existing tests.
- */
 class FileEditDiffTest {
     @get:Rule val tmp = TemporaryFolder()
 

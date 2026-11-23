@@ -11,12 +11,6 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.util.concurrent.Executor
 
-/**
- * [T-android-backup-log-sanitize] Records written before the progress-log fix
- * stay on the device for 30 days: the KILO repro left one with 16,827 lines,
- * and every visit to it froze the app. On first load each record's log is
- * cleaned once — and nothing else in the record changes.
- */
 class BackupHistorySanitizeTest {
 
     @get:Rule val tmp = TemporaryFolder()
@@ -28,7 +22,6 @@ class BackupHistorySanitizeTest {
     private fun e(at: Long, message: String, problem: Boolean = false) =
         BackupHistory.LogEntry(at, message, isProblem = problem)
 
-    /** The shape the KILO repro produced: phases, then ~2,600 lines per percent. */
     private fun bloated(lines: Int = 17_000): BackupHistory.Record {
         val log = mutableListOf(e(1, "Starting…"), e(2, "Exporting chats…"), e(3, "Packaging…"), e(4, "Sending to Folder…"))
         var at = 5L
@@ -45,7 +38,6 @@ class BackupHistorySanitizeTest {
         )
     }
 
-    // -- 6. The rule itself ------------------------------------------------------
 
     @Test
     fun `a 17,000 line log is cleaned to at most 201 lines and cleaning twice changes nothing`() {
@@ -78,7 +70,6 @@ class BackupHistorySanitizeTest {
         val merged = (50 until 150).flatMap { listOf("Exporting part $it…", "Sending to NAS… 2%") }
         assertEquals(merged, out.drop(1).map { it.message })
         assertEquals("idempotent with the note in place", out, BackupLogRules.sanitize(out))
-        // A record already cleaned once and grown again folds the counts together.
         val grown = out + List(50) { e(10_000L + it, "Exporting more $it…") }
         val again = BackupLogRules.sanitize(grown)
         assertEquals(201, again.size)
@@ -94,7 +85,6 @@ class BackupHistorySanitizeTest {
         assertEquals(out, BackupLogRules.sanitize(out))
     }
 
-    // -- On first load ------------------------------------------------------------
 
     @Test
     fun `first load cleans the log only, keeps a bak of the original and every other field`() {
@@ -115,7 +105,6 @@ class BackupHistorySanitizeTest {
         assertEquals("the original is kept once", raw, File(dir, "records.json.bak").readText())
         assertEquals(loaded, json.decodeFromString(listSer, File(dir, "records.json").readText()))
 
-        // A second process start finds nothing to clean and writes nothing.
         val store = File(dir, "records.json")
         val bak = File(dir, "records.json.bak")
         store.setLastModified(1_000_000L)

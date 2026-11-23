@@ -18,20 +18,6 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/**
- * OpenRouter OAuth manager using PKCE flow.
- * Mirrors iOS OpenRouterOAuthManager.
- *
- * Flow:
- * 1. Generate PKCE verifier + challenge
- * 2. Start local callback server on port 3000
- * 3. Open openrouter.ai/auth in Chrome Custom Tab (in-app browser)
- * 4. User authorizes → OpenRouter redirects to localhost:3000/callback
- * 5. Custom Tab navigates to localhost which fails to load → user sees error page
- *    but our callback server already captured the code
- * 6. Exchange code for permanent API key via /api/v1/auth/keys
- * 7. Store API key via ProviderRepository
- */
 object OpenRouterOAuthManager {
 
     private const val TAG = "OpenRouterOAuth"
@@ -42,11 +28,6 @@ object OpenRouterOAuthManager {
 
     private var callbackServer: OAuthCallbackServer? = null
 
-    /**
-     * Start the OAuth login flow for an OpenRouter provider instance.
-     * Opens an in-app Custom Tab for authentication.
-     * Returns the API key on success, or throws on failure.
-     */
     suspend fun login(context: Context, instanceId: String, providerRepository: ProviderRepository): String {
         Log.i(TAG, "=== OpenRouter OAuth login started (instance: $instanceId) ===")
 
@@ -61,8 +42,6 @@ object OpenRouterOAuthManager {
                 val server = OAuthCallbackServer(
                     CALLBACK_PORT,
                     FALLBACK_PORTS,
-                    // [T-oauth-callback-double-resume] Denied / failed on the
-                    // provider's page: end the sign-in now with its reason.
                     onError = { err -> if (cont.isActive) cont.resumeWithException(err.toException(context)) },
                 ) { receivedCode, _ ->
                     if (cont.isActive) {
@@ -84,12 +63,10 @@ object OpenRouterOAuthManager {
                     .appendQueryParameter("callback_url", callbackUrl)
                     .appendQueryParameter("code_challenge", challenge)
                     .appendQueryParameter("code_challenge_method", "S256")
-                    .appendQueryParameter("_nc", System.currentTimeMillis().toString()) // cache-bust
+                    .appendQueryParameter("_nc", System.currentTimeMillis().toString())
                     .build()
-                // [T-android-oauth-log-redact] code_challenge masked.
                 Log.d(TAG, "Auth URL: ${OAuthLogRedaction.url(authUrl.toString())}")
 
-                // Open in Chrome Custom Tab (in-app browser, like iOS SFSafariViewController)
                 OAuthTabLauncher.launch(context, authUrl, newTask = true)
                 Log.i(TAG, "Opened Custom Tab for OpenRouter authorization")
             }
@@ -98,16 +75,10 @@ object OpenRouterOAuthManager {
             callbackServer = null
             Log.i(TAG, "Callback received — code length: ${code.length}")
 
-            // Exchange code for permanent API key
-            // [T-android-oauth-foreground-exchange] The callback lands while the
-            // user is still in the Custom Tab, i.e. with Minis in the background,
-            // where the OS blocks this app's network (DNS answers "no address").
-            // Exchange only once the user is back.
             OAuthForegroundGate.awaitForeground(TAG)
             exchangeCode(code, verifier, com.openminis.app.network.NetworkRuntime.providerTag(instanceId))
         }
 
-        // Store the API key
         providerRepository.saveApiKey(instanceId, apiKey)
         Log.i(TAG, "=== OpenRouter OAuth login complete (instance: $instanceId) ===")
         return apiKey
@@ -125,23 +96,17 @@ object OpenRouterOAuthManager {
     private fun generatePKCE(): Pair<String, String> {
         val bytes = ByteArray(96)
         SecureRandom().nextBytes(bytes)
-        // Match iOS: standard base64 → manual URL-safe replacement (no padding)
         val verifier = standardBase64ToUrlSafe(bytes)
 
         val hash = MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.UTF_8))
         val challenge = standardBase64ToUrlSafe(hash)
 
-        // [T-android-oauth-log-redact] Length + first 4 chars only.
         Log.d(TAG, "PKCE verifier ${OAuthLogRedaction.secret(verifier)}")
         Log.d(TAG, "PKCE challenge ${OAuthLogRedaction.secret(challenge)}")
 
         return verifier to challenge
     }
 
-    /**
-     * Encode bytes to base64url matching iOS Data.base64URLEncodedOpenRouter():
-     * standard base64 → replace + with -, / with _, remove = padding.
-     */
     private fun standardBase64ToUrlSafe(bytes: ByteArray): String {
         return android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
             .replace('+', '-')
@@ -154,15 +119,12 @@ object OpenRouterOAuthManager {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    /** [FEAT-261021-16] [netTag]: the instance's Settings > Network tag. */
     private fun exchangeCode(code: String, verifier: String, netTag: String): String {
         val body = JSONObject()
         body.put("code", code)
         body.put("code_verifier", verifier)
         body.put("code_challenge_method", "S256")
 
-        // [T-android-oauth-log-redact] The request body holds the authorization
-        // code and the PKCE verifier — log only redacted forms of each.
         Log.d(TAG, "Exchange request: code=${OAuthLogRedaction.secret(code)} verifier=${OAuthLogRedaction.secret(verifier)}")
 
         val request = Request.Builder()
@@ -176,8 +138,6 @@ object OpenRouterOAuthManager {
         val response = com.openminis.app.network.NetworkHttp.client(netTag, client).newCall(request).execute()
         val responseBody = response.body?.string() ?: ""
         Log.i(TAG, "Response status: ${response.code}")
-        // [T-android-oauth-log-redaction] SUCCESS body carries the live API key
-        // — never log its content, only the size.
         Log.d(TAG, "Response body received (len=${responseBody.length})")
 
         if (!response.isSuccessful) {
@@ -188,5 +148,4 @@ object OpenRouterOAuthManager {
         return json.getString("key")
     }
 
-    // base64UrlEncode removed — use standardBase64ToUrlSafe to match iOS encoding exactly
 }

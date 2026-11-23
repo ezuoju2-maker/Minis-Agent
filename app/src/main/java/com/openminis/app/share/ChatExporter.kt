@@ -24,29 +24,6 @@ import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-/**
- * Streaming chat export — T-export-optimize (b443b54d).
- *
- * Previously [SessionListScreen.exportSession] loaded every [MessageEntity]
- * for a session at once, built the full JSON / TXT payload as a single
- * [String] in memory, and handed that to [Intent.EXTRA_TEXT]. Hundreds of
- * messages caused jank, ghosting and OOM crashes.
- *
- * This exporter:
- *   - paginates the session via [ChatRepository.loadMessagePageRaw] in
- *     batches of [BATCH_SIZE], releasing each batch after it's written;
- *   - streams the serialized output into `cacheDir/export-staging/<uuid>/`
- *     using a [BufferedWriter] so peak memory stays bounded;
- *   - wraps the staged transcript + a `session.json` metadata sidecar in
- *     a single [ZipOutputStream]-built archive;
- *   - moves the final `.zip` into `cacheDir/shared/` (already declared in
- *     `file_provider_paths.xml`), where it can be handed out via
- *     [FileProvider];
- *   - cleans the staging directory on success and failure.
- *
- * Runs on [Dispatchers.IO]; [progress] is a [StateFlow] so a future UI
- * (progress overlay) can subscribe without re-architecting the call site.
- */
 object ChatExporter {
 
     private const val BATCH_SIZE = 50
@@ -59,15 +36,10 @@ object ChatExporter {
         data class Failed(val throwable: Throwable) : Progress
     }
 
-    /**
-     * Lightweight summary of a finished export. Populated as we stream so
-     * the multi-select / "ready to share" UI can render a key-value preview
-     * without re-reading the payload.
-     */
     data class Summary(
-        val format: String,              // "json" | "text"
+        val format: String,
         val messageCount: Int,
-        val firstCreatedAt: Long?,       // ms, or null if empty
+        val firstCreatedAt: Long?,
         val lastCreatedAt: Long?,
         val imageAttachments: Int,
         val videoAttachments: Int,
@@ -77,13 +49,6 @@ object ChatExporter {
     private val _progress = MutableStateFlow<Progress>(Progress.Idle)
     val progress: StateFlow<Progress> = _progress.asStateFlow()
 
-    /**
-     * Stream-export [session] in [format] (`"json"` | `"text"`) and return
-     * a content [Uri] pointing at the zipped archive, suitable for
-     * [Intent.ACTION_SEND]. Throws on failure; caller's coroutine scope
-     * decides how to surface it. [Progress] is published to [progress] as
-     * batches are written.
-     */
     suspend fun exportToZip(
         context: Context,
         session: ChatSessionEntity,
@@ -105,7 +70,6 @@ object ChatExporter {
             val metaFile = File(workDir, "session.json")
             writeSessionMeta(metaFile, session, summary)
 
-            // Build zip under shared/ so FileProvider can hand it out.
             val sharedDir = File(context.cacheDir, "shared").apply { mkdirs() }
             val safeTitle = (session.title ?: "conversation")
                 .replace(Regex("[^A-Za-z0-9_-]+"), "_")
@@ -129,7 +93,6 @@ object ChatExporter {
             AppLogger.error(LOG_CATEGORY, "exportToZip failed: ${t.message}")
             throw t
         } finally {
-            // Always clean staging — the zip itself lives under shared/.
             runCatching { workDir.deleteRecursively() }
         }
     }
@@ -152,8 +115,6 @@ object ChatExporter {
 
         BufferedWriter(OutputStreamWriter(FileOutputStream(out), Charsets.UTF_8)).use { writer ->
             if (isJson) {
-                // Stream a hand-rolled JSON array — `[ {…}, {…}, … ]` —
-                // so we never materialize the whole list at once.
                 writer.write("[")
                 var firstEntry = true
                 forEachBatch(repository, session.id, total) { batch ->
@@ -261,10 +222,6 @@ object ChatExporter {
         for (i in 0 until arr.length()) {
             val obj = arr.optJSONObject(i) ?: continue
             if (obj.optString("type") == "text") {
-                // [T-android-retry-attachment-loss] Strip the persisted
-                // <user-attached-files> XML inventory from the human-readable
-                // text export — it's model-facing metadata, not chat content.
-                // (The JSON export above keeps full-fidelity parts_json.)
                 var value = obj.optString("value")
                 val start = value.indexOf("<user-attached-files>")
                 if (start >= 0) {
@@ -287,7 +244,6 @@ object ChatExporter {
         partsJson
     }
 
-    /** Best-effort `(images, videos)` count by walking parts_json. */
     private fun countAttachments(partsJson: String): Pair<Int, Int> = try {
         val arr = JSONArray(partsJson)
         var img = 0

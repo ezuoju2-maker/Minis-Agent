@@ -10,7 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/** [T-p1-delegate-task] Lifecycle + limit semantics of the in-process registry. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AgentJobRegistryTest {
 
@@ -114,8 +113,6 @@ class AgentJobRegistryTest {
     fun `a stop hook that wakes a watcher calling finish(DONE) cannot override CANCELLED`() {
         val j = child()
         AgentJobRegistry.markRunning(j.id, "S1") {
-            // What the child's stream flip does in production: the watcher
-            // observes idle and closes the job as DONE.
             AgentJobRegistry.finish(j.id, AgentJobState.DONE, "late")
         }
         AgentJobRegistry.cancel(j.id, "user-stop")
@@ -144,13 +141,7 @@ class AgentJobRegistryTest {
         assertEquals(listOf(j.id), seen)
     }
 
-    // ── [T-android-stop-sibling-subagent] Stopping the batch ────────────
 
-    /**
-     * Stopping one card stops the whole fan-out. Before this, cancel() took a
-     * single job id, so the siblings the user could not see kept running and
-     * kept spending tokens after the card said stopped.
-     */
     @Test
     fun `stopping one sub agent cancels its same-batch siblings`() {
         val a = child(); val b = child(); val c = child()
@@ -166,7 +157,6 @@ class AgentJobRegistryTest {
         }
     }
 
-    /** A different parent's run is a different batch and must survive. */
     @Test
     fun `stopping a batch leaves another conversation's agents alone`() {
         val mine = child("P"); val other = child("Q")
@@ -182,12 +172,6 @@ class AgentJobRegistryTest {
         )
     }
 
-    /**
-     * The ordering guard. finish() drains the queue on every terminal state,
-     * so cancelling a running job frees a slot — without dropping the queue
-     * FIRST, stopping the batch would start one of the very delegations being
-     * stopped.
-     */
     @Test
     fun `stopping a batch does not start a queued delegation`() {
         val a = child(); val b = child(); val c = child()
@@ -205,12 +189,6 @@ class AgentJobRegistryTest {
         assertEquals("a queued delegation must not start because a slot freed", 0, started)
     }
 
-    /**
-     * A sibling that had ALREADY finished still owns a pending callback.
-     * Delivering it after the stop restarts the parent's turn, which reads as
-     * the Stop button not working. The job still finishes and still records
-     * its result; only the parent-waking hop is suppressed.
-     */
     @Test
     fun `a finished sibling cannot re-wake a stopped parent`() {
         var dispatched = 0
@@ -232,7 +210,6 @@ class AgentJobRegistryTest {
         )
     }
 
-    /** New work in the session lifts the stop. */
     @Test
     fun `clearing the mute lets later delegations drive the parent again`() {
         var dispatched = 0
@@ -252,15 +229,7 @@ class AgentJobRegistryTest {
     }
 
 
-    // ── [T-android-sidebar-subagent-running] Sidebar attribution ────────
 
-    /**
-     * The sidebar's question is "does THIS conversation have work in flight",
-     * and a sub agent's activity is recorded under its own hidden child
-     * session id — an id no sidebar row carries. The query has to attribute it
-     * back to the parent, or a session that delegated everything out looks
-     * idle while it is still working.
-     */
     @Test
     fun `a running sub agent marks its parent as having work`() {
         val j = child("P")
@@ -272,7 +241,6 @@ class AgentJobRegistryTest {
         assertFalse("and it clears when the work ends", AgentJobRegistry.hasAgentWork("P"))
     }
 
-    /** A delegation waiting for a slot is still this conversation having work outstanding. */
     @Test
     fun `a queued delegation also marks its parent`() {
         AgentJobRegistry.enqueueDelegation(

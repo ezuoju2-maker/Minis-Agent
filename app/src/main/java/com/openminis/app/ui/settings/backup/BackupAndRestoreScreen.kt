@@ -110,63 +110,17 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import com.openminis.app.ui.theme.ChatColors
 
-/**
- * [T-backup-primary-action] Shared content for the two primary actions —
- * Start Backup and Start Restore.
- *
- * Both screens' main control is an icon + label pair, so they read as the same
- * kind of thing rather than two buttons that happen to sit in the same app
- * (iOS parity: `BackupActionIcon`).
- *
- * The spinner replaces the ICON, not the label. Swapping the label for a
- * status string — which is what Start Restore used to do — re-measures the row
- * the moment the user commits, so the button moves under the finger that just
- * pressed it. Keeping the label fixed and the spinner inside the icon's slot,
- * at the icon's size, holds the row's height constant across the transition.
- */
 @Composable
 private fun RowScope.PrimaryActionContent(
     icon: ImageVector,
     label: String,
     busy: Boolean,
-    /**
-     * [T-android-restore-perf] 0f..1f when a total is known, null otherwise.
-     * Drives a determinate arc so the indicator repaints on real progress
-     * rather than on every frame — see the busy branch below.
-     */
     fraction: Float? = null,
-    /**
-     * [T-android-restore-ui] Non-null while a restore is running and stoppable.
-     * Turns the ring into a tap target with a stop glyph at its centre; null
-     * leaves it a plain indicator.
-     */
     onStopClick: (() -> Unit)? = null,
 ) {
     if (busy) {
-        // [T-android-restore-perf] A DETERMINATE arc, not the spinning
-        // indeterminate one.
-        //
-        // CircularProgressIndicator's no-argument form animates forever, and
-        // an infinite animation drives a redraw every frame for as long as it
-        // is on screen. Measured with perfetto during a live restore: 478
-        // frames in 10 s (~48 fps) repainting the whole 1080x2340 surface,
-        // costing RenderThread 2.49 s of CPU per 10 s wall clock — on a device
-        // whose restore was already I/O-bound, spent entirely on a spinner
-        // that conveys nothing the counter beside it does not.
-        //
-        // The determinate form redraws only when `progress` actually changes,
-        // which the importer reports every 200 records (~1.7 s apart at the
-        // measured rate) rather than every frame.
         val stopActionLabel = stringResource(R.string.restore_stop_action)
         if (onStopClick != null) {
-            // [T-android-restore-ui] Ring + stop glyph, in one tap target.
-            //
-            // The touch area is 36.dp even though the ring is 24.dp: the
-            // visible arc is below the 48.dp accessibility minimum and cannot
-            // grow without unbalancing the button, so the hit rect is expanded
-            // around it instead. It is the ONLY live control while a restore
-            // runs — the button behind it is disabled — so a near miss does
-            // nothing rather than triggering something else.
             Box(
                 modifier = Modifier
                     .size(36.dp)
@@ -206,37 +160,17 @@ private fun RowScope.PrimaryActionContent(
     Text(label)
 }
 
-/**
- * [T-android-backup-ui] Backup & Restore — the Android peer of iOS
- * `BackupAndRestoreView`: a segmented [Backup | Restore] container over two
- * sub-forms. Reached from Settings → Storage.
- */
 @Composable
 fun BackupAndRestoreScreen(
     onBack: () -> Unit,
     onManageDestinations: () -> Unit = {},
-    // [T-android-restore-server-list] Open the "Restore from Server" list —
-    // the servers you can RESTORE FROM, plus an Add Server entry. Distinct
-    // from [onManageDestinations], which is the editable destinations screen
-    // (rename/remove/enable) reached from the Backup tab: same servers, a
-    // different verb, so they are deliberately different screens.
     onChooseRestoreServer: () -> Unit = {},
     onOpenHistoryRecord: (String) -> Unit = {},
     onBrowseDestination: (String) -> Unit = {},
-    // 0 = Backup, 1 = Restore. The onboarding restore link opens on Restore
-    // (iOS `BackupAndRestoreView(initialTab: .restore)`); Settings keeps Backup.
     initialTab: Int = 0,
 ) {
     val vm: BackupViewModel = viewModel()
-    // 0 = Backup, 1 = Restore. Saveable, not plain `remember`: navigating to
-    // the Add Server form takes this screen off the back stack, and coming
-    // back on plain `remember` reset the picker to Backup — dropping a user
-    // who cancelled out of "Choose from Server…" onto the wrong tab, one step
-    // further from where they started than when they left. A tab index is not
-    // a secret, so unlike the passphrases below it is safe to persist.
     var tab by rememberSaveable { mutableStateOf(initialTab) }
-    // Hoisted out of the tabs so switching tabs does not discard them — see
-    // [T-restore-keep-tab-state] below.
     var backupPassphrase by remember { mutableStateOf("") }
     var backupConfirm by remember { mutableStateOf("") }
     var restorePassphrase by remember { mutableStateOf("") }
@@ -259,16 +193,6 @@ fun BackupAndRestoreScreen(
             ) { Text(stringResource(R.string.backup_tab_restore)) }
         }
 
-        // [T-restore-keep-tab-state] Only ONE tab is composed at a time, so the
-        // other leaves the tree and plain `remember` state dies with it. The
-        // picked package survives regardless — it lives in the ViewModel — but
-        // a half-typed passphrase did not, so glancing at the other tab
-        // mid-restore silently emptied the field.
-        //
-        // Hoisted to the container, which outlives both tabs. NOT
-        // `rememberSaveable`: that would write the passphrase into the
-        // saved-instance-state bundle, persisting a secret to disk to save the
-        // user a few keystrokes.
         if (tab == 0) {
             BackupTab(
                 vm, onManageDestinations, onOpenHistoryRecord,
@@ -288,10 +212,8 @@ fun BackupAndRestoreScreen(
     }
 }
 
-/** Rows shown before "Show all" — enough to cover a normal week of backups. */
 private const val HISTORY_COLLAPSED_COUNT = 10
 
-// ─── Backup tab ──────────────────────────────────────────────────────────
 
 @Composable
 private fun BackupTab(
@@ -307,9 +229,6 @@ private fun BackupTab(
     val selected by vm.selected.collectAsState()
     val encrypt by vm.encrypt.collectAsState()
     val maxFileSizeMB by vm.maxFileSizeMB.collectAsState()
-    // [T-android-backup-run-controller] The backup's own flag, not the
-    // restore/backup union: this tab's Stop button must not appear for a
-    // restore running on the other tab.
     val running by vm.exportRunning.collectAsState()
     val status by vm.statusText.collectAsState()
     val error by vm.errorText.collectAsState()
@@ -319,27 +238,11 @@ private fun BackupTab(
     val exportReady by vm.exportReady.collectAsState()
     val saveState by vm.saveState.collectAsState()
 
-    // [T-android-backup-local-export] Save to Device: SAF CreateDocument. The
-    // MIME type drives the extension the picker appends (BackupFormat.MIME_TYPE
-    // explains why not octet-stream). The copy itself runs on the backup
-    // controller's process scope, so it survives leaving this screen.
     val saveLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument(com.openminis.app.backup.BackupFormat.MIME_TYPE),
     ) { uri -> uri?.let(vm::saveExportTo) }
 
-    // Re-read destinations every time this tab appears: the user may have just
-    // added one via "Manage Destinations…" and navigated back, and a stale
-    // empty list would keep the Start button disabled with no way to recover.
     LaunchedEffect(Unit) {
-        // [T-android-backup-transient-success] Drop a PREVIOUS visit's success
-        // card on the way IN, not on the way out. Clearing on dispose would
-        // yank it away the moment the user tapped into the run they were
-        // reading about; by the time this fires again, the visit that produced
-        // the result has ended, which is exactly when the card stops being
-        // useful. The same facts remain in Backup History.
-        //
-        // Only a settled, fully-delivered run is dropped — a failure is the
-        // one result worth coming back to.
         vm.clearSettledSuccess()
         vm.refreshDestinations()
         vm.refreshHistory()
@@ -359,13 +262,8 @@ private fun BackupTab(
     val passphraseValid = !encrypt || (passphrase.isNotEmpty() && passphrase == confirm)
     val hasFileTree = selected.any { it.carriesFileTree }
 
-    // -- Device Name --
     DeviceNameSection(enabled = !running)
 
-    // -- Include --
-    // Footer changes with the Max Per-File Size selection, but only when a
-    // file-carrying category is selected — otherwise the cap is meaningless
-    // (mirrors iOS BackupSettingsView).
     val includeFooter = when {
         !hasFileTree -> stringResource(R.string.backup_include_footer)
         maxFileSizeMB == MAX_FILE_NO_FILES ->
@@ -390,7 +288,6 @@ private fun BackupTab(
                 showDivider = i < cats.lastIndex || hasFileTree,
             )
         }
-        // Max Per-File Size picker — only when a file-carrying category is on.
         if (hasFileTree) {
             MaxFileSizeRow(
                 current = maxFileSizeMB,
@@ -400,18 +297,12 @@ private fun BackupTab(
         }
     }
 
-    // -- Encryption --
     SettingsSection(
         header = stringResource(R.string.backup_section_encryption),
         footer = if (encrypt) {
             stringResource(R.string.backup_encrypt_footer_on)
         } else if (BackupCategory.PROVIDERS in selected ||
             BackupCategory.ENVIRONMENT_VARIABLES in selected ||
-            // [T-backup-credentials-without-encryption] MCP belongs here for a
-            // reason that is easy to miss: mcp_servers.json is copied VERBATIM
-            // (BackupExporter.exportMcpServers), so a user-set Authorization
-            // header travels inside it — a secret, in an unencrypted package,
-            // whether or not PROVIDERS was selected. iOS lists the same three.
             BackupCategory.MCP_SERVERS in selected
         ) {
             stringResource(R.string.backup_encrypt_footer_off_creds)
@@ -429,9 +320,6 @@ private fun BackupTab(
             showDivider = encrypt,
         )
         if (encrypt) {
-            // [T-android-backup-passphrase-keyboard] (GH#345) One toggle for the
-            // pair: the user is typing the same secret twice and needs to
-            // compare them, so revealing only one half would defeat the point.
             var revealPassphrase by remember { mutableStateOf(false) }
             Column(Modifier.padding(16.dp)) {
                 OutlinedTextField(
@@ -440,16 +328,6 @@ private fun BackupTab(
                     label = { Text(stringResource(R.string.backup_passphrase)) },
                     singleLine = true,
                     enabled = !running,
-                    // [T-android-backup-passphrase-keyboard] (GH#345)
-                    // `PasswordVisualTransformation` alone only masks the
-                    // GLYPHS — the field still declares itself as ordinary
-                    // text, so the IME treats it as one: third-party keyboards
-                    // offer clipboard history and network-backed prediction,
-                    // and learn the passphrase into their personal dictionary.
-                    // KeyboardType.Password is what tells the IME this is a
-                    // secret, which is what makes a keyboard drop those
-                    // features (and what lets the system substitute its own
-                    // secure keyboard).
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     visualTransformation = if (revealPassphrase) {
                         VisualTransformation.None
@@ -501,12 +379,6 @@ private fun BackupTab(
         }
     }
 
-    // -- Destinations --
-    // [T-android-backup-destination-gate] Inline list, mirroring iOS's
-    // `destinationSection`. Android previously offered only a "Manage
-    // Destinations…" button, so the backup screen never showed WHETHER a
-    // destination existed — which is how "back up with none configured"
-    // stayed invisible.
     DestinationsSection(
         destinations = destinations,
         enabled = !running,
@@ -514,33 +386,12 @@ private fun BackupTab(
         onToggle = vm::setDestinationEnabled,
     )
 
-    // -- Action --
     Column(Modifier.padding(16.dp)) {
-        // [T-android-backup-stop] ONE button that toggles. While a backup runs
-        // it says "Stop Backup" and stops it — nothing else about the row
-        // changes.
-        //
-        // It used to turn into a disabled spinner captioned with the live
-        // status, which put the progress report inside the control: the row a
-        // user reaches for moved and greyed out at the very moment they wanted
-        // to act, and there was no way to stop a running backup at all.
-        // Progress belongs in the run's own entry in Backup History below,
-        // which shows the live status line and the whole log; the control
-        // stays a control. Same reasoning, and the same shape, as iOS.
         MinisButton(
             onClick = {
                 if (running) vm.stopExport()
                 else vm.startExport(passphrase.takeIf { encrypt })
             },
-            // The start-time requirements gate STARTING only. Applying them
-            // while running would disable the button mid-run and leave no way
-            // to stop the backup from this screen.
-            //
-            // [T-android-backup-local-export] A destination is no longer one
-            // of them. With none, the run is local-only and ends in Save to
-            // Device / Share, and the result card says it is not saved outside
-            // the app yet — so the "reads as success" problem the old gate
-            // guarded against is answered in words, not by a dead button.
             enabled = running || (selected.isNotEmpty() && passphraseValid),
             colors = if (running) {
                 androidx.compose.material3.ButtonDefaults.buttonColors(
@@ -552,16 +403,11 @@ private fun BackupTab(
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            // Stop is the destructive counterpart, so it gets the stop glyph
-            // on the red container rather than the same cloud-upload icon in a
-            // different colour.
             PrimaryActionContent(
                 icon = if (running) Icons.Outlined.Stop else Icons.Outlined.CloudUpload,
                 label = stringResource(
                     if (running) R.string.backup_stop else R.string.backup_start,
                 ),
-                // The backup button reports progress in Backup History below,
-                // not in the control, so it keeps its icon while running.
                 busy = false,
             )
         }
@@ -575,13 +421,7 @@ private fun BackupTab(
             )
         }
 
-        // Why the button is disabled. Destination first: it is the requirement
-        // a new user is most likely to be missing, since the categories arrive
-        // already selected (same ordering and rationale as iOS).
         if (!running) {
-            // [T-android-backup-local-export] Real blockers first; "no
-            // destination" is now information about where the package will
-            // (not) go, not a reason the button is disabled.
             val hint = when {
                 selected.isEmpty() -> stringResource(R.string.backup_needs_category)
                 encrypt && passphrase.isEmpty() -> stringResource(R.string.backup_needs_passphrase)
@@ -601,9 +441,6 @@ private fun BackupTab(
     }
 
 
-    // -- Just finished --
-    // Under the button, as on iOS: a transient report of the run the user just
-    // watched, gone by their next visit.
     lastResult?.let { r ->
         if (!running) {
             SettingsSection(
@@ -617,9 +454,6 @@ private fun BackupTab(
                 )
                 if (r.skippedFiles > 0) {
                     DetailValueRow(
-                        // "Too large" would be wrong when the user's own cap
-                        // said not to include files at all — nothing exceeded
-                        // anything then.
                         label = stringResource(
                             if (maxFileSizeMB == MAX_FILE_NO_FILES) R.string.backup_result_files_not_included
                             else R.string.backup_result_excluded_too_large,
@@ -628,8 +462,6 @@ private fun BackupTab(
                         showDivider = r.destinations.isNotEmpty(),
                     )
                 }
-                // Per destination, not one combined status: "2 of 3 saved" is
-                // only actionable if the user can see WHICH one failed.
                 r.destinations.forEachIndexed { i, d ->
                     ResultDestinationRow(
                         outcome = d,
@@ -637,12 +469,6 @@ private fun BackupTab(
                     )
                 }
             }
-            // [T-android-backup-local-export] The exits for a run that had
-            // nowhere to go. Same condition as iOS (`deliveryResults.isEmpty`):
-            // what matters is whether THIS run was carried anywhere, not
-            // whether a destination is configured now. A run whose delivery
-            // partly failed keeps its local copy but does not get these —
-            // its per-destination rows already say what to fix.
             val pkg = exportReady?.packageFile
             if (r.localOnly && pkg != null && pkg.exists()) {
                 LocalExportActions(
@@ -664,23 +490,12 @@ private fun BackupTab(
         }
     }
 
-    // -- History --
     BackupHistorySection(
         records = historyRecords,
         onOpen = onOpenHistoryRecord,
     )
 }
 
-/**
- * [T-android-backup-device-name-setting] Names this device for backup
- * filenames (`<device>-<date>-<id>.minisbak`) and the manifest's
- * `device_name` — the iOS Backup settings section of the same name.
- *
- * Committed on every change rather than on IME Done: the screen is usually
- * left with Back or by tapping Start Backup, neither of which submits. The
- * draft is local state so the field can sit empty while the user retypes
- * without the placeholder jumping; storing blank clears the override.
- */
 @Composable
 private fun DeviceNameSection(enabled: Boolean) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -728,8 +543,6 @@ private fun DeviceNameSection(enabled: Boolean) {
                 modifier = Modifier.weight(1f),
                 decorationBox = { inner ->
                     Box {
-                        // The placeholder is the automatic name, so an empty
-                        // field shows what will be used instead of a blank.
                         if (draft.isEmpty()) {
                             Text(
                                 automatic,
@@ -747,27 +560,12 @@ private fun DeviceNameSection(enabled: Boolean) {
     }
 }
 
-/**
- * [T-android-backup-history] Past runs, newest first. Mirrors iOS
- * `BackupSettingsView.historySection`.
- *
- * The screen previously showed only a transient "Backup ready" card for the
- * last run in the current session, which never said which destinations the
- * package actually reached — a delivery that failed to one server out of
- * three was a single red line that vanished on navigation.
- */
 @Composable
 private fun BackupHistorySection(
     records: List<BackupHistory.Record>,
     onOpen: (String) -> Unit,
 ) {
     if (records.isEmpty()) return
-    // Cap what is composed. The whole screen sits in a verticalScroll, so a
-    // LazyColumn here would fight it for height constraints; the 30-day
-    // retention meanwhile puts no ceiling on the count — a user backing up
-    // hourly has ~700 records, every one of them composed on every recomposition
-    // of this screen. iOS gets virtualisation for free from List and needs no
-    // equivalent.
     var expanded by remember { mutableStateOf(false) }
     val shown = if (expanded) records else records.take(HISTORY_COLLAPSED_COUNT)
     SettingsSection(
@@ -840,8 +638,6 @@ private fun BackupHistoryRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            // Says the row leads somewhere. Without it the row looks like a
-            // status readout, and the detail screen behind it goes unfound.
             Spacer(Modifier.width(4.dp))
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -859,11 +655,8 @@ private fun BackupHistoryRow(
     }
 }
 
-/** "12.4 MB · 2 of 3 destinations" — the delivery result, up front. */
 @Composable
 private fun backupHistorySubtitle(record: BackupHistory.Record): String {
-    // While running the subtitle is the LIVE progress line; afterwards it is
-    // the outcome. Same row either way, so a finishing backup doesn't jump.
     if (record.status == BackupHistory.Status.RUNNING) {
         return record.log.lastOrNull()?.message
             ?: stringResource(R.string.backup_history_running)
@@ -886,13 +679,11 @@ private fun backupHistorySubtitle(record: BackupHistory.Record): String {
 }
 
 
-/** Local date-time for a history row. Locale-aware via the platform formatter. */
 internal fun formatTimestamp(millis: Long): String =
     java.text.DateFormat.getDateTimeInstance(
         java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT,
     ).format(java.util.Date(millis))
 
-/** Max Per-File Size dropdown row (iOS: the `doc.zipper` menu Picker). */
 @Composable
 private fun MaxFileSizeRow(
     current: Int,
@@ -905,8 +696,6 @@ private fun MaxFileSizeRow(
         MAX_FILE_UNLIMITED -> stringResource(R.string.backup_max_file_unlimited)
         else -> stringResource(R.string.backup_max_file_mb, current)
     }
-    // Ordered smallest → largest with the two extremes at the ends, matching
-    // iOS's option list.
     val options = listOf(
         MAX_FILE_NO_FILES to stringResource(R.string.backup_max_file_no_files),
         1 to stringResource(R.string.backup_max_file_mb, 1),
@@ -919,9 +708,6 @@ private fun MaxFileSizeRow(
         MAX_FILE_UNLIMITED to stringResource(R.string.backup_max_file_unlimited),
     )
     Column {
-        // Circular gray badge to match iOS's doc.zipper circle (and the other
-        // backup rows' circular badges), rather than the shared SettingsRow's
-        // rounded square.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -945,14 +731,7 @@ private fun MaxFileSizeRow(
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.weight(1f),
             )
-            // The current value + a compact menu anchored to it (alignEnd), so
-            // the popup reads as "expanded from this row" near the value, not a
-            // near-fullscreen sheet. Mirrors iOS's tight native Picker.
             Box {
-                // Value + an up/down chevron. Without the glyph the row reads
-                // as a static label showing a setting, giving nothing away
-                // that tapping it opens a picker — the same affordance iOS
-                // gets for free from a native Picker's chevron.
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         label,
@@ -988,7 +767,6 @@ private fun MaxFileSizeRow(
     }
 }
 
-// ─── Restore tab ─────────────────────────────────────────────────────────
 
 @Composable
 private fun RestoreTab(
@@ -1005,7 +783,6 @@ private fun RestoreTab(
     val report by vm.report.collectAsState()
     val error by vm.errorText.collectAsState()
 
-    // Which destination the user is browsing for a package to restore from.
     var browsing by remember {
         mutableStateOf<com.openminis.app.backup.remote.RcloneRemoteStore.Remote?>(null)
     }
@@ -1017,26 +794,12 @@ private fun RestoreTab(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> if (uri != null) vm.loadPackage(uri) }
 
-    // Report replaces everything once a restore finishes.
     if (report != null) {
         RestoreReport(report!!, onDone = { vm.dismissReport() })
         return
     }
 
     if (pending == null) {
-        // [T-android-restore-destinations] The configured destinations, listed
-        // here rather than hidden behind a picker dialog. iOS shows them on
-        // the restore screen for the obvious reason: the backup a user wants
-        // is almost always on a server they already set up, so making that the
-        // first thing on the screen — instead of a button that opens a list —
-        // removes a step from the common path.
-        // [T-android-backup-local-folder] Server destinations only. Browsing a
-        // destination goes through rclone, which has no backend for a
-        // SAF-picked folder — listing one here would hand the user a row that
-        // opens an empty browser. Restoring FROM a local folder is already
-        // covered, and better, by "Choose Backup File…" below: the system
-        // picker reaches every folder on the device, not just the ones that
-        // happen to be registered as backup destinations.
         val serverDestinations = destinations.filterNot {
             com.openminis.app.backup.remote.RcloneRemoteStore.isLocalFolder(it.backend)
         }
@@ -1067,12 +830,6 @@ private fun RestoreTab(
             header = stringResource(R.string.backup_restore_other_sources),
             footer = stringResource(R.string.backup_choose_file_footer),
         ) {
-            // Two sources, matching iOS: local file / configured rclone servers.
-            // There is deliberately no "Choose from Shared Folders…" row: the
-            // system document picker below already reaches those folders (and
-            // every other document provider), so a second, narrower entry point
-            // was pure redundancy on the restore screen. The underlying shared
-            // folder support is untouched — only this duplicate entry is gone.
             RestoreSourceRow(
                 icon = Icons.Outlined.Description,
                 iconColor = Color(0xFF007AFF),
@@ -1087,19 +844,6 @@ private fun RestoreTab(
                 iconColor = Color(0xFFAF52DE),
                 label = stringResource(R.string.backup_choose_server),
                 enabled = !running,
-                // [T-android-restore-server-list] ALWAYS the same destination:
-                // a "Restore from Server" list page. It used to branch on
-                // whether any server existed — a dialog when there was one,
-                // and with none a dialog whose entire content was "no servers
-                // configured" over a lone Cancel: a dead end that named the
-                // problem and then refused to solve it, on the one screen
-                // where the user had already said what they wanted.
-                //
-                // One unconditional destination is what makes the empty state
-                // stop being special. That page lists the servers with an Add
-                // Server entry always at the end, so "none configured" is just
-                // the case where the list happens to be empty — the entry the
-                // user needs is in the same place either way. Matches iOS.
                 onClick = onChooseRestoreServer,
                 showDivider = false,
             )
@@ -1112,8 +856,6 @@ private fun RestoreTab(
                 )
             }
         }
-        // Tapped straight from the destinations list above — same picker, but
-        // with the server already chosen.
         browsing?.let { r ->
             ServerPackagePicker(
                 vm = vm,
@@ -1125,13 +867,8 @@ private fun RestoreTab(
     }
 
     val p = pending!!
-    // Summary
     SettingsSection(header = stringResource(R.string.backup_section_backup)) {
         Column(Modifier.padding(16.dp)) {
-            // The data cut-off, when the package records one. Distinct from
-            // "created": a run that took minutes has a snapshot older than its
-            // file, and which one you are looking at matters when deciding
-            // whether a backup is recent enough to restore from.
             p.manifest.snapshotAt
                 ?.takeIf { it.isNotEmpty() && it != p.manifest.createdAt }
                 ?.let { InfoLine(stringResource(R.string.backup_info_snapshot), it) }
@@ -1151,14 +888,10 @@ private fun RestoreTab(
         }
     }
 
-    // Category selection with per-category counts from the manifest.
     SettingsSection(
         header = stringResource(R.string.backup_section_restore),
         footer = stringResource(R.string.backup_restore_merge_footer),
     ) {
-        // Declaration order (BackupCategory.entries), NOT key-alphabetical, so
-        // the Restore list matches the Backup tab and iOS's
-        // availableCategories(_:) which filters allCases in declaration order.
         val cats = BackupCategory.entries.filter { it in p.availableCategories }
         cats.forEachIndexed { i, cat ->
             val stat = p.manifest.categories[cat.key]
@@ -1175,15 +908,11 @@ private fun RestoreTab(
         }
     }
 
-    // Passphrase (only if encrypted).
     if (p.manifest.encryption != null) {
         SettingsSection(
             footer = stringResource(R.string.backup_restore_passphrase_footer),
         ) {
             Column(Modifier.padding(16.dp)) {
-                // [T-android-backup-passphrase-keyboard] (GH#345) Same
-                // treatment as the backup side — see the comment there for why
-                // the keyboard type matters beyond the masking.
                 var revealRestorePassphrase by remember { mutableStateOf(false) }
                 OutlinedTextField(
                     value = passphrase,
@@ -1219,18 +948,6 @@ private fun RestoreTab(
     }
 
     Column(Modifier.padding(16.dp)) {
-        // [T-android-restore-ui] The button and its subtitle live in their own
-        // composable so that progress — which ticks every 200 records — only
-        // recomposes THEM.
-        //
-        // They used to read `vm.restoreProgress` from RestoreTab's top level,
-        // which put every category switch, text field and card on this screen
-        // in the same recomposition scope as a counter updating several times
-        // a second. Moving the collect down here is the whole fix; the
-        // subtitle reads a separate flow for the same reason.
-        // [T-restore-lock-passphrase] The passphrase field is disabled while a
-        // restore runs; starting one also takes the focus away, so the keyboard
-        // is down for the whole run instead of rising over the progress line.
         val restoreFocus = androidx.compose.ui.platform.LocalFocusManager.current
         RestoreProgressSection(
             vm = vm,
@@ -1274,19 +991,6 @@ private fun RestoreReport(
         }
     }
 
-    // Per-category outcomes. The totals above say a restore had issues; these
-    // say WHICH data was affected and why, which is the difference between
-    // "something went wrong" and knowing whether it matters. Each line names
-    // the category, as on iOS.
-    //
-    // [T-android-restore-report-severity] Split by severity. Everything used
-    // to render in the error colour, so a file the SOURCE device deliberately
-    // left out — over the size cap, or never downloaded there — read as if the
-    // restore had broken. Those are the backup's own policy, recorded as
-    // tombstones in the index, and they get their own amber section.
-    //
-    // Which counter is which severity is decided in restoreIssues(), not here,
-    // so the rule is tested as data rather than inferred from colours.
     val issues = restoreIssues(report)
     val lines = issues.map { issue ->
         val name = BackupCategory.fromKey(issue.categoryKey)
@@ -1305,8 +1009,6 @@ private fun RestoreReport(
         }
     }
     val errors = lines.filter { it.first == RestoreIssueSeverity.ERROR }.map { it.second }
-    // report.warnings are advisories (count mismatches and the like), already
-    // sentences rather than counts; they read as notices, not failures.
     val notices = lines.filter { it.first == RestoreIssueSeverity.NOTICE }.map { it.second } +
         report.warnings
     if (errors.isNotEmpty()) {
@@ -1330,7 +1032,6 @@ private fun RestoreReport(
         }
     }
 
-    // 3-way credentials message, keyed on the providers category (iOS parity).
     val prov = report.categories.firstOrNull {
         it.category == BackupCategory.PROVIDERS.key
     }
@@ -1354,18 +1055,7 @@ private fun RestoreReport(
     }
 }
 
-// ─── Restore sources ─────────────────────────────────────────────────────
 
-/**
- * [T-android-backup-destination-gate] The destinations a backup will be
- * delivered to, listed inline on the Backup tab. Mirrors iOS
- * `BackupSettingsView.destinationSection`.
- *
- * Android previously surfaced destinations only behind a "Manage Destinations…"
- * button, so the screen never showed whether any existed — a user with none
- * configured saw a normal-looking Start button, got "Backup ready", and ended
- * up with a package that never left the app sandbox.
- */
 @Composable
 private fun DestinationsSection(
     destinations: List<com.openminis.app.backup.remote.RcloneRemoteStore.Remote>,
@@ -1388,9 +1078,6 @@ private fun DestinationsSection(
                 onClick = onManage,
             )
         }
-        // ONE entry point, as on iOS: two buttons ("Add Folder" / "Add Server")
-        // would ask the user to know which mechanism they wanted before they
-        // knew what either did.
         RestoreSourceRow(
             icon = Icons.Outlined.Add,
             iconColor = Color(0xFF34C759),
@@ -1402,16 +1089,6 @@ private fun DestinationsSection(
     }
 }
 
-/**
- * One destination: name over "BACKEND · /path", with a switch. Mirrors the
- * server rows in iOS `destinationSection`.
- *
- * The switch controls DELIVERY, not existence — disabling keeps the server and
- * its credential, so skipping one destination for a while costs nothing to
- * undo. That is also why disabled rows stay visible: hiding them would leave
- * the user unable to see the destination still existed, let alone switch it
- * back on.
- */
 @Composable
 private fun DestinationRow(
     remote: com.openminis.app.backup.remote.RcloneRemoteStore.Remote,
@@ -1419,13 +1096,9 @@ private fun DestinationRow(
     onToggle: (Boolean) -> Unit,
     onClick: () -> Unit,
 ) {
-    // Material equivalents of the SF Symbols iOS picks per backend.
     val isLocal = com.openminis.app.backup.remote.RcloneRemoteStore
         .isLocalFolder(remote.backend)
     val icon = when {
-        // [T-android-backup-local-folder] A folder icon, so the one
-        // destination that is NOT a server is distinguishable at a glance
-        // from the five that are.
         isLocal -> Icons.Outlined.Folder
         remote.backend == "smb" -> Icons.Outlined.Dns
         remote.backend == "webdav" -> Icons.Outlined.Cloud
@@ -1440,8 +1113,6 @@ private fun DestinationRow(
                 .fillMaxWidth()
                 .heightIn(min = 56.dp)
                 .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
-                // 12dp, matching every other settings row — 10dp here left this
-                // row 4dp shorter than its neighbours.
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1482,7 +1153,6 @@ private fun DestinationRow(
     }
 }
 
-/** Label + right-aligned value, for the just-finished card. */
 @Composable
 private fun DetailValueRow(label: String, value: String, showDivider: Boolean) {
     Column {
@@ -1508,7 +1178,6 @@ private fun DetailValueRow(label: String, value: String, showDivider: Boolean) {
     }
 }
 
-/** One destination's outcome in the just-finished card. */
 @Composable
 private fun ResultDestinationRow(
     outcome: BackupHistory.DestinationOutcome,
@@ -1547,10 +1216,6 @@ private fun ResultDestinationRow(
     }
 }
 
-/**
- * [T-android-backup-local-export] Save to Device / Share for a local-only run.
- * Two equal buttons side by side, matching iOS's "Share…" / "Save to Files…".
- */
 @Composable
 private fun LocalExportActions(
     saving: Boolean,
@@ -1581,7 +1246,6 @@ private fun LocalExportActions(
     }
 }
 
-/** The Save to Device progress / outcome line, or null when idle. */
 @Composable
 private fun saveStateLine(
     state: com.openminis.app.backup.BackupRunController.SaveState?,
@@ -1595,16 +1259,6 @@ private fun saveStateLine(
         stringResource(R.string.backup_save_failed, state.message) to true
 }
 
-/**
- * [T-android-backup-local-export] Hand the package to another app through the
- * system share sheet (Drive, a chat app, a file manager…).
- *
- * `application/octet-stream`, not [com.openminis.app.backup.BackupFormat.MIME_TYPE]:
- * a share target filters on the MIME type it declares, and almost none
- * declare `application/x-minisbak`, so the precise type would hide exactly
- * the apps a user wants to send a backup to. The `.minisbak` name travels
- * with the URI regardless. The grant is per-URI and read-only.
- */
 private fun shareBackupPackage(context: android.content.Context, file: java.io.File) {
     runCatching {
         val uri = androidx.core.content.FileProvider.getUriForFile(
@@ -1627,30 +1281,20 @@ private fun shareBackupPackage(context: android.content.Context, file: java.io.F
     }
 }
 
-/** Where the package ended up, in words. */
 @Composable
 private fun backupResultFooter(r: com.openminis.app.backup.BackupRunController.RunResult): String {
-    // [T-android-backup-local-export] A local-only run is not "saved": say so
-    // until the user has actually put it somewhere outside the app.
     if (r.destinations.isEmpty()) {
         return r.savedAs?.let { stringResource(R.string.backup_saved_to_device, it) }
             ?: stringResource(R.string.backup_result_local_pending)
     }
     val ok = r.destinations.count { it.succeeded }
-    // Once every destination is verified the local package is deleted, so the
-    // footer has to say that rather than claim a copy is still on the device.
     if (r.localCopyRemoved) {
         return stringResource(R.string.backup_result_delivered_cleaned, r.destinations.size)
     }
-    // State the local copy explicitly: a user whose NAS was offline needs to
-    // see the backup still exists somewhere.
     return stringResource(R.string.backup_result_delivered, ok, r.destinations.size)
 }
 
-/** A tappable icon row for one restore source (iOS: circular-icon rows). */
 @Composable
-// [T-android-restore-server-list] internal so RestoreServersScreen renders
-// its rows with the same shape as the restore sources they follow from.
 internal fun RestoreSourceRow(
     icon: ImageVector,
     iconColor: Color,
@@ -1659,7 +1303,6 @@ internal fun RestoreSourceRow(
     onClick: () -> Unit,
     showDivider: Boolean,
     subtitle: String? = null,
-    /** [T-android-backup-dest-edit] e.g. the server list's details button. */
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Column {
@@ -1684,8 +1327,6 @@ internal fun RestoreSourceRow(
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
-                // Where this destination points, so two servers on the same
-                // backend are told apart before the user taps into one.
                 subtitle?.let {
                     Text(
                         it,
@@ -1707,15 +1348,6 @@ internal fun RestoreSourceRow(
     }
 }
 
-/**
- * [T-android-restore-destinations] Packages on ONE already-chosen destination.
- *
- * Picking WHICH server happens before this, on the Restore-from-Server list
- * ([RestoreServersScreen]); by the time this renders the server is known, so
- * asking again would answer a question the user just answered. This is the
- * single package picker for every route in — the destinations list on the
- * restore tab, and the list page's rows.
- */
 @Composable
 private fun ServerPackagePicker(
     vm: BackupViewModel,
@@ -1759,7 +1391,6 @@ private fun ServerPackagePicker(
     )
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────
 
 @Composable
 private fun InfoLine(label: String, value: String) {
@@ -1772,15 +1403,6 @@ private fun InfoLine(label: String, value: String) {
     }
 }
 
-/**
- * A settings switch row whose leading icon is a CIRCLE, not the shared
- * SettingsRow's rounded-square. iOS deliberately uses a circular badge for the
- * backup category list (BackupCategoryIcon.swift), distinct from the
- * rounded-square used elsewhere; this reproduces that without altering the
- * shared SettingsRow that the rest of Android settings depends on. Layout
- * (heights, paddings, divider inset) mirrors SettingsRow so it sits flush with
- * any sibling rows.
- */
 @Composable
 private fun CategorySwitchRow(
     title: String,
@@ -1850,17 +1472,10 @@ private fun CategorySwitchRow(
     }
 }
 
-/**
- * [T-android-restore-progress-counts] Display name for a raw category KEY.
- *
- * The importer reports keys, not enum cases, so an unknown key from a newer
- * writer falls back to the key itself rather than crashing or showing blank.
- */
 @Composable
 internal fun categoryLabel(key: String): String =
     BackupCategory.fromKey(key)?.let { stringResource(categoryNameRes(it)) } ?: key
 
-/** Localized display name per category. */
 internal fun categoryNameRes(cat: BackupCategory): Int = when (cat) {
     BackupCategory.CHATS -> R.string.backup_category_chats
     BackupCategory.SHARED_FILES -> R.string.backup_category_shared_files
@@ -1872,46 +1487,28 @@ internal fun categoryNameRes(cat: BackupCategory): Int = when (cat) {
     BackupCategory.VOICE_CORRECTIONS -> R.string.backup_category_voice
 }
 
-/**
- * Circular colored category icon — the Android counterpart of iOS
- * `BackupCategoryIcon` (same symbol intent + tint per category, using the
- * nearest Compose Material icon).
- */
 private fun categoryIcon(cat: BackupCategory): ImageVector = when (cat) {
-    BackupCategory.CHATS -> Icons.Outlined.Forum                 // bubble.left.and.bubble.right
-    BackupCategory.SHARED_FILES -> Icons.Outlined.Description    // doc.fill
-    BackupCategory.SKILLS -> Icons.Outlined.Extension            // puzzlepiece.fill
-    BackupCategory.MEMORY -> Icons.Outlined.Psychology           // brain.head.profile
-    BackupCategory.PROVIDERS -> Icons.Outlined.Link              // link
-    BackupCategory.MCP_SERVERS -> Icons.Outlined.Layers          // square.stack.3d.up.fill
-    BackupCategory.ENVIRONMENT_VARIABLES -> Icons.Outlined.Terminal // terminal.fill
-    BackupCategory.VOICE_CORRECTIONS -> Icons.Outlined.RecordVoiceOver // waveform
+    BackupCategory.CHATS -> Icons.Outlined.Forum
+    BackupCategory.SHARED_FILES -> Icons.Outlined.Description
+    BackupCategory.SKILLS -> Icons.Outlined.Extension
+    BackupCategory.MEMORY -> Icons.Outlined.Psychology
+    BackupCategory.PROVIDERS -> Icons.Outlined.Link
+    BackupCategory.MCP_SERVERS -> Icons.Outlined.Layers
+    BackupCategory.ENVIRONMENT_VARIABLES -> Icons.Outlined.Terminal
+    BackupCategory.VOICE_CORRECTIONS -> Icons.Outlined.RecordVoiceOver
 }
 
-/** Tint per category, mirroring iOS BackupCategoryIcon.tint(for:). */
 private fun categoryTint(cat: BackupCategory): Color = when (cat) {
-    BackupCategory.CHATS -> Color(0xFF007AFF)                 // blue
-    BackupCategory.SHARED_FILES -> Color(0xFF5856D6)         // indigo
-    BackupCategory.SKILLS -> Color(0xFFFF9500)              // orange
-    BackupCategory.MEMORY -> Color(0xFFFF2D55)             // pink
-    BackupCategory.PROVIDERS -> Color(0xFF30B0C7)         // teal
-    BackupCategory.MCP_SERVERS -> Color(0xFF32ADE6)      // cyan
-    BackupCategory.ENVIRONMENT_VARIABLES -> Color(0xFFA2845E) // brown
-    BackupCategory.VOICE_CORRECTIONS -> Color(0xFFAF52DE) // purple
+    BackupCategory.CHATS -> Color(0xFF007AFF)
+    BackupCategory.SHARED_FILES -> Color(0xFF5856D6)
+    BackupCategory.SKILLS -> Color(0xFFFF9500)
+    BackupCategory.MEMORY -> Color(0xFFFF2D55)
+    BackupCategory.PROVIDERS -> Color(0xFF30B0C7)
+    BackupCategory.MCP_SERVERS -> Color(0xFF32ADE6)
+    BackupCategory.ENVIRONMENT_VARIABLES -> Color(0xFFA2845E)
+    BackupCategory.VOICE_CORRECTIONS -> Color(0xFFAF52DE)
 }
 
-/**
- * Name the UNIT, not just the number.
- *
- * Every category used to render through `backup_count_items` ("N 项"), so one
- * label covered messages, skills, servers and providers alike and the reader
- * had no way to tell what was being counted — which is how "569 items" for a
- * dozen skills read as corruption.
- *
- * Each branch degrades to the generic label when its detail field is absent,
- * so a package written before those fields existed still renders (with the
- * old, less specific wording) instead of showing a wrong unit.
- */
 @Composable
 private fun categoryCountLabel(
     cat: BackupCategory,
@@ -1951,19 +1548,9 @@ internal fun humanBytes(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
-// Max Per-File Size sentinel tags, matching iOS noFilesTag / unlimitedTag.
 internal const val MAX_FILE_NO_FILES = -1
 internal const val MAX_FILE_UNLIMITED = 0
 
-/**
- * [T-android-restore-ui] The restore button, its progress ring, and the
- * remaining-time line under it.
- *
- * Exists as its own composable purely to bound recomposition: progress ticks
- * every 200 records, and reading it from RestoreTab's top level put the whole
- * settings form — every category switch, the passphrase field, the cards — in
- * the same scope as a counter that moves several times a second.
- */
 @Composable
 private fun RestoreProgressSection(
     vm: BackupViewModel,
@@ -1990,9 +1577,6 @@ private fun RestoreProgressSection(
         else -> {
             val name = categoryLabel(p.categoryKey)
             when {
-                // Percent first: on a package with hundreds of thousands of
-                // records the raw pair is too long to read at a glance, and
-                // "36%" answers "how far along" without arithmetic.
                 total != null && p.done > 0 -> stringResource(
                     R.string.backup_restoring_percent,
                     name,
@@ -2008,9 +1592,6 @@ private fun RestoreProgressSection(
 
     MinisButton(
         onClick = onStart,
-        // While a restore runs the button itself is inert — the only live
-        // control is the stop target in the middle of the ring, so a stray tap
-        // on the bar cannot start or abort anything.
         enabled = enabled,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -2024,9 +1605,6 @@ private fun RestoreProgressSection(
     }
 
     if (running) {
-        // The step line and the estimate share one row: they answer the same
-        // question ("what is happening, and for how much longer") and stacking
-        // them would push the layout around as the estimate appears.
         val eta = RestoreEta.bucket(etaSeconds)?.let { bucket ->
             when (bucket) {
                 is RestoreEta.EtaBucket.AlmostDone ->
@@ -2061,7 +1639,6 @@ private fun RestoreProgressSection(
                 }) {
                     Text(
                         stringResource(R.string.restore_stop_confirm),
-                        // Destructive: this abandons work in progress.
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
@@ -2075,15 +1652,6 @@ private fun RestoreProgressSection(
     }
 }
 
-/**
- * [T-android-restore-report-severity] One restore-report line with a leading
- * status icon, both drawn in [tint] so the icon and the words agree on
- * severity.
- *
- * Material icons rather than emoji: an emoji draws in its own fixed colours,
- * so a warning glyph could not follow the amber below into dark mode, and an
- * error glyph would not match the theme's error red.
- */
 @Composable
 private fun ReportLine(text: String, icon: ImageVector, tint: Color) {
     Row(
@@ -2094,8 +1662,6 @@ private fun ReportLine(text: String, icon: ImageVector, tint: Color) {
             icon,
             contentDescription = null,
             tint = tint,
-            // Nudged down to sit on the first text line rather than
-            // centring on a paragraph that may wrap.
             modifier = Modifier.padding(top = 1.dp).size(16.dp),
         )
         Spacer(Modifier.width(8.dp))
@@ -2103,17 +1669,6 @@ private fun ReportLine(text: String, icon: ImageVector, tint: Color) {
     }
 }
 
-/**
- * [T-android-restore-report-severity] Amber for "left out on purpose".
- *
- * Two values because no single amber works on both grounds at body-text size.
- * The commonly used #E6A23C measures 2.19:1 against a light surface — well
- * under the 4.5:1 small text needs — so it would be close to unreadable in
- * light mode. #B45309 gives 5.02:1 on light; #FFB74D gives 9.83:1 on dark.
- *
- * Keyed on ChatColors.isDark, the theme the app actually resolved, so it
- * follows the in-app Appearance setting rather than the OS one (GH#187).
- */
 @Composable
 private fun reportNoticeColor(): Color =
     if (ChatColors.isDark) {

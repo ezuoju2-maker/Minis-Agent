@@ -9,16 +9,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-calendar-update-all-day] `android-calendar update` all-day support
- * (iOS parity: fe7a01bc5 + 86e91526e) and the all-day storage form both create
- * and update now write.
- *
- * The provider requires an all-day event to be stored as UTC midnights with
- * EVENT_TIMEZONE=UTC. create used to store LOCAL midnight .. 23:59:59; east of
- * UTC that is the previous UTC day (Asia/Shanghai: 16:00Z), which the provider
- * snaps down — the event landed a day early.
- */
 class CalendarUpdateAllDayTest {
 
     private val h = CalendarOffloadHandler.Companion
@@ -32,7 +22,6 @@ class CalendarUpdateAllDayTest {
     private fun fmt(tz: TimeZone, ms: Long) =
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).apply { timeZone = tz }.format(java.util.Date(ms))
 
-    // ---- storage form ---------------------------------------------------
 
     @Test
     fun `a local day east of UTC is stored as that same date's UTC midnights`() {
@@ -43,7 +32,6 @@ class CalendarUpdateAllDayTest {
 
     @Test
     fun `west of UTC too - the local date wins, not the UTC instant`() {
-        // 2026-12-10 23:30 in LA is already 12-11 in UTC.
         val (s, e) = h.allDayStoredRange(at(la, 2026, 12, 10, 23, 30), null, la)
         assertEquals("2026-12-10 00:00:00", fmt(utc, s))
         assertEquals("2026-12-11 00:00:00", fmt(utc, e))
@@ -80,14 +68,12 @@ class CalendarUpdateAllDayTest {
 
     @Test
     fun `a DST day still ends on its own last second`() {
-        // 2026-03-08 is 23 hours long in Los Angeles.
         val (s, e) = h.allDayStoredRange(at(la, 2026, 3, 8), null, la)
         val (ls, le) = h.allDayLocalRange(s, e, la)
         assertEquals("2026-03-08 00:00:00", fmt(la, ls))
         assertEquals("2026-03-08 23:59:59", fmt(la, le))
     }
 
-    // ---- update wiring ----------------------------------------------------
 
     private val src = ProductionSources.read("sandbox/offload/CalendarOffloadHandler.kt")
     private val update = src.substringAfter("private fun doUpdate(").substringBefore("// ── delete")

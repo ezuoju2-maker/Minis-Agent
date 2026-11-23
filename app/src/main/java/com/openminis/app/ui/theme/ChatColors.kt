@@ -6,20 +6,6 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
 
-// Semantic chat colors mirroring iOS ChatColors (AIChatView.swift).
-// Resolved from LocalChatPalette, which is provided by MinisTheme.
-//
-// iOS reference:
-//   systemBackground        -> background
-//   secondarySystemBackground -> secondaryBg
-//   tertiarySystemFill      -> userBubble
-//   tertiarySystemGroupedBackground -> toolBg
-//   label                   -> primaryText
-//   secondaryLabel          -> secondaryText
-//   tertiaryLabel           -> tertiaryText
-//   quaternaryLabel         -> sendButtonDisabled
-//   separator               -> border
-//   systemGray6             -> inlineCodeBg / toolCapsuleBg
 @Immutable
 data class ChatPalette(
     val isDark: Boolean,
@@ -95,15 +81,6 @@ val LightChatPalette = ChatPalette(
     fabAccent = Color(0xFFB7AF96),
 )
 
-// T153: Android-specific dark palette tweaks. iOS borrows the system
-// palette (#1C1C1E / #2C2C2E etc.) which reads as "layered dark grey"
-// on a 1000+ nit display, but on a typical Android phone (Pixel 6 ≈
-// 500 nits, mid-range OEMs even less) those layers crush together
-// into a single near-black wash and the user can't tell tool capsules
-// from background or input from message list. Lift the non-background
-// layers ~6-10% so the contrast survives the brightness gap; the pure
-// `background` itself stays #000 because every other color is keyed
-// to "darker than this".
 val DarkChatPalette = ChatPalette(
     isDark = true,
     background = Color(0xFF000000),
@@ -116,12 +93,6 @@ val DarkChatPalette = ChatPalette(
     secondaryText = Color(0x99EBEBF5),
     tertiaryText = Color(0x4DEBEBF5),
     disabledText = Color(0x2EEBEBF5),
-    // [T-android-user-bubble-dark-contrast] The old 0x247676D7 was a 14%-alpha
-    // translucent blue-grey that washed out to near-invisible on the #000 chat
-    // background on real (≈500-nit) displays — exactly the "crush to a near-black
-    // wash" failure the palette header warns about. Use an OPAQUE cool slate-blue
-    // so the user's own messages read as a distinct accent; white primaryText
-    // stays legible on it.
     userBubble = Color(0xFF2F3A5C),
     toolBg = Color(0xFF3A3A3F),
     toolBorder = Color(0x40545458),
@@ -131,12 +102,6 @@ val DarkChatPalette = ChatPalette(
     sendButtonDisabled = Color(0x2EEBEBF5),
     codeBlockBg = Color(0xFF262626),
     codeBlockText = Color(0xFF8CF38C),
-    // [T-inline-code-dark-bg-android] Lifted into the T153 ramp — the old
-    // #1C1C1E chip was invisible on the #000 chat background (the comment
-    // block above explains why non-background layers need the ~6-10% lift;
-    // this one was missed). #34343A sits between inputBg (#2C2C30) and
-    // toolBg (#3A3A3F), clearly above codeBlockBg (#262626) so small inline
-    // chips read against both the wash and fenced blocks.
     inlineCodeBg = Color(0xFF34343A),
     inlineCodeText = Color(0xFFFF9F0A),
     link = Color(0xFF0A84FF),
@@ -155,7 +120,6 @@ val DarkChatPalette = ChatPalette(
 
 val LocalChatPalette = compositionLocalOf { LightChatPalette }
 
-// Short accessor: ChatColors.primaryText instead of LocalChatPalette.current.primaryText
 val ChatColors: ChatPalette
     @Composable
     @ReadOnlyComposable

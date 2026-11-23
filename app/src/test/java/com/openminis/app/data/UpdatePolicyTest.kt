@@ -9,10 +9,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [T-update-channels] The updater's pure decisions. */
 class UpdatePolicyTest {
 
-    // ── Versions ────────────────────────────────────────────────────────────
 
     @Test
     fun `semver order with two-part stable tags and beta pre-releases`() {
@@ -42,7 +40,6 @@ class UpdatePolicyTest {
         assertEquals("1.14", UpdatePolicy.displayVersion("1.14", null))
     }
 
-    // ── APK choice ──────────────────────────────────────────────────────────
 
     private fun a(name: String) = UpdatePolicy.Asset(name, "https://x/$name", 10, null)
 
@@ -52,11 +49,9 @@ class UpdatePolicyTest {
         assertEquals("MinisApp-1.16-build32-arm64-v8a.apk", UpdatePolicy.chooseApk(assets, listOf("arm64-v8a", "armeabi-v7a"))!!.name)
         assertEquals("MinisApp-1.16-build32-armeabi-v7a.apk", UpdatePolicy.chooseApk(assets, listOf("armeabi-v7a"))!!.name)
         assertNull(UpdatePolicy.chooseApk(assets, listOf("x86_64")))
-        // A universal APK names no ABI.
         assertEquals("MinisApp-1.16-build32.apk", UpdatePolicy.chooseApk(listOf(a("MinisApp-1.16-build32.apk")), listOf("x86_64"))!!.name)
     }
 
-    // ── Channels ────────────────────────────────────────────────────────────
 
     private fun r(tag: String, pre: Boolean = false, apk: String? = "MinisApp-$tag-arm64-v8a.apk", draft: Boolean = false) =
         UpdatePolicy.Release(tag, "Android $tag", pre, draft, "notes $tag", listOfNotNull(apk?.let { a(it) }))
@@ -88,20 +83,15 @@ class UpdatePolicyTest {
         assertEquals("the display name comes from the APK, not the tag", "1.16-beta.3", beta31.versionName)
         assertNull(history.versionCode)
 
-        // Running 1.15 (29).
         assertEquals(stable32, UpdatePolicy.pickUpdate(listOf(history, stable32), Channel.STABLE, "1.15", 29))
         assertEquals(stable32, UpdatePolicy.pickUpdate(listOf(history, beta31, stable32), Channel.BETA, "1.15", 29))
         assertEquals(beta31, UpdatePolicy.pickUpdate(listOf(history, beta31), Channel.BETA, "1.15", 29))
-        // A newer-by-name release without a build: stable only.
         val history16 = cand("1.16", "MinisApp-1.16-arm64-v8a.apk")
         assertEquals(history16, UpdatePolicy.pickUpdate(listOf(history16), Channel.STABLE, "1.15", 29))
         assertNull(UpdatePolicy.pickUpdate(listOf(history16), Channel.BETA, "1.15", 29))
-        // Up to date.
         assertNull(UpdatePolicy.pickUpdate(listOf(history, stable32), Channel.STABLE, "1.16", 32))
-        // From beta 1.16-beta.3 (31) back on stable: 1.16 build 32 is the way out, no downgrade.
         assertEquals(stable32, UpdatePolicy.pickUpdate(listOf(history, stable32), Channel.STABLE, "1.16-beta.3", 31))
         assertNull(UpdatePolicy.pickUpdate(listOf(history), Channel.STABLE, "1.16-beta.3", 31))
-        // A stable hotfix with a higher build beats an older beta for beta users.
         val beta33 = cand("0-beta-build33", "MinisApp-1.17-beta.1-build33-arm64-v8a.apk", pre = true)
         val stable34 = cand("1.16.1", "MinisApp-1.16.1-build34-arm64-v8a.apk")
         assertEquals(stable34, UpdatePolicy.pickUpdate(listOf(beta33, stable34), Channel.BETA, "1.16", 32))
@@ -123,10 +113,8 @@ class UpdatePolicyTest {
         assertEquals(UpdatePolicy.ApkName("1.16-beta.3", 31, "arm64-v8a"), p("MinisApp-1.16-beta.3-build31-arm64-v8a.apk"))
         assertEquals(UpdatePolicy.ApkName("1.16.1", 40, "armeabi-v7a"), p("MinisApp-1.16.1-build40-armeabi-v7a.apk"))
         assertEquals(UpdatePolicy.ApkName("1.16", 32, "x86_64"), p("MinisApp-1.16-build32-x86_64.apk"))
-        // The pre-build history is outside the protocol.
         assertNull(p("MinisApp-1.14-arm64-v8a.apk"))
         assertNull(p("MinisApp-0.22-preview-arm64-v8a.apk"))
-        // Malformed.
         for (bad in listOf("MinisApp-1.16-buildX-arm64-v8a.apk", "MinisApp--build32-arm64-v8a.apk", "MinisApp-1.16-build32-.apk",
             "Other-1.16-build32-arm64-v8a.apk", "MinisApp-1.16-build32-arm64-v8a.zip", "MinisApp-1.16-build-arm64-v8a.apk", "")) {
             assertNull(bad, p(bad))
@@ -162,7 +150,6 @@ class UpdatePolicyTest {
         assertEquals("MinisApp-1.16-build32-arm64-v8a.apk", UpdatePolicy.chooseApk(assets, listOf("arm64-v8a"))!!.name)
     }
 
-    // ── Throttle ────────────────────────────────────────────────────────────
 
     private val H = 60 * 60 * 1000L
 
@@ -200,7 +187,6 @@ class UpdatePolicyTest {
         val s = 100 * H
         assertEquals(AutoDecision.BACKING_OFF, d(now = s + 25 * H + 10 * 60_000, success = s, attempt = s + 25 * H))
         assertEquals(AutoDecision.CHECK, d(now = s + 25 * H + 15 * 60_000, success = s, attempt = s + 25 * H))
-        // Never succeeded, failed 1 min ago.
         assertEquals(AutoDecision.BACKING_OFF, d(now = 61_000, attempt = 1_000, cacheCh = Channel.STABLE))
     }
 
@@ -215,7 +201,6 @@ class UpdatePolicyTest {
         assertEquals(AutoDecision.INVALIDATE_AND_CHECK, d(now = 101 * H, success = 100 * H, code = 30))
     }
 
-    // ── Badges ──────────────────────────────────────────────────────────────
 
     @Test
     fun `badge - newer, not skipped, not downloaded, auto checks on`() {

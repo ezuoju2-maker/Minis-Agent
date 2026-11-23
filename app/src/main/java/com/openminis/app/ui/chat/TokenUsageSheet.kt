@@ -29,22 +29,6 @@ import androidx.compose.ui.unit.sp
 import com.openminis.app.R
 import com.openminis.app.i18n.uppercaseForDisplay
 
-/**
- * Session Token Usage bottom sheet — mirrors iOS `TokenUsageSheet` and uses
- * the standardized chat sheet shell so its header/dismiss behavior matches
- * every other "⋯" menu sheet.
- *
- * Sections (top to bottom):
- *   - Context: Context Used / Context Window / Max Output
- *   - Thinking (only when the model supports reasoning): On/Off / Level / Supported
- *   - Tokens (Session Total): Input (incl. cache) / Output
- *   - Cache (Session Total): Cache Read / Cache Write
- *   - Agent Loop: Total Loops
- *
- * Data loads asynchronously via [ChatViewModel.loadSessionTokenStats] when the
- * sheet appears; we intentionally don't hold a live subscription — token
- * counters change per API call, not per keystroke, so pull-on-open is enough.
- */
 @Composable
 fun TokenUsageSheet(
     viewModel: ChatViewModel,
@@ -62,10 +46,6 @@ fun TokenUsageSheet(
     StandardChatSheet(
         title = stringResource(R.string.token_usage_sheet_title),
         onDismiss = onDismiss,
-        // T148: iOS uses .presentationDetents([.medium]) for the same sheet
-        // (AIChatView.swift:508). Match that proportion on Android so the
-        // half-screen feel is consistent — the token-usage view holds maybe
-        // a screenful of stat rows max and looked overgrown at 90%.
         heightFraction = 0.5f,
     ) {
         Column(
@@ -104,10 +84,6 @@ fun TokenUsageSheet(
             StatSection(title = stringResource(R.string.token_usage_section_cache)) {
                 StatRow(stringResource(R.string.token_usage_cache_read), formatTokens(s?.cacheRead ?: 0L))
                 StatRow(stringResource(R.string.token_usage_cache_write), formatTokens(s?.cacheWrite ?: 0L))
-                // [T-android-token-usage-cache-hit-rate] iOS parity. Hidden
-                // rather than shown as 0.0% when nothing was cached, so a
-                // provider that does no caching does not look like a cache
-                // miss — see SessionTokenStats.cacheHitRate.
                 s?.cacheHitRate?.let {
                     StatRow(
                         stringResource(R.string.token_usage_cache_hit_rate),
@@ -116,9 +92,6 @@ fun TokenUsageSheet(
                 }
             }
 
-            // [T-android-token-usage-output-speed] iOS parity. Always shown,
-            // with "—" until a turn has streamed measurably — the row's
-            // absence would otherwise read as "this build has no speed".
             StatSection(title = stringResource(R.string.token_usage_section_speed)) {
                 val speed = s?.outputTokensPerSecond
                 StatRow(
@@ -176,7 +149,6 @@ private fun StatRow(label: String, value: String) {
     )
 }
 
-// iOS formatting: "%.1fM" >= 1M, "%.1fK" >= 1k, raw otherwise.
 private fun formatTokens(n: Long): String = when {
     n >= 1_000_000L -> String.format("%.1fM", n / 1_000_000.0)
     n >= 1_000L -> String.format("%.1fK", n / 1_000.0)

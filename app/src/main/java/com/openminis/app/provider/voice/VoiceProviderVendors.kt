@@ -28,14 +28,7 @@ import javax.crypto.spec.SecretKeySpec
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/**
- * [T-android-provider-voice] Vendor subclasses — Android port of iOS
- * VoiceProvider+Vendors.swift. Each vendor overrides only what differs from
- * the OpenAI-compatible base: default model names, endpoint paths, request
- * bodies, response envelopes, or auth.
- */
 
-// -- Groq (ASR only, OpenAI-compatible, only the default model differs) -------
 
 class GroqVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     VoiceProvider(providerId, baseURL, apiKey) {
@@ -43,18 +36,11 @@ class GroqVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     override fun defaultVoiceInputModel() = "whisper-large-v3-turbo"
 }
 
-// -- Alibaba Bailian (OpenAI-compatible TTS; ASR on chat completions) ---------
 
 class AlibabaVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     VoiceProvider(providerId, baseURL, apiKey) {
     override fun defaultVoiceInputModel() = CloudAsrProtocols.BAILIAN_ASR_MODEL
 
-    /**
-     * [FIX-261022-06, OpenMinis#469] The compatible mode has no
-     * /audio/transcriptions (404); its ASR is qwen3-asr-flash on
-     * /chat/completions with the clip in an `input_audio` part. The old
-     * default, paraformer-realtime-v2, is WebSocket-only.
-     */
     override suspend fun transcribe(request: VoiceInputRequest): VoiceInputResponse {
         val model = CloudAsrProtocols.bailianModel(request.model)
         val body = CloudAsrProtocols.bailianBody(model, request.audioData, request.language)
@@ -71,43 +57,10 @@ class AlibabaVoiceProvider(providerId: String, baseURL: String, apiKey: String?)
     override fun defaultVoiceOutputVoice() = "longxiaochun"
 }
 
-// -- Zhipu / BigModel (OpenAI-shaped voice under /api/paas/v4) ----------------
 
-/**
- * [T-android-zhipu-tts] Zhipu (open.bigmodel.cn, international api.z.ai).
- *
- * Reported (OPPO PEHM00, model entry `glm-tts`): read-aloud was silent. With no
- * Zhipu adapter the instance fell to the generic [VoiceProvider], which joins
- * the configured chat base `https://open.bigmodel.cn/api/paas/v4` with the
- * OpenAI path `/v1/audio/speech` — `…/api/paas/v4/v1/audio/speech`, a 404
- * ([composedUrlString] only folds a base ending in /v1–/v3). Read-aloud then
- * fell back to the system engine, which was itself unusable on that device
- * (see [T-android-tts-engine-visibility] in the manifest).
- *
- * UNVERIFIED — written without a Zhipu key; confirm each point with a real key
- * before relying on it:
- *   - endpoint `POST {origin}/api/paas/v4/audio/speech`, OpenAI-shaped body
- *     (model / input / voice / response_format), Bearer auth;
- *   - model id: `cogtts` as the default here; the reported entry was
- *     `glm-tts`, which is passed through unchanged when it is the entry;
- *   - voice ids (`tongtong` as the default);
- *   - response formats: believed to be `wav` / `pcm` only (no mp3), so WAV is
- *     always requested. WAV rather than PCM because the players hand the bytes
- *     to MediaPlayer, which needs a container; raw PCM would not play;
- *   - ASR at `/api/paas/v4/audio/transcriptions` with model `glm-asr`
- *     (OpenAI multipart). Kept enabled on that guess rather than switched off:
- *     the previous generic route 404'd anyway, so a wrong guess costs nothing
- *     that worked before.
- */
 class ZhipuVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     VoiceProvider(providerId, baseURL, apiKey) {
 
-    /**
-     * Origin only (scheme + host [+ port]): users configure the CHAT base,
-     * whose path varies (`/api/paas/v4`, `/api/coding/paas/v4`, `/v4` …), and
-     * trimming suffixes off it mangles the variants. The voice paths below are
-     * absolute from the origin.
-     */
     override fun effectiveBaseURL(): String {
         val url = super.effectiveBaseURL().toHttpUrlOrNull() ?: return DEFAULT_ORIGIN
         val port = if (url.port == HttpUrl.defaultPort(url.scheme)) "" else ":${url.port}"
@@ -121,9 +74,6 @@ class ZhipuVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     override fun defaultVoiceInputModel() = "glm-asr"
 
     override fun buildVoiceOutputRequest(request: VoiceOutputRequest): Request {
-        // Read-aloud and Quick Test pass the MODEL id as `voice` (model entries
-        // double as voices, [T-voice-minimax-quicktest-2054]); a Zhipu model id
-        // is never a voice id, so fall back to the default voice for it.
         val voice = request.voice
             ?.takeIf { it.isNotBlank() && it != request.model }
             ?: defaultVoiceOutputVoice()
@@ -135,7 +85,6 @@ class ZhipuVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     companion object {
         const val DEFAULT_ORIGIN = "https://open.bigmodel.cn"
 
-        /** Base URLs routed here by [VoiceProviderFactory]. */
         fun matches(normalizedBase: String): Boolean =
             normalizedBase.contains("open.bigmodel.cn") ||
                 normalizedBase.contains("api.z.ai") ||
@@ -143,7 +92,6 @@ class ZhipuVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     }
 }
 
-// -- xAI (ASR endpoint path differs: /v1/stt) ---------------------------------
 
 class XAIVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     VoiceProvider(providerId, baseURL, apiKey) {
@@ -153,18 +101,12 @@ class XAIVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     override fun defaultVoiceOutputVoice() = "eve"
 }
 
-// -- MiniMax (TTS only, distinct body, base64-nested response) ----------------
 
 class MiniMaxVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     VoiceProvider(providerId, baseURL, apiKey) {
 
     override val supportsVoiceInput: Boolean get() = false
 
-    /**
-     * [T-voice-minimax-tts-404] MiniMax's NATIVE TTS endpoint (/v1/t2a_v2)
-     * lives at the API host ROOT — not under the /anthropic chat-proxy path
-     * users configure for chat. Strip trailing /v1 and /anthropic segments.
-     */
     override fun effectiveBaseURL(): String {
         var base = super.effectiveBaseURL().trimEnd('/')
         for (suffix in listOf("/v1", "/anthropic")) {
@@ -179,15 +121,7 @@ class MiniMaxVoiceProvider(providerId: String, baseURL: String, apiKey: String?)
 
     override fun buildVoiceOutputRequest(request: VoiceOutputRequest): Request {
         val url = composedUrlString(voiceOutputEndpointPath())
-        // MiniMax-specific shape: speed becomes an integer 0~200.
         val speedInt = ((request.speed ?: 1.0f) * 100).toInt()
-        // [T-voice-minimax-quicktest-2054] The picker (where model entries
-        // double as voices) passes the MODEL id in `voice`. MiniMax voice ids
-        // are a SEPARATE namespace, so sending the model id as voice_id fails
-        // with 2054 "voice id not exist" — which is exactly what Quick Test hit
-        // on speech-2.8-hd / -turbo while iOS passed. Treat voice == model as
-        // "no voice selected" and fall back to the default. Port of the iOS
-        // guard in VoiceProvider+Vendors.swift.
         val requestedVoice = if (request.voice == request.model) null else request.voice
         val body = JSONObject().apply {
             put("model", request.model ?: defaultVoiceOutputModel())
@@ -216,12 +150,9 @@ class MiniMaxVoiceProvider(providerId: String, baseURL: String, apiKey: String?)
         return builder.build()
     }
 
-    // Response: { "audio": { "audio": "base64..." }, "base_resp": { status_code, status_msg } }
     override suspend fun synthesize(request: VoiceOutputRequest): ByteArray {
         val raw = executeRequest(buildVoiceOutputRequest(request))
         val json = runCatching { JSONObject(String(raw, Charsets.UTF_8)) }.getOrNull()
-        // Surface MiniMax's own error (base_resp) instead of a generic parse
-        // failure — on failure t2a_v2 returns NO audio, only base_resp.
         json?.optJSONObject("base_resp")?.let { base ->
             val code = base.optInt("status_code", 0)
             if (code != 0) {
@@ -229,11 +160,6 @@ class MiniMaxVoiceProvider(providerId: String, baseURL: String, apiKey: String?)
                 throw VoiceProviderException.Parse("MiniMax TTS error [$code]: $msg")
             }
         }
-        // [T-voice-minimax-quicktest-2054] Current t2a_v2 (api.minimaxi.com,
-        // verified on iOS 2026-07-24) nests HEX-encoded audio at `data.audio`;
-        // older deployments returned base64 at `audio.audio`. Android only knew
-        // the legacy shape, so even a request that succeeded upstream would
-        // have failed to parse. Try hex first, then base64, matching iOS.
         json?.optJSONObject("data")?.optString("audio")?.takeIf { it.isNotEmpty() }?.let { enc ->
             decodeHex(enc)?.let { return it }
             runCatching { Base64.decode(enc, Base64.DEFAULT) }.getOrNull()?.let { return it }
@@ -246,7 +172,6 @@ class MiniMaxVoiceProvider(providerId: String, baseURL: String, apiKey: String?)
             ?: throw VoiceProviderException.Parse("Unexpected MiniMax TTS response format")
     }
 
-    /** Hex string → bytes, or null when the string isn't valid hex. */
     private fun decodeHex(s: String): ByteArray? {
         if (s.length % 2 != 0 || s.isEmpty()) return null
         val out = ByteArray(s.length / 2)
@@ -260,7 +185,6 @@ class MiniMaxVoiceProvider(providerId: String, baseURL: String, apiKey: String?)
     }
 }
 
-// -- Doubao / Volcano (TTS + ASR, X-Api-Key auth, distinct formats) -----------
 
 class DoubaoVoiceProvider(providerId: String, apiKey: String?) :
     VoiceProvider(providerId, "https://openspeech.bytedance.com", apiKey) {
@@ -270,7 +194,6 @@ class DoubaoVoiceProvider(providerId: String, apiKey: String?) :
         builder.header("X-Api-Key", key)
     }
 
-    // TTS (v3 unidirectional streaming) ---------------------------------------
 
     override fun voiceOutputEndpointPath() = "/api/v3/tts/unidirectional"
     override fun defaultVoiceInputModel() = "bigmodel"
@@ -307,7 +230,6 @@ class DoubaoVoiceProvider(providerId: String, apiKey: String?) :
         return builder.build()
     }
 
-    // v3 TTS returns HTTP chunked: each line a JSON frame with base64 audio.
     override suspend fun synthesize(request: VoiceOutputRequest): ByteArray {
         val raw = executeRequest(buildVoiceOutputRequest(request))
         val out = ByteArrayOutputStream()
@@ -326,7 +248,6 @@ class DoubaoVoiceProvider(providerId: String, apiKey: String?) :
         return audio
     }
 
-    // ASR (v3 bigmodel flash recognize) ---------------------------------------
 
     override fun voiceInputEndpointPath() = "/api/v3/auc/bigmodel/recognize/flash"
 
@@ -341,12 +262,6 @@ class DoubaoVoiceProvider(providerId: String, apiKey: String?) :
         return builder.build()
     }
 
-    /**
-     * [FIX-261022-06, OpenMinis#468] The service answers in the
-     * X-Api-Status-Code / X-Api-Message headers (20000000 = OK) and may send an
-     * empty body on failure, so those are read here instead of reporting every
-     * failure as an unexpected response format.
-     */
     override suspend fun transcribe(request: VoiceInputRequest): VoiceInputResponse {
         val req = buildVoiceInputRequest(request)
         val resource = req.header("X-Api-Resource-Id").orEmpty()
@@ -356,7 +271,6 @@ class DoubaoVoiceProvider(providerId: String, apiKey: String?) :
                 val message = response.header("X-Api-Message")
                 val body = response.body?.bytes() ?: ByteArray(0)
                 if (status == "20000003") {
-                    // Silence: nothing to transcribe, not an error.
                     return@withContext VoiceInputResponse(text = "", language = request.language)
                 }
                 if (!response.isSuccessful || (status != null && status != "20000000")) {
@@ -371,7 +285,6 @@ class DoubaoVoiceProvider(providerId: String, apiKey: String?) :
         }
     }
 
-    // v3 ASR response: { "result": { "text": "..." }, "audio_info": { duration } }
     override fun parseVoiceInputResponse(data: ByteArray, request: VoiceInputRequest): VoiceInputResponse {
         val json = runCatching { JSONObject(String(data, Charsets.UTF_8)) }.getOrNull()
         val text = json?.optJSONObject("result")?.optString("text")
@@ -386,7 +299,6 @@ class DoubaoVoiceProvider(providerId: String, apiKey: String?) :
     }
 }
 
-// -- iFlytek / Xunfei (ASR with HMAC-SHA256 signed URL; TTS over WebSocket) ---
 
 class XunfeiVoiceProvider(
     providerId: String,
@@ -399,17 +311,8 @@ class XunfeiVoiceProvider(
         private const val DEFAULT_TTS_VOICE = "xiaoyan"
     }
 
-    // Xunfei authenticates via a signed URL, not a header.
     override fun applyVoiceAuth(builder: Request.Builder) {}
 
-    /**
-     * [FIX-261022-06, OpenMinis#469] Dictation is the v2 WebSocket API
-     * (wss://iat-api.xfyun.cn/v2/iat): 16 kHz mono PCM in frames paced like a
-     * live microphone, then `{"data":{"status":2}}`. The clip was POSTed as one
-     * HTTP JSON in another API's shape (and as WAV bytes labelled raw PCM),
-     * which never worked. A session takes at most 60 s, so longer clips run as
-     * several sessions whose text is joined.
-     */
     override suspend fun transcribe(request: VoiceInputRequest): VoiceInputResponse {
         val pcm = CloudAsrProtocols.pcm16kMono(request.audioData)
             ?: throw VoiceProviderException.Parse("iFlytek dictation needs WAV (PCM) audio")
@@ -425,7 +328,6 @@ class XunfeiVoiceProvider(
         )
     }
 
-    /** One dictation session: sends [frames] at the live pace and collects the result. */
     private suspend fun dictate(frames: List<String>): String {
         val url = buildSignedURL(host = "iat-api.xfyun.cn", path = "/v2/iat", date = Date())
             .replaceFirst("https://", "wss://")
@@ -466,7 +368,6 @@ class XunfeiVoiceProvider(
             },
         )
         try {
-            // OkHttp queues sends until the handshake completes.
             for (frame in frames) {
                 if (done.isCompleted) break
                 socket.send(frame)
@@ -478,11 +379,6 @@ class XunfeiVoiceProvider(
         }
     }
 
-    /**
-     * Xunfei TTS is a WebSocket endpoint (tts-api.xfyun.cn/v2/tts) streaming
-     * base64 PCM frames, signed with the same HMAC scheme as ASR. Collect all
-     * frames and wrap the 16k PCM in a WAV header.
-     */
     override suspend fun synthesize(request: VoiceOutputRequest): ByteArray {
         val signedUrl = buildSignedURL(host = "tts-api.xfyun.cn", path = "/v2/tts", date = Date())
             .replaceFirst("https://", "wss://")
@@ -530,7 +426,7 @@ class XunfeiVoiceProvider(
                             runCatching { Base64.decode(b64, Base64.DEFAULT) }.getOrNull()
                                 ?.let(pcm::write)
                         }
-                        if (dataObj.optInt("status", 0) == 2) {   // last frame
+                        if (dataObj.optInt("status", 0) == 2) {
                             webSocket.close(1000, null)
                             if (cont.isActive) {
                                 val bytes = pcm.toByteArray()
@@ -552,7 +448,6 @@ class XunfeiVoiceProvider(
         }
     }
 
-    // HMAC-SHA256 URL signature -----------------------------------------------
 
     private fun buildSignedURL(host: String, path: String, date: Date): String {
         val formatter = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply {
@@ -577,13 +472,7 @@ class XunfeiVoiceProvider(
     }
 }
 
-// -- Google Gemini (native TTS via generateContent + AUDIO modality) ----------
 
-/**
- * Gemini TTS is NOT OpenAI-compatible: POST {base}/v1beta/models/{model}:
- * generateContent with the key in ?key= and base64 raw PCM (24 kHz mono) in
- * candidates[0].content.parts[].inlineData.data. Wrap the PCM in WAV.
- */
 class GeminiVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     VoiceProvider(providerId, baseURL, apiKey) {
 
@@ -658,25 +547,18 @@ class GeminiVoiceProvider(providerId: String, baseURL: String, apiKey: String?) 
     }
 }
 
-// -- ElevenLabs (TTS) — REST, xi-api-key header, returns MP3 ------------------
 
-/**
- * ElevenLabs TTS. The model entry `id` carries the ElevenLabs voice_id; a fixed
- * model_id (eleven_multilingual_v2) drives synthesis.
- * POST {base}/v1/text-to-speech/{voice_id} → audio/mpeg.
- */
 class ElevenLabsVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     VoiceProvider(providerId, baseURL, apiKey) {
 
     companion object {
-        private const val DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM" // Rachel
+        private const val DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
         private const val MODEL_ID = "eleven_multilingual_v2"
     }
 
     override val supportsVoiceInput: Boolean get() = false
 
     override suspend fun synthesize(request: VoiceOutputRequest): ByteArray {
-        // The selected model entry id is the ElevenLabs voice_id.
         val voiceId = request.model?.takeIf { it.isNotEmpty() }
             ?: request.voice?.takeIf { it.isNotEmpty() }
             ?: DEFAULT_VOICE_ID
@@ -695,11 +577,10 @@ class ElevenLabsVoiceProvider(providerId: String, baseURL: String, apiKey: Strin
             .header("xi-api-key", apiKey ?: "")
             .header("Accept", "audio/mpeg")
             .build()
-        return executeRequest(req)   // MP3 bytes
+        return executeRequest(req)
     }
 }
 
-// -- Deepgram — ASR (/v1/listen) + TTS Aura (/v1/speak), Token header ---------
 
 class DeepgramVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     VoiceProvider(providerId, baseURL, apiKey) {
@@ -752,7 +633,6 @@ class DeepgramVoiceProvider(providerId: String, baseURL: String, apiKey: String?
     }
 }
 
-// -- Azure TTS (REST API, Ocp-Apim-Subscription-Key auth) ---------------------
 
 class AzureTTSVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     VoiceProvider(providerId, baseURL, apiKey) {
@@ -781,7 +661,6 @@ class AzureTTSVoiceProvider(providerId: String, baseURL: String, apiKey: String?
     }
 }
 
-// -- Xiaomi MiMo (ASR + TTS, both ride on /v1/chat/completions) ---------------
 
 class MimoVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     VoiceProvider(providerId, baseURL, apiKey) {
@@ -795,7 +674,6 @@ class MimoVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     override fun defaultVoiceOutputModel() = "mimo-v2.5-tts"
     override fun defaultVoiceOutputVoice() = "mimo_default"
 
-    // ASR ----------------------------------------------------------------------
 
     override suspend fun transcribe(request: VoiceInputRequest): VoiceInputResponse {
         val url = composedUrlString("/v1/chat/completions")
@@ -839,7 +717,6 @@ class MimoVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
         return VoiceInputResponse(text = text, durationSeconds = seconds)
     }
 
-    // TTS ----------------------------------------------------------------------
 
     override suspend fun synthesize(request: VoiceOutputRequest): ByteArray {
         val url = composedUrlString("/v1/chat/completions")
@@ -886,99 +763,37 @@ class MimoVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     }
 }
 
-// -- OpenRouter (dedicated voice endpoints + chat-audio) ----------------------
 
-/**
- * OpenRouter voice — Android port of iOS `OpenRouterVoiceProvider`
- * (iOS 1946b0b2 for TTS, 1f23fd02 for ASR; OpenMinis#280 for the catalog
- * roles). Must be kept in step with iOS.
- *
- * OpenRouter serves voice on three routes, each taking a DISJOINT model set:
- *   - `POST /v1/audio/speech` — the models listed by
- *     `GET /models?output_modalities=speech` (fish-audio, minimax speech,
- *     kokoro, …; voiceRole "tts");
- *   - `POST /v1/audio/transcriptions` — the models listed by
- *     `?output_modalities=transcription` (whisper, gpt-4o-transcribe, nova-3,
- *     qwen3-asr, voxtral, …; voiceRole "stt");
- *   - `POST /v1/chat/completions` — chat models: audio-preview output for
- *     TTS (gpt-audio family only), an `input_audio` part for ASR.
- *
- * Sending a model to another set's route fails, and on OpenRouter that
- * failure can be a 401 whose body is NOT about the key (OpenMinis#280) — see
- * [isAuthFailure]. So routing follows the catalog tag
- * ([com.openminis.app.data.model.LLMModel.voiceRole]), and model-name
- * guessing is only the fallback for untagged models. (An earlier version of
- * this comment claimed `/v1/audio/speech` does not exist. It does; the ids
- * probed then simply were not speech models.)
- */
 class OpenRouterVoiceProvider(providerId: String, baseURL: String, apiKey: String?) :
     VoiceProvider(providerId, baseURL, apiKey) {
 
-    /** Where a TTS request goes. */
     enum class TtsRoute { SPEECH_ENDPOINT, CHAT_AUDIO, UNSUPPORTED }
 
     companion object {
-        /**
-         * OpenAI's audio-preview models emit 24 kHz mono PCM16 and OpenRouter
-         * proxies that stream unchanged. No response field announces the rate,
-         * so it is fixed here — a wrong value plays at the wrong pitch, which
-         * is immediately audible if it ever changes.
-         */
         private const val PCM_SAMPLE_RATE = 24000
 
-        /**
-         * The voices OpenAI's audio-preview models accept, as returned verbatim
-         * in their own 400 ("Supported values are: …"). Used only to RECOGNISE
-         * a valid name on the CHAT-AUDIO route, never to pick one — and never
-         * applied to dedicated speech models, whose voices are their own.
-         */
         private val KNOWN_VOICES = setOf(
             "alloy", "echo", "fable", "onyx", "nova", "shimmer", "coral",
             "verse", "ballad", "ash", "sage", "marin", "cedar",
         )
 
-        /**
-         * Response-body phrases OpenRouter uses when the credential itself is
-         * rejected. Only these make a 401/403 an auth error; see [isAuthFailure].
-         */
         private val AUTH_FAILURE_PHRASES = listOf(
             "user not found", "no auth credentials", "invalid api key", "invalid_api_key",
         )
 
-        /**
-         * FALLBACK ONLY, for models with no catalog tag (custom entries, models
-         * saved before OpenMinis#280): ids that look like transcription models.
-         * Tagged models route by voiceRole — 12 of the 22 live transcription
-         * models (qwen3-asr, voxtral, parakeet, chirp-3, …) contain none of
-         * these words.
-         *
-         * Deepgram is matched VENDOR-qualified, never by the bare engine name:
-         * a bare "nova-2"/"nova-3" also matches `amazon/nova-2-lite-v1`, a chat
-         * model that would then be misrouted.
-         */
         fun isDedicatedTranscriptionModel(modelId: String): Boolean {
             val id = modelId.lowercase(Locale.ROOT)
             return id.contains("whisper") ||
-                id.contains("transcribe") || // gpt-4o[-mini]-transcribe
+                id.contains("transcribe") ||
                 id.contains("deepgram/")
         }
 
-        /** Pre-#280 name rule for chat-audio TTS, kept for untagged models. */
         private fun looksLikeChatAudio(modelId: String): Boolean {
             val id = modelId.lowercase(Locale.ROOT)
             if (!id.contains("audio")) return false
             return id.contains("gpt") || id.contains("openai")
         }
 
-        /**
-         * [T-openrouter-voice-catalog] Pick the TTS route. Tagged models go by
-         * tag: "tts" → speech endpoint, the chat-audio allowlist → chat, any
-         * other tag (a chat model such as Lyria, an ASR model) → UNSUPPORTED,
-         * raised as a clear error instead of a request that can only fail.
-         * Untagged models keep the old name rule for chat-audio. Otherwise they
-         * go to the speech endpoint when they declare audio output (they passed
-         * the picker's gate) or their name says TTS.
-         */
         fun ttsRoute(modelId: String, model: com.openminis.app.data.model.LLMModel?): TtsRoute {
             if (modelId in com.openminis.app.data.model.VoiceRole.OPENROUTER_CHAT_AUDIO_MODELS) {
                 return TtsRoute.CHAT_AUDIO
@@ -996,29 +811,15 @@ class OpenRouterVoiceProvider(providerId: String, baseURL: String, apiKey: Strin
             return if (declaresAudioOut || nameSaysTts) TtsRoute.SPEECH_ENDPOINT else TtsRoute.UNSUPPORTED
         }
 
-        /**
-         * [T-openrouter-voice-catalog] ASR route: true = chat/completions. A
-         * tagged model goes by tag ("stt" → transcriptions endpoint, a chat
-         * model → chat); the name rule is only the fallback for untagged ids.
-         */
         fun routesAsrThroughChat(model: com.openminis.app.data.model.LLMModel): Boolean {
             if (model.id in com.openminis.app.data.model.VoiceRole.OPENROUTER_CHAT_AUDIO_MODELS) return true
             model.voiceRole?.let { return it != com.openminis.app.data.model.VoiceRole.STT }
             return !isDedicatedTranscriptionModel(model.id)
         }
 
-        /**
-         * `voice` for the speech endpoint: forwarded as-is, because each
-         * vendor's voices are its own (fish-audio reference ids, minimax
-         * voice_ids, kokoro names) and OpenAI's list says nothing about them.
-         * Omitted when empty, or when it is just the model id — Quick Test and
-         * read-aloud pass the entry id as the voice (the convention for vendors
-         * whose catalog entries ARE voices), and a model id is never a voice.
-         */
         fun speechVoice(requested: String?, modelId: String): String? =
             requested?.trim()?.takeIf { it.isNotEmpty() && it != modelId }
 
-        /** True only when the body says the credential was rejected. */
         fun isAuthFailureBody(code: Int, body: ByteArray?): Boolean {
             if (code != 401 && code != 403) return false
             val text = body?.toString(Charsets.UTF_8)?.lowercase(Locale.ROOT) ?: return false
@@ -1026,44 +827,19 @@ class OpenRouterVoiceProvider(providerId: String, baseURL: String, apiKey: Strin
         }
     }
 
-    /**
-     * [T-openrouter-voice-catalog] OpenMinis#280. A 401 on OpenRouter is not
-     * always about the key: sending a model to a route it is not served on
-     * also came back 401, and reporting that as "check the API key" sent users
-     * hunting for a credential problem that did not exist. Only a body that
-     * actually says so is an auth error; anything else keeps its status and
-     * OpenRouter's own message ([VoiceProviderException.Http]).
-     */
     override fun isAuthFailure(code: Int, body: ByteArray?): Boolean = isAuthFailureBody(code, body)
 
-    /** Same attribution headers the models request already sends. */
     override fun applyVoiceAuth(builder: Request.Builder) {
         super.applyVoiceAuth(builder)
         builder.header("HTTP-Referer", "https://github.com/OpenMinis/OpenMinis")
         builder.header("X-Title", "Minis App")
     }
 
-    // -- ASR ------------------------------------------------------------------
 
     override fun usesChatBasedASR(model: com.openminis.app.data.model.LLMModel): Boolean =
         routesAsrThroughChat(model)
 
-    // -- TTS ------------------------------------------------------------------
 
-    /**
-     * Pick the `audio.voice` value for the CHAT-AUDIO route.
-     *
-     * Callers disagree on what [VoiceOutputRequest.voice] means: for vendors
-     * where a catalog entry IS a voice (ElevenLabs voice_id, Doubao speaker)
-     * the entry id is passed straight through, and Quick Test follows that
-     * convention. For chat-audio the model and the voice are separate axes, so
-     * that convention arrives as `voice: "openai/gpt-audio"` and the upstream
-     * answers "Invalid value: 'openai/gpt-audio'. Supported values are:
-     * 'alloy', …" — a second 400 hiding behind the first.
-     *
-     * So: honour a voice the vendor actually knows, otherwise fall back to the
-     * default rather than forwarding something certain to fail.
-     */
     private fun resolvedVoice(requested: String?, modelId: String): String {
         val want = requested?.takeIf { it.isNotEmpty() } ?: return defaultVoiceOutputVoice()
         val lowered = want.lowercase(Locale.ROOT)
@@ -1075,7 +851,6 @@ class OpenRouterVoiceProvider(providerId: String, baseURL: String, apiKey: Strin
         return defaultVoiceOutputVoice()
     }
 
-    /** `POST /v1/audio/speech` for a dedicated speech model. */
     override fun buildVoiceOutputRequest(request: VoiceOutputRequest): Request {
         val modelId = request.model ?: defaultVoiceOutputModel()
         val body = JSONObject().apply {
@@ -1092,21 +867,6 @@ class OpenRouterVoiceProvider(providerId: String, baseURL: String, apiKey: Strin
         return builder.build()
     }
 
-    /**
-     * TTS dispatch by [ttsRoute]. The chat-audio route is
-     * `POST /v1/chat/completions` in the audio-preview shape, with three hard
-     * constraints (each verified against the live API):
-     *   - `modalities: ["text","audio"]` + `audio: {voice, format}`;
-     *   - `stream: true` is MANDATORY — otherwise "Audio output requires
-     *     stream: true";
-     *   - while streaming, `audio.format` accepts ONLY `pcm16` — `wav` returns
-     *     "does not support 'wav' when stream=true".
-     *
-     * The SSE body is an ordinary chat-completions stream with two extra fields
-     * per delta: `audio.data` (base64 PCM16 chunk) and `audio.transcript`. We
-     * accumulate the PCM and wrap it in a WAV container, because the caller
-     * feeds this to MediaPlayer/ExoPlayer and headerless PCM is not openable.
-     */
     override suspend fun synthesize(request: VoiceOutputRequest): ByteArray {
         val modelId = request.model ?: defaultVoiceOutputModel()
         when (ttsRoute(modelId, request.resolvedModel)) {
@@ -1128,8 +888,6 @@ class OpenRouterVoiceProvider(providerId: String, baseURL: String, apiKey: Strin
                 "audio",
                 JSONObject()
                     .put("voice", resolvedVoice(request.voice, modelId))
-                    // pcm16 is the ONLY value accepted while streaming, and
-                    // streaming is mandatory — so this is fixed, not a choice.
                     .put("format", "pcm16"),
             )
             put("stream", true)
@@ -1150,9 +908,6 @@ class OpenRouterVoiceProvider(providerId: String, baseURL: String, apiKey: Strin
         withContext(Dispatchers.IO) {
             httpClient.newCall(builder.build()).execute().use { response ->
                 if (!response.isSuccessful) {
-                    // Drain the body so the server's message survives into the
-                    // error — an opaque "HTTP 400" is what made this bug hard
-                    // to place in the first place.
                     val errBody = response.body?.bytes()
                     if (isAuthFailure(response.code, errBody)) {
                         Log.e("VoiceProvider", "OpenRouter voice auth failed: HTTP ${response.code}")

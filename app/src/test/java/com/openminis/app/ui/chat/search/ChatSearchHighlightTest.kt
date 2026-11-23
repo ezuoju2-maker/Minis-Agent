@@ -21,11 +21,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-in-chat-search] Part 3: the matches painted where they are drawn, the
- * renderer's paths agreeing with the search's, and a match in a folded tool
- * run opening that run.
- */
 class ChatSearchHighlightTest {
 
     private val key = ChatSearchUnitKey("row", "body")
@@ -78,8 +73,6 @@ class ChatSearchHighlightTest {
     }
 
     @Test fun `painting agrees with the search on every piece of a markdown fragment`() {
-        // Each piece's text is what MdText draws; highlighting it with the
-        // count the engine found must paint exactly that many matches.
         val md = "# Plan for **plan**\n\n- plan one\n- see [plan](https://plan.io)\n\n> plan `plan` plan"
         val units = chatSearchMarkdownPieces(md).map { ChatSearchUnit(ChatSearchUnitKey("r", "md:${it.path}"), it.text) }
         val result = ChatSearchEngine.search(units, "plan")!!
@@ -92,31 +85,25 @@ class ChatSearchHighlightTest {
         assertFalse("the link URL is not a hit", units.any { it.text.contains("plan.io") })
     }
 
-    // ── renderer paths = search paths ─────────────────────────────────────
 
     private val main = listOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
     private val renderer = File(main, "java/com/openminis/app/ui/chat/StreamingMarkdownText.kt").readText()
 
     @Test fun `RenderBlock gives each Text the path chatSearchMarkdownPieces gives its piece`() {
-        // Top level b<i> in all three MarkdownBlockBody branches.
         assertTrue(renderer.contains("cached.forEachIndexed { idx, block -> WithSearchPath(\"b\$idx\") { RenderBlock(block) } }"))
         assertTrue(renderer.contains("blocks.forEachIndexed { idx, block -> WithSearchPath(\"b\$idx\") { RenderBlock(block) } }"))
         assertTrue(renderer.contains("LocalChatSearchPath provides \"b\$idx\","))
-        // Into a quote, a list item, an item's child.
         assertTrue(renderer.contains("WithSearchPath(quotePath?.let { \"\$it/q/b\$k\" }) { RenderBlock(inner) }"))
         assertTrue(renderer.contains("WithSearchPath(listPath?.let { \"\$it/\$j\" })"))
         assertTrue(renderer.contains("WithSearchPath(LocalChatSearchPath.current?.let { \"\$it/\$index\" })"))
         assertTrue(renderer.contains("WithSearchPath(taskPath?.let { \"\$it/\$j\" })"))
         assertTrue(renderer.contains("WithSearchPath(itemPath?.let { \"\$it/\$k\" })"))
-        // The search side builds the same shapes.
         assertTrue(renderer.contains("walk(block.innerBlocks, \"\$p/q/\")"))
         assertTrue(renderer.contains("val p = \"\${prefix}b\$i\""))
-        // Table cells are not units; MdText draws the highlighted string.
         assertTrue(renderer.contains("WithSearchPath(null) {"))
         assertTrue(renderer.contains("    Text(\n        text = searchShown,"))
     }
 
-    // ── folded runs ───────────────────────────────────────────────────────
 
     @Test fun `a match in a folded run finds its run, and expand opens it without toggling`() {
         val a = AssistantBlock(id = "tuA", kind = "tool_use", toolStatus = ToolBlockStatus.SUCCESS, toolName = "shell_execute", toolTitle = "List files")
@@ -131,7 +118,7 @@ class ChatSearchHighlightTest {
         val run = fold.runKeyContaining(hidden.foldMessageId()!!, hidden.foldBlockId()!!)
         assertTrue(run != null)
         fold.expand(run!!)
-        fold.expand(run) // a second expand must not close it
+        fold.expand(run)
         assertTrue(fold.expanded.value.contains(run))
         assertTrue(fold.fold(rows, listOf(m), emptyList()).any { it.key == hidden.key })
         assertNull(fold.runKeyContaining("m", "x-unknown"))

@@ -7,10 +7,6 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [plugin-ecosystem / unified] One catalog across native capability packs,
- * skills and MCP servers; native packs install as real SKILL.md documents.
- */
 class PluginEcosystemTest {
 
     @Test
@@ -52,8 +48,8 @@ class PluginEcosystemTest {
             assertTrue(root.has("mcpServers"))
             root.getJSONObject("mcpServers").let { assertTrue(it.length() >= 1) }
         }
-        assertTrue(mcps.any { it.needsConfig })   // github
-        assertTrue(mcps.any { !it.needsConfig })  // time
+        assertTrue(mcps.any { it.needsConfig })
+        assertTrue(mcps.any { !it.needsConfig })
     }
 
     @Test

@@ -28,7 +28,6 @@ import com.openminis.app.ui.chat.ToolResultWrap
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 
-/** The four Android serializers a request is checked against (names shared with iOS). */
 enum class CtxProvider(val id: String) {
     ANTHROPIC("anthropic"),
     OPENAI_CHAT("openai.chat"),
@@ -36,28 +35,6 @@ enum class CtxProvider(val id: String) {
     GEMINI("gemini"),
 }
 
-/**
- * A6 conversation DSL + A7 storage isolation.
- *
- * One session lives in its own temp directory (filesDir, MediaStore, uploads,
- * browser dir, spillover) and a list of persisted rows standing in for the
- * messages table; nothing touches real app data. Each verb runs the REAL
- * production functions in the order the app runs them; the glue between them
- * mirrors the ChatViewModel call site named in each KDoc (that glue is not
- * itself extracted, so a source guard pins it where it matters).
- *
- *  - [user]      sendMessage: ChatAttachmentIngest.prepare → buildPastedParts
- *                → ChatPartsJson.buildUserPartsJson → row → liveUserTurn
- *  - [assistant] buildAssistantPartsJson (row) + the loop's assistant message
- *  - [toolResults] ToolResultWrap.part → .persist → .historyMessage
- *  - [browser] / [readImage]  BrowserArtifacts.toolResult / ReadImageTool.imageResult
- *  - [compaction] a v2 marker anchored at a row, as compactAll writes it
- *  - [restart]   loadSession: rows → ChatHistoryRebuild.toLLMMessage
- *  - [queue]     drainQueuedPrompts: prepare → queuedTurn → row → queuedHistoryMessage
- *  - [edit]      editMessage + truncateBeforeEdit + the resend
- *  - [retry]     retryFromMessage (rows after the user turn deleted, history rebuilt)
- *  - [request]   RequestContextBuilder.build → the provider's own body builder
- */
 class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
     val root: java.io.File = ImageRealFixtures.tempDir("ctx-$name-")
     val filesDir = java.io.File(root, "files").apply { mkdirs() }
@@ -65,13 +42,10 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
     private val context = ImageRealFixtures.context(filesDir)
     val mediaStore = MediaStore(context)
 
-    /** The messages table. */
     val rows = mutableListOf<MessageEntity>()
 
-    /** agentHistory. */
     val history = mutableListOf<LLMMessage>()
 
-    /** The fixed clock every verb reads (attachments' modified=, screenshot names). */
     var clockMs: Long = 1_760_000_000_000L
 
     private var marker: CompactMarkerEntity? = null
@@ -79,10 +53,8 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
     private val warmUpCache = mutableMapOf<String, Int>()
     var warmUpBudget: Int? = null
 
-    /** Budget plans the request stage reported (the UI event in production). */
     val budgetPlans = mutableListOf<ImageBudget.RequestBudgetPlan>()
 
-    /** MessageBudget results reported at compose time. */
     val composeBudgets = mutableListOf<ImageBudget.BudgetResult>()
 
     private val pending = mutableMapOf<String, CtxKit.Attachment>()
@@ -108,7 +80,6 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         return row
     }
 
-    // ── user ────────────────────────────────────────────────────────────────
 
     private fun inputs(attachments: List<CtxKit.Attachment>): List<InputAttachment> = attachments.map { a ->
         val ia = InputAttachment(
@@ -132,17 +103,12 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         fileUri = { uriFor(it.name) },
     )
 
-    /** ChatAttachmentIngest.pastedParts (buildPastedParts) with [pastes] in the paste buffer: (partsJson, modelText). */
     private fun pasted(text: String, pastes: List<String>): Pair<List<String>, String>? {
         val buffer = pastes.mapIndexed { i, t -> PastedText(i + 1, t) }
         val p = ChatAttachmentIngest.pastedParts(text, { buffer }, sid, mediaStore) { uriFor(it.name) } ?: return null
         return p.partsJson to p.modelText
     }
 
-    /**
-     * sendMessage (ChatViewModel ~8925-8985). [pastes] become `[Pasted#N]`
-     * markers appended to [text], as the composer writes them.
-     */
     fun user(text: String, attachments: List<CtxKit.Attachment> = emptyList(), pastes: List<String> = emptyList()): MessageEntity {
         val composed = text + pastes.indices.joinToString("") { " " + PastedText.placeholderFor(it + 1) }
         val trimmed = composed.trim()
@@ -157,11 +123,9 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         return row
     }
 
-    // ── assistant + tools ───────────────────────────────────────────────────
 
     class Call(val id: String, val name: String, val input: JSONObject = JSONObject())
 
-    /** persistAssistantTurn's row (buildAssistantPartsJson, private) and the loop's assistant message. */
     fun assistant(text: String = "", vararg calls: Call): MessageEntity {
         val parts = buildList<AgentContentPart> {
             if (text.isNotEmpty()) add(AgentContentPart.Text(text))
@@ -173,7 +137,6 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         return row
     }
 
-    /** The agent loop's tool-result step: ToolResultWrap.part per call, persisted, appended. */
     fun toolResults(vararg results: Pair<Call, ToolExecutionResult>): MessageEntity? {
         val parts = results.map { (call, r) -> ToolResultWrap.part(call.id, call.name, r.output, r) }
         val id = runBlocking {
@@ -183,7 +146,6 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         return rows.lastOrNull { it.id == id }
     }
 
-    /** browser_use result → tool result, with this session's dir and clock. */
     fun browser(result: BrowserActionResult, title: String = "Take screenshot"): ToolExecutionResult =
         BrowserArtifacts.toolResult(
             result = result,
@@ -193,15 +155,12 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
             persist = { fn, data -> BrowserArtifacts.persist(sid, { filesDir }, fn, data) },
         )
 
-    /** read_image of a file the agent can see at [linuxPath]. */
     fun readImage(file: java.io.File, linuxPath: String, title: String = "Read image"): ToolExecutionResult =
         ReadImageTool.imageResult(file, linuxPath, title)
 
     fun text(output: String, success: Boolean = true) = ToolExecutionResult(output, success)
 
-    // ── compaction / restart ────────────────────────────────────────────────
 
-    /** A v2 marker whose anchor (last compacted message) is [anchorRowId]. */
     fun compaction(anchorRowId: String, summaryText: String) {
         summary = summaryText
         marker = CompactMarkerEntity(
@@ -210,7 +169,6 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         )
     }
 
-    /** loadSession: drop memory, rebuild agentHistory from the rows (the in-memory warm-up cache resets). */
     fun restart() {
         history.clear()
         warmUpCache.clear()
@@ -220,11 +178,9 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         }
     }
 
-    // ── queue / edit / retry / fork ─────────────────────────────────────────
 
     class Prompt(val text: String, val attachments: List<CtxKit.Attachment> = emptyList())
 
-    /** drainQueuedPrompts (ChatViewModel ~8595-8645): one row and one history message per batch. */
     fun queue(vararg prompts: Prompt): MessageEntity {
         val prepared = prepare(prompts.flatMap { it.attachments })
         val turn = ChatAttachmentIngest.queuedTurn(prompts.map { it.text }, prepared, NO_VISION)
@@ -235,19 +191,10 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         return row
     }
 
-    /**
-     * editMessage + truncateBeforeEdit + resend (ChatViewModel ~7970-8050):
-     * the edited bubble's media files come back as attachments (names from the
-     * bubble, MIME guessed from the extension), the rows from that bubble on
-     * are deleted, history is rebuilt from what remains, and the new text is
-     * sent like any message.
-     */
     fun edit(userRow: MessageEntity, newText: String): MessageEntity {
         val idx = rows.indexOfFirst { it.id == userRow.id }
         require(idx >= 0)
         val restored = mediaRefs(userRow).map { (file, name, mime) ->
-            // guessMimeType reads android.webkit.MimeTypeMap (a stub on the JVM); the
-            // JDK's extension table gives the same answer for the extensions used here.
             val fallback = if (mime.startsWith("image/")) "image/*" else "application/octet-stream"
             val guessed = name.substringAfterLast('.', "").takeIf { it.isNotEmpty() }
                 ?.let { java.net.URLConnection.guessContentTypeFromName(name) } ?: fallback
@@ -258,7 +205,6 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         return user(newText, restored)
     }
 
-    /** retryFromMessage: keep the user row, delete everything after it, rebuild history. */
     fun retry(userRow: MessageEntity) {
         val idx = rows.indexOfFirst { it.id == userRow.id }
         require(idx >= 0)
@@ -266,7 +212,6 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         restart()
     }
 
-    /** (file, originalFileName, mimeType) of every mediaRef part in [row]. */
     fun mediaRefs(row: MessageEntity): List<Triple<java.io.File, String, String>> {
         val arr = org.json.JSONArray(row.partsJson)
         return (0 until arr.length()).mapNotNull { i ->
@@ -277,11 +222,6 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         }
     }
 
-    /**
-     * SessionListViewModel.duplicateSession: rows copied verbatim into a new
-     * session id; no media / uploads copied. Returns the copy (sharing this
-     * filesDir, i.e. the same device).
-     */
     fun duplicate(newName: String): CtxSession {
         val copy = CtxSession(newName, window)
         copy.rows += rows.mapIndexed { i, r -> r.copy(id = "dup-${i + 1}", sessionId = copy.sid) }
@@ -289,7 +229,6 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         return copy
     }
 
-    /** Rebuild this session's history against [mediaFilesDir]'s media store (another device = another dir). */
     fun restartOn(mediaFilesDir: java.io.File) {
         val store = MediaStore(ImageRealFixtures.context(mediaFilesDir))
         history.clear()
@@ -299,7 +238,6 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
         }
     }
 
-    // ── request ─────────────────────────────────────────────────────────────
 
     fun input(): RequestContextBuilder.Input = RequestContextBuilder.Input(
         history = history,
@@ -328,17 +266,11 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
     companion object {
         val NO_VISION: (String?) -> String? = { null }
 
-        /**
-         * A Uri for a fixture: the real Uri.fromFile where android.net is real
-         * (Robolectric), the test-only CtxFakeUri where it is the unit-test stub
-         * (fromFile returns null there). Never read by the code under test.
-         */
         fun uriFor(name: String): android.net.Uri {
             val real: android.net.Uri? = android.net.Uri.fromFile(java.io.File(name))
             return real ?: android.net.CtxFakeUri(name)
         }
 
-        /** The body [provider] builds for [messages] on the streaming path the agent loop uses. */
         fun wire(provider: CtxProvider, messages: List<LLMMessage>): JSONObject = when (provider) {
             CtxProvider.ANTHROPIC -> {
                 val p = AnthropicProvider(apiKey = "test-key", model = LLMModel.claudeHaiku45, basePath = "https://example.invalid")
@@ -354,12 +286,6 @@ class CtxSession(val name: String, val window: Int? = 200_000) : AutoCloseable {
                 .buildResponsesAPIBody(messages, null, 4096, true, emptyList())
         }
 
-        /**
-         * The private buildRequestBody of Anthropic (with `stream`) / Gemini (without).
-         * Gemini's takes a trailing `thinkingFormat` since 270e09b4d (FIX-261019-07);
-         * null is its default, so the body is the one the agent loop builds with
-         * thinking off.
-         */
         private fun privateBody(provider: Any, messages: List<LLMMessage>, withStream: Boolean): JSONObject {
             val m = provider.javaClass.declaredMethods.first { it.name == "buildRequestBody" && it.parameterCount == 8 }
             m.isAccessible = true

@@ -14,18 +14,6 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-responses-orphan-tool-output] + [T-android-responses-tool-id-normalize]
- * Ports of iOS bc142f750 / ffbed35ca.
- *
- * Field report (iOS): every send failed with
- *   No tool call found for function call output with call_id call_… .
- * and kept failing on every retry and fallback model until the chat was
- * cleared, because the Responses request is rebuilt from the same history each
- * time and nothing checked its tool pairing.
- *
- * The wire tests drive the real OpenAIProvider.buildResponsesAPIBody.
- */
 class ResponsesToolPairingTest {
 
     private val model = LLMModel(id = "gpt-5", displayName = "GPT-5", provider = "test")
@@ -47,7 +35,6 @@ class ResponsesToolPairingTest {
 
     private fun user(text: String) = LLMMessage(LLMMessage.Role.USER, text)
 
-    /** One token per input item: fc:<call>, out:<call>, or the item's role. */
     private fun wire(messages: List<LLMMessage>): List<String> {
         val input = provider().buildResponsesAPIBody(messages = messages, systemPrompt = null,
             maxTokens = 1024, stream = false).getJSONArray("input")
@@ -70,11 +57,9 @@ class ResponsesToolPairingTest {
             .filter { it.optString("type") == "function_call_output" }
     }
 
-    // ── on the wire ───────────────────────────────────────────────────────
 
     @Test
     fun `a stranded tool result never reaches the wire`() {
-        // The reported shape: a result whose call is gone from the history.
         val seq = wire(listOf(
             user("hi"),
             results(res("call_gone|fc_gone")),
@@ -99,7 +84,6 @@ class ResponsesToolPairingTest {
 
     @Test
     fun `an unanswered call mid-history gets a placeholder after the whole call run`() {
-        // Two parallel calls; only the second was answered, then the chat went on.
         val seq = wire(listOf(
             user("hi"),
             assistant(use("call_a|fc_a"), use("call_b|fc_b")),
@@ -111,16 +95,12 @@ class ResponsesToolPairingTest {
 
     @Test
     fun `the trailing call run is left unanswered`() {
-        // The request that asks the model to continue after it called tools
-        // but before results exist ends on the calls; no fake failure.
         val seq = wire(listOf(user("hi"), assistant(use("call_a|fc_a"), use("call_b|fc_b"))))
         assertEquals(listOf("user", "fc:call_a", "fc:call_b"), seq)
     }
 
     @Test
     fun `mixed id forms still pair on the wire`() {
-        // Call stored combined, result stored with the bare call id (a model
-        // switch or a relay): both are the same call on the wire.
         val seq = wire(listOf(user("hi"), assistant(use("call_a|fc_a")), results(res("call_a")), user("next")))
         assertEquals(listOf("user", "fc:call_a", "out:call_a", "user"), seq)
     }
@@ -136,7 +116,6 @@ class ResponsesToolPairingTest {
         assertEquals(listOf("user", "fc:call_a", "fc:call_b", "out:call_a", "out:call_b", "user"), seq)
     }
 
-    // ── the sanitizer on its own ──────────────────────────────────────────
 
     private fun fc(id: String) = JSONObject().put("type", "function_call").put("call_id", id).put("name", "t")
     private fun out(id: String, text: String = "ok") =
@@ -183,7 +162,6 @@ class ResponsesToolPairingTest {
         assertEquals(listOf("gone"), r.droppedOrphanOutputs)
     }
 
-    // ── the history layer uses the same identity ─────────────────────────
 
     @Test
     fun `pairing key is the call id half, identity for ids without a bar`() {
@@ -197,7 +175,6 @@ class ResponsesToolPairingTest {
         val provider = ProductionSources.read("provider/openai/OpenAIProvider.kt")
         assertTrue(provider.contains("ResponsesToolPairing.sanitize(input)"))
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
-        // [T-ctx-builder] The sweep moved to RequestContextBuilder (ChatViewModel delegates).
         assertTrue(vm.contains("RequestContextBuilder.dropOrphanedToolParts(history, { activeSessionId })"))
         val drop = vm.substringAfter("    fun dropOrphanedToolParts(history: List<LLMMessage>, sessionId: () -> String").substringBefore("\n    }\n")
         val sanitize = vm.substringAfter("private fun sanitizeAgentHistory(").substringBefore("private fun unwrapFlowException(")

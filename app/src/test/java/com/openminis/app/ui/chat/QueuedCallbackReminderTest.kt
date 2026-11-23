@@ -12,10 +12,6 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-callback-queued-reminder] A finished sub agent callback waiting behind a
- * running loop is mentioned to the model once, in the request only.
- */
 class QueuedCallbackReminderTest {
 
     private fun callback(job: String, title: String, kind: AgentCallback.Kind = AgentCallback.Kind.FINISHED, status: String = "done") =
@@ -31,7 +27,6 @@ class QueuedCallbackReminderTest {
     private fun finished(id: String, job: String, title: String, status: String = "done") =
         queued(id, callback(job, title, status = status).xml)
 
-    // -- the text --
 
     @Test
     fun `the reminder is the agreed wording with the jobs filled in`() {
@@ -58,7 +53,6 @@ class QueuedCallbackReminderTest {
         assertTrue(plan.text, plan.text.contains("conversation: Summarise \"Q3\" & more (job job-42, timeout)\n"))
     }
 
-    // -- which prompts count --
 
     @Test
     fun `nothing queued, nothing to say`() {
@@ -69,7 +63,6 @@ class QueuedCallbackReminderTest {
     fun `only finished sub agent callbacks count`() {
         val queue = listOf(
             queued("user", "how is it going?", origin = QueuedPromptOrigin.USER),
-            // A user typing the tag by hand is still a user follow-up.
             queued("user-tag", callback("j0", "typed").xml, origin = QueuedPromptOrigin.USER),
             queued("progress", callback("j1", "still going", kind = AgentCallback.Kind.PROGRESS, status = "running").xml),
             queued("scheduled", "<scheduled_task id=\"t1\">check</scheduled_task>", scheduledTaskId = "t1"),
@@ -83,7 +76,6 @@ class QueuedCallbackReminderTest {
         assertTrue(plan.text.contains(": Real one (job j9, done)\n"))
     }
 
-    // -- once per job --
 
     @Test
     fun `a job is reminded once, and a later reminder lists only the new jobs`() {
@@ -107,7 +99,6 @@ class QueuedCallbackReminderTest {
     fun `a request that never got an answer does not use the reminder up`() {
         val queue = listOf(finished("p1", "j1", "First"))
         val attempt1 = QueuedCallbackReminder.plan(queue)!!
-        // Nothing was marked: the next attempt owes the same reminder.
         val attempt2 = QueuedCallbackReminder.plan(queue)!!
         assertEquals(attempt1.promptIds, attempt2.promptIds)
         assertEquals(attempt1.text, attempt2.text)
@@ -145,7 +136,6 @@ class QueuedCallbackReminderTest {
         assertEquals("still drained when the loop ends", listOf("p1"), QueuedPromptBatching.nextDrainBatch(queue).map { it.id })
     }
 
-    // -- where it goes in the request --
 
     private val text = "<system-reminder>\nX\n</system-reminder>"
 
@@ -215,7 +205,6 @@ class QueuedCallbackReminderTest {
         assertEquals("one", (history.last().contentParts.single() as AgentContentPart.ToolResult).content)
     }
 
-    // -- wiring --
 
     private val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
 
@@ -225,13 +214,11 @@ class QueuedCallbackReminderTest {
         assertTrue(vm.contains("QueuedCallbackReminder.inject(requestMessages, it.text)"))
         assertTrue(Regex("""currentProvider\.streamMessage\(\s*requestMessages,""").containsMatchIn(vm))
         assertFalse("the built request is no longer sent as is", Regex("""currentProvider\.streamMessage\(\s*requestContext\.messages,""").containsMatchIn(vm))
-        // Kept for the turn's retries; marked on the first chunk, not at send.
         assertTrue(vm.contains("val reminder = callbackReminder ?: QueuedCallbackReminder.plan(_promptQueue.value)"))
         val firstChunk = vm.indexOf("if (firstChunkSeen.compareAndSet(false, true)) {")
         val mark = vm.indexOf("_promptQueue.update { QueuedCallbackReminder.markSent(it, sent) }")
         assertTrue(firstChunk >= 0 && mark > firstChunk && mark - firstChunk < 1100)
         assertEquals("marked in one place", 1, Regex("""QueuedCallbackReminder\.markSent\(""").findAll(vm).count())
-        // Nothing in this feature writes to the history.
         val helper = ProductionSources.read("ui/chat/QueuedCallbackReminder.kt")
         assertFalse(helper.substringAfter("internal object").contains("agentHistory"))
     }

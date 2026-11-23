@@ -1,20 +1,7 @@
 package com.openminis.app.harness
 
-/**
- * v2.0 · Event-sourced agent core (借鉴 OpenHands SDK / LangGraph, 译为 Kotlin).
- *
- * Design contract: **the event log is the single source of truth**. The UI, the
- * resumable state, the cost panel, the audit trail and the replay tool are all
- * pure projections of this append-only log. This is what makes a phone Agent
- * survive process death, foreground-service restarts and "resume from step N".
- *
- * No Android, no coroutines, no external JSON: plain Kotlin stdlib only, so the
- * same file compiles in the app, in JVM unit tests and in an offline evaluator.
- */
 
-// ---------------------------------------------------------------- risk & kinds
 
-/** R0 只读自动 · R1 本地可逆自动但可见 · R2 外部可见需确认 · R3 不可逆强确认/禁用 */
 enum class Risk { R0, R1, R2, R3 }
 
 enum class EventKind {
@@ -25,11 +12,6 @@ enum class EventKind {
 
 enum class RunStatus { IDLE, PLANNING, RUNNING, WAITING_APPROVAL, INTERRUPTED, COMPLETED, FAILED }
 
-/**
- * An immutable, append-only fact. `payload` is ALWAYS redacted before it is
- * stored (see Observability.redact) — prompts and tool results never land in
- * the exported/telemetry copy by default.
- */
 data class AgentEvent(
     val seq: Long,
     val runId: String,
@@ -62,9 +44,6 @@ data class AgentEvent(
 
     companion object {
         fun fromJson(line: String): AgentEvent? {
-            // [v2.0 audit fix FIX-21] A truncated last line (process killed mid
-            // write) must be rejected, not thrown: restore() relies on null to
-            // keep the healthy log intact.
             val m = runCatching { MiniJson.parseObject(line) }.getOrNull() ?: return null
             val kind = runCatching { EventKind.valueOf(MiniJson.str(m, "kind")) }.getOrNull() ?: return null
             val risk = runCatching { Risk.valueOf(MiniJson.str(m, "risk", "R0")) }.getOrDefault(Risk.R0)
@@ -86,7 +65,6 @@ data class AgentEvent(
     }
 }
 
-// ---------------------------------------------------------------- folded state
 
 data class RunState(
     val runId: String,
@@ -104,19 +82,17 @@ data class RunState(
     val lastSeq: Long = 0L,
 )
 
-/** UI projection: one row per step in the task timeline (ChatGPT/Cursor 范式). */
 data class TimelineItem(
     val seq: Long,
     val stepId: String,
     val what: String,
     val tool: String,
-    val status: String,       // planned | running | approved | denied | done | error | interrupted
+    val status: String,
     val risk: Risk,
     val durationMs: Long,
     val detail: String,
 )
 
-// ---------------------------------------------------------------- event store
 
 class EventSourcedRun(
     val runId: String,
@@ -157,7 +133,6 @@ class EventSourcedRun(
         return e
     }
 
-    /** Fold the log into the current state. Pure: same log → same state. */
     fun state(): RunState = fold(log)
 
     fun fold(events: List<AgentEvent>): RunState {
@@ -188,7 +163,6 @@ class EventSourcedRun(
         return s
     }
 
-    /** Rebuild UI rows from the log — zero extra storage, deterministic. */
     fun timeline(): List<TimelineItem> {
         val rows = LinkedHashMap<String, TimelineItem>()
         for (e in log) {
@@ -220,7 +194,6 @@ class EventSourcedRun(
 
     fun snapshot(): String = log.joinToString("\n") { it.toJson() }
 
-    /** Transactional restore: a corrupt line must never wipe a healthy log. */
     fun restore(jsonl: String): Boolean {
         val parsed = ArrayList<AgentEvent>()
         for (line in jsonl.lineSequence()) {
@@ -235,7 +208,6 @@ class EventSourcedRun(
         return true
     }
 
-    /** Integrity check used by the post-change audit (point 4 of the brief). */
     fun selfCheck(): List<String> {
         val issues = ArrayList<String>()
         log.forEachIndexed { i, e ->
@@ -247,12 +219,7 @@ class EventSourcedRun(
     }
 }
 
-// ---------------------------------------------------------------- observability
 
-/**
- * OpenTelemetry-style span semantics, local-first. Only metadata leaves the
- * device; prompts and tool results are redacted and opt-in for upload.
- */
 object Observability {
     private val SECRET = Regex(
         "(?i)(bearer\\s+[a-z0-9._\\-]{8,}|sk-[a-z0-9]{16,}|api[_-]?key\\s*[:=]\\s*\\S+|" +
@@ -277,7 +244,6 @@ object Observability {
         "approval" to approved, "error" to errorCode,
     )
 
-    /** Export only metadata by default; payload export requires explicit consent. */
     fun export(events: List<AgentEvent>, includePayload: Boolean = false): String =
         events.joinToString("\n") { e ->
             MiniJson.obj(

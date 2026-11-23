@@ -12,13 +12,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-onboarding-model-fetch-fallback] Onboarding's "Select Models" page spun
- * forever when the provider's model list could not be fetched. The page now
- * runs its own bounded fetch and, when it ends with the page still empty,
- * shows the provider's error, Retry and Add Model Manually. iOS parity:
- * 7d17d29c4 / OnboardingModelFetchTests.
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class OnboardingModelFetchTest {
 
@@ -66,7 +59,6 @@ class OnboardingModelFetchTest {
         assertTrue(OnboardingModelFetch.TIMEOUT_MS in 15_000L..20_000L)
     }
 
-    // ---- wiring (Compose/network need a device) ----------------------------
 
     private val screen = ProductionSources.read("ui/onboarding/OnboardingModelSelectionScreen.kt")
 
@@ -99,8 +91,6 @@ class OnboardingModelFetchTest {
         assertTrue(repo.contains("onVendorError: ((String) -> Unit)? = null,"))
         val catch = repo.substringAfter("android.util.Log.e(\"ProviderRepo\", \"refreshModels fetch error:")
             .substringBefore("emptyList()")
-        // The catch reports through reportVendorError, which is the one place
-        // that calls onVendorError (26076413e moved the call there).
         assertTrue(catch.contains("reportVendorError("))
         val report = repo.substringAfter("reportVendorError(").substringBefore("\n    }")
         assertTrue(repo.contains("onVendorError?.invoke(message)"))

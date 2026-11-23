@@ -12,15 +12,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-backup-restore-semantics / B01] The restore semantics the owner decided
- * (2026-10-15), driven by the scenario file both platforms read:
- * `src/shared/backup-restore/b01_restore_scenarios.json`. One test per spec row
- * (a)-(i). Users reported that a restore left the model list, parameters and
- * groups as they were on the device (Android: same-id groups and existing
- * entries kept the LOCAL copy; a same-name group from the backup appeared as a
- * second group), while iOS dropped them outright.
- */
 class BackupRestoreSemanticsTest {
 
     private val doc: JSONObject by lazy {
@@ -88,7 +79,6 @@ class BackupRestoreSemanticsTest {
         }
     }
 
-    // ── (a) empty device ─────────────────────────────────────────────────
 
     @Test
     fun `a - onto an empty device every entry comes back, non-custom ones included`() {
@@ -102,7 +92,6 @@ class BackupRestoreSemanticsTest {
         assertEquals(strings(expect, "agentLoopGroupIds"), merged.agentLoopGroupIds.toList())
     }
 
-    // ── (b) same entry key, different parameters ─────────────────────────
 
     @Test
     fun `b - the backup's parameters win over the device's, the API's baseModel stays`() {
@@ -123,7 +112,6 @@ class BackupRestoreSemanticsTest {
         }
     }
 
-    // ── (c) same group id ────────────────────────────────────────────────
 
     @Test
     fun `c - a group with the same id takes the backup's fields and order, local extras appended`() {
@@ -131,7 +119,6 @@ class BackupRestoreSemanticsTest {
         assertGroups(r.config, expect)
     }
 
-    // ── (d) same name, different id ──────────────────────────────────────
 
     @Test
     fun `d - a same-name group collapses into one with the backup's content`() {
@@ -196,7 +183,6 @@ class BackupRestoreSemanticsTest {
         assertTrue(importer.contains("BackupProviderMerge.rewriteSubAgents("))
     }
 
-    // ── (e) agent-loop lists ─────────────────────────────────────────────
 
     @Test
     fun `e - agent loop lists are a union`() {
@@ -205,7 +191,6 @@ class BackupRestoreSemanticsTest {
         assertEquals(strings(expect, "agentLoopGroupIds"), r.config.agentLoopGroupIds.toList())
     }
 
-    // ── (f) tombstones ───────────────────────────────────────────────────
 
     @Test
     fun `f - a group gone from this device comes back, the backup's own tombstones are not applied`() {
@@ -214,7 +199,6 @@ class BackupRestoreSemanticsTest {
         assertEquals(strings(expect, "entryKeys"), r.config.modelEntries.map(::entryKey))
     }
 
-    // ── (g) nothing local is deleted ─────────────────────────────────────
 
     @Test
     fun `g - items only on this device survive`() {
@@ -244,7 +228,6 @@ class BackupRestoreSemanticsTest {
         assertEquals("inst-1/m-a", merged.modelEntries.single().id)
     }
 
-    // ── (i) one restore merge, not the sync merger ───────────────────────
 
     @Test
     fun `i - the restore uses the restore-only merge`() {

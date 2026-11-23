@@ -1,4 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Minis</string>
     <string name="new_chat">Nova conversa</string>
@@ -1901,7 +1900,6 @@
     <string name="chat_share_n_selected">Selecionados: %1$d</string>
     <string name="chat_share_select_all">Selecionar tudo</string>
     <string name="chat_share_deselect_all">Desmarcar tudo</string>
-    <!-- [T-port-user-ask] user_ask card and settings; text from the iOS string catalog. -->
     <string name="user_ask_needs_answer">Precisa da sua resposta</string>
     <string name="user_ask_needs_approval">Precisa da sua aprovação</string>
     <string name="user_ask_high_risk">Ação de alto risco</string>
@@ -1944,17 +1942,14 @@
     <string name="user_ask_setting_indefinitely">Sem limite</string>
     <string name="user_ask_setting_minutes">%1$d min</string>
     <string name="user_ask_setting_footer">Permite que o assistente peça para você escolher entre opções, ou confirmar uma ação arriscada antes de fazê-la, em um cartão no chat. Só em chats em que você está — nunca para subagentes, Atalhos ou tarefas agendadas. Desativado, o assistente decide sozinho e não faz ações arriscadas sem seu aval.</string>
-    <!-- [T-android-user-ask-notify] user_ask background notification. -->
     <string name="user_ask_setting_notify">Notificar em segundo plano</string>
     <string name="user_ask_notif_high_risk">Precisa de aprovação · Alto risco</string>
     <string name="user_ask_notif_open_app">Abrir o app</string>
     <string name="user_ask_notif_hidden_body">Há uma pergunta esperando sua resposta</string>
     <string name="user_ask_notif_channel_name">Perguntas para você</string>
     <string name="user_ask_notif_channel_description">Perguntas do assistente enquanto o Minis está em segundo plano, respondíveis pela notificação</string>
-    <!-- [T-tool-preview-longpress-close] Long-press the tool status bar preview -->
     <string name="tool_preview_close_menu">Fechar janela de pré-visualização</string>
     <string name="tool_preview_closed_toast">Janela de pré-visualização fechada. Você pode reativá-la em Ajustes &gt; Aparência.</string>
-    <!-- [T-mcp-oauth-signin-android] MCP browser sign-in (iOS #432) -->
     <string name="mcp_form_auth_mode">Autorização</string>
     <string name="mcp_form_auth_none">Nenhum</string>
     <string name="mcp_signin_not_signed_in">Não conectado</string>

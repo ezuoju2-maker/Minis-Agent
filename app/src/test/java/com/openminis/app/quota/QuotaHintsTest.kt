@@ -9,12 +9,6 @@ import org.junit.Test
 import java.math.BigDecimal
 import java.util.Locale
 
-/**
- * [T-provider-quota P2] Port of the iOS ProviderQuotaTests "Picker hints"
- * block ([T-quota-group-member-pill], [T-quota-composer-hint],
- * [T-quota-composer-windows], [T-quota-tag-level]) and the Android wiring of
- * the picker, Model Group page, nav bar dot and composer line.
- */
 class QuotaHintsTest {
 
     private val now = 1_800_000_000_000L
@@ -108,7 +102,6 @@ class QuotaHintsTest {
         assertEquals(QuotaLevel.depleted, QuotaComposerHintRules.segment(overView, overPools, now = now)?.level)
         assertEquals("a single window keeps the plain wording", "Quota 120% used", QuotaComposerHintRules.segment(overView, overPools, now = now)?.text)
 
-        // [T-quota-composer-windows] 5h + 7d on one subscription pool: both, shorter first.
         val twoWin = pool("subscription", listOf(window("7d", "0.32"), window("5h", "0.14")))
         val twoPools = mapOf(twoWin.id to twoWin)
         val twoView = QuotaModelResolver.view(
@@ -158,9 +151,6 @@ class QuotaHintsTest {
             !screen.contains("if (modelName.isNotEmpty()) Color(0xFF34C759) else Color(0xFFFF9500)"))
 
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
-        // [T-port-composer-hint-debug] The two real publish paths each attach
-        // the quota part; the DEV_TOOLS-only debug.chat.usageHint path attaches
-        // it only when asked for the live quota, and is counted on its own.
         fun body(signature: String) = vm.substringAfter(signature).substringBefore("\n    }\n")
         val withQuota = ".withQuota(composerQuotaPart())"
         assertTrue("loop-end / crossing hint carries the quota part",

@@ -6,11 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-user-ask-deferred] The pure half of deferred mode (iOS 7a818b8c0):
- * the tool result, the answer message, recovery actions, the record format
- * and the exposure decision. Vectors are iOS UserAskCoreTests 6b.
- */
 class UserAskDeferredCoreTest {
 
     private val which = UserAskQuestion(
@@ -37,10 +32,8 @@ class UserAskDeferredCoreTest {
         })
         assertEquals("The card is shown; the answer will arrive as the user's next message. End your turn now.", o.getString("note"))
         assertEquals(UserAskPromptText.DEFERRED_NOTE, UserAskDeferred.NOTE)
-        // Sorted keys like iOS JSONSerialization .sortedKeys.
         assertTrue(UserAskDeferred.toolResult(1).startsWith("{\"note\":"))
         assertEquals(1, JSONObject(UserAskDeferred.toolResult(0)).getJSONArray("results").length())
-        // Deferred is explained only where it happens, never in the description.
         assertFalse(UserAskPromptText.TOOL_DESCRIPTION.contains("deferred"))
     }
 
@@ -52,10 +45,8 @@ class UserAskDeferredCoreTest {
         assertEquals(UserAskRecoveryAction.DELIVER_DEFERRED, UserAskRecovery.action(ans, t0, toolResultInStore = true))
         val consumed = ans.copy(ask = ans.ask.copy(consumed = true))
         assertEquals(UserAskRecoveryAction.ALREADY_DELIVERED, UserAskRecovery.action(consumed, t0, toolResultInStore = true))
-        // Killed before the batch (with its `deferred` result) was written: the ordinary rules.
         assertEquals(UserAskRecoveryAction.DELIVER, UserAskRecovery.action(ans, t0, toolResultInStore = false))
         assertEquals(UserAskRecoveryAction.AWAIT_USER, UserAskRecovery.action(pending, t0, toolResultInStore = false))
-        // A non-deferred ask is unchanged: a result in the store means delivered.
         val plain = pending.copy(ask = pending.ask.copy(deferred = false))
         assertEquals(UserAskRecoveryAction.ALREADY_DELIVERED, UserAskRecovery.action(plain, t0, toolResultInStore = true))
     }
@@ -70,7 +61,6 @@ class UserAskDeferredCoreTest {
         assertFalse(UserAskDeferred.sendsAnswer(replaced))
         assertEquals(UserAskDismissReason.REPLACED_BY_NEW_ASK, replaced.dismissReason)
         assertFalse(UserAskDeferred.sendsAnswer(pending.ask.resolveTimedOut()!!))
-        // An interactive ask never sends a message: its waiting tool call takes the result.
         assertFalse(UserAskDeferred.sendsAnswer(ans.ask.copy(deferred = false)))
     }
 

@@ -10,12 +10,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-config-readable] The approval dialog's batch summary and the detail
- * page's raw-JSON rendering (iOS ConfigConfirmSheet.summaryLines /
- * ConfigAuditDetailView.prettyJSON), plus wiring guards for the hairline and
- * the Config Changes tap-through.
- */
 class ConfigReadableUiTest {
 
     private fun item(text: String, subject: String?, approved: Boolean = true) = PendingConfigChangeItem(
@@ -62,7 +56,6 @@ class ConfigReadableUiTest {
         assertTrue(Regex("""if \(readable\.isNotEmpty\(\)\) \{\s*ConfigReadableDivider\(\)""").containsMatchIn(list))
         assertTrue(list.contains(".clickable(onClick = onOpen)"))
         assertTrue(list.contains("configRevertMessage(entry, localize)"))
-        // The detail page separates description and raw change by sections, not a hairline.
         val detail = ProductionSources.read("ui/settings/ConfigAuditDetailScreen.kt")
         assertTrue(!detail.contains("ConfigReadableDivider()"))
     }

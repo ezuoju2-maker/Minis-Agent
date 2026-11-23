@@ -14,12 +14,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-user-ask-deferred] The deferred path end to end below the view model
- * (iOS 7a818b8c0, e1c070d9b): a deferred call returns at once with the card
- * left open; its resolution rewrites the stored `deferred` result and hands a
- * real answer on as the user's next message - exactly once, also after a kill.
- */
 class UserAskDeferredDeliveryTest {
 
     private val t0 = 1_000_000_000L
@@ -38,7 +32,6 @@ class UserAskDeferredDeliveryTest {
         override fun remove(requestId: String) { synchronized(map) { map.remove(requestId) } }
     }
 
-    /** Rows are (role, partsJson); the deferred tool result is rewritten in place like the DB row. */
     private class MemTranscript : UserAskTranscript {
         val rows = mutableListOf<Pair<String, String>>()
         override suspend fun sessionExists(sessionId: String) = true
@@ -62,7 +55,6 @@ class UserAskDeferredDeliveryTest {
         .put(JSONObject().put("type", "toolUse").put("value", JSONObject().put("toolUseId", "tc1").put("name", "user_ask").put("input", "{}")))
         .toString()
 
-    /** What the loop writes after a deferred call: the assistant row and the `deferred` result row. */
     private fun storeBatch(result: String) {
         transcript.rows += "assistant" to snapshot
         transcript.rows += "user" to UserAskRecovery.resultRowPartsJson(
@@ -94,7 +86,6 @@ class UserAskDeferredDeliveryTest {
         UserAskRecoveryCoordinator.install(records, transcript, { _, _ -> }, scanOthers = false) { d -> synchronized(delivered) { delivered += d } }
         UserAskCenter.onChanged = { records.onAskChanged(it) }
         UserAskCenter.clock = { t0 }
-        // Deliveries are driven explicitly below (in the app this hook launches one).
         UserAskCenter.onDeferredResolved = null
     }
 
@@ -118,7 +109,7 @@ class UserAskDeferredDeliveryTest {
     @Test fun `answered - the stored result is rewritten and the answer becomes the next message`() = runBlocking {
         val (ask, out) = askDeferred()
         storeBatch(out)
-        UserAskCenter.markDelivered(listOf("tc1"))   // the loop stored the `deferred` result
+        UserAskCenter.markDelivered(listOf("tc1"))
         assertNotNull("the record stays until the ANSWER is handed on", records.record(ask.requestId))
         var routed: PendingAsk? = null
         UserAskCenter.onDeferredResolved = { routed = it }
@@ -134,7 +125,6 @@ class UserAskDeferredDeliveryTest {
         assertEquals("1. Which DB? → Postgres\n" + UserAskDeferred.ANSWER_REMINDER, d.answerMessage)
         assertTrue("consumed", UserAskCenter.ask("tc1")!!.consumed)
         assertTrue("record gone", records.all().isEmpty())
-        // Exactly once.
         UserAskRecoveryCoordinator.deliverDeferred(ask.requestId)
         assertEquals(1, delivered.size)
     }
@@ -164,7 +154,7 @@ class UserAskDeferredDeliveryTest {
     @Test fun `after a kill - an open deferred card comes back, its answer is delivered`() = runBlocking {
         val (ask, out) = askDeferred()
         storeBatch(out)
-        UserAskCenter.resetForTest()   // the process died; the record and the transcript survive
+        UserAskCenter.resetForTest()
         UserAskCenter.onChanged = { records.onAskChanged(it) }
         UserAskCenter.clock = { t0 }
         assertFalse(UserAskRecoveryCoordinator.restoreForSession("s1", nowMs = t0 + 60_000))
@@ -198,7 +188,6 @@ class UserAskDeferredDeliveryTest {
 
     @Test fun `killed before the batch was written - the answer becomes the call's result`() = runBlocking {
         val (ask, _) = askDeferred()
-        // Nothing in the transcript: the loop never stored the batch.
         UserAskCenter.onDeferredResolved = null
         UserAskCenter.updateAnswer(ask.requestId, 0, UserAskAnswer(selected = listOf(1)))
         UserAskCenter.submitQuestion(ask.requestId, 0)
@@ -207,10 +196,6 @@ class UserAskDeferredDeliveryTest {
         assertTrue(storedOutput().contains("Postgres"))
     }
 
-    // [T-user-ask-deferred-live-batch] Resolved while its own batch still runs:
-    // the `deferred` result is not stored yet, so the hand-on waits for it
-    // instead of taking the killed-before-the-batch fallback (which appended
-    // the assistant row and a result row the loop then wrote again).
     @Test fun `answered while its batch still runs - handed on once the batch is stored`() = runBlocking {
         val (ask, out) = askDeferred()
         val routed = mutableListOf<PendingAsk>()
@@ -283,43 +268,31 @@ class UserAskDeferredDeliveryTest {
 
     @Test fun `view model wiring`() {
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
-        // Exposure: one decision per run, with the deferred mode and the answer origin.
         assertTrue(vm.contains("com.openminis.app.agent.userask.UserAskExposure.decision("))
         assertTrue(vm.contains("userAskDeferredThisRun = d.deferred"))
         assertTrue(vm.contains("decideUserAskExposureForRun(interactive = !headless, userAskAnswer = userAskAnswer)"))
-        // The call: a deferred run returns at once.
         val exec = vm.substringAfter("com.openminis.app.agent.userask.UserAskPromptText.TOOL_NAME -> if (!userAskExposedThisRun) {")
             .substringBefore("else -> ToolExecutionResult(\"Unknown tool: \$name\", false)")
         assertTrue(exec.indexOf("} else if (userAskDeferredThisRun) {") in 0 until exec.indexOf("UserAskToolRunner.execute("))
         assertTrue(exec.contains("userAskAskedThisRun = true"))
-        // A silent end after a deferred card is not an empty turn.
         assertTrue(vm.contains("val deferredAskShown = userAskDeferredThisRun && userAskAskedThisRun"))
         assertTrue(vm.contains("hasText = turnHasText || deferredAskShown,"))
-        // The answer: no context dialog, no composer files, queued as the user's own follow-up.
         assertTrue(vm.contains("sendMessage(text, skipContextCheck = true, headless = true, userAskAnswer = true)"))
         assertTrue(vm.contains("if (headless && !userAskAnswer) QueuedPromptOrigin.PROGRAMMATIC else QueuedPromptOrigin.USER"))
-        // The answer is headless: it brings no files and never takes the composer's
-        // ([T-headless-own-attachments], HeadlessAttachmentsTest).
         assertTrue(vm.contains("val promptAttachments = PromptAttachments.of(ownsComposer = !headless, own = headlessAttachments, composer = _attachments.value)"))
         assertTrue(vm.contains("val pendingAttachments = PromptAttachments.of(ownsComposer, ownAttachments, _attachments.value)"))
-        // A running compaction is waited out, then the answer goes.
         val onDelivered = vm.substringAfter("internal fun onUserAskDeferredDelivered(").substringBefore("\n    }\n")
         assertTrue(onDelivered.indexOf("replaceUserAskResultInMemory(d.toolUseId, d.resultJson)") < onDelivered.indexOf("submitUserAskAnswer(message)"))
         assertTrue(onDelivered.contains("while (_isCompacting.value && System.currentTimeMillis() < deadline) kotlinx.coroutines.delay(500)"))
         assertTrue(onDelivered.contains("UserAskSettings.isEnabled(context)"))
-        // [T-user-ask-deferred-live-batch] While a run is live, agentHistory is
-        // patched on the loop's thread before the next request, never from main.
         val replace = vm.substringAfter("internal fun replaceUserAskResultInMemory(").substringBefore("\n    }\n")
         assertTrue(replace.contains("val history = if (_isStreaming.value) {\n            pendingHistoryPatches.add(toolUseId to output)"))
         val loop = vm.substringAfter("for (turn in 0 until turnCap) {")
         assertTrue(loop.indexOf("applyPendingHistoryPatches()") in 0 until loop.indexOf("sanitizeAgentHistory()"))
-        // A run that never stored its batch releases its held deferred asks.
         val wrapper = vm.substringAfter("private suspend fun runAgentLoop(").substringBefore("private suspend fun runAgentLoopBody(")
         assertTrue(wrapper.substringAfter("} finally {").contains("UserAskCenter.releaseUnstoredDeferred(activeSessionId)"))
-        // A message the user types closes an open deferred card in memory before its request.
         val send = vm.substringAfter("UserAskRecoveryCoordinator.supersedeRecovered(activeSessionId)?.let { parts ->")
         assertTrue(send.substringBefore("if (editingId != null)").contains("supersedeDeferredAsks(activeSessionId)"))
-        // Every live user bubble hides the model's note.
         assertEquals(3, vm.split("content = userBubbleText(").size - 1)
     }
 }

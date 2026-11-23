@@ -1,7 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- [T-config-confirm-i18n] minis-config approval dialog (ConfigConfirmDialog).
-     Wording and translations copied from iOS Localizable.xcstrings
-     (ConfigConfirmSheet keys); a locale iOS lacks falls back to English. -->
 <resources>
     <string name="config_confirm_title_one">確認變更</string>
     <string name="config_confirm_title_many">確認 %1$d 項變更</string>

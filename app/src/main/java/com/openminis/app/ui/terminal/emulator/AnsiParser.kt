@@ -1,6 +1,5 @@
 package com.openminis.app.ui.terminal.emulator
 
-/** Actions emitted by the parser. */
 sealed class ParsedAction {
     data class Printable(val codePoint: Int) : ParsedAction()
     data class ControlChar(val byte: Int) : ParsedAction()
@@ -13,10 +12,6 @@ sealed class ParsedAction {
     data class OscDispatch(val command: Int, val payload: String) : ParsedAction()
 }
 
-/**
- * VT100/xterm escape sequence parser — state machine port of iOS ANSIParser.swift.
- * Feed raw bytes via [feed]; emits [ParsedAction] values through the callback.
- */
 class AnsiParser {
     private enum class State {
         GROUND, ESCAPE, ESCAPE_INTERMEDIATE,
@@ -55,7 +50,6 @@ class AnsiParser {
     }
 
     private fun processByte(byte: Int, action: (ParsedAction) -> Unit) {
-        // UTF-8 continuation handling (only in ground state)
         if (utf8Remaining > 0) {
             if (byte and 0xC0 == 0x80) {
                 utf8Buffer[utf8Len++] = byte.toByte()
@@ -69,7 +63,6 @@ class AnsiParser {
             } else {
                 utf8Len = 0
                 utf8Remaining = 0
-                // fall through to re-process this byte
             }
         }
 
@@ -90,7 +83,7 @@ class AnsiParser {
             0x1B -> state = State.ESCAPE
             in 0x00..0x1A, in 0x1C..0x1F -> action(ParsedAction.ControlChar(byte))
             in 0x20..0x7E -> action(ParsedAction.Printable(byte))
-            0x7F -> { /* DEL ignored */ }
+            0x7F -> {  }
             in 0xC0..0xDF -> {
                 utf8Buffer[0] = byte.toByte(); utf8Len = 1; utf8Remaining = 1
             }
@@ -100,20 +93,20 @@ class AnsiParser {
             in 0xF0..0xF7 -> {
                 utf8Buffer[0] = byte.toByte(); utf8Len = 1; utf8Remaining = 3
             }
-            else -> { /* invalid start byte */ }
+            else -> {  }
         }
     }
 
     private fun processEscape(byte: Int, action: (ParsedAction) -> Unit) {
         when (byte) {
-            0x5B -> { // [
+            0x5B -> {
                 state = State.CSI_ENTRY
                 csiParams.clear()
                 currentParam = 0
                 hasParam = false
                 csiIntermediate = null
             }
-            0x5D -> { // ]
+            0x5D -> {
                 state = State.OSC_PARAM
                 oscCommand = 0
                 oscPayload.setLength(0)
@@ -125,14 +118,14 @@ class AnsiParser {
                 action(ParsedAction.EscDispatch(byte.toChar()))
                 state = State.GROUND
             }
-            0x1B -> { /* new ESC, stay in escape */ }
+            0x1B -> {  }
             else -> state = State.GROUND
         }
     }
 
     private fun processEscapeIntermediate(byte: Int, action: (ParsedAction) -> Unit) {
         when (byte) {
-            in 0x20..0x2F -> { /* absorb additional intermediates */ }
+            in 0x20..0x2F -> {  }
             in 0x30..0x7E -> {
                 action(ParsedAction.EscDispatch(byte.toChar()))
                 state = State.GROUND
@@ -209,7 +202,7 @@ class AnsiParser {
 
     private fun processCsiIntermediate(byte: Int, action: (ParsedAction) -> Unit) {
         when (byte) {
-            in 0x20..0x2F -> { /* more intermediates */ }
+            in 0x20..0x2F -> {  }
             in 0x40..0x7E -> {
                 if (hasParam) csiParams.add(currentParam)
                 action(ParsedAction.CsiDispatch(
@@ -255,12 +248,11 @@ class AnsiParser {
             in 0x20..0x7E, in 0x80..0xFF -> {
                 oscPayload.append(byte.toChar())
             }
-            else -> { /* ignore */ }
+            else -> {  }
         }
     }
 
     private fun decodeUtf8(buf: ByteArray, len: Int): Int {
-        // buf[0..len-1] is a complete UTF-8 sequence
         val b0 = buf[0].toInt() and 0xFF
         return when {
             len == 2 -> ((b0 and 0x1F) shl 6) or (buf[1].toInt() and 0x3F)

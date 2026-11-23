@@ -10,15 +10,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-414-usage-tap-band] openminis/openminis#414: only a blank tap within five
- * lines of text above the usage capsule reveals it; blank taps anywhere else in
- * the reply do nothing.
- */
 class UsageTapBandTest {
 
-    // Pixel-4a-like density (1dp = 2.75px). An 8-line text node, lines 24dp tall,
-    // 300dp wide; every line ends at 120dp, so x = 200dp is clear of text.
     private val d = 2.75f
     private fun dp(v: Float) = v * d
     private val lineH = dp(24f)
@@ -26,7 +19,6 @@ class UsageTapBandTest {
     private val eight = lines(8)
     private val blankX = dp(200f)
 
-    /** The band when this node is the block's last row: its bottom is the capsule's position. */
     private fun bandOf(lineCount: Int, lineHeight: Float = lineH) = UsageTapBand.band(lineHeight * lineCount, lineHeight)
 
     private fun decide(
@@ -36,7 +28,6 @@ class UsageTapBandTest {
 
     private fun midOfLine(i: Int) = lineH * i + lineH / 2
 
-    // ── The band itself ────────────────────────────────────────────────────
 
     @Test fun `the band is five lines high and ends at the capsule`() {
         val b = bandOf(8) as Band.Range
@@ -108,13 +99,9 @@ class UsageTapBandTest {
     }
 
     @Test fun `an earlier row of the same block - the band is measured from the capsule, not from that row`() {
-        // The tapped row is 3 lines tall; the block's last row (2 lines) and a
-        // 22px gap sit below it, so the capsule is 66*2+22 px under this row's bottom.
         val rowLines = lines(3)
         val anchor = lineH * 3 + 22f + lineH * 2
         val band = UsageTapBand.band(anchor, lineH) as Band.Range
-        // 5 lines up from the capsule: the last row's 2 lines, the gap, and the
-        // lower part of this row.
         assertEquals(anchor - 5 * lineH, band.top, 0.001f)
         assertEquals(Kind.BLANK, decide(midOfLine(2), band, ls = rowLines))
         assertEquals(Kind.BLANK, decide(midOfLine(1), band, ls = rowLines))
@@ -128,33 +115,22 @@ class UsageTapBandTest {
         assertEquals(Band.None, UsageTapBand.band(500f, Float.NaN))
     }
 
-    // ── The line height unit ───────────────────────────────────────────────
 
     @Test fun `the unit is the line height the text was laid out with, not a constant`() {
-        // A middle-of-paragraph-sized last line: box = line height.
         assertEquals(66f, UsageTapBand.lastLineHeightPx(132f, 198f, 66f), 0.001f)
-        // Trim.Both: the last line's box has no leading below it (55 of 66), and
-        // in a one-line paragraph none above either (44 of 66). Still a full line.
         assertEquals(66f, UsageTapBand.lastLineHeightPx(55f, 110f, 66f), 0.001f)
         assertEquals(66f, UsageTapBand.lastLineHeightPx(0f, 44f, 66f), 0.001f)
-        // A larger font size setting: the style value scales, so does the unit.
         assertEquals(85.8f, UsageTapBand.lastLineHeightPx(0f, 57f, 85.8f), 0.001f)
     }
 
     @Test fun `lines of different sizes - the last line's height is the unit`() {
-        // No line height in the style: the last line's own box (35), not the
-        // taller lines above it (90, 40).
         assertEquals(35f, UsageTapBand.lastLineHeightPx(130f, 165f, null), 0.001f)
-        // A last line taller than the style says (a fallback font): its box.
         assertEquals(70f, UsageTapBand.lastLineHeightPx(0f, 70f, 66f), 0.001f)
-        // A heading as the block's last text is laid out with its own, larger
-        // line height: the band is five of THOSE lines.
         val heading = UsageTapBand.band(500f, UsageTapBand.lastLineHeightPx(0f, 80f, 96f)) as Band.Range
         assertEquals(480f, heading.bottom - heading.top, 0.001f)
         assertEquals(0f, UsageTapBand.lastLineHeightPx(null, null, null), 0f)
     }
 
-    // ── Which text block has a band: fed through the real row builder ──────
 
     private var n = 0
     private fun block(kind: String, content: String = "") = AssistantBlock(id = "b${n++}", kind = kind, content = content)
@@ -171,7 +147,6 @@ class UsageTapBandTest {
         assertEquals(UsageTapBand.endsWithText("thinking", true), false)
         assertEquals(UsageTapBand.endsWithText(null, false), false)
 
-        // tool, then the final reply: the reply has the band.
         val a = rows(text("Let me check."), tool(), text("Done.\n\nAll good."))
         val first = a.filter { it.rawText.startsWith("Let me") }
         val last = a.filter { !it.rawText.startsWith("Let me") }
@@ -187,7 +162,6 @@ class UsageTapBandTest {
         assertTrue(rows(text("Answer."), block("thinking", "hmm")).none { it.inFinalTextBlock })
         assertTrue("an empty trailing text block renders nothing and does not count",
             rows(text("Answer."), tool(), text("")).none { it.inFinalTextBlock })
-        // Two text blocks in a row: only the second, which the capsule follows.
         val two = rows(text("First."), text("Second."))
         assertEquals(listOf(false, true), two.map { it.inFinalTextBlock })
     }
@@ -195,23 +169,19 @@ class UsageTapBandTest {
     @Test fun `while streaming the final text is whatever is last at the time of the tap`() {
         val t = text("Working on it.")
         assertTrue(rows(t, streaming = true).all { it.inFinalTextBlock })
-        // A tool call lands after it: the same text block no longer ends the message.
         val after = rows(t, tool(), streaming = true)
         assertTrue(after.none { it.inFinalTextBlock })
         assertFalse("the row is a different value, so the list re-renders it",
             rows(t, streaming = true).single() == after.single())
     }
 
-    // ── Wiring guards ──────────────────────────────────────────────────────
 
     @Test fun `the tap handler asks the registry for the band at tap time and passes it to the decision`() {
         val src = ProductionSources.read("ui/chat/StreamingMarkdownText.kt")
         val tap = src.substringAfter("val tapModifier = if (hasUrlAnnotation").substringBefore("    } else Modifier\n    Text(")
         assertTrue(tap.contains("bandRegistry.bandFor(bandRow, layoutCoordinatesHolder[0], result)"))
         assertTrue(tap.contains("band = band,"))
-        // In a chat list a text outside a final text block is not a blank-tap target at all.
         assertTrue(src.contains("if (bandRegistry != null) bandRow?.messageId else LocalShardId.current?.messageId"))
-        // The band only filters what was already blank.
         val geo = ProductionSources.read("ui/chat/BlankTapGeometry.kt").substringAfter("fun decide(").substringBefore("\n    }\n")
         assertTrue(geo.trimEnd().endsWith("return if (band.contains(tap.y)) Kind.BLANK else Kind.OUTSIDE_BAND"))
         assertEquals("the only place the band is consulted", 1, Regex("band\\.contains").findAll(geo).count())
@@ -228,7 +198,6 @@ class UsageTapBandTest {
             assertTrue(screen, md.contains("inFinalTextBlock = item.inFinalTextBlock,"))
             assertTrue(screen, md.contains("isLastRow = item.isLastBlockOfMessage,"))
         }
-        // The capsule row itself is untouched: dismiss-only, exact bounds.
         val row = ProductionSources.read("ui/chat/BlankTapGeometry.kt").substringAfter("internal fun UsageCapsuleRow(")
         assertTrue(row.contains("if (shown) {"))
         assertFalse(row.contains("UsageTapBand"))

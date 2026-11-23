@@ -4,13 +4,8 @@ import com.openminis.app.data.repository.MemoryRepository
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Tool definitions and execution for memory_write and memory_get.
- * Schema matches iOS AgentToolDefinition exactly.
- */
 object MemoryTools {
 
-    // -- Tool Definitions (Anthropic format) --
 
     fun memoryWriteToolDefinition(): JSONObject {
         val properties = JSONObject().apply {
@@ -71,7 +66,6 @@ object MemoryTools {
         }
     }
 
-    // -- OpenAI Function Calling format --
 
     fun memoryWriteOpenAIDefinition(): JSONObject {
         return JSONObject().apply {
@@ -95,7 +89,6 @@ object MemoryTools {
         }
     }
 
-    // -- Execution --
 
     data class ToolResult(
         val output: String,

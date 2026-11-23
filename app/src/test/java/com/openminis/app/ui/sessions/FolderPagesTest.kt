@@ -7,13 +7,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-folder-pages] An open folder lists its first 20 members with "Show N more
- * (M left)" for the rest (port of iOS 14bc208b1, FolderPagesTests.swift).
- */
 class FolderPagesTest {
 
-    // ── Page maths (iOS vectors) ───────────────────────────────────────────
 
     @Test fun `pages of 15, 20, 21 and 45`() {
         assertEquals(15 to 0, FolderPages.page(15, 1))
@@ -63,7 +58,6 @@ class FolderPagesTest {
         assertEquals(1, FolderPages.revealing(-1, 0))
     }
 
-    // ── Stored pages: a state model of the view model's map ────────────────
 
     @Test fun `show more, collapse resets, reveal is kept, other folders are ignored`() {
         var pages = emptyMap<String, Int>()
@@ -71,28 +65,22 @@ class FolderPagesTest {
         assertEquals(mapOf("a" to 2), pages)
         pages = FolderPages.afterShowMore(pages, open = "a", folderId = "a", pagesShown = 2)
         assertEquals(mapOf("a" to 3), pages)
-        // A stale tap for a folder that is not open changes nothing.
         assertEquals(pages, FolderPages.afterShowMore(pages, open = "a", folderId = "b", pagesShown = 1))
-        // Collapsing (null) or opening another folder (accordion) drops the entry.
         assertEquals(emptyMap<String, Int>(), FolderPages.afterOpenChanged(pages, null))
         assertEquals(emptyMap<String, Int>(), FolderPages.afterOpenChanged(pages, "b"))
         assertEquals(pages, FolderPages.afterOpenChanged(pages, "a"))
-        // A reveal is stored, and never narrows a wider choice.
         assertEquals(mapOf("b" to 2), FolderPages.afterReveal(emptyMap(), open = "b", folderId = "b", revealed = 2))
         assertEquals(mapOf("b" to 3), FolderPages.afterReveal(mapOf("b" to 3), open = "b", folderId = "b", revealed = 2))
         assertEquals(emptyMap<String, Int>(), FolderPages.afterReveal(emptyMap(), open = null, folderId = "b", revealed = 2))
     }
 
     @Test fun `show more after a reveal counts from the pages on screen`() {
-        // Stored 1, but a reveal shows 3: the tap must open page 4, not 2.
         assertEquals(mapOf("a" to 4), FolderPages.afterShowMore(emptyMap(), open = "a", folderId = "a", pagesShown = 3))
     }
 
-    // ── partitionByFolder ──────────────────────────────────────────────────
 
     private fun folder(id: String) = FolderEntity(id = id, name = "F-$id", createdAt = 0, updatedAt = 0)
 
-    /** n members of folder [fid], newest first; ids "fid-0" (newest) … */
     private fun members(fid: String, n: Int, pinned: Set<Int> = emptySet()) = (0 until n).map { i ->
         ChatSessionEntity(
             id = "$fid-$i", modelId = "m", createdAt = 0, updatedAt = 10_000L - i, folderId = fid,
@@ -147,7 +135,6 @@ class FolderPagesTest {
         assertTrue("a-33" in b.ids)
         assertEquals(2, b.pagesShown)
         assertEquals(40 to 5, b.ids.size to b.hiddenCount)
-        // A revealed id outside the folder changes nothing.
         assertEquals(1, block(45, reveal = setOf("elsewhere")).pagesShown)
     }
 
@@ -165,7 +152,6 @@ class FolderPagesTest {
         assertEquals(45, b.totalCount)
     }
 
-    // ── Localization ───────────────────────────────────────────────────────
 
     @Test fun `the show-more row is translated in every locale the app ships`() {
         val res = listOf(File("src/main/res"), File("app/src/main/res")).first { it.isDirectory }

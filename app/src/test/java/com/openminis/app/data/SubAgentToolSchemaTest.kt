@@ -12,13 +12,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-sub-agents-v1] The tool surface the model sees.
- *
- * The schema is a contract with the model, and both platforms are supposed to
- * present the same one. These pin the shape iOS settled on: ONE tool carrying
- * five actions, a dynamic `agent` enum, and only `tool_title` required.
- */
 class SubAgentToolSchemaTest {
 
     private fun tools(
@@ -34,7 +27,6 @@ class SubAgentToolSchemaTest {
     private fun subAgentTool(vararg names: String) =
         tools(rosterNames = names.toList()).find { it.name == SubAgentDefinition.TOOL_NAME }
 
-    // ── One tool, not two ───────────────────────────────────────────────────
 
     @Test
     fun `the schema exposes subagent_task and no separate status tool`() {
@@ -46,7 +38,6 @@ class SubAgentToolSchemaTest {
 
     @Test
     fun `a helper never sees the tool`() {
-        // Depth 1: a sub agent cannot delegate further.
         val all = tools(isHelper = true).map { it.name }
         assertFalse(all.contains(SubAgentDefinition.TOOL_NAME))
     }
@@ -57,13 +48,9 @@ class SubAgentToolSchemaTest {
         assertFalse(all.contains(SubAgentDefinition.TOOL_NAME))
     }
 
-    // ── Parameters ──────────────────────────────────────────────────────────
 
     @Test
     fun `only tool_title is required`() {
-        // `task` is required for action=delegate and meaningless for
-        // status/cancel — a distinction JSON Schema cannot express, so the
-        // dispatcher enforces it instead.
         val tool = subAgentTool()!!
         assertEquals(listOf("tool_title"), tool.required)
     }
@@ -88,8 +75,6 @@ class SubAgentToolSchemaTest {
 
     @Test
     fun `the agent enum is the live roster so a name cannot be invented`() {
-        // Built from the same roster the resolver matches on: a name can never
-        // be advertised in one and rejected by the other.
         val tool = subAgentTool("General Sub Agent", "Researcher", "Reviewer")!!
         assertEquals(
             listOf("General Sub Agent", "Researcher", "Reviewer"),
@@ -117,14 +102,9 @@ class SubAgentToolSchemaTest {
         assertNotNull("resume needs child_session_id", p["child_session_id"])
     }
 
-    // ── Back-compat: the rename must not orphan shipped transcripts ─────────
 
     @Test
     fun `the pre-rename tool names are still recognised`() {
-        // Delegation SHIPPED on Android, so real devices hold transcripts with
-        // delegate_task blocks. The renderer and dispatcher key off the tool
-        // name; dropping the old names would turn every past delegation into an
-        // anonymous tool row and make a replayed call hit "Unknown tool".
         assertTrue(HelperRunner.isSubAgentToolName("subagent_task"))
         assertTrue(HelperRunner.isSubAgentToolName("delegate_task"))
         assertTrue(HelperRunner.isSubAgentToolName("agent_status"))
@@ -148,7 +128,6 @@ class SubAgentToolSchemaTest {
         }
     }
 
-    // ── Argument parsing ────────────────────────────────────────────────────
 
     @Test
     fun `agent and model_choice are parsed off the call`() {
@@ -167,8 +146,6 @@ class SubAgentToolSchemaTest {
 
     @Test
     fun `an unknown model choice falls back to the parent's model`() {
-        // The safe direction: default_model can cost far more than the model
-        // the user actually chose for this conversation.
         for (raw in listOf("", "nonsense", "SAME_AS_ME")) {
             assertEquals(
                 "'$raw' must parse to same_as_me",
@@ -186,7 +163,6 @@ class SubAgentToolSchemaTest {
         assertEquals(10, HelperRunner.parseArgs("""{"task":"x"}""").minutes)
     }
 
-    // ── The child's instructions section ────────────────────────────────────
 
     @Test
     fun `a definition's instructions are appended under the shared delimiter`() {
@@ -201,7 +177,6 @@ class SubAgentToolSchemaTest {
         assertEquals("", HelperRunner.subAgentInstructionsSection("   \n  "))
     }
 
-    // ── The roster section in the system prompt ─────────────────────────────
 
     @Test
     fun `the roster section names each agent and where it runs`() {
@@ -237,14 +212,6 @@ class SubAgentToolSchemaTest {
     }
 }
 
-/**
- * [T-sub-agents-v1] What the parent learns about a finished sub agent.
- *
- * `model_origin` and `model_group_unavailable` exist so a fan-out that behaved
- * inconsistently can be explained without guessing — and specifically so a
- * pinned group that silently stopped applying is visible rather than reading as
- * a bug months later.
- */
 class SubAgentResultPayloadTest {
 
     private fun payload(
@@ -270,7 +237,6 @@ class SubAgentResultPayloadTest {
 
     @Test
     fun `a named sub agent is reported and the built-in is not`() {
-        // Nothing to disambiguate for the built-in, so the key stays absent.
         assertEquals("Researcher", payload(agentName = "Researcher").optString("agent"))
         assertFalse(payload(agentName = null).has("agent"))
     }

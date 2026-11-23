@@ -5,14 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/**
- * [B01 cross-platform read] The credentials line under a finished restore.
- *
- * In the B01 cross-device test a backup whose provider_config.json could not
- * be read restored nothing ("unreadable 1"), and the report still said
- * "restored providers have no credentials - enter each API key": there were
- * no restored providers. The line is only for providers the restore wrote.
- */
 class RestoreCredentialsNoticeTest {
 
     private fun providers(

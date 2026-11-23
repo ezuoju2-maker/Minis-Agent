@@ -9,12 +9,6 @@ import org.junit.Test
 import java.util.UUID
 import com.openminis.app.ui.chat.share.ChatShareCell.Kind as k
 
-/**
- * [T-multi-select-share] Port of iOS MinisTests/Standalone/ChatShareModelTests.swift:
- * unit grouping, cells, round selection, select below, render groups, table
- * chunking, adaptive-table geometry, PDF pagination, the height estimate and the
- * long-image budget.
- */
 class ChatShareModelTest {
 
     private fun src(role: ChatShareUnitSource.Role, callback: Boolean = false, hidden: Boolean = false) =
@@ -204,8 +198,6 @@ class ChatShareModelTest {
         assertEquals("the list's spacedBy(2.dp)", 2f, row)
         assertEquals("card -> its reply (no header), or reply -> card without usage", row, ChatShareSpacing.gapBetween(false, false))
         assertEquals("finished reply -> next card / question: + the hidden usage row", 2 * row, ChatShareSpacing.gapBetween(true, false))
-        // Where the chat draws the assistant header the export stands in for it:
-        // bubble bottom 4 + 2 + 16 = 22, the question/answer gap from before.
         assertEquals("question -> answer", 18f, ChatShareSpacing.gapBetween(false, true))
         assertEquals("finished answer -> answer (question left out)", 20f, ChatShareSpacing.gapBetween(true, true))
         assertTrue(ChatShareSpacing.followsUserRow(bubble) && ChatShareSpacing.followsUserRow(card))
@@ -217,7 +209,6 @@ class ChatShareModelTest {
         val u = s.getValue("USER"); val a = s.getValue("ASSISTANT"); val x = s.getValue("SKIPPED")
         assertTrue("first message", ChatShareSpacing.headerAbove(listOf(a), 0))
         assertTrue("answer to a question", ChatShareSpacing.headerAbove(listOf(u, a), 1))
-        // The field report: reply, fire card, reply, fire card, reply - no header after a card.
         assertFalse("reply to a fire after a reply", ChatShareSpacing.headerAbove(listOf(u, a, x, a, x, a), 3))
         assertFalse(ChatShareSpacing.headerAbove(listOf(u, a, x, a, x, a), 5))
         assertTrue("a chat that starts with a fire", ChatShareSpacing.headerAbove(listOf(x, a), 1))
@@ -226,11 +217,8 @@ class ChatShareModelTest {
 
     @Test fun `pages never end inside a card`() {
         val breaks = listOf(100f, 130f, 150f, 170f, 200f)
-        // A card from 120 to 170: its text line at 150 is not a break; its edges are.
         assertEquals(listOf(100f, 170f, 200f), ChatSharePagination.withoutCutsThrough(breaks, listOf(120f to 170f)))
         assertEquals(breaks, ChatSharePagination.withoutCutsThrough(breaks, emptyList()))
-        // With no clean break left in the card's page, the card moves whole to the next page.
-        // 276 of 678 left: enough that the part would be split, but the card's lines are no breaks.
         val cursor = ChatSharePagination.Cursor(page = 0, y = 400f)
         val slices = ChatSharePagination.place(
             height = 300f, breaks = ChatSharePagination.withoutCutsThrough(listOf(100f, 200f), listOf(0f to 300f)),
@@ -239,7 +227,6 @@ class ChatShareModelTest {
         assertEquals(1, slices.size)
         assertEquals(1, slices[0].page)
         assertEquals(0f, slices[0].unitY)
-        // Without the filter the same part would have been cut through the card.
         val cut = ChatSharePagination.place(300f, listOf(100f, 200f), 678f, 2f, ChatSharePagination.Cursor(page = 0, y = 400f))
         assertTrue(cut.size > 1)
     }

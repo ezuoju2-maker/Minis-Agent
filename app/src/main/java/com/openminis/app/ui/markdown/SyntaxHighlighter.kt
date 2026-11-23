@@ -5,18 +5,14 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 
-/**
- * Lightweight syntax highlighter for code blocks.
- * Applies keyword/string/comment/number coloring for common languages.
- */
 object SyntaxHighlighter {
 
-    private val keywordColor = Color(0xFF569CD6)     // blue
-    private val stringColor = Color(0xFFCE9178)       // orange
-    private val commentColor = Color(0xFF6A9955)      // green
-    private val numberColor = Color(0xFFB5CEA8)       // light green
-    private val typeColor = Color(0xFF4EC9B0)         // teal
-    private val defaultColor = Color(0xFFD4D4D4)      // light gray
+    private val keywordColor = Color(0xFF569CD6)
+    private val stringColor = Color(0xFFCE9178)
+    private val commentColor = Color(0xFF6A9955)
+    private val numberColor = Color(0xFFB5CEA8)
+    private val typeColor = Color(0xFF4EC9B0)
+    private val defaultColor = Color(0xFFD4D4D4)
 
     private val commonKeywords = setOf(
         "if", "else", "for", "while", "return", "break", "continue", "switch", "case",
@@ -36,7 +32,6 @@ object SyntaxHighlighter {
         "List", "Map", "Set", "Array", "HashMap", "ArrayList", "Optional",
     )
 
-    // Token regex: strings, comments, numbers, words
     private val TOKEN_REGEX = Regex(
         """(//[^\n]*|#[^\n]*|/\*[\s\S]*?\*/)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`)|(\b\d+\.?\d*\b)|(\b[a-zA-Z_]\w*\b)|([^\s\w]+|\s+)"""
     )

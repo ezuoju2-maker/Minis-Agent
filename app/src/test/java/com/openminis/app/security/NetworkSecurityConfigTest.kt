@@ -10,12 +10,6 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
 
-/**
- * Validates invariants of [network_security_config.xml]:
- * 1. Base config permits both system and user CAs (for self-hosted HTTPS endpoints - Issue #258).
- * 2. High-risk official provider and auth domains strictly permit only system CAs (preventing MITM key exfiltration).
- * 3. Mutation tests verifying assertions accurately flag unsafe configurations (missing protected domains, user CA leaks into official domains, or missing user CA in base config).
- */
 class NetworkSecurityConfigTest {
 
     private val protectedDomains = setOf(
@@ -37,7 +31,6 @@ class NetworkSecurityConfigTest {
     }
 
     private fun loadConfigXml(): Element {
-        // Resolve network_security_config.xml relative to working directory or project root
         val candidates = listOf(
             File("src/main/res/xml/network_security_config.xml"),
             File("app/src/main/res/xml/network_security_config.xml"),

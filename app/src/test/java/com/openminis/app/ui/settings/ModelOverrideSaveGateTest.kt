@@ -8,22 +8,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-model-override-silent-drop] The model detail screen's Save gate.
- *
- * A user set a context window to 400000 and saved; after the daily model
- * refresh it read 1048576 again. The override had never been written: the save
- * gate compared each field against `baseModel` while the controls loaded from
- * override-or-base, so a value equal to today's auto value counted as "no
- * opinion". iOS fixed the same defect in 4ef8a48d7.
- *
- * Every behavioural test below also runs the OLD rule and asserts it produces
- * the wrong answer, so none of them can pass vacuously — a revert of the
- * production change has to fail here rather than merely stop being exercised.
- */
 class ModelOverrideSaveGateTest {
 
-    // ── the old, defective rules, kept verbatim for contrast ──────────────
 
     private fun oldSupportsReasoning(thinkingEnabled: Boolean, baseSupports: Boolean?): Boolean? =
         thinkingEnabled.takeIf { it != (baseSupports ?: false) }
@@ -34,7 +20,6 @@ class ModelOverrideSaveGateTest {
     private fun oldDisplayName(typed: String, baseName: String): String? =
         typed.trim().takeIf { it.isNotEmpty() && it != baseName }
 
-    /** Call the production gate with everything untouched unless stated. */
     private fun save(
         existing: ModelOverrides = ModelOverrides(),
         displayNameText: String = "",
@@ -61,16 +46,11 @@ class ModelOverrideSaveGateTest {
         outputModalitiesTouched = outputModalitiesTouched,
     )
 
-    // ── the reported case ─────────────────────────────────────────────────
 
     @Test
     fun `a context window equal to the current auto value is still recorded`() {
-        // The vendor already says 400000; the user types 400000 anyway.
         val result = save(contextWindowText = "400000")
         assertEquals(400_000, result.contextWindow)
-        // Which is what makes it survive a later vendor bump: resolution is
-        // `overrides.contextWindow ?: baseModel.contextWindow`, so a non-null
-        // override wins over the refreshed 1048576.
     }
 
     @Test
@@ -91,15 +71,12 @@ class ModelOverrideSaveGateTest {
         assertNull(save(contextWindowText = "abc").contextWindow)
     }
 
-    // ── supportsReasoning: touched wins over "equals base" ────────────────
 
     @Test
     fun `a thinking toggle set to the same value as base is still recorded`() {
-        // base already true, user deliberately leaves it on and saves.
         val result = save(thinkingEnabled = true, thinkingTouched = true)
         assertEquals(true, result.supportsReasoning)
 
-        // The old rule dropped exactly this, which is the bug.
         assertNull("old rule must fail here", oldSupportsReasoning(true, baseSupports = true))
     }
 
@@ -107,15 +84,11 @@ class ModelOverrideSaveGateTest {
     fun `an untouched thinking toggle records nothing and keeps inheriting`() {
         val result = save(thinkingEnabled = true, thinkingTouched = false)
         assertNull(result.supportsReasoning)
-        // This is what keeps ModelOverrides.isEmpty meaningful: opening the
-        // screen and pressing Save must not stamp an override on every model.
         assertTrue(result.isEmpty)
     }
 
     @Test
     fun `an existing thinking override survives the vendor catching up`() {
-        // override=true, and the vendor has now also moved to true. A no-op
-        // re-save must not drop the user's choice (failure mode 2).
         val existing = ModelOverrides(supportsReasoning = true)
         val result = save(existing = existing, thinkingEnabled = true, thinkingTouched = false)
         assertEquals(true, result.supportsReasoning)
@@ -125,14 +98,10 @@ class ModelOverrideSaveGateTest {
 
     @Test
     fun `turning the thinking toggle off is recorded as an explicit false`() {
-        // Distinct from null: false means "the user said no", null means
-        // "inherit". Resolution is `overrides.supportsReasoning ?: base`, so
-        // only a non-null false suppresses a vendor-declared true.
         val result = save(thinkingEnabled = false, thinkingTouched = true)
         assertEquals(false, result.supportsReasoning)
     }
 
-    // ── modalities ────────────────────────────────────────────────────────
 
     @Test
     fun `a touched modality set equal to base is still recorded`() {
@@ -159,8 +128,6 @@ class ModelOverrideSaveGateTest {
 
     @Test
     fun `clearing every input switch records an empty list not null`() {
-        // Empty and null differ: null inherits the vendor's modalities, empty
-        // is the user stating this model accepts none of them.
         val existing = ModelOverrides(inputModalities = listOf("image"))
         val result = save(existing = existing, inputModalities = emptyList(), inputModalitiesTouched = true)
         assertNotNull(result.inputModalities)
@@ -179,7 +146,6 @@ class ModelOverrideSaveGateTest {
         assertNull(result.outputModalities)
     }
 
-    // ── displayName ───────────────────────────────────────────────────────
 
     @Test
     fun `a display name equal to the base name is still recorded when touched`() {
@@ -203,13 +169,9 @@ class ModelOverrideSaveGateTest {
         assertEquals("My Name", result.displayName)
     }
 
-    // ── fields this screen cannot edit must survive a save ────────────────
 
     @Test
     fun `per-model tuning set elsewhere is not wiped by saving this screen`() {
-        // None of these have an editor here; they arrive via backup import or
-        // iCloud sync. The previous inline construction omitted them entirely,
-        // so they defaulted to null and a single Save silently erased them.
         val existing = ModelOverrides(
             maxThinkingLevel = ThinkingLevel.HIGH,
             temperature = 0.0,
@@ -219,18 +181,14 @@ class ModelOverrideSaveGateTest {
         val result = save(existing = existing, contextWindowText = "1000")
 
         assertEquals(ThinkingLevel.HIGH, result.maxThinkingLevel)
-        // 0.0 specifically: it is a legitimate temperature, so it must not be
-        // conflated with "unset".
         assertEquals(0.0, result.temperature!!, 0.0)
         assertEquals(0.9, result.topP!!, 0.0)
         assertEquals(mapOf("X-Test" to "1"), result.customHeaders)
     }
 
-    // ── the whole point, end to end ───────────────────────────────────────
 
     @Test
     fun `a fresh entry saved with no edits at all stays empty`() {
-        // The fast path in ProviderConfig.model depends on this staying true.
         assertTrue(save().isEmpty)
     }
 }

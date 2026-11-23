@@ -6,32 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-stream-fade-seed] + [T-android-freeze-edge-flash]
- *
- * Two streaming-render regressions from the same session, both "content that
- * was on screen vanished for a beat, then came back":
- *
- *  1. A bullet list's first item — already rendered — went to an empty bullet
- *     the moment the second item's text arrived, then both items faded in
- *     together. The list had not been the LAST block (a bare `-` parsed as a
- *     trailing paragraph), so it rendered opaque with no fade controller.
- *     When the `-` became item 2, the list became last, fade flipped on, and
- *     a FRESH FadeController was handed item 1's text. Its prefix-diff saw
- *     `lastPlainText == ""` — every string starts with "" — and sliced the
- *     whole thing into ranges at alpha 0. That is the erasure.
- *
- *  2. A 462-char table rendered, dropped to raw `| 城市 |---|` pipes for one
- *     parse, then rendered again. The live branch only deposited its parse
- *     into the freeze-edge cache above 2000 chars, on the assumption that a
- *     small cold miss would parse synchronously; the ANR fix later made EVERY
- *     cold miss go off-main behind a plain-text preview, and the gate became a
- *     guarantee that small fragments flash.
- *
- * The controller tests below run the real class. The rest pins the wiring
- * (structure-stable block loops, seed routing, ungated replace-previous
- * deposit) as source facts, since Compose composition needs a device.
- */
 class StreamingFadeSeedTest {
 
     private fun activeRanges(c: FadeController): List<IntRange> {
@@ -40,13 +14,9 @@ class StreamingFadeSeedTest {
         return out
     }
 
-    // ---- FadeController: the mechanism ------------------------------------
 
     @Test
     fun `a fresh controller fed via ingest fades ALL of its first text`() {
-        // This is the pre-existing behaviour, kept on purpose: it is correct
-        // for a brand-new paragraph appearing as the live tail. It is also
-        // exactly what erased the list item — which is why seed() exists.
         val c = FadeController()
         c.ingest("hello world")
         assertTrue(c.hasSeenText)
@@ -64,11 +34,9 @@ class StreamingFadeSeedTest {
 
     @Test
     fun `the reported shape - a controller born after render never masks offset 0`() {
-        // Controller created at the flip, handed text the user was reading.
         val visible = "華南的廣州、深圳：高溫又可能有雷雨 ⚡"
         val c = FadeController()
         c.seed(visible)
-        // The same text recomposes through again (nothing appended yet).
         c.ingest(visible)
         assertFalse("already-visible text must not be re-faded", c.hasActiveRanges)
         assertTrue(activeRanges(c).none { 0 in it })
@@ -76,8 +44,6 @@ class StreamingFadeSeedTest {
 
     @Test
     fun `words appended AFTER a seed still fade in`() {
-        // Seeding must not kill the fade for real appends — that is the
-        // whole feature. Only the birth text is exempt.
         val c = FadeController()
         c.seed("hello world")
         c.ingest("hello world foo bar")
@@ -89,8 +55,6 @@ class StreamingFadeSeedTest {
 
     @Test
     fun `seed then diverged text clears rather than fades`() {
-        // The existing hard-reset path (text not a prefix extension) is
-        // unchanged by seeding: divergence renders opaque, never at alpha 0.
         val c = FadeController()
         c.seed("abc def")
         c.ingest("xyz")
@@ -100,15 +64,11 @@ class StreamingFadeSeedTest {
 
     @Test
     fun `hasSeenText is set by both entry points`() {
-        // MdText decides seed-vs-ingest on this flag; if either path forgot
-        // to set it, a second composition would seed again and drop a real
-        // append on the floor.
         assertTrue(FadeController().apply { seed("a") }.hasSeenText)
         assertTrue(FadeController().apply { ingest("a") }.hasSeenText)
         assertFalse(FadeController().hasSeenText)
     }
 
-    // ---- Wiring: source facts --------------------------------------------
 
     private val md by lazy {
         File("src/main/java/com/openminis/app/ui/chat/StreamingMarkdownText.kt").readText()
@@ -122,8 +82,6 @@ class StreamingFadeSeedTest {
             "must capture fade state at birth with a KEYLESS remember",
             fade.contains("val fadeFromBirth = remember { fadeEnabled }"),
         )
-        // [T-android-stream-fade-reentry] The first-text decision moved into
-        // fadeBirthPlan, which also handles a node REBUILT with fade on.
         assertTrue(
             "late-born controller must seed",
             fade.contains("if (!fadeController.hasSeenText)") &&
@@ -136,9 +94,6 @@ class StreamingFadeSeedTest {
 
     @Test
     fun `no block loop wraps only the last block any more`() {
-        // The if/else that wrapped just the last block in a provider gave the
-        // two branches different group shapes; a shift in lastIdx disposed the
-        // subtree and every controller with it.
         assertEquals(
             "a literal `provides true` on the fade local means a last-block-only wrapper is back",
             0,
@@ -157,9 +112,6 @@ class StreamingFadeSeedTest {
 
     @Test
     fun `the frozen-history path composes without per-block providers`() {
-        // Structure-stability is only needed while streaming. Paying a
-        // provider per block on cold-loaded history would tax exactly the
-        // session-open path the ANR fix protects.
         val loopA = md.substringAfter("[T-android-stream-fade-seed] Every block goes through the SAME")
             .substringBefore("blocks.forEach { RenderBlock(it) }")
         assertTrue("loop A must gate the provider loop on isStreaming", loopA.contains("if (isStreaming) {"))

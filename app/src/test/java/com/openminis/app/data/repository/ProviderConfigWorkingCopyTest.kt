@@ -5,9 +5,6 @@ import org.junit.Test
 
 class ProviderConfigWorkingCopyTest {
 
-    // [T-android-subagents-working-copy] Every MutableList on ProviderConfig is
-    // edited in place by some mutator; workingCopy must copy each one or the
-    // edit lands on the published config under lock-free readers.
     @Test
     fun `workingCopy copies every mutable list of ProviderConfig`() {
         val cfg = com.openminis.app.ProductionSources.read("data/model/ProviderConfig.kt")

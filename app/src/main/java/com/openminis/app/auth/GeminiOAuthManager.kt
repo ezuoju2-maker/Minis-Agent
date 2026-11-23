@@ -17,33 +17,19 @@ class GeminiOAuthManager(context: Context, instanceId: String) : OAuthManager(co
         private const val TAG = "GeminiOAuth"
         private const val USER_AGENT = "GeminiCLI/0.30.0 (android; aarch64)"
 
-        /**
-         * Proactive refresh window — mirrors [ClaudeOAuthManager] for consistent
-         * behavior across Anthropic + Google OAuth. iOS Gemini uses a 0-second
-         * buffer (only refreshes when actually expired); keeping 5 minutes here
-         * avoids a race on Google's 1-hour access tokens.
-         */
         private const val REFRESH_BUFFER_MS = 5 * 60 * 1000L
 
-        /** Per-instance refresh mutex — serializes concurrent refresh calls. */
         private val refreshMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
 
         private fun mutexFor(instanceId: String): Mutex =
             refreshMutexes.getOrPut(instanceId) { Mutex() }
     }
 
-    /**
-     * Refresh outcome classification. Mirrors [ClaudeOAuthManager.RefreshOutcome]
-     * for uniform dispatch at call sites that work with either provider.
-     */
     enum class RefreshOutcome { SUCCESS, INVALID_GRANT, TRANSIENT, NO_TOKEN }
 
     override val authURL = "https://accounts.google.com/o/oauth2/v2/auth"
     override val tokenURL = "https://oauth2.googleapis.com/token"
     override val clientId = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
-    // Placeholder. Google OAuth requires a client secret alongside the
-    // client id; supply your own from Google Cloud Console to use this
-    // sign-in. API-key providers are unaffected.
     override val clientSecret = "GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxxxxx"
     override val callbackPort = 8085
     override val redirectPath = "/oauth2callback"
@@ -80,7 +66,6 @@ class GeminiOAuthManager(context: Context, instanceId: String) : OAuthManager(co
     private suspend fun fetchUserEmail() {
         val token = validAccessToken() ?: return
         try {
-            // [FEAT-261021-16] Routed by the instance's tag; unrouted it is the same HttpURLConnection request.
             com.openminis.app.network.NetworkUrlRequest.open(netTag, "https://www.googleapis.com/oauth2/v1/userinfo",
                 headers = mapOf("Authorization" to "Bearer $token")).use { r ->
                 if (r.code == 200) email = JSONObject(r.text()).optString("email")
@@ -94,7 +79,6 @@ class GeminiOAuthManager(context: Context, instanceId: String) : OAuthManager(co
         if (!gcpProjectId.isNullOrEmpty()) return@withContext true
         val token = validAccessToken() ?: return@withContext false
 
-        // Try loadCodeAssist first
         val projectId = loadCodeAssist(token) ?: onboardUser(token)
         if (projectId != null) {
             gcpProjectId = projectId
@@ -103,7 +87,6 @@ class GeminiOAuthManager(context: Context, instanceId: String) : OAuthManager(co
         false
     }
 
-    /** The headers the Cloud Code calls have always sent, in the same order. */
     private fun cloudCodeHeaders(token: String, json: Boolean): Map<String, String> = buildMap {
         put("Authorization", "Bearer $token")
         put("User-Agent", USER_AGENT)
@@ -160,27 +143,10 @@ class GeminiOAuthManager(context: Context, instanceId: String) : OAuthManager(co
         return null
     }
 
-    // ── Token refresh with classification + concurrency protection ──
-    // Mirrors ClaudeOAuthManager's refresh machinery; see RefreshOutcome for
-    // the error taxonomy.
 
-    /** Boolean compatibility wrapper over [refreshTokenClassified]. */
     override suspend fun refreshToken(): Boolean =
         refreshTokenClassified() == RefreshOutcome.SUCCESS
 
-    /**
-     * Refresh with structured error classification. Serialized per-instance
-     * so concurrent callers share a single network round-trip. Mirrors iOS
-     * `GeminiOAuthManager.validAccessToken` error handling:
-     *
-     *  - `INVALID_GRANT` — Google returned 400/401/403 or `invalid_grant`/
-     *    `invalid_token`: refresh token is revoked/expired. Stored credentials
-     *    are kept and the instance is marked for re-login
-     *    (`markNeedsReauth`); user must re-run OAuth.
-     *  - `TRANSIENT` — network/5xx: credentials kept; caller may retry.
-     *  - `NO_TOKEN` — no stored refresh token (not logged in).
-     *  - `SUCCESS` — new access token persisted.
-     */
     suspend fun refreshTokenClassified(): RefreshOutcome = withContext(Dispatchers.IO) {
         val mutex = mutexFor(instanceId)
         mutex.withLock {
@@ -188,8 +154,6 @@ class GeminiOAuthManager(context: Context, instanceId: String) : OAuthManager(co
             val refreshTokenValue = stored.optString("refresh_token", "")
                 .ifEmpty { return@withLock RefreshOutcome.NO_TOKEN }
 
-            // Coalesce concurrent refreshers: if another coroutine refreshed
-            // while we were queued on the mutex, short-circuit with SUCCESS.
             val priorExpireAt = stored.optLong("expire_at", 0)
             val freshCheck = loadStoredTokens()?.optLong("expire_at", 0) ?: 0
             if (freshCheck > priorExpireAt && freshCheck > System.currentTimeMillis()) {
@@ -198,7 +162,6 @@ class GeminiOAuthManager(context: Context, instanceId: String) : OAuthManager(co
             }
 
             try {
-                // Google's token endpoint accepts form-urlencoded (NOT JSON like Anthropic).
                 val params = mapOf(
                     "grant_type" to "refresh_token",
                     "refresh_token" to refreshTokenValue,
@@ -217,7 +180,6 @@ class GeminiOAuthManager(context: Context, instanceId: String) : OAuthManager(co
 
                 if (responseCode in 200..299) {
                     val json = JSONObject(responseBody)
-                    // Google may rotate or drop the refresh_token; preserve if absent.
                     if (!json.has("refresh_token")) {
                         json.put("refresh_token", refreshTokenValue)
                     }
@@ -230,16 +192,11 @@ class GeminiOAuthManager(context: Context, instanceId: String) : OAuthManager(co
                     return@withLock RefreshOutcome.SUCCESS
                 }
 
-                // Classify non-2xx response. Google's token endpoint returns 400
-                // with `error=invalid_grant` for revoked/expired refresh tokens,
-                // and `error=invalid_token` for truly malformed tokens. Both are
-                // non-recoverable; user must re-auth.
                 val bodyLower = responseBody.lowercase()
                 val isInvalidGrant = responseCode == 400 || responseCode == 401 || responseCode == 403 ||
                     bodyLower.contains("invalid_grant") ||
                     bodyLower.contains("invalid_token")
                 if (isInvalidGrant) {
-                    // [T-oauth-keep-credentials] Never delete: mark for re-login.
                     Log.e(TAG, "Refresh token invalid ($responseCode): ${OAuthManager.sanitizeBody(responseBody)} — marking for re-login")
                     markNeedsReauth(refreshTokenValue)
                     return@withLock RefreshOutcome.INVALID_GRANT
@@ -253,12 +210,6 @@ class GeminiOAuthManager(context: Context, instanceId: String) : OAuthManager(co
         }
     }
 
-    /**
-     * Return a valid access token, refreshing within the 5-minute pre-expiry
-     * window. Returns null if credentials are missing or invalid. Mirrors iOS
-     * `GeminiOAuthManager.validAccessToken` behavior (with Android's wider
-     * pre-refresh window — iOS Gemini refreshes only on hard expiry).
-     */
     override suspend fun validAccessToken(): String? = withContext(Dispatchers.IO) {
         val stored = loadStoredTokens() ?: return@withContext null
         val token = stored.optString("access_token", "").ifEmpty { return@withContext null }

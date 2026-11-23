@@ -22,15 +22,6 @@ import java.net.URLDecoder
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.concurrent.thread
 
-/**
- * [T-mcp-oauth-bridge-name] The server name comes from servers.json, which the
- * guest can write; it names the host's bridge file, so a '/' in it pointed the
- * host's writes and deletes outside the bridge directory.
- *
- * [T-mcp-oauth-never-throws] authorize() is documented "never throws", but an
- * endpoint that was not a URL threw out of it into the form's coroutine, which
- * has no handler, and crashed the app.
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class McpOAuthGuardsTest {
@@ -82,7 +73,6 @@ class McpOAuthGuardsTest {
         assertEquals(File(dir, "srv.json"), c.bridgeFile("srv"))
         assertNull(c.bridgeFile("../evil"))
         assertNull(c.bridgeFile("../../files/shared_prefs/x"))
-        // Sign-out and purge of such a name delete nothing outside.
         val outside = File(dir.parentFile, "evil.json").apply { writeText("{}") }
         c.signOut("../evil")
         c.purge("../evil")

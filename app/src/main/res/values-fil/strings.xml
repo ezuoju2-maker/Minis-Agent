@@ -1,4 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Minis</string>
     <string name="new_chat">Bagong Chat</string>
@@ -1898,7 +1897,6 @@
     <string name="chat_share_n_selected">%1$d ang Napili</string>
     <string name="chat_share_select_all">Piliin Lahat</string>
     <string name="chat_share_deselect_all">Alisin ang Lahat ng Pinili</string>
-    <!-- [T-port-user-ask] user_ask card and settings; text from the iOS string catalog. -->
     <string name="user_ask_needs_answer">Kailangan ang sagot mo</string>
     <string name="user_ask_needs_approval">Kailangan ang pag-apruba mo</string>
     <string name="user_ask_high_risk">Mapanganib na aksyon</string>
@@ -1941,17 +1939,14 @@
     <string name="user_ask_setting_indefinitely">Walang limitasyon</string>
     <string name="user_ask_setting_minutes">%1$d min</string>
     <string name="user_ask_setting_footer">Hinahayaan ang assistant na pumili ka sa mga opsyon, o kumpirmahin ang mapanganib na aksyon bago ito gawin, gamit ang card sa chat. Sa mga chat lang na kasali ka — hindi sa sub agents, Shortcuts o naka-iskedyul na gawain. Kapag naka-off, ang assistant ang magpapasya at hindi gagawa ng mapanganib na aksyon nang walang pahintulot mo.</string>
-    <!-- [T-android-user-ask-notify] user_ask background notification. -->
     <string name="user_ask_setting_notify">Mag-abiso kapag nasa background</string>
     <string name="user_ask_notif_high_risk">Kailangan ng pag-apruba · Mataas na panganib</string>
     <string name="user_ask_notif_open_app">Buksan ang app</string>
     <string name="user_ask_notif_hidden_body">May tanong na naghihintay ng sagot mo</string>
     <string name="user_ask_notif_channel_name">Mga tanong para sa iyo</string>
     <string name="user_ask_notif_channel_description">Mga tanong ng assistant habang nasa background ang Minis; masasagot mula sa notification</string>
-    <!-- [T-tool-preview-longpress-close] Long-press the tool status bar preview -->
     <string name="tool_preview_close_menu">Isara ang preview window</string>
     <string name="tool_preview_closed_toast">Isinara ang preview window. Maaari mo itong buksan muli sa Settings &gt; Hitsura.</string>
-    <!-- [T-mcp-oauth-signin-android] MCP browser sign-in (iOS #432) -->
     <string name="mcp_form_auth_mode">Awtorisasyon</string>
     <string name="mcp_form_auth_none">Wala</string>
     <string name="mcp_signin_not_signed_in">Hindi naka-sign in</string>

@@ -13,28 +13,9 @@ import java.security.SecureRandom
 import java.util.Base64
 import java.util.concurrent.TimeUnit
 
-/**
- * [T-builtin-accounts] MiniMax Code (mcode) account platform.
- *
- * Ported from the open-source `@minimax-ai/code` CLI (MIT). MiniMax Code signs
- * in with a standard RFC 8628 device-code flow and then talks to an
- * OpenAI-compatible endpoint with the issued bearer token.
- *
- * MiniMax runs two sites with separate account systems — minimax.cn (domestic)
- * and minimax.io (international) — so both are exposed as regions:
- *
- *  domestic      intl
- *  account.minimax.cn        account.minimax.io      /oauth2/device/code, /oauth2/token
- *  agent.minimaxi.com        agent.minimax.io        /mavis/api/v1/models?region=…
- *  agent.minimaxi.com/mavis/api/v1/llm/v1  (chat)     same path on the intl host
- *  www.minimaxi.com          www.minimax.io          /v1/api/openplatform/coding_plan/remains
- *
- * client_id / scope / audience are the ones the official CLI ships with.
- */
 object MiniMaxCodeApi : BuiltInPlatformApi {
     override val displayName: String = "MiniMax Code"
 
-    /** MiniMax splits its two sites' accounts; tokens are not interchangeable. */
     override val regions: List<BuiltInRegion> = listOf(BuiltInRegion.CN, BuiltInRegion.INTL)
 
     private const val TAG = "MiniMaxCodeApi"
@@ -53,22 +34,10 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
     private fun webBase(region: String) =
         if (region == BuiltInRegion.INTL.id) "https://platform.minimax.io" else "https://www.minimaxi.com"
 
-    /** Build env the official CLI asks for; "prod" is what shipped builds send. */
     private const val BUILD_ENV = "prod"
 
     private fun llmBase(region: String) = agentBase(region) + "/mavis/api/v1/llm/v1"
 
-    /**
-     * [FIX-minimax-chat-protocol] Anthropic Messages base for the account chat.
-     * MiniMax Code does NOT serve OpenAI `/chat/completions` — it answers
-     * `50115 direct_route_not_configured` (confirmed against the live prod host).
-     * The real chat is Anthropic Messages `POST {base}/v1/messages`, and the
-     * official CLI uses `agent.minimax.cn` (prod) domestically, NOT the
-     * `agent.minimaxi.com` test/dev host. AnthropicProvider appends `/v1/messages`
-     * itself, so this must end at `/llm` (no trailing `/v1`).
-     * Domestic prod host is pinned here; the model/quota/signin APIs keep using
-     * [agentBase] untouched so those already-working paths are unaffected.
-     */
     fun messagesBase(region: String): String =
         if (region == BuiltInRegion.INTL.id) {
             "https://agent.minimax.io/mavis/api/v1/llm"
@@ -76,10 +45,8 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
             "https://agent.minimax.cn/mavis/api/v1/llm"
         }
 
-    /** Chat endpoint for the given region — used by manual/debug OpenAI setup. */
     fun chatEndpoint(region: String) = llmBase(region) + "/chat/completions"
 
-    /** Default (domestic) chat base for manual provider setup / debug UI. */
     val DEFAULT_CHAT_BASE: String = "https://agent.minimaxi.com/mavis/api/v1/llm/v1"
 
     @Deprecated("Region specific; use chatEndpoint(region)")
@@ -130,7 +97,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
         client.newCall(req).execute().use { return it.code to it.body?.string().orEmpty() }
     }
 
-    /** Public catalogue document — deliberately no Authorization header. */
     private fun getPublic(url: String): Pair<Int, String> {
         val req = Request.Builder().url(url)
             .header("Accept", "application/json")
@@ -254,9 +220,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
     override suspend fun fetchModels(account: BuiltInAccount): BuiltInModels = withContext(Dispatchers.IO) {
         val agent = agentBase(account.region)
         val regionTag = if (account.region == BuiltInRegion.INTL.id) "en" else "cn"
-        // This is a PUBLIC configuration document published by the official
-        // CLI — sending the OAuth bearer here makes some gateways answer 503.
-        // Shape: { providers: [ { config: { models: { id: {...} } } } ] }
         val catalogUrl = "$agent/mavis/api/v1/models?region=$regionTag&buildEnv=$BUILD_ENV"
         val (code, text) = try {
             getPublic(catalogUrl)
@@ -285,7 +248,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
                 val keys = models.keys()
                 while (keys.hasNext()) {
                     val id = keys.next()
-                    // Only models this account's plan actually exposes.
                     if (whitelist.isNotEmpty() && id !in whitelist) continue
                     val m = models.optJSONObject(id) ?: continue
                     val limit = m.optJSONObject("limit")
@@ -305,7 +267,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
                 }
             }
         }
-        // Fallback for older clients that still expose a plain data[] array.
         if (out.isEmpty()) {
             val arr = root.optJSONArray("data") ?: root.optJSONArray("models")
             arr?.let {
@@ -330,20 +291,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
     override suspend fun fetchQuota(account: BuiltInAccount): List<Pair<String, String>> = withContext(Dispatchers.IO) {
         val rows = mutableListOf<Pair<String, String>>()
         rows += "站点" to siteOf(account)
-        // The web endpoint (www.minimaxi.com/.../coding_plan/remains) requires
-        // a browser session COOKIE (returns status_code 1004 "cookie is missing"
-        // for a bearer token). A system-browser OAuth login cannot obtain that
-        // cookie, so it can never produce a number here — that is why the tile
-        // showed "—". The official @minimax-ai/code CLI instead reads the plan
-        // balance from the AGENT-domain matrix APIs with the OAuth bearer +
-        // the same signature headers used for check-in. Those APIs accept the
-        // token (verified: fake bearer -> 401, not 1004), so they are our path.
-        //
-        // Official flow (chunk-L5T5ZVX3.js Oi class):
-        //   POST /matrix/api/v1/user/get_user_extra_info  -> workspaces[]
-        //   POST /matrix/api/v1/commerce/get_membership_info -> tier/credit
-        //   credit = op_credit_summary.total_remaining_amount (or opcredit_balance)
-        //   op_group_id -> X-Group-Id for the web quota endpoint (best effort).
 
         fun postMatrix(path: String, bodyObj: String): JSONObject? {
             val req = signedDailyRequest(account, path, "POST", bodyObj, devicePlatform = "mcode")
@@ -363,7 +310,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
             return root.optJSONObject("data")?.optJSONObject(key)
         }
 
-        // Credit balance can live on any workspace with workspace_type == 0.
         var credit: String? = null
         var opGroupId: String? = null
         var tier: String? = null
@@ -399,7 +345,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
             opGroupId = opGroupId ?: m.optString("op_group_id", "").ifBlank { null }
         }
 
-        // "剩余额度" is the credit balance (a real number); UI reads this key.
         val creditNum = credit?.replace(",", "")?.toDoubleOrNull()
         if (creditNum != null) {
             rows += "剩余额度" to trimNum(creditNum)
@@ -407,9 +352,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
             rows += "剩余额度" to "未开通"
         }
 
-        // Best effort: the detailed 5h/week quota needs X-Group-Id (and may
-        // still demand a web cookie). Only add it when it really answers.
-        // Never `return` early here — the 总量 fallback below must always run.
         if (!opGroupId.isNullOrBlank()) {
             val url = "${webBase(account.region)}/v1/api/openplatform/coding_plan/remains" +
                 "?business=Agent&device_platform=mcode"
@@ -445,11 +387,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
             }
         }
 
-        // MiniMax Code is pay-as-you-go: the credit balance has NO hard cap,
-        // so a numeric "total" genuinely does not exist (the web quota API
-        // demands a browser cookie we cannot get via system-browser OAuth).
-        // The UI's "总量" tile falls back to the "套餐" key, so emit an honest
-        // label there instead of a bare "—" whenever we have no real total.
         if (rows.none { it.first == "总额度" }) {
             rows += "套餐" to (tier ?: "按量计费")
         } else {
@@ -458,7 +395,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
         rows
     }
 
-    /** Upstream keys are English snake_case; show a readable Chinese label. */
     private fun quotaLabel(key: String): String = when (key) {
         "total_count" -> "总额度"
         "remain_count", "remaining_count" -> "剩余额度"
@@ -481,13 +417,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
         return if (msg.isNotBlank()) "，上游说明「${msg.take(100)}」" else "，响应「${t.take(100)}」"
     }
 
-    // ── Daily check-in ──────────────────────────────────────────────────
-    // Ported from @minimax-ai/code 0.6.9 (chunk-5URK63JW.js `eL` + daily
-    // check-in gateway). Endpoint:
-    //   GET  {agent}/minimax-cloud/api/v1/signin/status   -> panel + accountKey
-    //   POST {agent}/minimax-cloud/api/v1/signin/claim    -> claim result
-    // Signed headers: x-signature = md5(ts + secret + body),
-    //   yy = md5(encodeURIComponent(path+query) + "_" + body + md5(nowMs) + "ooui").
     private val SIGN_SECRET = "I*7Cf%WZ#S&%1RlZJ&C2"
 
     private fun md5(s: String): String =
@@ -554,7 +483,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
         client.newCall(builder.build()).execute().use { return it.code to it.body?.string().orEmpty() }
     }
 
-    /** Parse the 7-day sign-in panel into UI rows. */
     private fun parsePanel(root: JSONObject): BuiltInCheckin {
         val data = root.optJSONObject("data") ?: root
         val daysArr = data.optJSONArray("days")
@@ -579,7 +507,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
                 )
             }
         }
-        // Streak: count claimed days backwards from today (or yesterday).
         val sorted = days.sortedBy { it.dayNo }
         val todayIdx = sorted.indexOfFirst { it.isToday }
         var streak = 0
@@ -611,7 +538,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
     }
 
     override suspend fun claimCheckin(account: BuiltInAccount): BuiltInCheckin = withContext(Dispatchers.IO) {
-        // First read status to get the accountKey (realUserID) and panel.
         val statusReq = signedDailyRequest(account, "/minimax-cloud/api/v1/signin/status", "GET", null)
         val (sCode, sText) = try {
             request(statusReq, "GET", null)
@@ -622,7 +548,6 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
         if (sCode !in 200..299 || statusRoot == null) {
             return@withContext BuiltInCheckin(error = "签到状态返回 HTTP $sCode" + snippet(sText))
         }
-        // accountKey must match our uid; if upstream gave one, use it for the claim signature.
         val accountKey = statusRoot.optString("account_key", "")
             .ifEmpty { statusRoot.optJSONObject("data")?.optString("account_key", "").orEmpty() }
         val claimReq = signedDailyRequest(account, "/minimax-cloud/api/v1/signin/claim", "POST", "{}")

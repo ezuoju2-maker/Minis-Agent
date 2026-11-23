@@ -16,21 +16,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * An Android backup restored on an iPhone must decode there.
- *
- * iOS reads backup records with synthesized `Codable`, which rejects a record
- * missing a required key and silently drops that line (`try?`). Android used
- * to write sessions flat while iOS requires `{"session": {…}, …}`, so every
- * session — and with it every message and all group membership — vanished
- * from an Android -> iOS restore that still reported success.
- *
- * These tests check the REAL exporter output against the Swift declarations
- * parsed from the iOS sources, so either side drifting breaks the build here.
- */
 class BackupIosWireShapeTest {
 
-    // -- Swift declarations -------------------------------------------------
 
     private data class SwiftProp(val name: String, val optional: Boolean)
 
@@ -42,11 +29,9 @@ class BackupIosWireShapeTest {
 
     private fun swiftSource(rel: String): String = File(repoRoot, rel).readText()
 
-    /** Stored properties of `struct <name>` (computed `{ … }` ones excluded). */
     private fun storedProps(source: String, header: String): List<SwiftProp> {
         val start = source.indexOf(header)
         require(start >= 0) { "declaration not found: $header" }
-        // Walk braces to the end of the struct body.
         var depth = 0
         var i = source.indexOf('{', start)
         val bodyStart = i
@@ -66,7 +51,6 @@ class BackupIosWireShapeTest {
         }
     }
 
-    // Found wherever iOS declares them (f492946c7 moved both out of ChatStore.swift).
     private val iosSession by lazy { storedProps(IosSources.declaring("struct ChatSession: "), "struct ChatSession: ") }
     private val iosFolder by lazy { storedProps(IosSources.declaring("struct ChatFolder: "), "struct ChatFolder: ") }
     private val iosSessionRecord by lazy {
@@ -76,7 +60,6 @@ class BackupIosWireShapeTest {
         )
     }
 
-    // -- Fixtures -------------------------------------------------------------
 
     private val session = ChatSessionEntity(
         id = "S-1",
@@ -113,7 +96,6 @@ class BackupIosWireShapeTest {
     private val record: JsonObject get() = BackupExporter.sessionRecord(session).jsonObject
     private val folderRec: JsonObject get() = BackupExporter.folderRecord(folder).jsonObject
 
-    // -- Session: iOS shape -------------------------------------------------
 
     @Test
     fun `the Swift declarations were found`() {
@@ -172,7 +154,6 @@ class BackupIosWireShapeTest {
         assertEquals("high", record["thinkingOverride"]!!.jsonPrimitive.content)
     }
 
-    // -- Folder -----------------------------------------------------------------
 
     @Test
     fun `a folder carries every required ChatFolder field, and desc for iOS`() {
@@ -187,9 +168,7 @@ class BackupIosWireShapeTest {
         )
     }
 
-    // -- Android -> Android: new AND old packages ---------------------------
 
-    /** The pre-change flat shape, as packages made by 1.13 and earlier hold it. */
     private fun legacyFlat(): JsonObject {
         val r = record
         return JsonObject(r["session"]!!.jsonObject + r.filterKeys { it != "session" })

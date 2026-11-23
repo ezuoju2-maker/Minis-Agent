@@ -11,11 +11,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [FIX-261025-12] After replacing an API key in Settings, Retry in the open
- * chat still sent the old key: the key is not part of ProviderInstance, which
- * is all the chat's edit watch compared.
- */
 class ProviderKeyEditRebuildTest {
 
     @Test fun `saving or removing a key announces its instance`() = runBlocking {

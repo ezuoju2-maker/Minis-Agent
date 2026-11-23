@@ -17,19 +17,6 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowToast
 
-/**
- * [T-android-picker-anf] The closest this gets to a ROM without DocumentsUI
- * without a device: a real ComponentActivity, a really registered
- * OpenMultipleDocuments launcher (the chat "Add File" contract), and
- * Robolectric's checkActivities(true), which makes startActivity throw
- * ActivityNotFoundException when no activity resolves the Intent - and in
- * Robolectric nothing resolves ACTION_OPEN_DOCUMENT.
- *
- * Gap from a real device: the Toast text itself is not checked (no app
- * resources in this test setup); the Intent goes through Robolectric's shadow
- * instrumentation, not the framework's ActivityTaskManager, and the "no
- * activity" state is simulated rather than a ROM's real package set.
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
 class SafePickerLaunchRobolectricTest {
@@ -61,10 +48,6 @@ class SafePickerLaunchRobolectricTest {
         val logs = mutableListOf<String>()
         var notified = 0
 
-        // safeLaunchPicker = launchPickerSafely + AppLogger + a Toast of a
-        // string resource; this test setup has no app resources, so the
-        // decision part is driven with the real launcher and the UI part is
-        // recorded instead.
         val launched = launchPickerSafely(
             launch = { launcher.launch(arrayOf("*/*")) },
             log = { logs += it },

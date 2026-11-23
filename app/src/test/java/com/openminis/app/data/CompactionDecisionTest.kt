@@ -11,21 +11,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Guards for the auto-compaction and revert decisions that a later edit is
- * most likely to break without any other test noticing. Every case drives the
- * production functions, not a copy of them:
- *
- *  - the in-loop decision table ([ContextPolicy.inLoopStep]) and the
- *    "never wedge" properties it exists for;
- *  - a small agent-loop model built only from production functions, for the
- *    interactions (smoothing × valve × rejection × compaction);
- *  - the calibration replay a reload runs, and the same-session carry-over a
- *    revert depends on;
- *  - the warm-up trim's turn boundaries.
- *
- * iOS twin: MinisTests/Standalone/CompactionDecisionTests.swift.
- */
 class CompactionDecisionTest {
 
     private val window = 128_000
@@ -41,7 +26,6 @@ class CompactionDecisionTest {
         used: Boolean = false,
     ) = ContextPolicy.inLoopStep(verdict, measured, raw, window, canCompact, ratio, used)
 
-    // ── in-loop decision table ─────────────────────────────────────────────
 
     @Test
     fun `OK always sends and EXHAUSTED always stops`() {
@@ -57,7 +41,6 @@ class CompactionDecisionTest {
 
     @Test
     fun `above the compact line but inside the window is sent, not stopped`() {
-        // The original wedge: the loop stopped here having made zero API calls.
         assertEquals(InLoopStep.SEND_WITHIN_WINDOW, step(measured = window - 1))
         assertEquals("the window itself does not fit", InLoopStep.STOP, step(measured = window))
     }
@@ -83,14 +66,7 @@ class CompactionDecisionTest {
         }
     }
 
-    // ── agent-loop model (production functions only) ────────────────────────
 
-    /**
-     * One session on one model. [realFactor] is how the provider actually
-     * counts our raw estimate; [floor] is what a compaction can shrink the
-     * history to (incompressible remainder). Mirrors the order of
-     * inLoopContextCheck → dispatch → calibrateContextSize / noteContextOverflow.
-     */
     private inner class LoopModel(
         var raw: Int,
         val realFactor: Double,
@@ -105,7 +81,6 @@ class CompactionDecisionTest {
         var compactions = 0
         val ratio get() = ContextSizeMeter.ratioFor("m", own?.let { mapOf("m" to it) } ?: emptyMap(), borrowed)
 
-        /** One agent loop of [iterations] tool rounds; returns how it ended. */
         fun loop(iterations: Int): String {
             var valveUsed = false
             var noProgress = false
@@ -139,7 +114,7 @@ class CompactionDecisionTest {
                         own = ContextSizeMeter.smoothed(own, ContextSizeMeter.calibrationRatio(real, raw)!!)
                         noProgress = false
                         if (rearmValveOnSuccess) valveUsed = false
-                        raw += 500   // the tool round adds a little
+                        raw += 500
                     }
                 }
             }
@@ -149,21 +124,15 @@ class CompactionDecisionTest {
 
     @Test
     fun `a slowly falling ratio does not stop a loop the provider keeps accepting`() {
-        // Own ratio learned on image-heavy turns; the content is now plain text
-        // that counts 1:1, and the history cannot be compacted any further.
         val m = LoopModel(raw = 100_000, realFactor = 1.0, own = 1.8, floor = 100_000)
         assertEquals("completed", m.loop(iterations = 6))
         assertEquals(0, m.rejected)
-        // Falsification: with the valve only once per loop (before
-        // [T-ctx-valve-rearm]) the second iteration stopped, right after the
-        // provider accepted a same-size request.
         val old = LoopModel(raw = 100_000, realFactor = 1.0, own = 1.8, floor = 100_000, rearmValveOnSuccess = false)
         assertEquals("stopped after 1", old.loop(iterations = 6))
     }
 
     @Test
     fun `an under-read costs at most one rejection, then compaction recovers`() {
-        // Borrowed ratio from a sparser model; this one counts 1.4x.
         val m = LoopModel(raw = 95_000, realFactor = 1.4, own = null, borrowed = 1.0, floor = 20_000)
         assertEquals("completed", m.loop(iterations = 4))
         assertTrue("rejections=${m.rejected}", m.rejected <= 1)
@@ -176,8 +145,6 @@ class CompactionDecisionTest {
         val end = m.loop(iterations = 3)
         assertTrue(end, end.startsWith("stopped"))
         assertEquals("rejected once, then the raised ratio is believed", 1, m.rejected)
-        // Falsification: before [T-ctx-valve-rearm] the valve then re-sent the
-        // very request the provider had just rejected.
         val old = LoopModel(raw = 120_000, realFactor = 1.3, own = 1.0, floor = 120_000, rejectionSpendsValve = false)
         old.loop(iterations = 3)
         assertEquals(2, old.rejected)
@@ -193,7 +160,6 @@ class CompactionDecisionTest {
             CheckResult.NEEDS_COMPACT, policy.check(ContextSizeMeter.calibrated(100_000, afterOutlier), window))
     }
 
-    // ── overflow edges ─────────────────────────────────────────────────────
 
     @Test
     fun `overflow handling edge cases`() {
@@ -209,7 +175,6 @@ class CompactionDecisionTest {
             ContextSizeMeter.ratioAfterOverflow(1.0, 10_000, 500_000, window), 1e-9)
     }
 
-    // ── reload / revert: calibration replay and carry-over ─────────────────
 
     private fun sample(reported: Int, estimated: Int = 100_000, model: String? = "a", fixed: Int = 9_000) =
         CalibrationSample(reported, estimated, fixed, model)
@@ -231,7 +196,6 @@ class CompactionDecisionTest {
         val reversed = ContextSizeMeter.replayCalibration(rows.reversed()).ratios.getValue("a")
         assertEquals(1.5 + 0.3 * (1.0 - 1.5), forward, 1e-9)
         assertEquals(1.5, reversed, 1e-9)
-        // So the DAO query feeding it must keep conversation order.
         val dao = ProductionSources.read("data/db/ChatDao.kt")
         assertTrue(dao.contains("AND token_usage IS NOT NULL ORDER BY sort_order ASC\")"))
     }
@@ -257,19 +221,12 @@ class CompactionDecisionTest {
         assertEquals(CalibrationSample(130_000, 100_000, 7_000, "gpt-5"), s)
         assertNull("an empty model id is no model",
             ContextSizeMeter.calibrationSample("""{"latestContextTokens":1,"estimatedRequestTokens":1,"calibrationModelId":"","estimatorVersion":3}""")!!.modelId)
-        // [T-ctx-count-reasoning] A pair taken with the estimator that ignored
-        // replayed reasoning (no version = v1) is not comparable: skipped.
         assertNull(ContextSizeMeter.calibrationSample("""{"latestContextTokens":341873,"estimatedRequestTokens":48958,"calibrationModelId":"deepseek-flash"}"""))
         assertNull(ContextSizeMeter.calibrationSample("""{"latestContextTokens":341873,"estimatedRequestTokens":48958,"estimatorVersion":1}"""))
-        // [T-ctx-count-wire-framing] v3 counts wire framing, like iOS since
-        // e48d29ee9: a v2 pair's ratio already holds that framing (2x for
-        // small tool rounds) and is skipped like v1; an iOS v3 pair from a
-        // synced session is now comparable and replays.
         assertEquals(3, ContextSizeMeter.ESTIMATOR_VERSION)
         assertNull(ContextSizeMeter.calibrationSample("""{"latestContextTokens":130000,"estimatedRequestTokens":100000,"estimatorVersion":2}"""))
         assertEquals(CalibrationSample(80_950, 80_968, 0, null),
             ContextSizeMeter.calibrationSample("""{"latestContextTokens":80950,"estimatedRequestTokens":80968,"estimatorVersion":3}"""))
-        // [T-ctx-estimator-version-exact] A NEWER estimator is still not comparable.
         assertNull(ContextSizeMeter.calibrationSample("""{"latestContextTokens":80950,"estimatedRequestTokens":80968,"estimatorVersion":4}"""))
         assertNull(ContextSizeMeter.calibrationSample("""{"latestContextTokens":80950,"estimatedRequestTokens":80968,"estimatorVersion":99}"""))
         assertEquals(CalibrationState(), ContextSizeMeter.replayCalibration(emptyList()))
@@ -277,9 +234,6 @@ class CompactionDecisionTest {
 
     @Test
     fun `revert keeps a ratio that exists only in memory`() {
-        // Measured on device before the fix: a rejection raised the ratio
-        // 1.29 → 1.97, revert reloaded the session, the reload reset it to 1.29
-        // from the rows, and the retry went out uncompacted and was rejected.
         val rows = listOf(sample(129_000))
         val inMemory = CalibrationState(mapOf("a" to 1.97), lastLearned = 1.97, fixedTokens = 9_500)
         val reloaded = ContextSizeMeter.replayCalibration(rows).carryingOver(inMemory)
@@ -300,16 +254,13 @@ class CompactionDecisionTest {
         assertEquals("a zero fixed share keeps the rows'", 9_000, merged.fixedTokens)
     }
 
-    // ── warm-up trim ───────────────────────────────────────────────────────
 
     @Test
     fun `warm-up trim never starts the kept slice inside a tool round`() {
-        // user text, assistant tool_use, user tool_result, assistant, user text, assistant
         val starts = listOf(true, false, false, false, true, false)
         val sizes = listOf(100, 50, 20_000, 300, 100, 400)
         val drop = ContextSizeMeter.warmUpDrop(sizes, starts, restTokens = 5_000, budget = 10_000)
         assertEquals("the whole first round goes, tool result included", 4, drop)
-        // Property: the slice starts on a turn, or is empty.
         val rnd = java.util.Random(7)
         repeat(500) {
             val n = 1 + rnd.nextInt(12)
@@ -328,12 +279,10 @@ class CompactionDecisionTest {
         assertEquals("one under keeps everything", 0, ContextSizeMeter.warmUpDrop(sizes, starts, 0, 2_001))
     }
 
-    // ── wiring: the view model uses these, and revert keeps its guards ─────
 
     @Test
     fun `view model routes its decisions through the tested functions`() {
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
-        // [T-ctx-trim-ladder] The failed-compaction exit settles on the re-trimmed measurement.
         assertEquals("both no-compaction exits share one table", 1,
             vm.split("return settleWithoutCompacting(m, window, compactionsSoFar)").size - 1)
         assertEquals(1, vm.split("return settleWithoutCompacting(contextMeasurement(), window, compactionsSoFar)").size - 1)

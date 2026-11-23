@@ -5,10 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-selection-add-to-input-first] Selection bar: Copy → Add to Chat
- * Input → Copy Full Text → Read Aloud (iOS order), as many inline as fit.
- */
 class SelectionToolbarLayoutTest {
 
     private fun count(widths: List<Float>, max: Float, overflow: Float = 40f) =
@@ -19,7 +15,6 @@ class SelectionToolbarLayoutTest {
     }
 
     @Test fun `a fifth action goes to the overflow and the button is budgeted`() {
-        // 4 inline = 380 + overflow 40 = 420 > 400, so only 3 inline.
         assertEquals(3, count(listOf(60f, 120f, 110f, 90f, 100f), max = 400f))
         assertEquals(4, count(listOf(60f, 120f, 110f, 90f, 100f), max = 430f))
     }

@@ -6,12 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * Hardening around the native-offload socket: the listener is close-on-exec
- * [T-native-offload-cloexec], only this app's uid may connect
- * [T-native-offload-peer-uid], and the terminal child closes inherited fds
- * before exec [T-pty-close-fds].
- */
 class NativeOffloadHardeningTest {
 
     private val server = ProductionSources.read("sandbox/NativeOffload.kt")

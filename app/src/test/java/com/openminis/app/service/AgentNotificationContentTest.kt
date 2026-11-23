@@ -4,11 +4,6 @@ import com.openminis.app.R
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * [T-android-live-update-content] Pins the phase → icon/title/text/timer
- * mapping behind the ongoing agent notification and the Android 16 Live
- * Update chip. Pure functions, no Android runtime needed.
- */
 class AgentNotificationContentTest {
 
     @Test

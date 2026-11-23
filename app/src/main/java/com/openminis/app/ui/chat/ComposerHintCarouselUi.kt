@@ -27,12 +27,6 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.openminis.app.R
 import kotlinx.coroutines.delay
 
-/**
- * [T-port-composer-hint-carousel] One usage page, with its figures tinted by
- * its own tier: the context page ("Context 62% used · 124k / 200k") or the
- * quota page ("Quota 5h 14% / 7d 32% used"). Highlights are located in the
- * RESOLVED string so a translation may reorder around them.
- */
 @Composable
 internal fun contextUsagePageText(hint: ContextUsageHint, page: UsageHintPage): AnnotatedString {
     return when (page) {
@@ -56,7 +50,6 @@ internal fun contextUsagePageText(hint: ContextUsageHint, page: UsageHintPage): 
             val color = ContextUsageColors.textHighlight(hint.quotaTier)
             buildAnnotatedString {
                 append(quota)
-                // A normal quota stays plain text.
                 val q = hint.quotaHighlight
                 if (!q.isNullOrEmpty() && hint.quotaTier != ContextUsage.Tier.NORMAL) {
                     val start = quota.indexOf(q)
@@ -67,7 +60,6 @@ internal fun contextUsagePageText(hint: ContextUsageHint, page: UsageHintPage): 
     }
 }
 
-/** The whole set of figures in one string, for a screen reader. */
 @Composable
 internal fun contextUsageSpokenText(hint: ContextUsageHint): String {
     val parts = ArrayList<String>(2)
@@ -75,13 +67,6 @@ internal fun contextUsageSpokenText(hint: ContextUsageHint): String {
     return parts.joinToString(" · ")
 }
 
-/**
- * [T-port-composer-hint-carousel] A usage page in the placeholder: one line,
- * shrunk just enough to fit (never below [MIN_FIT_SCALE] of [fontSize]; an
- * ellipsis only past that), as iOS fits each page. Not drawn until it fits,
- * so a shrinking pass never shows a clipped frame. The screen reader hears
- * every page at once.
- */
 @Composable
 internal fun UsageHintPageText(hint: ContextUsageHint, page: UsageHintPage, fontSize: TextUnit, color: Color) {
     val text = contextUsagePageText(hint, page)
@@ -111,12 +96,6 @@ internal fun UsageHintPageText(hint: ContextUsageHint, page: UsageHintPage, font
 private const val MIN_FIT_SCALE = 0.75f
 private const val FIT_STEP = 0.05f
 
-/**
- * [T-port-composer-hint-carousel] The page the transient usage line shows:
- * turns every [ComposerHintCarousel.INTERVAL_MS] while [ComposerHintCarousel.canTurn]
- * holds, and only while the screen is resumed (a hidden composer does not use
- * up its rounds). New figures start their own rounds.
- */
 @Composable
 internal fun rememberHintCarouselPage(hint: ContextUsageHint?, composerEmpty: Boolean, screenReaderOn: Boolean): Int {
     val carousel = remember { ComposerHintCarousel() }

@@ -10,14 +10,8 @@ import org.junit.Test
 import java.security.MessageDigest
 import java.util.Base64
 
-/**
- * [T-android-mcp-oauth] Phase 1 coverage: PKCE parameter generation, RFC 8707
- * resource canonicalization, authorization-URL assembly, and the non-secret
- * MCPOAuthConfig JSON round-trip.
- */
 class McpOAuthPhase1Test {
 
-    // -- PKCE (RFC 7636, S256) --
 
     @Test
     fun `code challenge is base64url SHA-256 of the verifier, no padding`() {
@@ -26,7 +20,6 @@ class McpOAuthPhase1Test {
             MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.UTF_8)),
         )
         assertEquals(expected, McpPkce.codeChallengeS256(verifier))
-        // base64url alphabet only: no +, /, or = padding.
         val ch = McpPkce.codeChallengeS256(verifier)
         assertFalse(ch.contains('+'))
         assertFalse(ch.contains('/'))
@@ -40,12 +33,10 @@ class McpOAuthPhase1Test {
         assertEquals(64, a.verifier.length)
         assertTrue(a.verifier.all { it.isLetterOrDigit() || it in "-._~" })
         assertEquals(McpPkce.codeChallengeS256(a.verifier), a.challenge)
-        // Overwhelmingly likely to differ; guards against a constant/seeded RNG.
         assertNotEquals(a.verifier, b.verifier)
         assertNotEquals(a.state, b.state)
     }
 
-    // -- RFC 8707 resource canonicalization --
 
     @Test
     fun `resource uri drops fragment and trailing slashes`() {
@@ -63,7 +54,6 @@ class McpOAuthPhase1Test {
         assertNull(McpPkce.canonicalResourceUri("not a uri"))
     }
 
-    // -- authorization URL --
 
     @Test
     fun `authorization url carries all pkce and refresh params`() {
@@ -86,7 +76,6 @@ class McpOAuthPhase1Test {
         assertTrue(url.contains("prompt=consent"))
         assertTrue(url.contains("resource=https%3A%2F%2Fmcp.example.com"))
         assertTrue(url.contains("scope=openid%20email"))
-        // redirect must be percent-encoded.
         assertTrue(url.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A54546%2Fcallback"))
     }
 
@@ -106,7 +95,6 @@ class McpOAuthPhase1Test {
         assertFalse(url.contains("scope="))
     }
 
-    // -- MCPOAuthConfig JSON round-trip --
 
     @Test
     fun `config round-trips through json`() {
@@ -126,13 +114,12 @@ class McpOAuthPhase1Test {
     fun `fromJson returns null for absent or empty oauth block`() {
         assertNull(MCPOAuthConfig.fromJson(null))
         assertNull(MCPOAuthConfig.fromJson(JSONObject()))
-        // an object with only a mode but no endpoints/clientId is noise.
         assertNull(MCPOAuthConfig.fromJson(JSONObject().put("mode", "static")))
     }
 
     @Test
     fun `unconfigured config is flagged`() {
-        assertFalse(MCPOAuthConfig(clientId = "cid").isConfigured) // endpoints missing
+        assertFalse(MCPOAuthConfig(clientId = "cid").isConfigured)
         assertFalse(MCPOAuthConfig().isConfigured)
     }
 }

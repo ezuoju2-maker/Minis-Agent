@@ -9,11 +9,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-search-folder-collapse] A folder in search results can be folded away
- * for that search (iOS 14bc208b1): an unsaved set, no accordion, cleared by
- * the next query, and the card says how many matches the fold hides.
- */
 class SearchFolderCollapseTest {
 
     private fun folder(id: String) = FolderEntity(id = id, name = "F-$id", createdAt = 0, updatedAt = 0)
@@ -45,7 +40,6 @@ class SearchFolderCollapseTest {
     }
 
     @Test fun `the saved open folder is neither read nor needed`() {
-        // The normal list's open folder "b" does not close "a" in a result set.
         val b = blocks(emptySet(), expanded = "b")
         assertFalse(b.getValue("a").isCollapsed)
         assertFalse(b.getValue("b").isCollapsed)
@@ -59,12 +53,10 @@ class SearchFolderCollapseTest {
         val collect = vm.substringAfter("val folderHits = SearchFolders.matchedFolderIds(folders.value, q)").substringBefore("isSearching.value = false")
         assertEquals(2, collect.split("searchCollapsedFolderIds.value = emptySet()").size - 1)
         val screen = ProductionSources.read("ui/sessions/SessionListScreen.kt")
-        // Card tap, mini-bar and "new chat in group" use the search set in a result set.
         assertTrue(screen.contains("if (searchResultsActive) {\n                                                viewModel.toggleSearchFolderCollapsed(block.folder.id)\n                                                return@FolderCard"))
         assertTrue(screen.contains("if (searchResultsActive) viewModel.toggleSearchFolderCollapsed(bar.folder.id)\n                                        else viewModel.toggleFolderCollapsed(bar.folder.id)"))
         assertTrue(screen.contains("viewModel.reopenSearchFolder(block.folder.id)"))
         assertTrue(screen.contains("searchCollapsedFolderIds = if (searchResultsActive) searchCollapsedFolderIds else emptySet(),"))
-        // The count line while folded.
         assertTrue(screen.contains("searchQuery != null && block.isCollapsed && block.totalCount > 0 ->\n                            stringResource(R.string.sessionlist_folder_matches_hidden, block.totalCount)"))
     }
 

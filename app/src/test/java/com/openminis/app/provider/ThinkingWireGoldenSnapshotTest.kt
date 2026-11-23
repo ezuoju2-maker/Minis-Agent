@@ -14,73 +14,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 
-/**
- * GOLDEN SNAPSHOT of the thinking-parameter injection on the Chat Completions path.
- *
- * WHY THIS EXISTS, and how it differs from [ThinkingRulesRegressionTest]: that suite
- * asserts the *rules we knew to look for* — one hand-written assertion per catalogued
- * rule. This file asserts something weaker but far broader: for a matrix of
- * (model × level × endpoint) combinations, the emitted thinking fields are
- * **byte-for-byte what they are today**, whatever that happens to be.
- *
- * That distinction is what makes it useful for the Thinking Rules refactor. The
- * acceptance criterion is "behaviour is byte-for-byte unchanged", but the named suite
- * only covers the vendors it was written for — it says nothing about the OpenAI-native
- * o/gpt-5 branch, the OpenRouter nested shape, or the seed family. Passing it proves
- * "the parts we tested did not change", not "nothing changed". These snapshots pin the
- * ACTUAL current output of every branch, including ones nobody wrote a named rule for.
- *
- * HOW TO USE DURING THE REFACTOR
- *  1. Committed BEFORE the refactor, generated against the OLD code.
- *  2. After the refactor it must still pass unchanged. A diff here is a behaviour
- *     change — either an unintended regression, or an intended fix that must be called
- *     out explicitly in the commit message and updated deliberately.
- *  3. Do NOT regenerate expectations to turn a red test green without first explaining,
- *     in words, why the wire format legitimately changed.
- *
- * Only the thinking-related keys are captured (the rest of the body — messages, model,
- * stream flags — is noise for this purpose and would make the snapshot brittle). Keys
- * are rendered sorted so JSON ordering can never masquerade as a behaviour change.
- *
- * NOT COMPARABLE ROW-BY-ROW WITH THE iOS SNAPSHOT — the two capture different layers,
- * deliberately. iOS calls the pure `injectThinkingParams` directly, so its rows show the
- * injector in isolation. Android's injector is private and reads instance state, so this
- * drives the real `sendMessageClamped`, which means the rows also include two upstream
- * effects: (a) the `catalogMaxThinkingLevel` ceiling — `gpt-5.3` matches no catalog rule
- * so it defaults to XHIGH, which is why MAX/ULTRA render as `"xhigh"` here and `"max"` on
- * iOS; and (b) `explicitOffEffort`, which requires a literal `https://api.openai.com`
- * base, so a MockWebServer URL never qualifies and OFF renders `{}` rather than
- * `{"reasoning_effort":"none"}`. Both are correct for their layer. Each snapshot is an
- * oracle for ITS OWN platform across the refactor; cross-platform parity is what
- * ThinkingRulesRegressionTest asserts.
- *
- * BASELINE MOVED ONCE, DELIBERATELY — [T-thinking-levels-data-driven]. 18 rows changed
- * when `catalogMaxThinkingLevel` began deriving its ceiling from the model's DECLARED
- * effort set (iOS parity, LLMTypes.swift:881-883 / 47dc71b3). Two groups, moving in
- * opposite directions, both correct:
- *
- *   • RAISED to "max" — deepseek-v4, deepseek-v4-unified, glm-declared, sparse-high-max,
- *     venice-deepseek, deepseek-v4-on-openrouter. All declare `["high","max"]`. The
- *     ceiling used to be the XHIGH default, so a MAX request became "xhigh", which is
- *     NOT in the declared set, and the wire clamp then snapped it DOWN to "high" — the
- *     user could never reach the "max" the catalog plainly declares (field report:
- *     deepseek-v4/GLM stuck below max on Android while iOS reached it).
- *
- *   • LOWERED to "high" — gpt5-on-dashscope (`["low","high"]`) and openrouter
- *     (`["low","medium","high"]`). A declared set is authoritative in BOTH directions:
- *     offering XHIGH for a backend that only accepts low/high invites a 400. These rows
- *     previously rode the XHIGH default because `gpt-5.3` / `claude-sonnet-4-6` match no
- *     id rule. iOS resolves both to .high through the same early return.
- *
- * `clampEffort` itself is untouched — the fix is the ceiling, not the clamp.
- *
- * READING THE BASELINE — `mimo/XHIGH` and `seed/XHIGH` record `reasoning_effort:"xhigh"`
- * even though both families 400 on that value (72968c4f). That is correct: the family
- * ceiling is applied UPSTREAM, by the clamp in LLMProvider.streamMessage/sendMessage,
- * so injection is never reached with XHIGH for those ids in production. These rows pin
- * this layer in isolation; the ceiling is covered by the named suite. Do not "fix" the
- * snapshot by clamping here — that would put the ceiling in two places and let them drift.
- */
 class ThinkingWireGoldenSnapshotTest {
 
     private lateinit var server: MockWebServer
@@ -108,7 +41,6 @@ class ThinkingWireGoldenSnapshotTest {
         reasoningEffortValues = reasoningEffortValues,
     )
 
-    /** Stable textual form: sorted keys at every level, bools distinct from numbers. */
     private fun canonical(v: Any?): String = when (v) {
         null, JSONObject.NULL -> "null"
         is JSONObject -> v.keys().asSequence().sorted()
@@ -118,7 +50,6 @@ class ThinkingWireGoldenSnapshotTest {
         else -> v.toString()
     }
 
-    /** The keys this layer is allowed to touch. Everything else is request noise. */
     private val watched = listOf(
         "reasoning_effort", "reasoning", "thinking",
         "enable_thinking", "thinking_budget", "extra_body",
@@ -174,13 +105,6 @@ class ThinkingWireGoldenSnapshotTest {
         Case("mistral", model("mistral-large-latest", reasoningEffortValues = listOf("low", "high")), "/mistral.ai/v1"),
         Case("venice-deepseek", model("deepseek-v4-flash", reasoningEffortValues = listOf("low", "high", "max")), "/api.venice.ai/api/v1"),
 
-        // ---- CROSS-PRODUCT ROWS ----
-        // Every case above varies ONE dimension, and that blind spot let a real ordering
-        // regression through: hoisting the unified-gateway rule above the qwen and
-        // OpenAI-native patterns changed the wire shape for models that match a vendor
-        // pattern AND sit on a unified/DashScope endpoint. Single-dimension rows cannot
-        // see it, because neither dimension alone is wrong. These rows pin the
-        // interaction, which is where rule-ordering bugs actually live.
         Case("qwen-on-unified", model("qwen3-32b"), "/ark.volces.com/api/v3"),
         Case("gpt5-on-dashscope", model("gpt-5.3", reasoningEffortValues = listOf("low", "high")), "/dashscope.aliyuncs.com/compatible-mode/v1"),
         Case("mimo-on-unified", model("mimo-v2.5"), "/ark.volces.com/api/v3"),
@@ -221,7 +145,6 @@ class ThinkingWireGoldenSnapshotTest {
     }
 
     companion object {
-        /** Generated from the PRE-refactor implementation. See the class doc. */
         private val EXPECTED = """
 openai-gpt5/OFF -> {}
 openai-gpt5/LOW -> {reasoning_effort:"low"}

@@ -16,20 +16,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-port-user-ask-fk-crash] Pixel 4a, HEAD 98ee344e5: the first user_ask in a
- * new chat crashed the app (3/3) with "FOREIGN KEY constraint failed" from an
- * insertMessage on an IO StandaloneCoroutine, 25 ms after BEGIN. The first ask
- * installs recovery, whose launch scan walked a record left by a chat the user
- * had since deleted and appended its assistant row into that missing session.
- *
- * This transcript enforces the foreign key: appending into a session that does
- * not exist throws, exactly as SQLite does.
- */
 class UserAskFkCrashTest {
 
     private class FkTranscript(val sessions: MutableSet<String>) : UserAskTranscript {
-        val rows = mutableListOf<Triple<String, String, String>>()   // sid, role, parts
+        val rows = mutableListOf<Triple<String, String, String>>()
         override suspend fun partsJsonRows(sessionId: String) = synchronized(rows) { rows.filter { it.first == sessionId }.map { it.third } }
         override suspend fun append(sessionId: String, role: String, partsJson: String) {
             if (sessionId !in sessions) throw IllegalStateException("FOREIGN KEY constraint failed (code 787 SQLITE_CONSTRAINT_FOREIGNKEY)")
@@ -73,7 +63,6 @@ class UserAskFkCrashTest {
         UserAskCenter.onResolvedWithoutWaiter = null
     }
 
-    /** Records a deleted chat can leave behind: stopped (never consumed), still waiting, answered. */
     private fun staleRecords() {
         val base = PendingAsk.create("stale-stop", deleted, "old-tc", listOf(confirm), now - 60_000, 5)
         records.save(UserAskRecord(base.resolveDismissed(UserAskDismissReason.STOPPED)!!, snapshot))
@@ -89,16 +78,14 @@ class UserAskFkCrashTest {
         },
     )).toString()
 
-    /** The view model's BeforeShow, as wired in ChatViewModel. */
     private val beforeShow = UserAskToolRunner.BeforeShow { ask ->
         UserAskRecoveryCoordinator.saveNew(UserAskRecord(ask, assistantPartsJson = "[]"))
     }
 
-    // ── The device repro ───────────────────────────────────────────────────
 
     @Test fun `first ask in a new chat with stale records of a deleted chat - no crash, stale records dropped`() = runBlocking {
         staleRecords()
-        install(scanOthers = true)   // what the first ask does: the launch scan runs on IO
+        install(scanOthers = true)
         val call = async(start = CoroutineStart.UNDISPATCHED) {
             UserAskToolRunner.execute(args(confirm), "call_9984", live, null, 5, requestId = "8afda200", beforeShow = beforeShow)
         }
@@ -121,7 +108,6 @@ class UserAskFkCrashTest {
     }
 
     @Test fun `a write that hits a constraint anyway is contained`() = runBlocking {
-        // The session row is there when checked, gone when written (deleted mid-recovery).
         val racy = object : UserAskTranscript by transcript {
             override suspend fun sessionExists(sessionId: String) = true
         }
@@ -147,14 +133,13 @@ class UserAskFkCrashTest {
         assertNull("nothing written, nothing mirrored", UserAskRecoveryCoordinator.supersedeRecovered(deleted))
     }
 
-    // ── The race and drafts ────────────────────────────────────────────────
 
     @Test fun `a scan between saving and showing never takes over the live ask`() = runBlocking {
         install(scanOthers = false)
         val a = PendingAsk.create("rLive", live, "tcLive", listOf(confirm), now, 5)
-        UserAskCenter.claim(a.requestId)          // what the runner does first
+        UserAskCenter.claim(a.requestId)
         UserAskRecoveryCoordinator.saveNew(UserAskRecord(a, snapshot))
-        UserAskRecoveryCoordinator.restoreForSession(live, nowMs = now)   // the scan lands here
+        UserAskRecoveryCoordinator.restoreForSession(live, nowMs = now)
         assertTrue("no assistant row appended twice", transcript.rows.isEmpty())
         assertNull("not registered as a restored card", UserAskCenter.ask("tcLive"))
         assertTrue(records.all().containsKey("rLive"))
@@ -167,7 +152,6 @@ class UserAskFkCrashTest {
         assertTrue(records.all().isEmpty())
     }
 
-    // ── New chat, first question: confirm and options ──────────────────────
 
     @Test fun `new chat - first confirm and first options question show and resolve`() = runBlocking {
         install(scanOthers = true)
@@ -185,10 +169,8 @@ class UserAskFkCrashTest {
         assertTrue("nothing was appended by recovery for the live chat", transcript.rows.isEmpty())
     }
 
-    // ── Source guards ──────────────────────────────────────────────────────
 
     @Test fun `ownership comes first, recovery is contained, existence is checked against the DB`() {
-        // [T-user-ask-deferred] The waiting call; a deferred one is never in-process.
         val runner = ProductionSources.read("agent/userask/UserAskToolRunner.kt").substringAfter("suspend fun execute(")
         assertTrue(runner.indexOf("UserAskCenter.claim(ask.requestId)") in 0 until runner.indexOf("beforeShow?.onAsk(ask)"))
         assertTrue(runner.contains("runCatching { beforeShow?.onAsk(ask) }"))

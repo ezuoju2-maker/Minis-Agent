@@ -11,11 +11,6 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 import java.nio.file.Files
 
-/**
- * [T-storage-orphan-cleanup] Only session folders that no conversation owns,
- * that nothing is using and that have been quiet for an hour are removed
- * (port of iOS 20e1825f6), on a real tree in a temp dir.
- */
 class OrphanedSessionFilesTest {
 
     @get:Rule val tmp = TemporaryFolder()
@@ -40,13 +35,11 @@ class OrphanedSessionFilesTest {
         write(File(s.mediaRoot, "2026/05/01/$orphanOld/img.jpg"), 1000, old)
         write(File(s.mediaRoot, "2026/05/02/$orphanOld2/img.jpg"), 500, old)
         write(File(s.mediaRoot, "2026/05/02/$live/img.jpg"), 500, old)
-        // Never candidates: non-UUID folders, a loose file, a UUID-named file and symlink.
         write(File(s.sessionsRoot, "shared/x.txt"), 50, old)
         write(File(s.sessionsRoot, "__new__draft/x.txt"), 50, old)
         write(File(s.sessionsRoot, "66666666-6666-4666-8666-666666666666"), 50, old)
         val target = tmp.newFolder("elsewhere"); write(File(target, "keep.txt"), 50, old)
         Files.createSymbolicLink(File(s.sessionsRoot, "77777777-7777-4777-8777-777777777777").toPath(), target.toPath())
-        // Directory mtimes go last: writing files above touched them.
         root.walkTopDown().filter { it.isDirectory }.forEach { it.setLastModified(old) }
         File(s.sessionDir(orphanNew), "fresh.txt").setLastModified(now - 60_000L)
         return s to target

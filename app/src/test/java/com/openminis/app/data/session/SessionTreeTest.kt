@@ -4,9 +4,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** [T-android-child-session-delete-storage] Tree walk + root aggregation. */
 class SessionTreeTest {
-    // P → {A, B}; A → {A1}; orphan X (parent missing); self-loop L
     private val children = mapOf("P" to listOf("A", "B"), "A" to listOf("A1"), "L" to listOf("L"))
     private val parentOf = mapOf<String, String?>(
         "P" to null, "A" to "P", "B" to "P", "A1" to "A", "X" to "missing", "L" to "L",

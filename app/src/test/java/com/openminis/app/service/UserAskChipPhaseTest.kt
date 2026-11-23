@@ -11,11 +11,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-user-ask-chip] While a user_ask question waits, the ongoing
- * notification / Android 16 chip is in an ASKING phase - its own icon and
- * text, counting down to the question's timeout - instead of "Running".
- */
 class UserAskChipPhaseTest {
 
     private val now = 1_000_000_000L

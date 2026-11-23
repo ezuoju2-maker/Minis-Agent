@@ -65,38 +65,16 @@ import com.openminis.app.R
 import com.openminis.app.power.PowerOptimizationManager
 import com.openminis.app.i18n.uppercaseForDisplay
 
-/**
- * T50 settings screen — surfaces the two pieces of background-keep-alive
- * state the user can fix from the OS but the app cannot:
- *
- *   1. Battery-optimisation exemption (`isIgnoringBatteryOptimizations`).
- *   2. OEM-specific autostart permission (Xiaomi/Huawei/OPPO/Vivo/Samsung).
- *
- * Both rows just deep-link to the right system settings page; the app
- * has no privileged way to flip these directly. The state for (1) is
- * polled on resume — when the user comes back from the system settings
- * dialog, the row updates to "already allowed".
- *
- * Renders without depending on the file-private SettingsSection /
- * SettingsItem helpers in [SettingsScreen]; those don't need to grow
- * a public surface for one consumer. Visual feel is intentionally
- * close to the existing settings rows but the components are local.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackgroundSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val activity = context as? Activity
 
-    // T180-bg-notif: pull the BackgroundSettingsRepository off the
-    // Application instance — keeps AppNavigation parameters unchanged
-    // (no plumbing churn through the nav graph). MinisApp.onCreate is
-    // guaranteed to have run before any composable composes.
     val app = context.applicationContext as MinisApp
     val backgroundRepo = app.backgroundSettingsRepository
     val taskNotificationsEnabled by backgroundRepo.taskNotificationsEnabled.collectAsState()
     val backgroundOverlayEnabled by backgroundRepo.backgroundOverlayEnabled.collectAsState()
-    // [T-android-dynamic-island] Live-Updates toggle + device capability.
     val dynamicIslandEnabled by backgroundRepo.dynamicIslandEnabled.collectAsState()
     val scheduledCountdownLead by backgroundRepo.scheduledCountdownLead.collectAsState()
 
@@ -109,9 +87,6 @@ fun BackgroundSettingsScreen(onBack: () -> Unit) {
                 Settings.canDrawOverlays(context),
         )
     }
-    // [T-android-dynamic-island] Re-probed on ON_RESUME (spec §3) so a
-    // Live-Updates grant the user toggled in system settings is picked up
-    // without an app restart.
     var dynamicIslandCapable by remember {
         mutableStateOf(
             com.openminis.app.service.DynamicIslandSupport.isDynamicIslandCapable(context),
@@ -127,9 +102,6 @@ fun BackgroundSettingsScreen(onBack: () -> Unit) {
                 canDrawOverlays =
                     Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
                         Settings.canDrawOverlays(context)
-                // [T-android-island-capability-ttl] The user may have just
-                // flipped Live Updates in system settings: drop the cached
-                // answer so this re-probe really asks the platform.
                 com.openminis.app.service.DynamicIslandSupport.invalidateCapabilityCache()
                 dynamicIslandCapable =
                     com.openminis.app.service.DynamicIslandSupport.isDynamicIslandCapable(context)
@@ -161,10 +133,6 @@ fun BackgroundSettingsScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState()),
         ) {
             Spacer(Modifier.size(8.dp))
-            // T180-bg-notif: Task Notifications toggle. Mirrors iOS
-            // EnhancedBackgroundSettingsView's first section (the toggle
-            // ships ON to match iOS default — see
-            // BackgroundSettingsRepository.DEFAULT_TASK_NOTIFICATIONS).
             BgSectionTitle(stringResource(R.string.settings_section_notifications))
             BgToggleRow(
                 icon = Icons.Outlined.NotificationsActive,
@@ -175,28 +143,11 @@ fun BackgroundSettingsScreen(onBack: () -> Unit) {
             )
             BgFooter(stringResource(R.string.settings_task_notifications_footer))
 
-            // T-bg-overlay phase 2: floating tool-status overlay toggle.
-            // Tapping ON without SYSTEM_ALERT_WINDOW deep-links the user to
-            // the system "Display over other apps" screen; canDrawOverlays
-            // is re-polled on ON_RESUME so flipping the system grant
-            // immediately makes the UI reflect ready-to-use state.
             Spacer(Modifier.size(8.dp))
             BgToggleRow(
                 icon = Icons.Outlined.Layers,
                 iconColor = Color(0xFF5856D6),
                 title = stringResource(R.string.settings_bg_overlay),
-                // [T-android-overlay-toggle-reflects-intent] Reflect the user's
-                // PERSISTED intent, not the derived ready-state. Previously this
-                // was `backgroundOverlayEnabled && canDrawOverlays`, so a user
-                // who tapped ON but never granted SYSTEM_ALERT_WINDOW (or later
-                // had it revoked) came back to a switch that read OFF — they
-                // concluded the toggle "won't stay on" and never connected it to
-                // the missing permission, so the overlay silently never showed.
-                // Showing ON here surfaces the real state: the switch is on, and
-                // the footer below says a permission is still needed, which is
-                // the actionable signal. canDrawOverlays still gates whether the
-                // overlay actually renders (AgentForegroundService checks the
-                // grant independently and posts a permission nudge).
                 checked = backgroundOverlayEnabled,
                 onCheckedChange = { wanted ->
                     if (wanted && !canDrawOverlays) {
@@ -207,15 +158,10 @@ fun BackgroundSettingsScreen(onBack: () -> Unit) {
                             ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                             context.startActivity(intent)
                         } catch (_: Throwable) {
-                            // Fallback: open generic overlay settings screen.
                             val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
                                 .apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                             try { context.startActivity(intent) } catch (_: Throwable) {}
                         }
-                        // Persist the user's intent so when they return
-                        // with the grant in place, the overlay turns on
-                        // immediately (canDrawOverlays re-polls on
-                        // ON_RESUME — see LaunchedEffect above).
                         backgroundRepo.setBackgroundOverlayEnabled(true)
                     } else {
                         backgroundRepo.setBackgroundOverlayEnabled(wanted)
@@ -230,12 +176,6 @@ fun BackgroundSettingsScreen(onBack: () -> Unit) {
                 },
             )
 
-            // [T-android-dynamic-island] Live Updates / "dynamic island" toggle.
-            // Only interactive when the device is capable (Android 16+ with the
-            // per-app Live-Updates grant). When ON it REPLACES the floating
-            // overlay — the mutual-exclusion guard lives in
-            // AgentForegroundService.applyOverlayState. Disabled + explained on
-            // devices/versions that don't support it.
             Spacer(Modifier.size(8.dp))
             BgToggleRow(
                 icon = Icons.Outlined.Bolt,
@@ -253,9 +193,6 @@ fun BackgroundSettingsScreen(onBack: () -> Unit) {
                 },
             )
 
-            // [FIX-261025-03] When a waiting scheduled task's chat becomes
-            // active again: the ongoing notification, the capsule / Live
-            // Updates countdown and the keep-alive (ScheduledSessionHold).
             Spacer(Modifier.size(8.dp))
             val countdownLabels = listOf(
                 stringResource(R.string.settings_scheduled_countdown_off),
@@ -364,9 +301,6 @@ private fun BgToggleRow(
     title: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    // [T-android-dynamic-island] When false the row is greyed out and both the
-    // whole-row tap and the Switch are inert (used for the dynamic-island
-    // toggle on devices that don't support Live Updates).
     enabled: Boolean = true,
 ) {
     val rowAlpha = if (enabled) 1f else 0.4f

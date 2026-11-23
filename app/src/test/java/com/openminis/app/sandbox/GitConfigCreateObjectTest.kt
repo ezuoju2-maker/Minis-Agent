@@ -9,24 +9,12 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/**
- * [T-git-createobject-rename] openminis/openminis#409: minis.sh ran
- * `git config --system core.createObject copy`. `copy` is not a valid value
- * (only `link` and `rename` are), so every git command in the sandbox died
- * with "invalid mode for object creation". Now:
- * - minis.sh no longer writes it;
- * - PRootKernel injects core.createObject=rename through GIT_CONFIG_COUNT /
- *   KEY_0 / VALUE_0, so every shell (login or not) gets it;
- * - RootfsManager removes the invalid line from the guest's /etc/gitconfig at
- *   boot, before any shell runs.
- */
 class GitConfigCreateObjectTest {
 
     @get:Rule val tmp = TemporaryFolder()
 
     private fun migrate(text: String) = RootfsManager.migrateGitConfigText(text)
 
-    // ── Migration (pure) ───────────────────────────────────────────────────
 
     @Test fun `the only entry - the line goes, the core header stays`() {
         val (out, removed) = migrate("[core]\n\tcreateObject = copy\n")
@@ -90,7 +78,6 @@ class GitConfigCreateObjectTest {
         assertEquals(once to 0, migrate(once))
     }
 
-    // ── Migration (file) ───────────────────────────────────────────────────
 
     @Test fun `the file is rewritten in place, and a missing file is fine`() {
         val etc = tmp.newFolder("etc")
@@ -104,7 +91,6 @@ class GitConfigCreateObjectTest {
         assertEquals("no temp file left behind", listOf("gitconfig"), etc.list()!!.toList())
     }
 
-    // ── Guards ─────────────────────────────────────────────────────────────
 
     @Test fun `minis sh no longer writes the invalid value`() {
         val sh = File(ProductionSources.mainRoot()!!, "../../../../assets/default_mount/etc/profile.d/minis.sh").readText()

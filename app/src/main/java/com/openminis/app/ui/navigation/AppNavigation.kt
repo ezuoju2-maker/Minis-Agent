@@ -79,10 +79,6 @@ import com.openminis.app.ui.terminal.TerminalScreen
 import com.openminis.app.ui.onboarding.OnboardingModelSelectionScreen
 import kotlinx.coroutines.flow.first
 
-// T342: Material 3 motion easing curves. Compose-Material3 (1.3.x) ships
-// `MotionScheme` only in 1.4-alpha; mirror the spec values directly so we
-// don't take a dependency-bump tax just for two CubicBezierEasing instances.
-// Source: m3.material.io/styles/motion/easing-and-duration/tokens-specs
 private val EmphasizedDecelerate = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1.0f)
 private val EmphasizedAccelerate = CubicBezierEasing(0.3f, 0.0f, 0.8f, 0.15f)
 
@@ -93,48 +89,27 @@ object Routes {
     const val PROVIDER_LIST = "providers"
     const val ADD_PROVIDER = "add_provider"
     const val PROVIDER_DETAIL = "provider/{instanceId}"
-    /** [T-android-provider-voice] Read-only shadow Voice Service detail. */
     const val SHADOW_VOICE_DETAIL = "voice_service/{instanceId}"
     const val MODEL_GROUPS = "model_groups"
     const val MODEL_GROUP_DETAIL = "model_group/{groupId}"
     const val ADD_MODELS_TO_GROUP = "add_models_to_group/{groupId}"
-    /** T185: picker that adds model *entries* to the agent-loop set. */
     const val ADD_MODELS_TO_AGENT_LOOP = "add_models_to_agent_loop"
-    /** T185: picker that adds model *groups* to the agent-loop set. */
     const val ADD_GROUPS_TO_AGENT_LOOP = "add_groups_to_agent_loop"
-    /** T171→T182: AGENT_LOOP_MODELS deprecated (the screen lived inside
-     *  Settings, now the picker is a section inside ModelGroupsScreen).
-     *  Route declared so any back-compat deep-link string from preview
-     *  builds pops back instead of crashing. */
     const val AGENT_LOOP_MODELS = "agent_loop_models"
     const val MODEL_ENTRY_DETAIL = "model_entry/{instanceId}/{entryId}"
     const val ADD_CUSTOM_MODEL = "add_custom_model/{instanceId}"
     const val STORAGE = "storage"
-    /** [T-workbuddy] Settings → Discover → Built-in Models (platform list). */
     const val BUILT_IN_MODELS = "built_in_models"
-    // [T-workbuddy] Built-in platform card that reuses the existing account-login
-    // provider flow (Kimi Code / GitHub Copilot / OpenRouter), preselecting the type.
     const val ADD_PROVIDER_TYPE = "add_provider_type/{providerType}"
     fun addProviderType(type: String) = "add_provider_type/$type"
-    /** [T-workbuddy] A single built-in platform's account/models/quota screen. */
     const val BUILT_IN_PLATFORM = "built_in_platform/{platformId}"
     fun builtInPlatform(id: String) = "built_in_platform/$id"
     const val BACKUP = "backup"
-    /**
-     * [T-onboarding-restore-link] One-shot key the caller sets on its own
-     * savedStateHandle before navigating to [BACKUP] to open on a given tab.
-     * A handle value rather than a route argument: the BACKUP route string is
-     * matched verbatim by getBackStackEntry / pop-to-BACKUP in the restore
-     * browse flow, and an optional argument would change its pattern.
-     */
     const val BACKUP_INITIAL_TAB_KEY = "backup_initial_tab"
     const val BACKUP_DESTINATIONS = "backup_destinations"
     const val BACKUP_HISTORY_DETAIL = "backup_history_detail"
     const val BACKUP_DESTINATION_BROWSE = "backup_destination_browse"
     const val RESTORE_BROWSE = "restore_browse"
-    // [T-android-restore-server-list] The servers you can restore FROM, plus
-    // an Add Server entry. Separate from BACKUP_DESTINATIONS, which is the
-    // editable management screen for the same servers.
     const val RESTORE_SERVERS = "restore_servers"
     const val SESSION_STORAGE_DETAIL = "session_storage/{sessionId}"
     const val ROOTFS_MANAGEMENT = "rootfs_management"
@@ -144,7 +119,6 @@ object Routes {
     const val FILE_PREVIEW = "file_preview"
     const val ENV_VARS = "env_vars"
     const val NETWORK = "network"
-    // [FEAT-261021-04] The other pages of Settings > Network.
     const val NETWORK_TAILSCALE = "network_tailscale"
     const val NETWORK_PROXIES = "network_proxies"
     const val CONTAINER_DNS = "container_dns"
@@ -155,16 +129,11 @@ object Routes {
 
     fun skillDetail(skillId: String) = "skill/$skillId"
     fun skillFile(skillId: String, relativePath: String = "SKILL.md"): String {
-        // Path may contain `/`, which the nav library treats as a route
-        // separator. URL-encode so subdirectory paths survive a round-trip.
         val encoded = java.net.URLEncoder.encode(relativePath, "UTF-8").replace("+", "%20")
         return "skill_file/$skillId/$encoded"
     }
     const val TERMINAL = "terminal?initCommand={initCommand}&sessionId={sessionId}"
     fun terminal(initCommand: String? = null, sessionId: String? = null): String {
-        // URLEncoder follows application/x-www-form-urlencoded — spaces become `+`.
-        // Nav library only %-decodes the route, so `+` would reach the screen literally.
-        // Replace `+` with `%20` so Nav decodes it back to a space.
         fun enc(v: String) = java.net.URLEncoder.encode(v, "UTF-8").replace("+", "%20")
         val params = buildList {
             if (initCommand != null) add("initCommand=${enc(initCommand)}")
@@ -172,59 +141,40 @@ object Routes {
         }
         return if (params.isEmpty()) "terminal" else "terminal?${params.joinToString("&")}"
     }
-    /** Chat-files browser: opens FileBrowser rooted at /var/minis for the session. */
     const val CHAT_FILES = "chat_files/{sessionId}?path={path}"
-    /** [path]: optional Linux folder to open at (a tapped minis:// folder link). */
     fun chatFiles(sessionId: String, path: String? = null) =
         if (path == null) "chat_files/$sessionId" else "chat_files/$sessionId?path=${android.net.Uri.encode(path)}"
-    /** [T-agent-transcript-page] Full-screen read-only agent (child) transcript. */
     const val AGENT_TRANSCRIPT = "agent_transcript/{sessionId}"
     fun agentTranscript(sessionId: String) = "agent_transcript/$sessionId"
     const val MEMORY = "memory"
-    /** [T-p2-agent-settings] Settings › Agents. */
     const val AGENTS = "agents"
-    // [T-sub-agents-v1] The roster the main model delegates to by name.
     const val SUB_AGENTS = "sub_agents"
     const val SUB_AGENT_DETAIL = "sub_agent/{agentId}"
-    /** [T-tools-granular-switches] Settings > Agent Runtime > Tools. */
     const val AGENT_TOOLS = "agent_tools"
-    /** [T-mcp-integration-android] MCP Integrations management screen. */
     const val MCP = "mcp"
-    /** [T-soul-md] SOUL.md editor. */
     const val SOUL = "soul"
     const val MEMORY_FILE_EDIT = "memory_file/{fileName}/{isGlobal}"
     const val PERMISSIONS = "permissions"
-    /**
-     * T322 / [T-android-privileged-backend]: Shizuku-protocol manager
-     * walkthrough — handles both Shizuku and AXManager (they share the same
-     * binder protocol + client SDK).
-     */
     const val SHIZUKU = "shizuku"
-    /** T323: System Permissions (Accessibility service status, etc.). */
     const val SYSTEM_PERMISSIONS = "system_permissions"
     const val USAGE_STATS = "usage_stats"
     const val LOGS = "logs"
     const val LOG_DETAIL = "log_detail/{fileName}"
-    /** [T-config-readable] Logs → Config Changes → one record. */
     const val CONFIG_AUDIT_DETAIL = "config_audit_detail/{auditId}"
     const val APPEARANCE = "appearance"
     const val BACKGROUND = "background"
     const val ABOUT = "about"
     const val ONBOARDING_MODELS = "onboarding_models"
-    /** T219-2: Mount external folders settings + detail. */
     const val MOUNTED_FOLDERS = "mounted_folders"
     const val MOUNTED_FOLDERS_DETAIL = "mounted_folders_detail/{mountId}"
     fun mountedFoldersDetail(mountId: String) = "mounted_folders_detail/$mountId"
-    /** T235: Shared folders (Shared / Skills / Memory) — fixed list. */
     const val SHARED_FOLDERS = "shared_folders"
     const val SHARED_FOLDERS_DETAIL = "shared_folders_detail/{folderId}"
     fun sharedFoldersDetail(folderId: String) = "shared_folders_detail/$folderId"
-    /** [T-android-scheduled-tasks-design] Scheduled tasks list + editor. */
     const val SCHEDULED_TASKS = "scheduled_tasks"
     const val SCHEDULED_TASK_EDIT = "scheduled_tasks/edit?taskId={taskId}"
     fun scheduledTaskEdit(taskId: String? = null): String =
         if (taskId == null) "scheduled_tasks/edit" else "scheduled_tasks/edit?taskId=$taskId"
-    // [T-android-scheduled-tasks-run-records] per-task execution log.
     const val SCHEDULED_TASK_RUNS = "scheduled_tasks/runs/{taskId}"
     fun scheduledTaskRuns(taskId: String): String = "scheduled_tasks/runs/$taskId"
 
@@ -237,27 +187,13 @@ object Routes {
     fun shadowVoiceDetail(instanceId: String) = "voice_service/$instanceId"
     fun modelGroupDetail(groupId: String) = "model_group/$groupId"
     fun addModelsToGroup(groupId: String) = "add_models_to_group/$groupId"
-    // [T-android-model-entry-route-slash-crash] entryId is a composite key
-    // "<instanceId>/<modelId>" (compositeEntryKey) — it CONTAINS a '/'. Left
-    // raw, that slash splits the route into an extra path segment, so the
-    // built route no longer matches the registered MODEL_ENTRY_DETAIL pattern
-    // (model_entry/{instanceId}/{entryId}) and navigate() throws
-    // IllegalArgumentException "destination … cannot be found" — a guaranteed
-    // crash on tapping any model whose id carries a '/'. URL-encode it so the
-    // slash becomes %2F (one segment); the receiver decodes it back.
     fun modelEntryDetail(instanceId: String, entryId: String) =
         "model_entry/${android.net.Uri.encode(instanceId)}/${android.net.Uri.encode(entryId)}"
     fun addCustomModel(instanceId: String) = "add_custom_model/$instanceId"
 }
 
-/** Holder for file preview navigation state (not serializable via nav args). */
 internal object FilePreviewHolder {
     var currentItem: FileItem? = null
-    /**
-     * The chat the previewed file was opened from, when there is one: a
-     * minis:// link inside a previewed markdown document resolves against
-     * that session's attachments / workspace, as it does in the chat.
-     */
     var currentSessionId: String? = null
     var fileBrowserViewModel: FileBrowserViewModel? = null
 }
@@ -275,32 +211,16 @@ fun AppNavigation(
 ) {
     val context = LocalContext.current
 
-    // T219-5: use the application-scoped singleton from MinisApp so UI
-    // add/remove shares state with PRootKernel and the lifecycle re-probe
-    // path. Pre-T219-5 this `remember { MountedFoldersStore(...) }` created
-    // a SECOND independent instance — UI list updated but PRoot never
-    // saw the change because PRootKernel.mountedFoldersStore pointed at
-    // the application-scoped singleton in MinisApp.
     val mountedFoldersStore = remember {
         (context.applicationContext as com.openminis.app.MinisApp).mountedFoldersStore
     }
 
-    // Handle initial deep link after composition
     LaunchedEffect(initialDeepLink) {
         when (initialDeepLink) {
             is DeepLinkAction.OpenTerminal -> {
                 navController.safeNavigate(Routes.terminal(initialDeepLink.initCommand))
             }
             is DeepLinkAction.OpenSession -> {
-                // T-double-chat-fix: on process-death recreation NavController
-                // auto-restores [SESSION_LIST, chat/<id>] AND MainActivity
-                // synthesizes an OpenSession deep-link from saved state. A
-                // bare navigate() pushed a SECOND chat entry, forcing the
-                // user to press back twice. launchSingleTop collapses the
-                // duplicate; popUpTo(SESSION_LIST, saveState=true) +
-                // restoreState=true preserves chat-screen state across the
-                // hop. When the synthesized deep-link is a no-op (chat
-                // already on top) launchSingleTop short-circuits.
                 navController.safeNavigate(Routes.chat(initialDeepLink.sessionId)) {
                     popUpTo(Routes.SESSION_LIST) {
                         inclusive = false
@@ -318,57 +238,26 @@ fun AppNavigation(
                 )
                 navController.safeNavigate(Routes.ENV_VARS)
             }
-            // T183: any settings screen reachable by route string. The
-            // parser already resolved the path → route mapping so we
-            // just navigate.
             is DeepLinkAction.OpenSettingsScreen -> {
                 navController.safeNavigate(initialDeepLink.route)
             }
             is DeepLinkAction.OpenPermissionSettings -> {
                 navController.safeNavigate(Routes.PERMISSIONS)
             }
-            // OpenHtmlPreview is handled by setting startDestination
-            // (see below) so the NavHost mounts directly into the right
-            // chat — no safeNavigate dance, no sessions-list flash.
             is DeepLinkAction.OpenHtmlPreview -> {}
-            // App-icon quick actions: all three open a fresh draft chat.
-            // Voice/camera additionally seed DeepLinkCoordinator.pendingChatAction
-            // (done up-front in startDestination block below so the seed
-            // lands before ChatScreen's first compose).
             is DeepLinkAction.NewChat,
             is DeepLinkAction.NewVoiceChat,
             is DeepLinkAction.NewCameraChat -> {
-                // Navigation handled by startDestination = chat/<__new__…>
-                // when the launch intent carries one of these actions.
-                // Nothing to do here — see startDestination block below.
             }
             else -> {}
         }
     }
 
-    // Resolve launch session preference once into a deferred navigation target.
-    // T314: this LaunchedEffect fires the same frame the NavHost mounts, so
-    // the SESSION_LIST start-destination's NavBackStackEntry is still in
-    // STARTED state when we'd otherwise call navigate(). safeNavigate() —
-    // designed to defang the back-then-tap race — early-returns whenever
-    // the current entry isn't RESUMED, which silently dropped every
-    // launch-session navigation and left the user on the home screen
-    // regardless of mode 1 / 2 / 0. Wait for the start destination to
-    // settle into RESUMED before navigating; for mode 3 (Home) we don't
-    // need to navigate at all so we can skip the wait entirely.
     LaunchedEffect(Unit) {
         val hasDeepLink = initialDeepLink != null && initialDeepLink !is DeepLinkAction.Unknown
         if (hasDeepLink) return@LaunchedEffect
         val hasPendingShare =
             com.openminis.app.share.ShareCoordinator.bufferVersion.value > 0
-        // [T-android-share-routing] A cold start that carries a share always
-        // opens a NEW draft addressed to it, whatever the launch mode (mirrors
-        // iOS). Auto mode used to resume a recent chat and pour the share
-        // into it - the cross-session mix-up - and Auto with no sessions yet
-        // returned early and stranded it on the list. Decided first, before
-        // any suspending read, so this NavHost navigation wins the race with
-        // the scaffold's router (which waits for RESUMED); if the scaffold
-        // did route it, a chat is already open for it: navigate nowhere.
         if (hasPendingShare) {
             val draft = newDraftSessionId()
             if (com.openminis.app.share.ShareCoordinator.addressTo(draft)) {
@@ -379,50 +268,15 @@ fun AppNavigation(
             return@LaunchedEffect
         }
         val rawMode = getAppearancePrefs(context).getInt(KEY_LAUNCH_SESSION, 0)
-        // Hang-detector circuit breaker: if the previous launches racked up
-        // ≥3 main-thread hangs, force mode = 3 (home) so we don't reopen
-        // the session/chat that was hanging. The user clears this either
-        // by completing a chat session quietly (HangDetector.markHealthyTick
-        // on ChatScreen) or by tapping the manual reset in Settings.
-        //
-        // Crash-frequency circuit breaker: same effect, different trigger.
-        // When CrashFrequencyDetector tripped on the previous boot it set
-        // a 1-hour force-home grace window — within that window every
-        // launch lands on Home regardless of the user's Launch Session
-        // preference, even after they dismissed the share dialog. Avoids
-        // re-entering the session that may have been the crash trigger.
-        //
-        // [T-android-larky-longsession-followup] Beacon-driven restart-count
-        // gate: the previous cycle ended in crash_or_stall AND the rolling
-        // count of consecutive crashed launches exceeds the threshold
-        // (default 3). Catches the "process repeatedly killed re-entering
-        // the same monster session" pattern that the existing
-        // HangDetector breaker misses when hangs short-circuit before the
-        // SharedPreferences counter increments. Resets automatically the
-        // moment the user has ANY non-crash_or_stall cycle (clean_exit /
-        // silent_kill / first_launch) — see LaunchCycleBeacon.lastRestartCount.
         val mode = if (
             com.openminis.app.diagnostics.HangDetector.shouldForceHomeOnLaunch(context) ||
             com.openminis.app.crash.CrashFrequencyDetector.shouldForceHomeOnLaunch(context) ||
             com.openminis.app.diagnostics.LaunchCycleBeacon.shouldForceHomeOnLaunch()
         ) 3 else rawMode
         val autoThresholdMs = 15L * 60 * 1000
-        // [T-android-first-launch-lands-home] Read once, before the mode
-        // branches: "is this device set up at all?" is the question that
-        // outranks the launch preference.
         val hasAnySession = chatRepository.dao.listSessions().isNotEmpty()
-        // [T-android-hang-false-positive] Wait for the provider config to load
-        // by SUSPENDING, bounded, instead of blocking the main thread: the
-        // getter used to take configLock and waited up to 21 s behind a
-        // saveConfig. If the load never completes (unreadable store), fall
-        // through after the bound and read what is published, as before.
         kotlinx.coroutines.withTimeoutOrNull(2_000) { providerRepository.awaitConfigLoaded() }
         val hasAnyProvider = providerRepository.instances.isNotEmpty()
-        // [XSessionDiag] Hypothesis 1 context: which launch mode actually applied.
-        // rawMode is the user's preference (0 = auto, the default); mode is what
-        // survived the force-home circuit breakers. Without this line a log that
-        // lacks the "launch/auto" entry below is ambiguous — it could mean the
-        // auto branch was not taken, or that this whole resolver never ran.
         com.openminis.app.logging.AppLogger.info(
             "XSessionDiag",
             "[XSessionDiag] launch/mode: rawMode=$rawMode effectiveMode=$mode " +
@@ -430,34 +284,14 @@ fun AppNavigation(
                 "hasAnyProvider=$hasAnyProvider",
         )
         val target: String? = when {
-            // [T-android-first-launch-lands-home] Nothing configured AND no
-            // history: land on Home whatever the mode says. Mode 2 ("always a
-            // new chat") is a real preference, but on a device with no provider
-            // it opens a composer that cannot send — and hides the onboarding
-            // steps that explain why. Once the user has either a session or a
-            // provider, their preference is honoured again.
             !hasAnySession && !hasAnyProvider -> null
             mode == 1 -> chatRepository.dao.listSessions().firstOrNull { !it.isChild }?.let { Routes.chat(it.id) }
             mode == 2 -> Routes.chat("__new__${java.util.UUID.randomUUID()}")
             mode == 3 -> null
             else -> {
-                // [T-android-first-launch-lands-home] No history → Home, not a
-                // fresh draft. Auto mode is the DEFAULT, and it used to fall
-                // through to a new chat here: a device with providers but no
-                // sessions yet opened straight into an empty composer instead
-                // of the list. "Resume what I was doing" has nothing to resume
-                // when nothing was ever done.
-                // [T-child-session-leak] "Resume what I was doing" must never
-                // land in a hidden agent child session.
                 val latest = chatRepository.dao.listSessions().firstOrNull { !it.isChild }
                     ?: return@LaunchedEffect
                 val fresh = System.currentTimeMillis() - latest.updatedAt < autoThresholdMs
-                // [XSessionDiag] Hypothesis 1: auto mode silently RESUMES the most
-                // recently updated session, so a restored backup whose updatedAt is
-                // the iPhone's own timestamp can look "fresh" and be presented as
-                // the landing chat — the user believes they are in a new chat.
-                // Logs the exact inputs to the freshness test and where it navigated.
-                // Runs once per cold start; no measurable cost.
                 run {
                     val now = System.currentTimeMillis()
                     com.openminis.app.logging.AppLogger.info(
@@ -473,35 +307,12 @@ fun AppNavigation(
             }
         }
         if (target != null) {
-            // T314: navigate directly without the safeNavigate guard.
-            // safeNavigate exists to defang back-then-tap-settings races
-            // where a popped destination is mid-tear-down — it requires
-            // RESUMED to be safe. But this LaunchedEffect fires on the
-            // first composition pass, when the start destination is
-            // STARTED but not yet RESUMED. There's no race here: we're
-            // the deterministic startup dispatcher, the start destination
-            // hasn't even rendered, and we want to navigate to it BEFORE
-            // it shows. Calling navigate() unconditionally produces the
-            // intended cold-start dispatch (mode 1 → last session, mode 2
-            // → new chat, mode 0 → auto). Pre-T314 the safeNavigate guard
-            // silently dropped this navigation and stranded the user on
-            // the SESSION_LIST start destination regardless of mode.
             navController.navigate(target) {
                 popUpTo(Routes.SESSION_LIST) { inclusive = false }
             }
         }
     }
 
-    // [T-android-share-routing] Warm-share fallback for screens that do NOT
-    // host the chat scaffold (settings, editors, ...). The two scaffold routes
-    // (`sessions`, `chat/{id}`) route a share themselves from what is actually
-    // visible - see ChatSplitScaffold. Here the user is elsewhere, so open a
-    // new draft addressed to the share.
-    //
-    // T185 decided this from `route == sessions`, which the two-pane layout
-    // broke (the list can show under `chat/{id}`), and went through
-    // safeNavigate, which DROPS the call unless the entry is RESUMED - the
-    // state an onNewIntent share often arrives in. Wait for RESUMED instead.
     val shareBufferVersion by com.openminis.app.share.ShareCoordinator.bufferVersion.collectAsState()
     LaunchedEffect(shareBufferVersion) {
         if (shareBufferVersion == 0) return@LaunchedEffect
@@ -518,17 +329,7 @@ fun AppNavigation(
         }
     }
 
-    // Pinned-shortcut cold start: when launched via
-     // `minis://session/<id>/<resource-path>`, set the pending HTML
-     // preview synchronously and start NavHost directly at the matching
-     // chat so ChatScreen's LaunchedEffect consumes the pending state on
-     // first composition — no sessions-list flash, no launch-session
-     // preference detour.
     val htmlShortcut = initialDeepLink as? DeepLinkAction.OpenHtmlPreview
-    // App-icon quick action cold start: mount NavHost directly at a fresh
-    // draft chat, seeding the pending action so ChatScreen consumes it on
-    // its first LaunchedEffect tick. Mirrors the htmlShortcut path —
-    // avoids a sessions-list flash and a duplicate back-stack entry.
     val quickActionStart: String? = when (initialDeepLink) {
         is DeepLinkAction.NewVoiceChat -> {
             DeepLinkCoordinator.setPendingChatAction(
@@ -547,8 +348,6 @@ fun AppNavigation(
     }
     val startDestination = when {
         htmlShortcut != null -> {
-            // Seed coordinator before NavHost composition so ChatScreen sees
-            // the pending state on its very first LaunchedEffect tick.
             DeepLinkCoordinator.setPendingHtmlPreview(
                 htmlShortcut.sessionId,
                 htmlShortcut.resourcePath,
@@ -562,35 +361,9 @@ fun AppNavigation(
     NavHost(
         navController = navController,
         startDestination = startDestination,
-        // T153: paint the in-app theme color underneath every transition
-        // frame. Without this the NavHost's transition surface is
-        // transparent and the window background bleeds through during
-        // enter/exit animations — on dark mode the base Light window
-        // background flashes white between screens. Tying the host to
-        // the active Material colorScheme also keeps the first frame
-        // correct on cold start.
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
-        // T342: Material 3 motion — shared-axis X transition.
-        // Spec (m3.material.io/styles/motion/transitions):
-        //   - enter uses EmphasizedDecelerate (cubic-bezier 0.05, 0.7, 0.1, 1.0)
-        //     so the new destination eases in confidently
-        //   - exit uses EmphasizedAccelerate (cubic-bezier 0.3, 0.0, 0.8, 0.15)
-        //     so the leaving destination clears out fast
-        //   - both legs together feel like a single 300ms motion (200ms
-        //     exit overlapping 300ms enter), short enough that a rapid second
-        //     tap still lands on the next destination once safeNavigate's
-        //     RESUMED guard releases
-        //   - the small slide distance (~SlideDirection default ≈ container
-        //     width ÷ N — Compose's slideIntoContainer already picks a
-        //     subtle distance) plus fade reads as a single coordinated
-        //     motion rather than a hard cut, matching Settings/Files in
-        //     Material You system apps.
-        // RESUMED guard via safeNavigate + the colorScheme.background
-        // modifier above (T333) still defend against rapid-tap white
-        // flashes; the slightly longer enter spec (300ms vs 220ms) is
-        // covered by the same guard.
         enterTransition = {
             slideIntoContainer(
                 AnimatedContentTransitionScope.SlideDirection.Start,
@@ -616,14 +389,6 @@ fun AppNavigation(
             ) + fadeOut(animationSpec = tween(200, easing = EmphasizedAccelerate))
         },
     ) {
-        // [T-android-tablet-split] SESSION_LIST and CHAT both render the same
-        // ChatSplitScaffold; they differ only in which session it opens with.
-        //
-        // Keeping BOTH routes (rather than collapsing to one) is deliberate:
-        // `Routes.chat(id)` is navigated to from many places — deep links,
-        // share handoff, Move-to, the widget, notifications — and every one of
-        // them keeps working unchanged. On a phone the scaffold resolves to a
-        // single pane, so those pushes look and behave exactly as before.
         composable(Routes.SESSION_LIST) {
             ChatSplitScaffoldRoute(
                 initialSessionId = null,
@@ -703,19 +468,16 @@ fun AppNavigation(
                     providerRepository = providerRepository,
                     onBack = { navController.safePopBackStack() },
                 )
-                // [T-builtin-accounts] Qoder / MiniMax Code share one screen.
                 "qoder", "minimax" -> com.openminis.app.ui.settings.BuiltInAccountScreen(
                     platform = platformId,
                     providerRepository = providerRepository,
                     onBack = { navController.safePopBackStack() },
                 )
-                else -> {} // unknown platform: stay (list is the only entry point today)
+                else -> {}
             }
         }
 
         composable(Routes.BACKUP) { entry ->
-            // Read once per entry and consumed, so a later visit from Settings
-            // opens on Backup again.
             val initialTab = remember(entry) {
                 navController.previousBackStackEntry?.savedStateHandle
                     ?.remove<Int>(Routes.BACKUP_INITIAL_TAB_KEY) ?: 0
@@ -745,14 +507,8 @@ fun AppNavigation(
             val history = remember { com.openminis.app.backup.BackupHistory.get(ctx) }
             val record = remember(id) { history.records().firstOrNull { it.id == id } }
             if (record == null) {
-                // The record was removed (or pruned) while this screen was on
-                // the stack; there is nothing to show, so leave rather than
-                // render an empty shell.
                 LaunchedEffect(Unit) { navController.safePopBackStack() }
             } else {
-                // The screen needs a ViewModel for the delete-with-files path
-                // (it talks to rclone); scoped to this entry so it dies with
-                // the screen.
                 val vm: com.openminis.app.ui.settings.backup.BackupViewModel =
                     androidx.lifecycle.viewmodel.compose.viewModel()
                 com.openminis.app.ui.settings.backup.BackupHistoryDetailScreen(
@@ -762,14 +518,6 @@ fun AppNavigation(
                         history.remove(id)
                         navController.safePopBackStack()
                     },
-                    // [T-android-backup-delete-files-feedback] Await the
-                    // delete and hand the screen its outcome. This used to pop
-                    // on the same frame it called the ViewModel — and since the
-                    // ViewModel is scoped to THIS nav entry, popping cleared it
-                    // and cancelled `viewModelScope` before the IO block ran.
-                    // Nothing was deleted and nothing was said, which is the
-                    // "button does nothing" the user reported. The screen now
-                    // pops itself via onRemoved, once the record is really gone.
                     onRemoveWithFiles = { vm.removeHistoryRecordWithFiles(id) },
                     onRemoved = { navController.safePopBackStack() },
                     onOpenDestination = { name ->
@@ -792,7 +540,6 @@ fun AppNavigation(
                 com.openminis.app.backup.remote.RcloneRemoteStore(ctx).remote(name)
             }
             if (remote == null) {
-                // The destination was removed since the record was written.
                 LaunchedEffect(Unit) { navController.safePopBackStack() }
             } else {
                 val vm: com.openminis.app.ui.settings.backup.BackupViewModel =
@@ -805,9 +552,6 @@ fun AppNavigation(
             }
         }
 
-        // [T-android-restore-server-list] Reached from the restore tab's
-        // "Choose from Server…" — always, configured or not. Picking a row
-        // (or finishing an add) continues to that server's package browser.
         composable(Routes.RESTORE_SERVERS) {
             com.openminis.app.ui.settings.backup.RestoreServersScreen(
                 onBack = { navController.safePopBackStack() },
@@ -831,9 +575,6 @@ fun AppNavigation(
             if (remote == null) {
                 LaunchedEffect(Unit) { navController.safePopBackStack() }
             } else {
-                // Scoped to the BACKUP entry so the browser and the restore
-                // screen share one ViewModel — the picked package has to be
-                // visible to the screen that restores it.
                 val parent = remember(entry) { navController.getBackStackEntry(Routes.BACKUP) }
                 val vm: com.openminis.app.ui.settings.backup.BackupViewModel =
                     androidx.lifecycle.viewmodel.compose.viewModel(parent)
@@ -841,23 +582,6 @@ fun AppNavigation(
                     remote = remote,
                     vm = vm,
                     onBack = { navController.safePopBackStack() },
-                    // [T-android-restore-picked-lands-home] Pop to BACKUP, not
-                    // one level up.
-                    //
-                    // This screen is reachable at two different depths:
-                    // BACKUP → RESTORE_BROWSE when a destination is tapped on
-                    // the restore tab, but BACKUP → RESTORE_SERVERS →
-                    // RESTORE_BROWSE when the user came through "Choose from
-                    // Server…". A single pop is right for the first and one
-                    // short for the second, so after a multi-GB download and
-                    // extract the user landed back on the server list — the
-                    // step BEFORE the one they just completed — with no sign
-                    // of the package they had waited for. It is on the Backup
-                    // screen, one more pop away, that the opened package and
-                    // its category checkboxes actually render.
-                    //
-                    // Popping to a named destination is depth-independent, so
-                    // a future third entry point cannot reintroduce this.
                     onPicked = {
                         navController.safePopBackStack(
                             route = Routes.BACKUP,
@@ -904,9 +628,6 @@ fun AppNavigation(
                     FilePreviewHolder.fileBrowserViewModel = FileBrowserViewModel(
                         rootPath = hostPath,
                         rootLabel = label,
-                        // Route reads through PRoot bind mounts so the host
-                        // dirs that back /var/minis/{shared,skills,memory}
-                        // resolve, matching how chat-files browse works.
                         linuxRootPath = "/var/minis/$folderId",
                         appContext = ctx.applicationContext,
                     )
@@ -945,9 +666,6 @@ fun AppNavigation(
                         )
                         navController.safeNavigate(Routes.FILE_BROWSER)
                     } else {
-                        // resolvedHostPath null = SAF tree from a non-externalstorage
-                        // provider (cloud / Drive). Picker normally rejects these at
-                        // add time, so this is a defensive fallback.
                         android.widget.Toast.makeText(
                             context,
                             "Mount path unavailable",
@@ -1072,10 +790,6 @@ fun AppNavigation(
             )
         }
 
-        // T185: full-screen picker for adding entries to the agent-loop
-        // usable set (replaces the T182 ModalBottomSheet so the visual
-        // matches AddModelsToGroupScreen — same shared
-        // modelEntryPickerItems composable in ui/components/).
         composable(Routes.ADD_MODELS_TO_AGENT_LOOP) {
             AddAgentLoopModelsScreen(
                 providerRepository = providerRepository,
@@ -1083,9 +797,6 @@ fun AppNavigation(
             )
         }
 
-        // T185: companion picker for adding model groups to the agent-loop
-        // set. Simpler layout (no per-provider sectioning) but same
-        // selection/confirm semantics as the entries picker.
         composable(Routes.ADD_GROUPS_TO_AGENT_LOOP) {
             AddAgentLoopGroupsScreen(
                 providerRepository = providerRepository,
@@ -1093,13 +804,6 @@ fun AppNavigation(
             )
         }
 
-        // T182: AgentLoopModels is no longer a standalone screen. The
-        // picker now lives as the last section inside ModelGroupsScreen
-        // (mirrors iOS Views/Providers/ModelGroupsView.swift L77-79's
-        // `AgentLoopModelsSection`). Routes.AGENT_LOOP_MODELS is left
-        // declared for back-compat with any deep-link string we may
-        // have shipped to early users; safePopBackStack lands them on
-        // the prior screen if it ever fires.
         composable(Routes.AGENT_LOOP_MODELS) {
             androidx.compose.runtime.LaunchedEffect(Unit) {
                 navController.safePopBackStack()
@@ -1113,10 +817,6 @@ fun AppNavigation(
                 navArgument("entryId") { type = NavType.StringType },
             ),
         ) { backStackEntry ->
-            // [T-android-model-entry-route-slash-crash] Decode back the
-            // %2F-encoded composite ids so ModelEntryDetailScreen can match
-            // entry.id == "<instanceId>/<modelId>" (which carries a literal '/')
-            // against the repo. Mirrors the encode in Routes.modelEntryDetail.
             val instanceId = backStackEntry.arguments?.getString("instanceId")
                 ?.let { android.net.Uri.decode(it) } ?: return@composable
             val entryId = backStackEntry.arguments?.getString("entryId")
@@ -1142,9 +842,6 @@ fun AppNavigation(
         }
 
         composable(Routes.STORAGE) {
-            // [T-android-storage-usage-cache] Scoped to this entry: it survives a
-            // trip to a session's detail page and back (no re-measure), and is
-            // dropped when the user leaves Storage.
             val storageContext = androidx.compose.ui.platform.LocalContext.current
             val storageVm: com.openminis.app.ui.settings.StorageUsageViewModel =
                 androidx.lifecycle.viewmodel.compose.viewModel(
@@ -1165,8 +862,6 @@ fun AppNavigation(
             arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
         ) { backStackEntry ->
             val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
-            // [T-android-storage-usage-cache] The list's ViewModel, when Storage
-            // is below us on the stack: this page's measurements update its row.
             val storageVm = remember(backStackEntry) {
                 runCatching { navController.getBackStackEntry(Routes.STORAGE) }.getOrNull()
             }?.let { parent ->
@@ -1183,16 +878,6 @@ fun AppNavigation(
                 onBack = { navController.safePopBackStack() },
                 onMeasured = { id, minis, media -> storageVm?.onSessionMeasured(id, minis, media) },
                 onBrowseFiles = { rootPath ->
-                    // [T-android-copy-abs-path-fullpath] This browser is rooted at
-                    // the per-session host dir (filesDir/minis-sessions/<sid>),
-                    // whose immediate children (workspace/ attachments/ offloads/
-                    // browser/) are exactly the PRoot /var/minis/* subdirs. The
-                    // host listing already resolves correctly so we keep rootPath
-                    // host-based (no linuxRootPath re-routing — that would redirect
-                    // /var/minis to the global/empty placeholder dir). We only pass
-                    // displayLinuxPrefix = "/var/minis" so "Copy Absolute Path"
-                    // emits the agent-visible /var/minis/workspace/foo.py instead of
-                    // the opaque /data/user/0/.../minis-sessions/<sid>/... host path.
                     FilePreviewHolder.fileBrowserViewModel = FileBrowserViewModel(
                         rootPath = java.io.File(rootPath),
                         rootLabel = "Session Files",
@@ -1212,18 +897,10 @@ fun AppNavigation(
                     FilePreviewHolder.fileBrowserViewModel = FileBrowserViewModel(
                         rootPath = rootfs.rootfsDir,
                         rootLabel = "/",
-                        // [T-filebrowser-delete-symlink-target] The rows ARE the
-                        // Linux tree, so name them by their Linux path: delete
-                        // then knows /proc, /var/minis/skills… are bind targets,
-                        // and Copy Absolute Path gives what the shell sees.
                         displayLinuxPrefix = "/",
                     )
                     navController.safeNavigate(Routes.FILE_BROWSER)
                 },
-                // [T-android-mirror-manual-select] Without this callback the
-                // mirror rows fall back to the declaration-site no-op default
-                // and MirrorCategoryDetailScreen (manual mirror selection,
-                // iOS MirrorCategoryDetailView parity) was unreachable.
                 onMirrorCategoryClick = { category ->
                     navController.safeNavigate(Routes.mirrorCategoryDetail(category.key))
                 },
@@ -1256,11 +933,6 @@ fun AppNavigation(
             )
         }
 
-        // Browse Chat Files (iOS parity: open FileBrowser rooted at the full
-        // Linux root, focused on /var/minis. Matches AIChatView.swift L490:
-        //   FileBrowserView(rootPath: dataPath, initialPath: dataPath/var/minis,
-        //                   rootLabel: "/")
-        // so the user can navigate up out of /var/minis into the broader rootfs.
         composable(
             route = Routes.CHAT_FILES,
             arguments = listOf(
@@ -1276,10 +948,6 @@ fun AppNavigation(
             val rootfs = RootfsManager.getInstance(context.applicationContext)
             val varMinis = java.io.File(rootfs.rootfsDir, "var/minis")
             val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
-            // [T-minis-folder-link] A tapped folder link opens at that folder.
-            // The browser is rooted at the rootfs and lists through the PRoot
-            // resolver, so the Linux path maps onto the rootfs layout directly;
-            // the folder need not exist inside the rootfs tarball itself.
             val folderPath = backStackEntry.arguments?.getString("path")
                 ?.trim('/')?.takeIf { it.isNotEmpty() }
             val vm = remember(rootfs.rootfsDir.absolutePath, varMinis.absolutePath, sessionId, folderPath) {
@@ -1288,20 +956,7 @@ fun AppNavigation(
                     initialPath = folderPath?.let { java.io.File(rootfs.rootfsDir, it) }
                         ?: varMinis.takeIf { it.exists() },
                     rootLabel = "/",
-                    // T121: route directory listings through PRootKernel bind
-                    // mounts so /var/minis/{skills,memory,shared} resolve to
-                    // their backing host dirs (filesDir/minis-global/<subdir>).
-                    // Without this the browser walks the rootfs tarball
-                    // directly and shows the empty placeholder dirs that ship
-                    // inside Ubuntu 24.04's var/minis/ — every subdir reads as
-                    // "Empty folder" even though the agent has files there.
                     linuxRootPath = "/",
-                    // T147: scope per-session subdirs (attachments / workspace
-                    // / offloads / browser) to THIS chat's host dir even when
-                    // another session was the last to boot a PRoot — that
-                    // global bindMounts state is last-writer-wins and would
-                    // otherwise hide the agent's generated files for the
-                    // session the user is looking at.
                     sessionId = sessionId,
                     appContext = context.applicationContext,
                 )
@@ -1317,20 +972,6 @@ fun AppNavigation(
             )
         }
 
-        // Rendered as a Dialog destination (not a `composable`) so the
-        // underlying screen — typically ChatScreen — stays in the composition
-        // while preview is open. With `composable()`, NavHost unmounts the
-        // previous entry, which detaches the chat LazyColumn from layout;
-        // when the user pops back, LazyListState re-anchors to (0, 0) and
-        // the user loses their scroll position (plus a white-flash on the
-        // first frame before the list remeasures). `dialog()` keeps the
-        // back entry's composition alive — listState retains both
-        // firstVisibleItemIndex/Offset and its layoutInfo cache, so the
-        // chat paints its previous viewport on the first frame after pop.
-        // `usePlatformDefaultWidth=false` lets the dialog fill the screen
-        // edge-to-edge, matching the prior full-screen composable feel;
-        // `decorFitsSystemWindows=false` lets FilePreviewScreen handle its
-        // own insets exactly like before.
         dialog(
             route = Routes.FILE_PREVIEW,
             dialogProperties = DialogProperties(
@@ -1473,7 +1114,6 @@ fun AppNavigation(
             }
         }
 
-        // [T-mcp-integration-android] MCP Integrations management screen.
         composable(Routes.MCP) {
             if (mcpRepository != null) {
                 com.openminis.app.ui.settings.MCPIntegrationsScreen(
@@ -1484,7 +1124,6 @@ fun AppNavigation(
             }
         }
 
-        // [T-soul-md] SOUL.md editor.
         composable(Routes.SOUL) {
             com.openminis.app.ui.settings.SoulSettingsScreen(
                 onBack = { navController.safePopBackStack() },
@@ -1513,11 +1152,6 @@ fun AppNavigation(
         composable(Routes.PERMISSIONS) {
             OffloadPermissionScreen(
                 onBack = { navController.safePopBackStack() },
-                // [T-android-privileged-backend] Single Shizuku-protocol screen
-                // handles both Shizuku and AXManager managers; the old
-                // multi-backend screen was retired in favour of a single
-                // surface (the two managers share one binder slot, so a
-                // multi-backend abstraction was misleading).
                 onOpenPrivilegedBackend = { navController.safeNavigate(Routes.SHIZUKU) },
             )
         }
@@ -1554,17 +1188,6 @@ fun AppNavigation(
             )
         }
 
-        // [T-android-subagent-page-parity] AGENTS resolves to the roster page
-        // itself, not to a wrapper around it.
-        //
-        // The old AgentSettingsScreen held a link to this page plus a READ-ONLY
-        // mirror of the sub-model group — a setting iOS configures under
-        // Providers > Model Groups, not here. Once the switch moved onto the
-        // roster page (e905140cb), the wrapper carried nothing of its own and
-        // was purely an extra tap between the user and the thing they picked.
-        //
-        // Kept as a route rather than deleted: `minis://settings/agents` is a
-        // published deep link, so it must keep resolving.
         composable(Routes.AGENTS) {
             com.openminis.app.ui.settings.SubAgentsScreen(
                 onBack = { navController.safePopBackStack() },
@@ -1654,7 +1277,6 @@ fun AppNavigation(
             )
         }
 
-        // [T-android-scheduled-tasks-design] Scheduled tasks list + editor.
         composable(Routes.SCHEDULED_TASKS) {
             com.openminis.app.ui.scheduled.ScheduledTasksScreen(
                 onBack = { navController.safePopBackStack() },
@@ -1669,7 +1291,6 @@ fun AppNavigation(
                 },
             )
         }
-        // [T-android-scheduled-tasks-run-records] per-task run records.
         composable(
             route = Routes.SCHEDULED_TASK_RUNS,
             arguments = listOf(navArgument("taskId") { type = NavType.StringType }),

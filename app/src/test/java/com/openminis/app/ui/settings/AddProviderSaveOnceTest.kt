@@ -6,7 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** A fast double tap on Add Provider's save makes one provider and pops once. */
 class AddProviderSaveOnceTest {
 
     @Test

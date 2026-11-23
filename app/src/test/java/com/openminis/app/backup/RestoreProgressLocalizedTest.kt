@@ -5,11 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-restore-progress-localized] / [T-restore-lock-passphrase] Restore progress
- * lines are localized and name the category, and starting a restore puts the
- * keyboard away (port of iOS f587513fc).
- */
 class RestoreProgressLocalizedTest {
 
     @Test

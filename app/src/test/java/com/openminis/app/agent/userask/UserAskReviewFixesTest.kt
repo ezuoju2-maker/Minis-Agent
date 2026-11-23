@@ -13,12 +13,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
-/**
- * Fixes from the Android beta review of the user_ask port:
- * - [T-user-ask-exposure-guard] a run that does not offer user_ask refuses it like iOS;
- * - [T-user-ask-async-draft-save] draft edits are saved off the main thread,
- *   coalesced, never resurrecting a removed record; terminal states stay synchronous.
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class UserAskReviewFixesTest {
@@ -35,7 +29,6 @@ class UserAskReviewFixesTest {
 
     @After fun tearDown() = store.flushPending()
 
-    // ── async draft saves ──────────────────────────────────────────────────
 
     @Test fun `a draft edit lands, coalesced, and keeps the record's snapshot`() {
         store.save(UserAskRecord(ask, assistantPartsJson = "[snapshot]"))
@@ -53,7 +46,6 @@ class UserAskReviewFixesTest {
         store.save(UserAskRecord(ask, "[]"))
         val answered = ask.copy(submitted = setOf(0)).setAnswer(UserAskAnswer(selected = listOf(1)), 0).resolveAnswered(UserAskAnswerSource.APP)!!
         store.onAskChanged(answered)
-        // Read straight from a fresh store over the same prefs, no flush.
         val fresh = UserAskRecordStore(RuntimeEnvironment.getApplication())
         assertEquals(UserAskState.ANSWERED, fresh.record("r1")!!.ask.state)
         store.onAskChanged(answered.copy(consumed = true))
@@ -74,7 +66,6 @@ class UserAskReviewFixesTest {
         assertEquals("restored", store.record("r1")!!.ask.answers[0].otherText)
     }
 
-    // ── exposure guard ─────────────────────────────────────────────────────
 
     @Test fun `a run that does not offer user_ask refuses it with iOS's message`() {
         assertEquals("Error: user_ask is not available in this run.", UserAskPromptText.NOT_AVAILABLE)

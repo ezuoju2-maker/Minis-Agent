@@ -6,10 +6,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/**
- * [T-android-codex-account-id-claim] The ChatGPT account id (sent as the
- * Chatgpt-Account-Id header) is read from where an OpenAI id_token has it.
- */
 @RunWith(RobolectricTestRunner::class)
 class CodexAccountIdClaimTest {
 

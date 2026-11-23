@@ -10,30 +10,10 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
-/**
- * [T-android-zip-store-by-content] The packer must decide STORED vs DEFLATE
- * from the member's CONTENT.
- *
- * Android used to store EVERY member unconditionally. That is right for media
- * blobs, which carry their own compression, but it also applied to the jsonl
- * members that are the bulk of a text-heavy package: a measured 10.4 MB package
- * held 7.11 MB of raw `data/messages.jsonl`, and every byte of it was
- * re-uploaded on each backup.
- *
- * iOS had the opposite half of the same bug (fixed in 1fbcf5886): it decided
- * from the filename extension, and blobs are content-addressed with no
- * extension, so it deflated 22,845 of 23,206 entries — all the photos and
- * video included. One writer stored everything, the other deflated everything.
- *
- * The round-trip cases matter as much as the decision ones: a mixed-method
- * archive is a different code path from an all-STORED one, and it has to come
- * back byte-identical.
- */
 class BackupZipStoreByContentTest {
 
     @get:Rule val tmp = TemporaryFolder()
 
-    /** Realistic jsonl: varied prose, distinct ids — not a repeated line. */
     private fun jsonlBytes(records: Int = 1200): ByteArray {
         val words = listOf(
             "analysis", "config", "request", "retry", "check", "log", "session",
@@ -53,7 +33,6 @@ class BackupZipStoreByContentTest {
     private fun jpegBytes(size: Int = 200_000): ByteArray {
         val rnd = java.util.Random(11)
         val b = ByteArray(size).also { rnd.nextBytes(it) }
-        // JPEG magic, so the decision is made by magic and not by the probe.
         b[0] = 0xFF.toByte(); b[1] = 0xD8.toByte(); b[2] = 0xFF.toByte()
         return b
     }
@@ -68,23 +47,19 @@ class BackupZipStoreByContentTest {
 
     @Test
     fun `an extension-less JPEG blob is stored`() {
-        // Blobs are `blobs/<2hex>/<sha256>` — the name says nothing, which is
-        // exactly what defeated the iOS extension lookup.
         assertTrue(BackupZip.shouldStoreBytes(jpegBytes()), "JPEG magic must win")
     }
 
     @Test
     fun `ISO base media is recognised at offset four`() {
-        // `ftyp` sits at byte 4, not 0, so it cannot be a leading-bytes match.
         val mp4 = ByteArray(64).also {
-            it[4] = 0x66; it[5] = 0x74; it[6] = 0x79; it[7] = 0x70 // ftyp
+            it[4] = 0x66; it[5] = 0x74; it[6] = 0x79; it[7] = 0x70
         }
         assertTrue(BackupZip.shouldStoreBytes(mp4))
     }
 
     @Test
     fun `headerless high-entropy data is stored by the probe`() {
-        // No magic to match; only the entropy probe can answer.
         val random = ByteArray(200_000).also { java.util.Random(3).nextBytes(it) }
         assertTrue(BackupZip.shouldStoreBytes(random))
     }
@@ -115,8 +90,6 @@ class BackupZipStoreByContentTest {
         val pkg = File(tmp.root, "out.minisbak")
         BackupZip.archive(staging, pkg)
 
-        // Both methods must be present — an all-STORED archive would pass a
-        // round-trip check while proving nothing about the mixed path.
         ZipFile(pkg).use { zf ->
             val byName = zf.entries().toList().associateBy { it.name }
             assertEquals(

@@ -3,28 +3,6 @@ package com.openminis.app.imagerepro
 import com.openminis.app.provider.ImageBudget
 import com.openminis.app.provider.ImageCodec
 
-/**
- * A JDK-backed [ImageCodec] so the REAL production image functions
- * (ImageBudget.downscaleForModel / compressBytes / resizeJpegToMaxEdge,
- * ReadImageTool.imageResult) run end to end in a JVM test. Every call is also
- * appended to [log], which shows exactly what the production code asked the
- * decoder to do (e.g. a full decode with no sampling).
- *
- * What it is NOT: Android's decoder. Known differences:
- *  - bounds come from the format header (BitmapFactory reports -1 for an
- *    undecodable input; so does this);
- *  - sampled decode uses ImageIO source subsampling (ceil(w/n)); Android's
- *    inSampleSize may round differently — only affects compressBytes, whose
- *    final size derives from the decoded size;
- *  - EXIF is ignored by ImageIO as by BitmapFactory, but that is a property of
- *    this codec, not evidence about Android;
- *  - JPEG encoding of an image with alpha draws it onto a fresh RGB canvas
- *    (black) because ImageIO's JPEG writer rejects alpha — NOT evidence of
- *    Android's black background;
- *  - HEIC cannot be decoded (no JDK reader).
- * Bytes differ from a device's; sizes, formats, qualities and control flow
- * are the production code's own.
- */
 internal class ImageRealJvmCodec : ImageCodec {
     val log = mutableListOf<String>()
 
@@ -88,7 +66,7 @@ internal class ImageRealJvmCodec : ImageCodec {
         if (width(bitmap) == width && height(bitmap) == height) return bitmap
         val hasAlpha = Class.forName("java.awt.image.ColorModel").getMethod("hasAlpha")
             .invoke(bi.getMethod("getColorModel").invoke(bitmap)) as Boolean
-        return draw(bitmap, width, height, if (hasAlpha) 2 /* INT_ARGB */ else 1 /* INT_RGB */)
+        return draw(bitmap, width, height, if (hasAlpha) 2  else 1 )
     }
 
     private fun draw(src: Any, w: Int, h: Int, type: Int): Any {
@@ -113,7 +91,7 @@ internal class ImageRealJvmCodec : ImageCodec {
             imageIO.getMethod("write", renderedImage, String::class.java, java.io.OutputStream::class.java).invoke(null, bitmap, "png", out)
             return
         }
-        val rgb = draw(bitmap, width(bitmap), height(bitmap), 1 /* INT_RGB: alpha drops to black */)
+        val rgb = draw(bitmap, width(bitmap), height(bitmap), 1 )
         val writer = (imageIO.getMethod("getImageWritersByFormatName", String::class.java).invoke(null, "jpeg") as Iterator<*>).next()!!
         val writerClass = Class.forName("javax.imageio.ImageWriter")
         val ios = imageIO.getMethod("createImageOutputStream", Any::class.java).invoke(null, out)
@@ -136,7 +114,6 @@ internal class ImageRealJvmCodec : ImageCodec {
     }
 
     companion object {
-        /** Run [block] with this codec installed in production, restoring the Android one afterwards. */
         fun <T> with(block: (ImageRealJvmCodec) -> T): T {
             val codec = ImageRealJvmCodec()
             val previous = ImageBudget.codec

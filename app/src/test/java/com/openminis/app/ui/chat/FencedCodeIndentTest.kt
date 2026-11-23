@@ -5,10 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-codeblock-fence-indent] Copying a command from a code block that
- * sits inside a list item gave it leading spaces ("  npm install").
- */
 class FencedCodeIndentTest {
 
     @Test fun `a fence under a bullet loses its two-space indent`() {

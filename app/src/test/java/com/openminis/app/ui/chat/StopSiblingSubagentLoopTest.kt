@@ -7,16 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-stop-sibling-subagent-loop] Stopping a sub agent from its card
- * must stop the conversation that delegated it (iOS 59c1d7208).
- *
- * Android already muted the parent and cancelled the whole batch
- * (AgentJobRegistry.cancelSiblings), and the mute kept a finished sibling's
- * callback from waking the parent. But a parent turn that was itself waiting
- * on the batch came back to runAgentLoop with the stopped results and sent
- * them to the model, which then delegated again.
- */
 class StopSiblingSubagentLoopTest {
 
     private val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
@@ -34,7 +24,6 @@ class StopSiblingSubagentLoopTest {
 
     @Test
     fun `the parent loop stops after the results are recorded and before anything else is sent`() {
-        // [T-ctx-builder] The results message is built by ToolResultWrap.historyMessage.
         val appended = vm.indexOf("agentHistory.add(ToolResultWrap.historyMessage(resultParts, toolResultDbId))")
         val gate = vm.indexOf("if (com.openminis.app.agent.jobs.AgentJobRegistry.isDelegationMuted(activeSessionId)) {")
         val nextBatch = vm.indexOf("val insertBatch = QueuedPromptBatching.nextInsertBatch(_promptQueue.value)")

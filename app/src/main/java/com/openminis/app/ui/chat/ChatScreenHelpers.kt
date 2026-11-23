@@ -1,8 +1,5 @@
 package com.openminis.app.ui.chat
 
-// [T-android-split-chat] Camera/file URI helpers + PendingNonTextSelection model
-// extracted verbatim from ChatScreen.kt. Full import block copied
-// (unused=warnings); all internal (used by the ChatScreen composable).
 
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -271,15 +268,6 @@ import com.openminis.app.ui.browser.BrowserSheet
 import com.openminis.app.ui.theme.ChatColors
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * Create an empty JPEG file under filesDir/camera-photos/ and return a
- * FileProvider content URI for it, plus the underlying File. The camera
- * app writes the captured image into this URI synchronously.
- *
- * Bug 1 (MIUI): the previous version put the staging file under cacheDir,
- * which MIUI may clear while the camera Activity is in flight. Moving to
- * filesDir keeps the URI valid until we explicitly delete it.
- */
 internal fun createCameraOutputUri(context: android.content.Context): Pair<Uri, java.io.File> {
     val dir = java.io.File(context.filesDir, "camera-photos").also { it.mkdirs() }
     val ts = System.currentTimeMillis()
@@ -300,13 +288,7 @@ internal fun getFileName(context: android.content.Context, uri: Uri): String? {
     }
 }
 
-// ─── Model Picker Bottom Sheet ──────────────────────────────────────────────
 
-/**
- * Captures a tap on a model whose output modality (image/audio/video) makes
- * it unsuitable for driving an Agent task, so the picker can show a
- * confirmation dialog before applying the binding.
- */
 internal sealed class PendingNonTextSelection {
     abstract val modelDisplayName: String
     abstract val modalityLabel: String
@@ -331,24 +313,7 @@ internal sealed class PendingNonTextSelection {
     ) : PendingNonTextSelection()
 }
 
-// ── Voice-correction capture from plain text edits ────────────────────────────
 
-/**
- * [T-android-voice-correction] Capability #3: detect a select-and-replace edit
- * in the composer and hand the before/after pair to the learning recorder.
- *
- * The trigger is structural rather than heuristic: [previous] must have had a
- * NON-EMPTY selection, and [next] must have swapped exactly that span for
- * different text. Ordinary typing is append-only and never matches, so this
- * stays silent during normal composition.
- *
- * Whether the replacement is a genuine CORRECTION is not decided here — the
- * recorder applies the same phonetic-similarity and length-ratio test used for
- * ASR transcripts, so "I changed my mind" is discarded rather than learned.
- *
- * Nothing is captured unless the user has opted in; the call is fire-and-forget
- * so keystrokes never wait on segmentation or SQLite.
- */
 internal fun captureSelectionReplacement(
     context: android.content.Context,
     previous: androidx.compose.ui.text.input.TextFieldValue,
@@ -365,8 +330,6 @@ internal fun captureSelectionReplacement(
     val replaced = oldText.substring(start, end)
     if (replaced.isBlank()) return
 
-    // The unchanged prefix/suffix around the selection must still match, which
-    // confirms this edit replaced exactly that span rather than something else.
     val prefix = oldText.substring(0, start)
     val suffix = oldText.substring(end)
     val newText = next.text
@@ -375,8 +338,6 @@ internal fun captureSelectionReplacement(
     val insertedEnd = newText.length - suffix.length
     if (insertedEnd < prefix.length) return
     val inserted = newText.substring(prefix.length, insertedEnd)
-    // An empty replacement is a deletion — it carries no "should have been"
-    // information, so there is nothing to learn from it.
     if (inserted.isBlank() || inserted == replaced) return
 
     com.openminis.app.speech.correction.VoiceCorrection.captureTextInputEdit(

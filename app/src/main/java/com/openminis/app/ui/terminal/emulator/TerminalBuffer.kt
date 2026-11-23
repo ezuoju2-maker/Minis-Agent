@@ -1,9 +1,5 @@
 package com.openminis.app.ui.terminal.emulator
 
-/**
- * Terminal screen buffer — port of iOS TerminalBuffer.swift.
- * Rows × cols character grid + scrollback history + cursor state + scroll region.
- */
 class TerminalBuffer(
     var cols: Int,
     var rows: Int,
@@ -31,7 +27,6 @@ class TerminalBuffer(
 
     private fun blankLine(): Array<TerminalCell> = Array(cols) { TerminalCell.BLANK }
 
-    // ── Cursor movement ────────────────────────────────────────────────────
     fun moveCursorTo(col: Int, row: Int) {
         cursorCol = clampCol(col); cursorRow = clampRow(row); wrapPending = false
     }
@@ -41,7 +36,6 @@ class TerminalBuffer(
     fun moveCursorForward(n: Int) { cursorCol = minOf(cols - 1, cursorCol + n); wrapPending = false }
     fun moveCursorBackward(n: Int) { cursorCol = maxOf(0, cursorCol - n); wrapPending = false }
 
-    // ── Save / restore ─────────────────────────────────────────────────────
     fun saveCursor(style: CursorStyle) {
         savedCursorCol = cursorCol; savedCursorRow = cursorRow
         savedCursorStyle = style.copy()
@@ -51,7 +45,6 @@ class TerminalBuffer(
         return savedCursorStyle.copy()
     }
 
-    // ── Writing ────────────────────────────────────────────────────────────
     fun writeChar(codePoint: Int, style: CursorStyle, autoWrap: Boolean) {
         val width = characterWidth(codePoint)
         if (wrapPending) {
@@ -79,7 +72,6 @@ class TerminalBuffer(
         if (cursorCol >= cols) { cursorCol = cols - 1; wrapPending = true }
     }
 
-    // ── Line ops ───────────────────────────────────────────────────────────
     fun carriageReturn() { cursorCol = 0; wrapPending = false }
 
     fun lineFeed() {
@@ -94,14 +86,12 @@ class TerminalBuffer(
         wrapPending = false
     }
 
-    // ── Scroll ─────────────────────────────────────────────────────────────
     fun scrollUp(n: Int) {
         repeat(n) {
             if (scrollbackEnabled) {
                 scrollback.addLast(grid[scrollTop])
                 while (scrollback.size > maxScrollback) scrollback.removeFirst()
             }
-            // Shift [scrollTop+1..scrollBottom] → [scrollTop..scrollBottom-1]
             for (r in scrollTop until scrollBottom) grid[r] = grid[r + 1]
             grid[scrollBottom] = blankLine()
         }
@@ -114,7 +104,6 @@ class TerminalBuffer(
         }
     }
 
-    // ── Erase ──────────────────────────────────────────────────────────────
     fun eraseInDisplay(mode: Int) {
         when (mode) {
             0 -> {
@@ -148,7 +137,6 @@ class TerminalBuffer(
         for (c in cursorCol until end) grid[cursorRow][c] = TerminalCell.BLANK
     }
 
-    // ── Insert / delete lines & chars ──────────────────────────────────────
     fun insertLines(n: Int) {
         if (cursorRow !in scrollTop..scrollBottom) return
         val count = minOf(n, scrollBottom - cursorRow + 1)
@@ -187,7 +175,6 @@ class TerminalBuffer(
         }
     }
 
-    // ── Scroll region ──────────────────────────────────────────────────────
     fun setScrollRegion(top: Int, bottom: Int) {
         val t = maxOf(0, top - 1)
         val b = minOf(rows - 1, bottom - 1)
@@ -197,7 +184,6 @@ class TerminalBuffer(
 
     fun resetScrollRegion() { scrollTop = 0; scrollBottom = rows - 1 }
 
-    // ── Resize ─────────────────────────────────────────────────────────────
     fun resize(newCols: Int, newRows: Int) {
         if (newCols <= 0 || newRows <= 0) return
         val newGrid = Array(newRows) { r ->
@@ -213,7 +199,6 @@ class TerminalBuffer(
         wrapPending = false
     }
 
-    // ── Tabs ───────────────────────────────────────────────────────────────
     fun tabForward() {
         val next = (cursorCol / 8 + 1) * 8
         cursorCol = minOf(next, cols - 1)
@@ -223,15 +208,6 @@ class TerminalBuffer(
     private fun clampCol(c: Int) = maxOf(0, minOf(c, cols - 1))
     private fun clampRow(r: Int) = maxOf(0, minOf(r, rows - 1))
 
-    // ── Export ─────────────────────────────────────────────────────────────
-    /**
-     * [#451 Copy All] The whole buffer as plain text: scrollback, then the
-     * screen. Each row loses its trailing blanks, and the empty rows under the
-     * last line of output are dropped. A wide character's trailer cell is not
-     * text, so CJK and emoji come out without the padding space the grid
-     * stores after them. Soft-wrapped lines stay split: the grid does not
-     * record where a line wrapped (same as iOS `plainText`).
-     */
     fun plainText(): String {
         val sb = StringBuilder((scrollback.size + rows) * (cols / 2 + 1))
         for (row in scrollback) { appendRowText(sb, row); sb.append('\n') }
@@ -243,12 +219,6 @@ class TerminalBuffer(
     }
 
     companion object {
-        /**
-         * Append the text of [row] in `[from, to)` to [sb] with its trailing
-         * spaces trimmed. Wide-character trailers and empty (0) cells are
-         * skipped — shared by [plainText] and the selection copy, which used
-         * to put a space after every CJK character ("中 文").
-         */
         fun appendRowText(sb: StringBuilder, row: Array<TerminalCell>, from: Int = 0, to: Int = row.size) {
             val start = sb.length
             for (c in from until to) {
@@ -261,13 +231,10 @@ class TerminalBuffer(
             sb.setLength(end)
         }
 
-        /** Return 2 for CJK / emoji fullwidth characters, else 1. */
         fun characterWidth(cp: Int): Int {
-            // Emoji pictographic ranges (simplified from iOS — covers common cases)
             if (cp in 0x1F000..0x1FAFF) return 2
-            if (cp in 0x2600..0x27BF) return 2  // Misc symbols through Dingbats
+            if (cp in 0x2600..0x27BF) return 2
             if (cp in 0x2B00..0x2BFF) return 2
-            // CJK
             if (cp in 0x1100..0x115F) return 2
             if (cp == 0x2329 || cp == 0x232A) return 2
             if (cp in 0x2E80..0x303E) return 2

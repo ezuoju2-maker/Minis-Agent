@@ -8,12 +8,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * [T-scheduled-tool-prefill] `minis-scheduled create --shell/--command/--tool`
- * parsing. Flag names and rules follow iOS (ScheduledOffload.m +
- * ScheduledPresetToolCall.fromCLI) so one instruction works on both.
- * The argv here is what the CLI handler receives after the subcommand.
- */
 class ScheduledPrefillCliTest {
 
     private fun parse(vararg argv: String) =
@@ -67,9 +61,7 @@ class ScheduledPrefillCliTest {
         val call = parse("--tool", "shell", "--tool-args", """{"command":"make","timeout":1200}""")!!
         assertEquals("shell_execute", call.toolName)
         assertEquals(1200, call.args().getInt("timeout"))
-        // --tool defaults to shell, as on iOS.
         assertEquals("make", parse("--tool-args", """{"command":"make"}""")!!.args().getString("command"))
-        // A flag timeout wins over one inside --tool-args.
         assertEquals(60, parse("--tool-args", """{"command":"make","timeout":1200}""", "--shell-timeout", "60s")!!.args().getInt("timeout"))
     }
 
@@ -105,16 +97,12 @@ class ScheduledPrefillCliTest {
         assertTrue(src.contains("prefillToolCall = prefill,"))
         assertTrue(src.contains("if (prefill != null && target is ScheduledTargetMode.RerunMessage)"))
         assertTrue("list output shows it", src.contains("t.prefillToolCall?.let { put(\"prefillTool\", it.toJson()) }"))
-        // [T-android-scheduled-triggers] --command leads, as on iOS (3b69e3d00);
-        // --shell stays accepted as the alias.
         assertTrue("help documents the iOS names", src.contains("PREFILLED TOOL CALL (--command, alias --shell)"))
     }
 
-    // ─── [T-android-scheduled-duration-finite] (iOS 40d74b5df) ───────────
 
     @Test
     fun `a timeout past the Int range is rejected, not wrapped`() {
-        // 2^32 + 60: Math.round(...).toInt() used to wrap this to 60.
         assertRejected("--prompt", "p", "--shell", "date", "--shell-timeout", "4294967356", contains = "between 1s and 1h")
         assertRejected("--prompt", "p", "--shell", "date", "--shell-timeout", "99999999999999999999h", contains = "between 1s and 1h")
     }

@@ -12,20 +12,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [B01 cross-platform read] An Android backup's `provider_config.json` must
- * decode on iOS.
- *
- * Android's backup JSON omits every field equal to its default, and iOS
- * decodes these with `decode` (required): `instances[].isEnabled`,
- * `modelEntries[].isHidden` / `isCustom`, the top-level `sessionBindings`;
- * a group without `strategy` is dropped by `decodeModelGroupsLeniently`.
- * Observed on vphone with a real Pixel package: `keyNotFound 'isEnabled'`,
- * the whole file unreadable, nothing restored.
- *
- * The fixture is the B01X part of that real package (Android 1.15-beta.4,
- * build 33), unchanged: it is exactly what the old exporter wrote.
- */
 class BackupProviderWireTest {
 
     private val fixture: String by lazy {
@@ -47,8 +33,6 @@ class BackupProviderWireTest {
 
     @Test
     fun `the old exporter left out the fields iOS requires`() {
-        // Guards the premise: if this ever fails the fixture is not what the
-        // field build wrote and the tests below prove nothing.
         val raw = BackupFormat.json.parseToJsonElement(fixture).jsonObject
         val instance = raw["instances"]!!.jsonArray.single().jsonObject
         assertTrue("isEnabled" !in instance)
@@ -85,8 +69,6 @@ class BackupProviderWireTest {
         assertEquals(3, groups.size)
         for ((name, g) in groups) {
             assertTrue("strategy in $name", g.str("strategy") != null)
-            // iOS FallbackStrategy has only `limited` and `always`; Android's
-            // `default` is iOS's `limited` and must be written that way.
             assertTrue("fallbackStrategy in $name: ${g.str("fallbackStrategy")}", g.str("fallbackStrategy") in setOf("limited", "always"))
         }
         assertEquals("fallback", groups.getValue("B01X-G-CODEX").str("strategy"))
@@ -97,7 +79,6 @@ class BackupProviderWireTest {
         assertEquals("fallback", groups.getValue("B01X-G-NEW").str("strategy"))
         assertEquals("limited", groups.getValue("B01X-G-NEW").str("fallbackStrategy"))
 
-        // Android has no session bindings in its config; iOS requires the key.
         assertEquals(JsonObject(emptyMap()), out["sessionBindings"])
     }
 
@@ -114,8 +95,6 @@ class BackupProviderWireTest {
     fun `writing the defaults out changes nothing an Android restore reads back`() {
         val before = decode(fixture)
         val after = decode(BackupProviderWire.encode(before))
-        // ProviderConfig.equals compares only its in-memory revision counter,
-        // so the content is compared part by part.
         assertEquals(before.instances, after.instances)
         assertEquals(before.modelEntries, after.modelEntries)
         assertEquals(before.modelGroups, after.modelGroups)

@@ -8,7 +8,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 
-/** [T-android-voice-correction] Full-stack device coverage for Phases 1-3. */
 @RunWith(AndroidJUnit4::class)
 class CorrectionInstrumentedTest {
     private val ctx = InstrumentationRegistry.getInstrumentation().targetContext
@@ -23,7 +22,6 @@ class CorrectionInstrumentedTest {
         db().clearAll()
     }
 
-    // --- phonetic keys must match iOS byte for byte ---
     @Test fun pinyinKeysMatchIos() {
         assertEquals("zhangsan", PinyinNormalizer.normalize("张三"))
         assertEquals("shitang", PinyinNormalizer.normalize("食堂"))
@@ -32,7 +30,6 @@ class CorrectionInstrumentedTest {
         assertEquals("", PinyinNormalizer.normalize("  "))
     }
 
-    // --- storage ---
     @Test fun repeatedUpsertFoldsAndBumpsFrequency() {
         val k = PinyinNormalizer.normalize("食堂")
         db().upsertConfusion(k, "石塘", "食堂", "zh", null, "")
@@ -61,7 +58,6 @@ class CorrectionInstrumentedTest {
         assertEquals(2, rows[0].distinctDays)
     }
 
-    // --- consent + capture (capabilities #2 and #3) ---
     @Test fun captureBlockedWithoutConsent() {
         recorder().recordTranscriptEdit("张山说今天有空", "张三说今天有空")
         recorder().recordTextInputEdit("石塘", "食堂")
@@ -99,7 +95,6 @@ class CorrectionInstrumentedTest {
         assertEquals(0, db().counts()["confusion_dictionary"])
     }
 
-    // --- retrieval end-to-end (needs ICU + jieba, so device only) ---
     @Test fun learnedPairIsRetrievedAsACandidate() {
         VoiceCorrectionConsent.setEnabled(ctx, true)
         recorder().recordTranscriptEdit("我们约在石塘见面", "我们约在食堂见面")

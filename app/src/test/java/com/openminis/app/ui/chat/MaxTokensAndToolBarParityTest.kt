@@ -9,22 +9,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * iOS parity for three things a field log showed (realme, 1.15 build 29):
- *  - [T-android-max-tokens-notice] a reply that stopped at the output-token
- *    limit ended silently; iOS shows "Response truncated (max tokens reached)"
- *    and offers Resume (AIChatViewModel+AgentLoop.swift, no-tool exit).
- *  - [T-android-max-tokens-default] the default output budget per provider
- *    (iOS defaultMaxTokens: Chat Completions 16K, Responses 32K, Anthropic
- *    64K, Gemini 16K).
- *  - [T-android-toolbar-after-compaction] the floating tool bar counted tool
- *    calls above the compaction divider ("1941/1941"); iOS leaves them out.
- */
 class MaxTokensAndToolBarParityTest {
 
     private val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
 
-    // -- max tokens: stop reason --
 
     @Test
     fun `every provider spelling of an output-limit stop is recognised, nothing else is`() {
@@ -40,7 +28,6 @@ class MaxTokensAndToolBarParityTest {
         assertFalse(EmptyTurnRecovery.shouldClassifyAsEmptyTurn(hasText = false, hasToolCall = false, stopReason = "max_tokens"))
     }
 
-    // -- max tokens: the loop branch --
 
     private val branch: String by lazy {
         val start = vm.indexOf("if (com.openminis.app.provider.StopReasons.isMaxTokens(turnFinishReason) && !closingRequestDue) {")
@@ -69,13 +56,11 @@ class MaxTokensAndToolBarParityTest {
 
     @Test
     fun `a sub agent owed its closing request keeps that path, as on iOS`() {
-        // closingRequestDue is computed before the branch and gates it.
         val due = vm.indexOf("val closingRequestDue = com.openminis.app.agent.jobs.HelperRunner.shouldSendClosingRequest(")
         val maxTokens = vm.indexOf("StopReasons.isMaxTokens(turnFinishReason) && !closingRequestDue")
         assertTrue(due in 1 until maxTokens)
     }
 
-    // -- default output budget --
 
     private val model = LLMModel("gpt-x", "GPT X", "OpenAI")
 
@@ -104,7 +89,6 @@ class MaxTokensAndToolBarParityTest {
         assertFalse("Gemini inherits the 16K fallback", ProductionSources.read("provider/gemini/GeminiProvider.kt").contains("defaultMaxOutputTokens"))
     }
 
-    // -- floating tool bar after a compaction --
 
     private fun tool(id: String, kind: String = "tool_use", status: ToolBlockStatus? = ToolBlockStatus.SUCCESS) =
         AssistantBlock(id = id, kind = kind, toolStatus = status)
@@ -140,7 +124,6 @@ class MaxTokensAndToolBarParityTest {
             screen.contains(".flatMap { it.toolBlocks }\n                            .filter { it.toolStatus != null"))
     }
 
-    // -- strings --
 
     private val res = java.io.File(ProductionSources.mainRoot()!!.parentFile.parentFile.parentFile.parentFile, "res")
 

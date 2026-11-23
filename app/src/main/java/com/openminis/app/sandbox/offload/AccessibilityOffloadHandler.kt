@@ -20,39 +20,12 @@ import com.openminis.app.sandbox.PRootKernel
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * `android-a11y-cli` — UI-layer automation surface backed by
- * [MinisAccessibilityService]. Mirrors the design doc
- * `docs/.../android-accessibility-cli-design.md`.
- *
- * Output envelope `{ ok, data }` / `{ ok:false, error:{code,message} }`
- * matches the rest of `android-*` so `--quiet` strips it cleanly.
- */
 class AccessibilityOffloadHandler(private val context: Context) : NativeOffloadHandler {
 
     companion object {
         private const val TAG = "A11yOffload"
         private const val TOOL = "android-a11y-cli"
 
-        /**
-         * [T-android-a11y-screenshot-mount] Where `ui screenshot` writes its PNG.
-         *
-         * It must be a path PRoot bind-mounts into the guest, or the agent
-         * cannot read back what it just captured. The previous location,
-         * `getExternalFilesDir("a11y_screenshots")`, is mounted nowhere:
-         * `ExecutionCoordinator.buildSessionBindMounts` only exposes
-         * `/var/minis/{attachments,offloads,workspace,browser}` (per session)
-         * and `/var/minis/{memory,skills,shared,mcp-servers}` (global), so the
-         * returned host path resolved through `resolveHostPath`'s rootfs
-         * fallback to a file that does not exist and `read_image` answered
-         * "File not found".
-         *
-         * `attachments` is the right namespace rather than `workspace`: it is
-         * session-scoped, it is what the system prompt already documents for
-         * media the model may render inline, and it is where the sibling
-         * producers write (`ImageBudget` spillover, user uploads). The
-         * `screenshots/` subdir keeps captures separate from those.
-         */
         private const val VAR_MINIS_ATTACHMENTS = "/var/minis/attachments"
         private const val A11Y_SHOT_SUBDIR = "screenshots"
 
@@ -122,10 +95,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
             return NativeOffloadResult(if (args.positional.isEmpty()) 2 else 0, TOP_HELP)
         }
         val sub = args.positional[0]
-        // T330: tri-state agent gate via OffloadPermissionManager. `service`
-        // and `--version` are diagnostic and pass through so the agent (or
-        // a curious developer) can still verify the service runs even when
-        // the agent surface is blocked.
         if (sub != "service" && sub != "--version") {
             if (!OffloadGate.allow("a11y_cli", "android-a11y-cli", request)) {
                 return err(
@@ -135,36 +104,11 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
                 )
             }
         }
-        // [T-android-a11y-force-stop-recovery] A force-stop (system Settings'
-        // "Force stop", or an OEM "clear" button) makes the framework strip our
-        // component out of Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES. It
-        // never self-heals, so without this every subsequent a11y call just
-        // returns SERVICE_NOT_RUNNING and the user has no idea the grant is the
-        // problem. Detect it here — the single point every real operation
-        // passes through — and offer a repair (one-tap via Shizuku when
-        // available, otherwise a trip to Settings).
-        //
-        // `service` / `--version` are exempt for the same reason they bypass
-        // the gate above: they are how you DIAGNOSE this state, and prompting
-        // from `service status` would be circular.
-        //
-        // runBlocking matches the established pattern for permission gates in
-        // the sibling handlers (Calendar / Contacts / BrowserUse) — offload
-        // handlers are invoked off the main thread on a sandbox worker, and
-        // `handle` is not a suspend fun. The prompt self-cancels after
-        // AccessibilityRecoveryManager.PROMPT_TIMEOUT_MS so this can never
-        // block the worker indefinitely.
         if (sub != "service" && sub != "--version") {
             val usable = kotlinx.coroutines.runBlocking {
                 AccessibilityRecoveryManager.ensureGrantOrPrompt(context)
             }
             if (!usable) {
-                // [T-android-restricted-settings] Distinguish the two reasons
-                // the grant can be missing. If the OS has flagged this install
-                // (sideloaded from a downloaded APK), telling the user to
-                // "re-enable it under Settings → Accessibility" sends them to a
-                // toggle that is greyed out and cannot be moved — the actual
-                // blocker is the restricted-settings gate, so name it.
                 val restricted = RestrictedSettingsManager.isRestricted(context)
                 return err(
                     args,
@@ -185,26 +129,11 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
                 )
             }
         }
-        // [T-bg-overlay phase 2 fix] Surface a11y sub-action progress to
-        // SessionActivityTracker.currentToolStatus so the background
-        // overlay capsule + FGS notification show what the agent is
-        // actually doing — "tap by-text Login" instead of the static
-        // "Running: a11y_cli". Computed before dispatch so even fast
-        // sub-commands (status / ping) get a one-line update before they
-        // return. Does NOT touch the per-message tool name / running
-        // flag — those stay owned by ChatViewModel so the overlay's
-        // tool-icon and indeterminate progress are not affected.
         com.openminis.app.service.SessionActivityTracker.updateToolStatus(
             statusForSubAction(sub, args.positional.getOrNull(1), args),
         )
         return try {
             when (sub) {
-                // [T-android-a11y-helper-mount] Resolve screenshots against the
-                // session whose attachments dir the guest has MOUNTED: for a
-                // helper that is its parent (ExecutionCoordinator binds
-                // `fsSessionId ?: sessionId`), not the MINIS_CHAT_SESSION_ID it
-                // exports. Otherwise the PNG lands where neither the helper's
-                // shell nor read_image can find it.
                 "ui"        -> uiSub(
                     args,
                     request.sessionId?.let {
@@ -234,7 +163,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         }
     }
 
-    // ── service ──────────────────────────────────────────────────────────
 
     private fun serviceSub(args: OffloadArgs): NativeOffloadResult {
         return when (args.positional.getOrNull(1)) {
@@ -248,11 +176,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
                         put("retrieveWindowContent"); put("performGestures"); put("watchEvents")
                     })
                     .put("androidVersion", android.os.Build.VERSION.SDK_INT)
-                    // [T-android-restricted-settings] `service status` is the
-                    // documented way to diagnose why the service won't start,
-                    // so report the OS-level block explicitly — otherwise the
-                    // only visible fact is running=false, which looks
-                    // identical to "the user never enabled it".
                     .put("restrictedSettings", RestrictedSettingsManager.isRestricted(context))
                 ok(args, data)
             }
@@ -273,15 +196,7 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         }
     }
 
-    // ── ui ───────────────────────────────────────────────────────────────
 
-    /**
-     * [T-android-a11y-screenshot-mount] `sessionId` is threaded in only for
-     * `screenshot`, which must resolve the calling chat's own
-     * `/var/minis/attachments` rather than whichever session wrote the global
-     * bind-mount map last. Null when the call did not come from an agent shell
-     * (e.g. the interactive terminal).
-     */
     private fun uiSub(args: OffloadArgs, sessionId: String?): NativeOffloadResult {
         return when (args.positional.getOrNull(1)) {
             null         -> NativeOffloadResult(2, UI_HELP)
@@ -487,31 +402,11 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
             return ok(args, data)
         }
 
-        // [T-android-a11y-screenshot-mount] Resolve the SESSION's attachments
-        // directory, not the global bind-mount map's current answer.
-        //
-        // PRootKernel.bindMounts is process-global mutable state that
-        // ExecutionCoordinator.buildSessionBindMounts overwrites every time ANY
-        // session boots a shell, so resolveHostPath is last-writer-wins. Using
-        // it alone would drop this chat's screenshot into a different chat's
-        // attachments directory whenever two sessions are active — the capture
-        // would then be unreadable here and would leak into an unrelated
-        // conversation. resolveSessionHostPath bypasses that map for the
-        // per-session subdirs and is the API the chat link resolver and
-        // read_image already use for exactly this reason.
-        //
-        // The global map remains the fallback for a call with no session (the
-        // interactive terminal), where last-writer-wins is the only answer
-        // available and nothing is being attributed to a chat.
         val attachmentsHostDir: java.io.File? = sessionId
             ?.let { PRootKernel.resolveSessionHostPath(it, VAR_MINIS_ATTACHMENTS, context) }
             ?: PRootKernel.resolveHostPath(VAR_MINIS_ATTACHMENTS)
 
         if (attachmentsHostDir == null) {
-            // Do NOT silently fall back to a private directory the way the old
-            // `?: cacheDir` chain did: that produced a path the agent cannot
-            // read and reported success, which is the whole bug. Fail loudly
-            // and name the one flag that still works without a mount.
             return err(args, "NO_ATTACHMENTS_MOUNT",
                 "cannot resolve $VAR_MINIS_ATTACHMENTS; run from an agent shell, or pass --inline for base64")
         }
@@ -523,13 +418,8 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         return try {
             java.io.FileOutputStream(file).use { it.write(pngBytes) }
             val linuxPath = "$VAR_MINIS_ATTACHMENTS/$A11Y_SHOT_SUBDIR/$filename"
-            // `path` is the guest path so it can be handed straight to
-            // read_image / the shell. This replaces the host absolute path the
-            // old code returned, which no agent-side tool could open.
             data.put("path", linuxPath)
             data.put("minis_url", "minis://attachments/$A11Y_SHOT_SUBDIR/$filename")
-            // Kept for debugging and for any caller that genuinely wants the
-            // Android-side location; it is NOT readable from the sandbox.
             data.put("host_path", file.absolutePath)
             ok(args, data)
         } catch (t: Throwable) {
@@ -538,7 +428,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         }
     }
 
-    // ── tap ──────────────────────────────────────────────────────────────
 
     private fun tapSub(args: OffloadArgs): NativeOffloadResult {
         return when (args.positional.getOrNull(1)) {
@@ -648,7 +537,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         for (i in 0 until node.childCount) findByResourceId(node.getChild(i), rid, maxDepth, depth + 1, out)
     }
 
-    // ── input ────────────────────────────────────────────────────────────
 
     private fun inputSub(args: OffloadArgs): NativeOffloadResult {
         return when (args.positional.getOrNull(1)) {
@@ -708,7 +596,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         return null
     }
 
-    // ── scroll ───────────────────────────────────────────────────────────
 
     private fun scrollSub(args: OffloadArgs): NativeOffloadResult {
         return when (args.positional.getOrNull(1)) {
@@ -801,7 +688,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         return null
     }
 
-    // ── gesture ──────────────────────────────────────────────────────────
 
     private fun gestureSub(args: OffloadArgs): NativeOffloadResult {
         return when (args.positional.getOrNull(1)) {
@@ -856,7 +742,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         else err(args, "GESTURE_FAILED", "path cancelled")
     }
 
-    // ── wait ─────────────────────────────────────────────────────────────
 
     private fun waitSub(args: OffloadArgs): NativeOffloadResult {
         return when (args.positional.getOrNull(1)) {
@@ -950,7 +835,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         return ok(args, JSONObject().put("timedOut", true))
     }
 
-    // ── event / notify / dialog ──────────────────────────────────────────
 
     private fun eventSub(args: OffloadArgs): NativeOffloadResult {
         return when (args.positional.getOrNull(1)) {
@@ -1003,7 +887,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         if (sub != "watch" && sub != "once") {
             return NativeOffloadResult(2, "$TOOL notify: unknown action\n$NOTIFY_HELP")
         }
-        // Reuse eventWatch with forced type filter.
         val newArgv = mutableListOf("event", sub)
         args.get("package")?.let { newArgv += listOf("--package", it) }
         args.get("text-contains")?.let { newArgv += listOf("--text-contains", it) }
@@ -1095,7 +978,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         return err(args, "NODE_NOT_FOUND", "no matching dismiss button found (looked for: ${candidates.joinToString()})")
     }
 
-    // ── extract ──────────────────────────────────────────────────────────
 
     private fun extractSub(args: OffloadArgs): NativeOffloadResult {
         return when (args.positional.getOrNull(1)) {
@@ -1192,7 +1074,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         for (i in 0 until node.childCount) collectFormFields(node.getChild(i), maxDepth, depth + 1, arr, registry)
     }
 
-    // ── helpers ──────────────────────────────────────────────────────────
 
     private class NotRunning(msg: String) : RuntimeException(msg)
 
@@ -1211,19 +1092,6 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         return NativeOffloadResult(exit, OffloadOutput.formatBody(body, args) + "\n")
     }
 
-    /**
-     * [T-bg-overlay phase 2 fix] Human-readable sub-action status surfaced
-     * to the background overlay + FGS notification while the a11y CLI is
-     * running. Format mirrors the CLI's own subcommand vocabulary so a
-     * developer reading logs sees the same thing the agent ran.
-     *
-     * Examples:
-     *   ui dump           → "a11y_cli: dumping UI tree"
-     *   tap by-text Login → "a11y_cli: tap \"Login\""
-     *   input set --text X → "a11y_cli: input text"
-     *   scroll forward    → "a11y_cli: scroll forward"
-     *   event watch       → "a11y_cli: watching events"
-     */
     private fun statusForSubAction(sub: String, verb: String?, args: OffloadArgs): String {
         val v = verb ?: ""
         val target = args.positional.getOrNull(2)?.takeIf { it.isNotBlank() }

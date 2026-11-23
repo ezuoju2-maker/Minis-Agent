@@ -14,54 +14,16 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * T188 — `minis-sessions-cli` offload handler. Lets the in-shell agent
- * query historical chat sessions and messages without round-tripping
- * back through the LLM. Four subcommands:
- *
- *   list       List recent sessions, optionally filtered by id, keyword,
- *              and date range. Default if no subcommand is given.
- *   search     Search message content across sessions; --keywords
- *              required.
- *   messages   Read a paginated transcript of one session; --id required.
- *   status     [T-subagent-termination] Current state of one session; --id
- *              required. Same fields as iOS `status`, including how a sub
- *              agent run ended (termination_reason, last_tool_status, …).
- *   update     [T-sessions-cli-update] Change a session's title, group and/or
- *              icon through the same repository calls the session list's
- *              Edit sheet and group menu use (the UI refreshes from Room).
- *   groups     [T-sessions-cli-update] Every group with its session count.
- *
- * Mirrors iOS canonical CLI surface: argv shape, JSON envelope, exit
- * codes, error messages all line up. The on-device db (Room) is the
- * same shape as iOS (sqlite tables `sessions`/`messages` with matching
- * column names), so query semantics translate one-to-one.
- *
- * Output flags `--compact` / `-q` / `--quiet` are honored uniformly via
- * [OffloadOutput.formatBody], same as every other android-* / minis-*
- * tool.
- */
 class SessionsOffloadHandler(
     private val repo: ChatRepository,
-    /** The authoritative is-running signal (iOS: SessionActivityTracker.isActive). */
     private val isRunning: (String) -> Boolean = { com.openminis.app.service.SessionActivityTracker.isActive(it) },
-    /** A live sub agent job still runs in this session (registry), for `interrupted` resolution. */
     private val hasLiveJob: (String) -> Boolean = { sid ->
         com.openminis.app.agent.jobs.AgentJobRegistry.list().any { it.runSessionId == sid && it.isActive }
     },
-    /**
-     * [T-sessions-cli-update] `update --title-auto`: the session list's
-     * Regenerate Title (SessionTitleRegenerator); true when a title was written.
-     */
     private val titleRegenerator: (suspend (String) -> Boolean)? = null,
 ) : NativeOffloadHandler {
 
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
-        // argv[0] is the program name ("minis-sessions-cli"); subcommand
-        // and options follow. Drop argv[0] before parsing so positional[0]
-        // is the subcommand name. `full` is declared boolean so
-        // `--full <token>` never greedily consumes the next token as a value
-        // (e.g. `--full` placed before the subcommand). Same for `--tools`.
         val args = OffloadArgs(request.argv.drop(1), booleanFlags = setOf("full", "tools", "title-auto"))
         if (args.hasFlag("h", "help")) {
             return NativeOffloadResult(0, OffloadOutput.formatBody(HELP_TEXT, args) + "\n")
@@ -90,9 +52,6 @@ class SessionsOffloadHandler(
                 }
             }
         } catch (e: Throwable) {
-            // Last-ditch: any unexpected exception (sql parse error, OOM,
-            // …) becomes an INTERNAL envelope rather than a crash so the
-            // shell stays alive and the agent can read the failure.
             AppLogger.warning(TAG, "uncaught: ${e.message}")
             val err = errorEnvelope(sub, "INTERNAL", e.message ?: "unknown error")
             NativeOffloadResult(
@@ -108,8 +67,6 @@ class SessionsOffloadHandler(
         val startMs = parseDate(args.get("start"))
         val endMs = parseEndDate(args.get("end"))
         val limit = parseLimit(args)
-        // [T-sessions-cli-update] --group <name>: exact, case-sensitive name
-        // (every group with that name - names are not unique); "" = ungrouped.
         val groupFilter = args.get("group")?.let(SessionsUpdateRules::normalizedGroup)
 
         val (metas, folderNames) = runBlocking {
@@ -129,11 +86,6 @@ class SessionsOffloadHandler(
                 .put("started_at", DATE_FMT.format(Date(m.startedAt)))
                 .put("last_active", DATE_FMT.format(Date(m.lastActive)))
                 .put("message_count", m.messageCount)
-            // Optional fields — only emit when non-null so the JSON
-            // matches iOS's `(optional)` shape rather than carrying
-            // null literals through to the agent prompt.
-            // [T-sessions-cli-update] title / group / icon are always present
-            // ("" = untitled / ungrouped / default icon).
             s.put("title", m.title.orEmpty())
             s.put("group", m.folderId?.let { folderNames[it] }.orEmpty())
             s.put("icon", m.category.orEmpty())
@@ -200,34 +152,13 @@ class SessionsOffloadHandler(
             }
         val limit = parseLimit(args)
         val offset = (args.getInt("offset") ?: 0).coerceAtLeast(0)
-        // [T-android-sessions-cli-full] --full lifts the per-message text cap
-        // from the default 600 to 50000 chars (iOS parity). Previously the flag
-        // was silently ignored — every message stayed truncated at 600 no
-        // matter what the caller passed, gutting transcript exports.
         val full = args.hasFlag("full")
         val maxChars = if (full) ChatRepository.MESSAGE_TEXT_MAX_FULL else ChatRepository.MESSAGE_TEXT_MAX
-        // [T-android-sessions-cli-messages-daterange] GH#200 (iOS 8f3189a73).
-        // HELP_TEXT documents --start / --end and `list` / `search` honour
-        // them, but `messages` parsed neither — the CLI accepted the flags and
-        // silently returned the whole session, which reads as the filter
-        // working and matching everything.
         val startMs = parseDate(args.get("start"))
         val endMs = parseEndDate(args.get("end"))
-        // [T-android-sessions-cli-tool-calls] Opt-in, so the default output is
-        // unchanged (iOS 7af22b59f).
         val tools = args.hasFlag("tools")
 
         val (page, total) = runBlocking {
-            // Single coroutine block so the two reads see a consistent
-            // snapshot — ordering matters less than ensuring we don't
-            // surface a `total` that disagrees with the slice we
-            // returned (e.g. another session interleaving inserts mid-
-            // call). Room serializes via the suspending dispatcher so
-            // these run sequentially in the same coroutine.
-            // Both reads take the SAME date range on purpose: an unfiltered
-            // count next to a filtered page would make `total` describe the
-            // whole session while the slice covers only the matches, so
-            // `hasMore` would lie. iOS 8f3189a73 calls this out explicitly.
             repo.loadMessagePage(sessionId, offset, limit, maxChars, startMs, endMs, includeTools = tools) to
                 repo.messageCountInRange(sessionId, startMs, endMs)
         }
@@ -239,8 +170,6 @@ class SessionsOffloadHandler(
                 .put("role", m.role)
                 .put("created_at", DATE_FMT.format(Date(m.createdAt)))
                 .put("text", m.text)
-            // Only present when the stored text exceeded the cap, so normal
-            // messages serialize byte-identically to before (iOS parity).
             if (m.truncated) obj.put("truncated", true)
             if (tools) {
                 obj.put("tool_calls", toolCallsJson(m.toolUses, maxChars))
@@ -257,20 +186,10 @@ class SessionsOffloadHandler(
             .put("total", total)
             .put("count", msgs.length())
             .put("messages", msgs)
-        // Only when on, so the default envelope keeps exactly its old keys.
         if (tools) data.put("tools", true)
         return emit("messages", data, args)
     }
 
-    /**
-     * [T-subagent-termination] `status --id <session_id>`: is it running, what
-     * did it last say and do, and — for a sub agent session — how did its run
-     * end. Port of iOS `getSessionStatus` with its 2026-10-04 fixes:
-     * last_message / last_tool come from the stored transcript (iOS returned ""
-     * for any session whose view model was not cached), and the termination
-     * record is merged in. A record still `running` with nothing alive behind
-     * it is reported (and stored) as `interrupted`.
-     */
     private fun cmdStatus(args: OffloadArgs): NativeOffloadResult {
         val sessionId = (args.get("id") ?: args.positional.getOrNull(1))?.takeIf { it.isNotBlank() }
             ?: run {
@@ -293,23 +212,6 @@ class SessionsOffloadHandler(
         return emit("status", statusData(session, rows, running, termination, group), args)
     }
 
-    /**
-     * [T-sessions-cli-update] `update --id <id> [--title t | --title-auto] [--group g] [--icon i]`.
-     * Same contract and order of steps as iOS SessionsOffloadBridge.updateSession:
-     *
-     *  1. Argument errors ([SessionsUpdateRules.validate]) before any lookup.
-     *  2. session_not_found / not_allowed (a sub agent's hidden session).
-     *  3. --title-auto first, through the list's own Regenerate Title
-     *     ([titleRegenerator]); if it fails nothing else is written.
-     *  4. Title / icon in one write - the Edit sheet's own repository call -
-     *     skipped when nothing differs, so a no-op does not re-sort the list.
-     *  5. Group: exact (trimmed) name, created when missing, "" ungroups -
-     *     the group picker's createFolder / setFolderForSessions.
-     *  6. `changed`: the fields whose value differs, in the order title, group, icon.
-     *
-     * Every write goes through ChatRepository, so the list and an open chat
-     * refresh from Room as after an edit in the app.
-     */
     private fun cmdUpdate(args: OffloadArgs): NativeOffloadResult {
         for (f in listOf("id", "title", "group", "icon")) {
             if (args.hasFlag(f) && args.get(f) == null) return updateFail(args, SessionsUpdateRules.INVALID_ARGUMENTS, "--$f needs a value.")
@@ -356,7 +258,6 @@ class SessionsOffloadHandler(
         }
         val before = snapshot(session)
 
-        // 1. --title-auto first: on failure nothing else has been written.
         if (req.titleAuto) {
             val regen = titleRegenerator
                 ?: return fail(SessionsUpdateRules.TITLE_AUTO_FAILED, "Title regeneration is not available.")
@@ -369,7 +270,6 @@ class SessionsOffloadHandler(
             }
         }
 
-        // 2. Title / icon: one write, skipped when nothing differs.
         if (req.title != null || req.icon != null) {
             val current = repo.getSession(id) ?: return fail(SessionsUpdateRules.SESSION_NOT_FOUND, "Session $id was deleted during the update.")
             val newTitle = req.title?.let(SessionsUpdateRules::normalizedTitle) ?: current.title
@@ -386,7 +286,6 @@ class SessionsOffloadHandler(
             }
         }
 
-        // 3. Group: exact name, created when missing, "" ungroups.
         if (req.group != null) {
             val name = SessionsUpdateRules.normalizedGroup(req.group)
             val folderId = if (name.isEmpty()) null else {
@@ -407,14 +306,8 @@ class SessionsOffloadHandler(
         return SessionsUpdateRules.Outcome.Done(after, SessionsUpdateRules.changedFields(before, after))
     }
 
-    /**
-     * iOS's error envelope (noff_json_error): `{ok:false, tool, action,
-     * error:{code, message}}`; `-q` prints just `error`. Usage errors
-     * (invalid_arguments, invalid_icon) exit 2, errors about the session 1.
-     */
     private fun updateFail(args: OffloadArgs, code: String, msg: String): NativeOffloadResult {
         val error = JSONObject().put("code", code).put("message", msg)
-        // An extra key the shared spec allows: the keys an agent can retry with.
         if (code == SessionsUpdateRules.INVALID_ICON) error.put("valid_icons", JSONArray(SessionsUpdateRules.ICON_NAMES))
         val err = JSONObject()
             .put("ok", false)
@@ -426,13 +319,6 @@ class SessionsOffloadHandler(
         return NativeOffloadResult(exit, OffloadOutput.formatBody(err.toString(2), args) + "\n")
     }
 
-    /**
-     * [T-sessions-cli-update] `groups`: every group as `{name, session_count}`,
-     * same-named groups separately. Order as the home list shows them:
-     * pinned groups first, then groups by their newest member's activity,
-     * then empty groups. `session_count` counts home-list sessions only (no
-     * hidden child sessions).
-     */
     private fun cmdGroups(args: OffloadArgs): NativeOffloadResult {
         val rows = runBlocking {
             repo.listFolders().map { f ->
@@ -450,7 +336,6 @@ class SessionsOffloadHandler(
         return emit("groups", JSONObject().put("count", arr.length()).put("groups", arr), args, timestamp = true)
     }
 
-    // ─── arg parsing helpers ──────────────────────────────────────────
 
     private fun parseIds(args: OffloadArgs): List<String>? {
         val raw = args.get("ids") ?: return null
@@ -460,9 +345,6 @@ class SessionsOffloadHandler(
 
     private fun parseKeywords(args: OffloadArgs): List<String>? {
         val raw = args.get("keywords") ?: return null
-        // Split on any whitespace (the user may quote multi-word keywords
-        // at the shell, in which case we get one big token containing a
-        // space — collapse runs of whitespace into a single delimiter).
         val parts = raw.split(Regex("\\s+")).filter { it.isNotEmpty() }
         return parts.takeIf { it.isNotEmpty() }
     }
@@ -477,12 +359,6 @@ class SessionsOffloadHandler(
         }.getOrNull()
     }
 
-    /**
-     * Inclusive end-of-day: `--end 2025-03-31` includes everything up to
-     * and including 2025-03-31 23:59:59.999. Adding (1 day - 1 ms) is
-     * safer than (24h - 1ms) across DST transitions on devices that
-     * don't run UTC. Mirrors iOS SessionsOffload.m L141-145.
-     */
     private fun parseEndDate(raw: String?): Long? {
         val ms = parseDate(raw) ?: return null
         val cal = Calendar.getInstance().apply {
@@ -497,13 +373,7 @@ class SessionsOffloadHandler(
         return raw.coerceIn(1, MAX_LIMIT)
     }
 
-    // ─── envelope helpers ─────────────────────────────────────────────
 
-    /**
-     * [T-sessions-cli-update] `timestamp` (ISO 8601, local offset, as iOS
-     * noff_format_date) is set for the commands specified together with iOS
-     * (update, groups); the older commands keep their exact previous keys.
-     */
     private fun emit(action: String, data: JSONObject, args: OffloadArgs, timestamp: Boolean = false): NativeOffloadResult {
         val envelope = JSONObject()
             .put("ok", true)
@@ -531,11 +401,8 @@ class SessionsOffloadHandler(
         private const val DEFAULT_LIMIT = 50
         private const val MAX_LIMIT = 100
 
-        // iOS NOFF_EXIT_INVALID_ARGS — the shell convention is exit 2
-        // for invalid CLI args, distinct from exit 1 for runtime errors.
         private const val EXIT_INVALID_ARGS = 2
 
-        /** [T-sessions-cli-update] `--title-auto` gives up after this (shared spec 2.2). */
         private const val TITLE_AUTO_TIMEOUT_MS = 60_000L
 
         private fun isoNow(): String =
@@ -545,26 +412,11 @@ class SessionsOffloadHandler(
             timeZone = TimeZone.getDefault()
         }
 
-        /**
-         * [T-subagent-termination] The `status` data object, pure for tests.
-         * Keys match iOS: session_id, title, model_name, is_running,
-         * last_message, last_tool, updated_at, plus — when known —
-         * last_tool_status, last_tool_result, parent_session_id and the
-         * termination fields (termination_reason, termination_detail,
-         * last_tool_name, partial_output_available, closing_attempted,
-         * delivery_state, delivery_detail, ended_at).
-         *
-         * last_message is the last assistant text of the stored transcript;
-         * when there is none (a run that ended on a tool result) it falls back
-         * to the session's recorded last activity (the list preview), and
-         * last_tool_result carries what the last tool returned.
-         */
         internal fun statusData(
             session: com.openminis.app.data.db.ChatSessionEntity,
             rows: List<com.openminis.app.data.db.MessageEntity>,
             isRunning: Boolean,
             termination: com.openminis.app.agent.jobs.SubAgentTermination?,
-            /** [T-sessions-cli-update] Name of the session's group, "" = ungrouped. */
             group: String = "",
         ): JSONObject {
             val (lastAssistant, tool) = com.openminis.app.agent.jobs.SubAgentTerminationRules.lastActivity(rows)
@@ -588,12 +440,6 @@ class SessionsOffloadHandler(
             return data
         }
 
-        /**
-         * [T-android-sessions-cli-tool-calls] `tool_calls` for one message:
-         * `{tool_use_id, name, input}`, input being the stored input JSON as a
-         * string (so the field has one type even when cut mid-JSON), capped at
-         * the same [maxChars] as `text` with `input_truncated` when cut.
-         */
         internal fun toolCallsJson(uses: List<com.openminis.app.data.repository.OffloadToolUse>, maxChars: Int): JSONArray {
             val out = JSONArray()
             for (tu in uses) {
@@ -607,7 +453,6 @@ class SessionsOffloadHandler(
             return out
         }
 
-        /** [T-android-sessions-cli-tool-calls] `tool_results`: `{tool_use_id, success, output}`, same cap. */
         internal fun toolResultsJson(results: List<com.openminis.app.data.repository.OffloadToolResult>, maxChars: Int): JSONArray {
             val out = JSONArray()
             for (tr in results) {

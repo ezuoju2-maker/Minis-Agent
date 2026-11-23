@@ -10,24 +10,11 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-image-upload-format] DeepSeek 400 "You have uploaded an
- * unsupported image" on every turn of a conversation holding a HEIC photo.
- *
- * Reproduced on a Pixel 4a, both paths, request bodies read back from the
- * debug server:
- *  - first send:   data:image/heic;base64,<JPEG bytes ff d8 ff e0 … JFIF> → 400
- *  - after reload: data:image/heic;base64,<HEIC bytes …ftypheic>           → 400
- *  - control:      data:image/jpeg;base64,<JPEG bytes>                      → 200
- * DeepSeek validates the declared MIME, so a correct label matters as much as
- * an accepted format.
- */
 class ImageUploadFormatTest {
 
     private fun bytes(vararg v: Int) = ByteArray(v.size) { v[it].toByte() } + ByteArray(24)
     private fun ascii(s: String) = s.toByteArray(Charsets.ISO_8859_1)
 
-    /** Exact headers captured from the device requests. */
     private val jpeg = bytes(0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01)
     private val heic = byteArrayOf(0x00, 0x00, 0x00, 0x20) + ascii("ftypheic") + ByteArray(24)
     private val png = bytes(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
@@ -53,7 +40,6 @@ class ImageUploadFormatTest {
         budget: (ByteArray) -> ByteArray = passBudget,
     ) = ImageBudget.prepareForUpload(input, declared, transcode, budget)
 
-    // -- sniffing --
 
     @Test fun `sniffs every format by its magic bytes`() {
         assertEquals(ImageFormat.JPEG, ImageBudget.sniffFormat(jpeg))
@@ -75,7 +61,6 @@ class ImageUploadFormatTest {
         assertEquals(listOf("image/jpeg", "image/png", "image/gif", "image/webp"), uploadable)
     }
 
-    // -- the first-send case: JPEG bytes carrying the HEIC label --
 
     @Test fun `JPEG bytes declared image-heic go out labeled image-jpeg, bytes untouched`() {
         val out = prepare(jpeg, "image/heic")
@@ -95,7 +80,6 @@ class ImageUploadFormatTest {
         }
     }
 
-    // -- the reload case: raw HEIC --
 
     @Test fun `raw HEIC is transcoded to JPEG and labeled image-jpeg`() {
         val out = prepare(heic, "image/heic")!!
@@ -124,7 +108,6 @@ class ImageUploadFormatTest {
         assertNull(prepare(ByteArray(0), "image/jpeg"))
     }
 
-    // -- the byte budget runs after the format gate, and the label follows it --
 
     @Test fun `a budget re-encode relabels to the budget's output format`() {
         val shrunk = jpeg.copyOf().also { it[21] = 9 }
@@ -145,7 +128,6 @@ class ImageUploadFormatTest {
         assertFalse(url.contains('\n'))
     }
 
-    // -- source guards --
 
     private val providers = listOf(
         "provider/openai/OpenAIProvider.kt",
@@ -172,8 +154,6 @@ class ImageUploadFormatTest {
 
     @Test fun `first send labels the part by its encoded bytes`() {
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
-        // [T-image-real-tests] The per-image ingest moved into ChatAttachmentIngest.ingestImage
-        // (same file), where the attachment's MIME is the `mimeType` parameter.
         assertTrue(vm.contains("val inferenceMime = ImageBudget.sniffFormat(inferenceBytes).mimeType ?: mimeType"))
         assertTrue(vm.contains("LLMMessage.ImagePart(inferenceBytes, inferenceMime, linuxPath = linuxPath)"))
         assertFalse(vm.contains("LLMMessage.ImagePart(inferenceBytes, attachment.mimeType"))

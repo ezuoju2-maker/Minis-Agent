@@ -5,13 +5,6 @@ import com.openminis.app.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Static catalogue of every JSON-RPC method exposed by the Android debug server.
- *
- * Returned by `rpc.discover` so clients can introspect the API at runtime
- * instead of relying on external documentation. Keep this in sync with the
- * dispatch `when` in [DebugRPCHandler.dispatch].
- */
 object DebugMethodRegistry {
 
     data class ParamSpec(
@@ -193,7 +186,6 @@ object DebugMethodRegistry {
             returns = "{size, content, encoding, bytesRead, truncated?}",
             example = ex("path" to "/etc/os-release", "limit" to 4096),
         ),
-        // [T-android-backup-subagents]
         MethodSpec(
             name = "debug.backup.export",
             description = "Run the real BackupExporter into filesDir/debug-backup (no destination upload). Credentials excluded unless includeCredentials=true.",
@@ -572,7 +564,6 @@ object DebugMethodRegistry {
             example = JSONObject(),
         ),
 
-        // --- Browser ---
         MethodSpec(
             name = "debug.browser.listTabs",
             description = "List all open browser tabs in the application-scoped pool.",
@@ -641,7 +632,6 @@ object DebugMethodRegistry {
             example = JSONObject(),
         ),
 
-        // --- Provider (read-only — Phase 1) ---
         MethodSpec(
             name = "provider.types",
             description = "Return the schema of every supported provider type, including built-in model ids and OAuth flows.",
@@ -696,7 +686,6 @@ object DebugMethodRegistry {
             example = JSONObject(),
         ),
 
-        // --- Chat (read-only — Phase 1) ---
         MethodSpec(
             name = "chat.sessions.list",
             description = "List recent chat sessions sorted by updated_at desc.",
@@ -751,7 +740,6 @@ object DebugMethodRegistry {
             example = JSONObject(),
         ),
 
-        // --- Provider mutate ---
         MethodSpec(
             name = "provider.instances.create",
             description = "Create a new provider instance. apiKey/oauthToken are write-only.",
@@ -933,7 +921,6 @@ object DebugMethodRegistry {
             example = ex("groupId" to "grp_xyz", "inLoop" to true),
         ),
 
-        // --- Chat mutate ---
         MethodSpec(
             name = "chat.prompt",
             description = "Send a prompt to a new or existing chat session. wait=true blocks until completion.",

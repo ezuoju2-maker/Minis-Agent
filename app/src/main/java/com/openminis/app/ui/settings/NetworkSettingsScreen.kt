@@ -76,29 +76,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/**
- * [FEAT-261021-04, iOS c77be4fb6] The pages of Settings > Network, each its
- * own row in the Settings list and its own deep link: Network Routing
- * (default / per-feature / per-provider routes, diagnostics, Restore Direct
- * Connections), Tailscale and Proxies. One screen draws all three, so the
- * dialogs, polling and sign-in flow stay in one place.
- */
 enum class NetworkPage { ROUTING, TAILSCALE, PROXIES }
 
-/** A provider instance as the Network Routing page lists it. */
 data class NetworkProviderRow(val id: String, val label: String)
 
-/**
- * [T-net-android-phase2] Settings > Network: built-in Tailscale, upstream
- * proxies, the default route and per-scope routes, diagnostics and the
- * "Restore Direct Connections" switch. Mirrors iOS `NetworkSettingsView`;
- * the runtime lives in [NetworkHub].
- */
 @Composable
 fun NetworkSettingsScreen(
     onBack: () -> Unit,
     page: NetworkPage = NetworkPage.ROUTING,
-    /** [FEAT-261021-04, iOS 17e6141be] Configured providers, listed with their routes on the Routing page. */
     providers: List<NetworkProviderRow> = emptyList(),
 ) {
     val settings by NetworkHub.settings.collectAsState()
@@ -116,12 +101,6 @@ fun NetworkSettingsScreen(
     var confirmClear by remember { mutableStateOf(false) }
     var addingProviderRoutes by remember { mutableStateOf(false) }
 
-    // [FIX-261025-10] Poll only while the screen is started. Tied to the
-    // composable alone, a Network page left open when the user went to
-    // another app kept asking tsnet for its status every 2 s for as long as
-    // the process lived (the agent's foreground service can keep it alive
-    // for hours). The browser sign-in has its own bounded poll
-    // (TailscaleLoginFlow), so stopping here does not miss a login.
     val pollLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(pollLifecycle) {
         var polling = false
@@ -132,7 +111,6 @@ fun NetworkSettingsScreen(
                 else -> {}
             }
         }
-        // addObserver replays ON_START when the screen is already started.
         pollLifecycle.lifecycle.addObserver(observer)
         onDispose {
             pollLifecycle.lifecycle.removeObserver(observer)
@@ -140,7 +118,6 @@ fun NetworkSettingsScreen(
         }
     }
 
-    // [FEAT-261021-05] What keeps failing, and the editor the banner asked for.
     val failing by com.openminis.app.network.NetworkAlertCenter.failing.collectAsState()
     val pendingProxy by NetworkHub.pendingProxyEditor.collectAsState()
     LaunchedEffect(page, pendingProxy) {
@@ -150,8 +127,6 @@ fun NetworkSettingsScreen(
         settings.proxies.firstOrNull { it.id == id }?.let { editingProxy = it }
     }
 
-    // [T-net-ts-login-browser] One-tap browser sign-in: the flow hands over the
-    // URL once tsnet has it, and is told when the browser covers / uncovers us.
     val login by NetworkHub.browserLogin.state.collectAsState()
     LaunchedEffect(Unit) {
         NetworkHub.browserLogin.opens.collect { url ->
@@ -179,7 +154,6 @@ fun NetworkSettingsScreen(
         },
     )
     SettingsScaffold(title = title, onBack = onBack) {
-        // While routing is off, every page shows the switch back on in place.
         if (settings.forceDirect) {
             SettingsSection(footer = stringResource(R.string.network_paused_message)) {
                 SettingsRow(
@@ -196,8 +170,6 @@ fun NetworkSettingsScreen(
             }
         }
 
-        // Default route
-        // [FEAT-261021-16] What follows the default route besides "Follow Default" scopes.
         if (page == NetworkPage.ROUTING) SettingsSection(
             footer = stringResource(R.string.network_default_route_footer) + "\n\n" + stringResource(R.string.network_default_route_covers),
         ) {
@@ -209,7 +181,6 @@ fun NetworkSettingsScreen(
             )
         }
 
-        // Tailscale
         if (page == NetworkPage.TAILSCALE) SettingsSection(
             header = stringResource(R.string.network_tailscale),
             footer = stringResource(R.string.network_tailscale_footer),
@@ -223,9 +194,6 @@ fun NetworkSettingsScreen(
             if (settings.tailscaleEnabled) {
                 StatusRow(ts, applying, settings.forceDirect)
                 if (ts.needsLogin) {
-                    // Always tappable: the flow waits for the URL itself (a
-                    // handler that appeared only once a later poll brought the
-                    // URL is why the first tap used to do nothing).
                     val opening = login == com.openminis.app.network.TailscaleLoginFlow.State.OpeningPage
                     SettingsRow(
                         title = stringResource(R.string.network_login_browser),
@@ -243,7 +211,6 @@ fun NetworkSettingsScreen(
                         showChevron = !opening,
                         trailing = if (opening) ({ CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp) }) else null,
                     )
-                    // Fallback only: when no app can open the page, the link to copy.
                     val url = NetworkHub.browserLogin.lastUrl
                     val noBrowser = (login as? com.openminis.app.network.TailscaleLoginFlow.State.Failed)?.reason ==
                         com.openminis.app.network.TailscaleLoginFlow.Reason.NO_BROWSER
@@ -295,8 +262,6 @@ fun NetworkSettingsScreen(
             }
         }
 
-        // [FEAT-261021-23, iOS 45510cce2] Exit node privacy for the shell, shown
-        // only while an exit node is selected (both off by default).
         if (page == NetworkPage.TAILSCALE && settings.tailscaleEnabled && ts.isLoggedIn && settings.exitNodeIP != null) {
             SettingsSection(footer = stringResource(R.string.network_exit_node_privacy_footer)) {
                 SettingsSwitchRow(
@@ -313,8 +278,6 @@ fun NetworkSettingsScreen(
             }
         }
 
-        // [FEAT-261021-05] Opened from the "keeps failing" banner: why, and
-        // that the switch above is the way out.
         val tsFailure = failing[com.openminis.app.network.NetworkAlertEvent.Subject.Tailscale]
         if (page == NetworkPage.TAILSCALE && settings.tailscaleEnabled && tsFailure != null) {
             SettingsSection(footer = stringResource(R.string.network_tailscale_failing_footer)) {
@@ -322,7 +285,6 @@ fun NetworkSettingsScreen(
             }
         }
 
-        // Proxies
         if (page == NetworkPage.PROXIES) SettingsSection(
             header = stringResource(R.string.network_proxies),
             footer = stringResource(R.string.network_proxies_footer),
@@ -351,10 +313,8 @@ fun NetworkSettingsScreen(
             )
         }
 
-        // Used By
         if (page == NetworkPage.ROUTING) SettingsSection(
             header = stringResource(R.string.network_used_by),
-            // [FEAT-261021-18] The shell's limits (G4b) are said, not left to be discovered.
             footer = stringResource(R.string.network_used_by_footer) + "\n" + stringResource(R.string.network_shell_limits) +
                 (if (!WebViewNetworkProxy.isSupported()) "\n" + stringResource(R.string.network_browser_no_proxy) else ""),
         ) {
@@ -368,14 +328,6 @@ fun NetworkSettingsScreen(
             }
         }
 
-        // [FEAT-261021-04, iOS 17e6141be] Provider routes, the same setting
-        // minis-config writes as providers.<id>.networkRoute.
-        // [PAR-261021-01, iOS 1b4e8bc8a] Only providers with a route of their
-        // own are listed; a row per provider buried the rest of the page.
-        // "Add Providers" picks several at once and gives them one route.
-        // Choosing "Follow Default" in a row removes the override, so the
-        // provider leaves the list. Overrides of deleted providers stay in
-        // settings but are not shown.
         val routed = providers.filter { settings.providerRoutes.containsKey(it.id) }
         val unrouted = providers.filter { !settings.providerRoutes.containsKey(it.id) }
         if (page == NetworkPage.ROUTING && providers.isNotEmpty()) SettingsSection(
@@ -579,11 +531,6 @@ fun NetworkSettingsScreen(
     }
 }
 
-/**
- * [FEAT-261021-09, iOS ProviderNetworkRouteSection] The Network row on a
- * provider's detail page: Follow Default / Direct / Tailscale / a proxy, the
- * same NetworkHub.providerRoute setting the Routing page lists.
- */
 @Composable
 internal fun ProviderNetworkRouteSection(instanceId: String) {
     val settings by NetworkHub.settings.collectAsState()
@@ -674,16 +621,6 @@ internal fun RoutePickerDialog(
     )
 }
 
-/**
- * [PAR-261021-01, iOS AddProviderRoutesView] Gives several providers the same
- * route in one go: one route (no Follow Default - that is what not being
- * listed means) and a multi-select list of the providers not yet listed.
- * Add writes them in a single [NetworkHub.update], so the runtime is applied
- * once.
- *
- * A half-screen sheet like the model and provider pickers: slim drag handle,
- * Cancel / centred title / Add in one bar, grouped settings cards below.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddProviderRoutesSheet(
@@ -704,7 +641,6 @@ private fun AddProviderRoutesSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.background,
-        // The slim handle the model picker uses (6dp / 4dp, not Material's ~22dp).
         dragHandle = {
             Box(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 4.dp), contentAlignment = Alignment.TopCenter) {
                 Box(
@@ -877,7 +813,6 @@ private fun ProxyEditorDialog(proxy: ProxyServer, isNew: Boolean, onDismiss: () 
     )
 
     LaunchedEffect(kind) {
-        // Suggest the usual port when the user has not typed one.
         if (portText in listOf("", "1080", "8080", "443")) portText = ProxyServer.defaultPort(kind).toString()
     }
 
@@ -935,8 +870,6 @@ private fun ProxyEditorDialog(proxy: ProxyServer, isNew: Boolean, onDismiss: () 
                     Text(msg, style = MaterialTheme.typography.bodySmall,
                         color = if (ok) Color(0xFF34C759) else MaterialTheme.colorScheme.error)
                 }
-                // [FEAT-261021-05] Opened from the "keeps failing" banner: say
-                // why, and let the user stop using it without deleting it.
                 val failure = NetworkAlertCenter.failing.collectAsState().value[NetworkAlertEvent.Subject.Proxy(proxy.id)]
                 if (!isNew && failure != null) {
                     val inUse = NetworkHub.proxyInUse(proxy.id, NetworkHub.settings.collectAsState().value)
@@ -995,13 +928,6 @@ private fun AuthKeyDialog(onDismiss: () -> Unit) {
     )
 }
 
-/**
- * [T-net-ts-login-browser] Opens the Tailscale sign-in page in a Custom Tab -
- * the default browser's own cookies, so an existing sign-in (Google, Apple,
- * GitHub, Microsoft, passkeys) is reused - or, with no Custom Tabs provider, in
- * the browser itself (ACTION_VIEW). False when no app can open it. The URL is
- * not logged.
- */
 private fun openSignInPage(context: android.content.Context, url: String): Boolean {
     val uri = Uri.parse(url)
     val provider = androidx.browser.customtabs.CustomTabsClient.getPackageName(context, null)

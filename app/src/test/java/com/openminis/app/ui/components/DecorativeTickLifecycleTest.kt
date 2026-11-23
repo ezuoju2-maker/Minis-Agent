@@ -5,7 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [FIX-261025-14] A reader in a stopped screen no longer keeps the decorative clock ticking. */
 class DecorativeTickLifecycleTest {
     @Test fun `a reader holds the clock only between ON_START and ON_STOP`() {
         val src = ProductionSources.read("ui/components/DecorativeAnimation.kt")

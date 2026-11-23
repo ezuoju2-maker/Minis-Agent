@@ -14,18 +14,6 @@ import com.openminis.app.data.model.ThinkingLevel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
-/**
- * [FIX-qoder-chat-protocol] Qoder chat via the cosy-signed `agent_chat_generation`
- * gateway. Qoder has no OpenAI-compatible chat endpoint (the previous
- * `/model/v1/chat/completions` call returned HTTP 404). This provider adapts the
- * app's [LLMProvider] contract to [QoderApi.chatStream], which speaks the
- * community-verified cosy protocol (private encrypted body + SSE envelope).
- *
- * The cosy chat identity is obtained by exchanging the signed-in account's
- * credential for a jobToken (the chat gateway rejects the raw device token).
- * The exchange is handled inside QoderApi.chatStream, so the account the user
- * signed in with works here with no extra PAT setup.
- */
 internal class QoderChatProvider(
     private val context: Context,
     override var model: LLMModel,
@@ -59,8 +47,6 @@ internal class QoderChatProvider(
             } else emptyList()
             out.add(QoderApi.QoderChatMessage(role, m.content, imgs))
         }
-        // If the caller passed images separately (QuickTest vision path) attach
-        // them to the last user turn.
         if (imageParts.isNotEmpty()) {
             val extra = imageParts.mapNotNull { part ->
                 runCatching {
@@ -127,8 +113,6 @@ internal class QoderChatProvider(
                         cacheReadInputTokens = d.cachedTokens,
                     )))
                 }
-                // Qoder's SSE envelope doesn't carry a stop reason explicitly;
-                // a non-empty content/reasoning frame then stream end = stop.
                 if (d.content.isNotEmpty() || d.reasoning.isNotEmpty()) finished = true
             }
             emit(LLMStreamChunk.Finished(if (finished) "stop" else "stop"))

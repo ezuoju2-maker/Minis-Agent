@@ -14,19 +14,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-in-chat-search] "Search in Chat", the pure half (port of iOS
- * ChatSearchEngineTests, 62b421d0d):
- *
- *   [1] matcher     case / diacritic insensitive, CJK, whole-string phrase,
- *                   non-overlapping, empty and blank queries, invisible chars
- *   [2] engine      display order, per-unit and total caps, "2000+", cancel
- *   [3] navigation  newest first, wrapping both ways, keep-by-identity, counter
- *   [4] markdown    the renderer's own text, not the source: no **, no link
- *                   URL, no backticks, inline formulas masked; one piece per
- *                   drawn Text (list items, quote children, table, code)
- *   [5] units       what is searched and what is not, in display order
- */
 class ChatSearchEngineTest {
 
     private val M = ChatSearchMatcher
@@ -34,7 +21,6 @@ class ChatSearchEngineTest {
     private fun unit(row: String, text: String, field: String = ChatSearchUnits.BODY) =
         ChatSearchUnit(ChatSearchUnitKey(row, field), text)
 
-    // ── [1] matcher ────────────────────────────────────────────────────────
 
     @Test fun `case insensitive`() = assertEquals(3, M.count("hello", "Hello HELLO hello", 99))
 
@@ -67,20 +53,16 @@ class ChatSearchEngineTest {
 
     @Test fun `ranges are UTF-16 offsets of the original text`() {
         assertEquals(listOf(2 until 3), M.ranges("x", "😀x"))
-        // The range covers the accented original, not its folded form.
         assertEquals(listOf(4 until 8), M.ranges("cafe", "the café"))
-        assertEquals(listOf(0 until 1), M.ranges("e", "é")) // e + combining acute
+        assertEquals(listOf(0 until 1), M.ranges("e", "é"))
     }
 
     @Test fun `invisible renderer characters are skipped inside a match`() {
-        // Zero-width (CJK emphasis fix), hair space (breakable inline code),
-        // object mark (an inline formula's masked placeholder).
         assertEquals(listOf(0 until 3), M.ranges("ab", "a​b"))
         assertEquals(listOf(1 until 4), M.ranges("ab", "xa b"))
         assertEquals(1, M.count("a b", "a ￼￼ b".replace(" ￼￼", ""), 9))
     }
 
-    // ── [2] engine ─────────────────────────────────────────────────────────
 
     private val units = listOf(unit("r1", "foo bar foo"), unit("r2", "nothing"), unit("r3", "FOO"))
 
@@ -127,7 +109,6 @@ class ChatSearchEngineTest {
     @Test fun `same input, same order`() =
         assertEquals(ChatSearchEngine.search(units, "o"), ChatSearchEngine.search(units, "o"))
 
-    // ── [3] navigation ─────────────────────────────────────────────────────
 
     private val N = ChatSearchNavigation
 
@@ -167,7 +148,6 @@ class ChatSearchEngineTest {
         assertEquals("0/0", N.counterText(null, 0, truncated = false))
     }
 
-    // ── [4] markdown: the renderer's own text ──────────────────────────────
 
     private fun pieces(md: String) = chatSearchMarkdownPieces(md)
     private fun texts(md: String) = pieces(md).map { it.text }
@@ -198,7 +178,6 @@ class ChatSearchEngineTest {
         assertTrue(code.text, code.text.contains("val x = 1") && !code.text.contains("```"))
         val table = pieces("| h1 | **h2** |\n|---|---|\n| a | `b` |").single()
         assertTrue(table.isWholeBlock)
-        // Inline code is padded with U+2006 by the inline parser; the matcher skips it.
         assertEquals("h1\th2\na\t b ", table.text)
         assertEquals(1, M.count("a\tb", table.text, 9))
     }
@@ -231,7 +210,6 @@ class ChatSearchEngineTest {
         assertEquals(0, M.count("LATEX", s, 9))
     }
 
-    // ── [5] units ──────────────────────────────────────────────────────────
 
     private val source = object : ChatSearchUnits.TextSource {
         override fun markdownPieces(raw: String) = listOf(ChatSearchPiece("b0", raw))
@@ -296,15 +274,12 @@ class ChatSearchEngineTest {
         assertNull(ChatSearchUnits.build(listOf(user("u", "x")), source, isCancelled = { true }))
     }
 
-    // [T-in-chat-search-fold-cost] Folding is cached per code point and kept in
-    // primitive arrays; the ranges must stay exactly what they were.
     @Test fun `folding keeps ranges exact for CJK, accents, astral and expanding code points`() {
         val text = "你好世界，你好 Café 🍎ẞ İx"
-        repeat(2) { // the second pass reads the per-code-point cache
+        repeat(2) {
             assertEquals(listOf(0 until 2, 5 until 7), ChatSearchMatcher.ranges("你好", text))
             assertEquals(listOf(8 until 12), ChatSearchMatcher.ranges("cafe", text))
             assertEquals(listOf(13 until 15), ChatSearchMatcher.ranges("🍎", text))
-            // İ: NFD drops its dot, the rest folds to "i" and maps back to İ.
             assertEquals(listOf(17 until 19), ChatSearchMatcher.ranges("ix", text))
         }
     }

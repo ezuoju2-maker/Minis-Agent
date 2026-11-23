@@ -10,11 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.math.BigDecimal
 
-/**
- * [T-quota-claude-subscription] [T-quota-codex-subscription] Port of the iOS
- * ProviderQuotaTests "Claude subscription", "Codex subscription" and
- * "Subscription refresh window" blocks, plus the Android wiring.
- */
 class QuotaSubscriptionTest {
 
     private val now = 1_800_000_000_000L
@@ -122,7 +117,6 @@ class QuotaSubscriptionTest {
         val credits = xu.pools.first { it.id.rawValue.endsWith(":credits") }
         assertTrue(credits.unit == QuotaUnit.Credits() && same(credits.amounts?.remaining, "12.5") && credits.kind == QuotaPool.Kind.prepaidBalance)
         assertEquals("plus", xu.plan?.rawId)
-        // Codex (used_percent) and Claude (utilization) are both stored as used.
         assertTrue(same(cMain.windows.first { it.id == "5h" }.reportedUsedFraction, "0.06"))
 
         val xh = CodexSubscriptionQuotaAdapter.parseHeaders(

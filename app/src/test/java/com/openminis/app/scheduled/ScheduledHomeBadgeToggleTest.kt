@@ -13,11 +13,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 
-/**
- * [T-android-sched-badge-toggle] The home clock icon's count badge can be
- * turned off from the Scheduled Tasks screen. Default on; the setting
- * persists; the gate hides the badge when off or when nothing is enabled.
- */
 @RunWith(RobolectricTestRunner::class)
 class ScheduledHomeBadgeToggleTest {
 

@@ -5,10 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [screen-control] Incremental UI-tree diff: only changes are reported, stable
- * signatures, duplicate-id safe, bounded render.
- */
 class ScreenTreeDiffTest {
 
     private fun n(id: String, text: String, bounds: String = "0,0-1,1", flags: Int = 0) =
@@ -55,7 +51,7 @@ class ScreenTreeDiffTest {
     @Test
     fun `duplicate resource ids are disambiguated by occurrence`() {
         val before = listOf(n("row", "Item1"), n("row", "Item2"))
-        val after = listOf(n("row", "Item1"), n("row", "Item2")) // same
+        val after = listOf(n("row", "Item1"), n("row", "Item2"))
         assertTrue(ScreenTreeDiff.diff(before, after).isEmpty)
 
         val after2 = listOf(n("row", "Item1"), n("row", "CHANGED"))

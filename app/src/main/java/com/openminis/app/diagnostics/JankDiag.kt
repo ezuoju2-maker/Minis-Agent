@@ -25,51 +25,22 @@ import com.openminis.app.logging.AppLogger
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
-/**
- * [T-android-jankdiag] Targeted, always-on jank diagnostics for a field report
- * (120 Hz HUAWEI: chat / memory / env-var / group-list scrolling and transitions
- * at an estimated 20-40 fps, not reproducible on a 60 Hz Pixel 4a). Every line
- * starts with `[JankDiag]` at Info level, so the user only turns file logging on.
- *
- * What it answers, one suspect each:
- *  - device / refresh rate: build, device, display modes and changes, the window's
- *    preferred refresh rate, power saving, thermal status, ART compile state;
- *  - frame cost: a FrameMetrics window per 5 s, stage by stage, printed only when
- *    it has jank, tagged with the screen and whether a reply is streaming;
- *  - main thread: any message over 100 ms, with one stack per 10 s at most;
- *  - streaming: chunks in, UI publishes, parse time, newest-row recompositions;
- *  - opening a chat: click -> mount -> first layout -> first placement -> stable;
- *  - the log itself: lines per second and time spent writing on the main thread;
- *  - GC / heap / CPU / threads, in a 30 s heartbeat;
- *  - process resources (threads, memory mappings, fds - GH #453), sampled every
- *    30 s in the foreground AND the background, with a per-name thread count
- *    past a threshold and the newest sample kept on disk for the exit report;
- *  - Stop: cancelStream's own time and tap -> next frame;
- *  - transitions: every route change and the frames in the 1.5 s after it.
- *
- * Cost rules (guarded by JankDiagGuardTest): nothing is logged per frame or per
- * token; the main thread only stores timestamps and bumps counters; every log
- * line, /proc read, Display / PowerManager query and aggregation runs on the
- * "JankDiag" background thread.
- */
 object JankDiag {
     private const val TAG = "JankDiag"
     private const val WINDOW_MS = 5_000L
-    private const val HEARTBEAT_EVERY = 6 // windows: 30 s
+    private const val HEARTBEAT_EVERY = 6
     private const val STALL_MS = 100L
     private const val STACK_EVERY_MS = 10_000L
     private const val TRANSITION_MS = 1_500L
     private const val WATCH_MS = 50L
-    private const val BACKGROUND_RES_EVERY = 10 // heartbeats: 5 min
+    private const val BACKGROUND_RES_EVERY = 10
 
     private val thread = HandlerThread("JankDiag", Process.THREAD_PRIORITY_BACKGROUND)
     private lateinit var bg: Handler
     private lateinit var app: Application
     @Volatile private var started = false
 
-    // ── state written from the main thread (plain stores / counters only) ────
     @Volatile private var screen = "start"
-    /** The navigation route's label, and a screen shown inside it (a chat in the split scaffold). */
     @Volatile private var routeLabel = "start"
     @Volatile private var overlayLabel: String? = null
     @Volatile private var streaming = false
@@ -84,7 +55,6 @@ object JankDiag {
     private val newestRecomposes = AtomicInteger(0)
     @Volatile private var cancelStartNs = 0L
 
-    // ── state owned by the background thread ────────────────────────────────
     private val window = JankFrameWindow()
     private val beat = JankFrameWindow()
     private val transition = JankFrameWindow()
@@ -123,24 +93,16 @@ object JankDiag {
         }
     }
 
-    /** File logging was just switched on: repeat the banner so the new file has it. */
     fun onLoggingStarted() {
         if (started) bg.post { banner() }
     }
 
-    // ── hooks (main thread; cheap) ───────────────────────────────────────────
 
-    /** Route change (MainActivity's back-stack collector). */
     fun setScreen(route: String?) {
         routeLabel = jankScreenLabel(route)
         applyScreen()
     }
 
-    /**
-     * A screen shown without a route change of its own — on a phone a chat opens
-     * inside the sessions route's split scaffold. ChatScreen calls this while it
-     * is composed, so frames and transitions are tagged "chat".
-     */
     fun enterScreen(label: String) {
         overlayLabel = label
         applyScreen()
@@ -169,21 +131,16 @@ object JankDiag {
 
     fun setStreaming(active: Boolean) { streaming = active }
 
-    /** Every streamed chunk reaching the view model, before throttling. */
     fun onStreamChunk(totalChars: Int) { streamChunks.incrementAndGet(); streamChars = totalChars }
 
-    /** A throttled publish of the streaming text to the UI. */
     fun onStreamPublish() { streamPublishes.incrementAndGet() }
 
-    /** The chat list's newest row recomposed. */
     fun onNewestRowRecompose() { newestRecomposes.incrementAndGet() }
 
-    /** One off-main parse tick of the live markdown tail. */
     fun onStreamParse(fragLen: Int, ms: Double) {
         if (started) bg.post { parse.add(ms); streamChars = maxOf(streamChars, fragLen) }
     }
 
-    /** A chat row was tapped in the session list. */
     fun beginOpen(sessionId: String) {
         if (!started) return
         val t = System.nanoTime()
@@ -192,14 +149,12 @@ object JankDiag {
         bg.post { open.begin(sessionId, t, busy) }
     }
 
-    /** A named step of opening a chat (PerfLongCtx step names). */
     fun openStage(sessionId: String, stage: String) {
         if (!started) return
         val t = System.nanoTime()
         bg.post { open.stage(sessionId, stage, t) }
     }
 
-    /** The newest row laid out for the first time: the chat is on screen. */
     fun openStable(sessionId: String, messages: Int, rows: Int, prewarmMs: Long) {
         if (!started) return
         val t = System.nanoTime(); val busy = mainBusyNs.get(); val longest = longestMsgNs
@@ -215,13 +170,7 @@ object JankDiag {
         bg.post { pendingCancel = start to end }
     }
 
-    // ── main-thread message monitor ─────────────────────────────────────────
 
-    /**
-     * Looper message timing through the looper's Printer: two string checks and a
-     * few stores per message. A message over [STALL_MS] is handed to the
-     * background thread; the watchdog samples the stack while it is still running.
-     */
     private fun installLooperMonitor() {
         Looper.getMainLooper().setMessageLogging { line ->
             if (line.startsWith(">>>>>")) {
@@ -264,8 +213,6 @@ object JankDiag {
     private fun reportStall(seq: Long, durationNs: Long, label: String, streaming: Boolean) {
         val stack = sampledStacks.remove(seq)
         if (stack == null && durationNs < 1_000_000_000L) {
-            // Stacks are sampled at most once per 10 s; unsampled stalls under a
-            // second are only counted, into the heartbeat.
             suppressedStalls++
             return
         }
@@ -276,7 +223,6 @@ object JankDiag {
         )
     }
 
-    // ── frames ──────────────────────────────────────────────────────────────
 
     private val lifecycle = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityResumed(activity: Activity) {
@@ -308,7 +254,6 @@ object JankDiag {
 
     private val stageBuf = LongArray(JankFrameWindow.Stage.entries.size)
 
-    /** Background thread (the listener's handler): store one frame, never log. */
     private fun onFrame(m: FrameMetrics) {
         if (m.getMetric(FrameMetrics.FIRST_DRAW_FRAME) == 1L) return
         val st = JankFrameWindow.Stage.entries
@@ -350,7 +295,6 @@ object JankDiag {
         transition.reset()
     }
 
-    // ── periodic summary (background) ───────────────────────────────────────
 
     private val tick = object : Runnable {
         override fun run() {
@@ -392,26 +336,18 @@ object JankDiag {
         if (windows % HEARTBEAT_EVERY == 0) {
             val res = resources()
             if (resumed.get() > 0) heartbeat(log, res)
-            // In the background the frame / GC fields mean little, but GH #453's
-            // process grew for hours with nothing on screen: one line per 5 min.
             else if (windows % (HEARTBEAT_EVERY * BACKGROUND_RES_EVERY) == 0) {
                 AppLogger.info(TAG, "[JankDiag] res background ${res.fields()}")
             }
         }
     }
 
-    // ── process resources (GH #453) ─────────────────────────────────────────
 
     private val alertGate = ResourceWatermark.AlertGate()
     private val clock = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
     private var lastBreakdown: String? = null
     private var lastMapsBreakdown: String? = null
 
-    /**
-     * Background thread only. Samples, prints the per-name thread count when
-     * [ResourceWatermark.AlertGate] says so, and replaces this process's
-     * water-mark file. Never throws.
-     */
     private fun resources(): ResourceWatermark.Sample {
         val s = ResourceWatermark.sample()
         val now = System.currentTimeMillis()
@@ -427,7 +363,6 @@ object JankDiag {
                         "(alert at threads>${ResourceWatermark.THREAD_ALERT} or maps>${ResourceWatermark.MAPS_ALERT}) top=$top " +
                         "offloadInFlight=$offload",
                 )
-                // [INV-261024-05] Past the maps line, also say which mappings.
                 if (s.maps > ResourceWatermark.MAPS_ALERT) {
                     val maps = ResourceWatermark.mapsBreakdown()
                     lastMapsBreakdown = "${clock.format(java.util.Date(now))} $maps"
@@ -476,7 +411,6 @@ object JankDiag {
 
     private fun stat(key: String): Long = runCatching { Debug.getRuntimeStat(key)?.toLong() ?: -1L }.getOrDefault(-1L)
 
-    // ── device / display / power ────────────────────────────────────────────
 
     private fun display(): Display? = app.getSystemService(DisplayManager::class.java)?.getDisplay(Display.DEFAULT_DISPLAY)
 
@@ -535,11 +469,9 @@ object JankDiag {
 
     private fun reportCompileState() {
         runCatching {
-            // Synchronous variant (worker thread): the async one returns a Guava future.
             val status = androidx.profileinstaller.ProfileVerifier.writeProfileVerification(app)
             AppLogger.info(
                 TAG,
-                // Result code in the low 16 bits, an error code in the high 16 (ProfileVerifier.CompilationStatus).
                 "[JankDiag] art profileResult=${status.profileInstallResultCode and 0xFFFF} profileError=${status.profileInstallResultCode shr 16} " +
                     "compiledWithProfile=${status.isCompiledWithProfile} " +
                     "profileEnqueued=${status.hasProfileEnqueuedForCompilation()}",
@@ -550,7 +482,6 @@ object JankDiag {
     private fun registerSystemListeners() {
         app.getSystemService(DisplayManager::class.java)?.registerDisplayListener(object : DisplayManager.DisplayListener {
             override fun onDisplayChanged(displayId: Int) {
-                // May fire often on variable-refresh panels: counted, reported once per window.
                 if (displayId == Display.DEFAULT_DISPLAY) { displayChanges++; displayReportPending = true }
             }
             override fun onDisplayAdded(displayId: Int) = Unit
@@ -578,7 +509,6 @@ object JankDiag {
         }
     }
 
-    /** Timeline of one chat opening (background thread). */
     private class OpenTimeline {
         private var session: String? = null
         private var clickNs = 0L

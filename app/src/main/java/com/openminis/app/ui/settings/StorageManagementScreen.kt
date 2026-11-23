@@ -67,13 +67,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/**
- * [T-android-child-session-delete-storage] Size every session, then fold
- * hidden child sessions onto their root parent. Rows are ROOTS only; a child's
- * bytes appear exactly once, under its parent — so the overview total and the
- * list agree, and the user never sees a `Helper · …` session as a separate
- * thing to manage. Pure (given the entity list + a storage) so it is testable.
- */
 internal fun aggregateSessionStorage(
     sessions: List<ChatSessionEntity>,
     storage: SessionStorage,
@@ -88,17 +81,6 @@ internal fun aggregateSessionStorage(
         .map { Triple(it, minisByRoot[it.id] ?: 0L, mediaByRoot[it.id] ?: 0L) }
 }
 
-/**
- * Settings › Storage. [T-android-storage-usage-cache] Everything shown comes
- * from [StorageUsageViewModel], scoped to this destination's back-stack entry:
- * measured once per visit, then updated incrementally. Returning from a
- * session's detail page no longer re-measures anything.
- *
- * Multi-select (like a mail list): the "Select" action in the top bar, or a
- * long-press on a session row, enters it; rows then toggle on tap, the top
- * bar offers Cancel / Select All, and a bottom bar offers Clear Files and
- * Delete for the selection, each behind a confirmation.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun StorageManagementScreen(
@@ -111,17 +93,13 @@ internal fun StorageManagementScreen(
     val state by vm.state.collectAsState()
     val result by vm.result.collectAsState()
     var showClearLogsDialog by remember { mutableStateOf(false) }
-    // [T-storage-orphan-cleanup] Bytes the preview found removable; non-null = confirm.
     var orphanConfirmBytes by remember { mutableStateOf<Long?>(null) }
     val orphanResult by vm.orphanResult.collectAsState()
     var showBatchClearDialog by remember { mutableStateOf(false) }
     var showBatchDeleteDialog by remember { mutableStateOf(false) }
 
-    // Runs each time the list comes back on screen; a no-op unless the rootfs
-    // screen was opened in between.
     LaunchedEffect(Unit) { vm.onListShown() }
 
-    // System back leaves selection first, like the home list.
     BackHandler(enabled = state.selecting) { vm.stopSelecting() }
 
     LaunchedEffect(result) {
@@ -185,12 +163,6 @@ internal fun StorageManagementScreen(
                 )
             }
         } else null,
-        // [T-android-storage-usage-cache] The session list can hold thousands
-        // of rows (2382 on the test device). As children of the scaffold's
-        // scrolling Column they were ALL composed at once: one 7 s frame
-        // (Choreographer skipped 418 frames) every time the list appeared,
-        // including on the way back from a detail page. A LazyColumn composes
-        // only what is on screen, and keyed items make a re-sort a move.
         scrollable = false,
     ) {
         LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -236,7 +208,6 @@ internal fun StorageManagementScreen(
 
             }
             if (state.orphanBytes > 0 || state.isCleaningOrphans) item(key = "orphans") {
-                // [T-storage-orphan-cleanup] Only while there is something to clean.
                 SettingsSection(footer = stringResource(R.string.storage_orphan_footer)) {
                     Row(
                         modifier = Modifier
@@ -267,7 +238,6 @@ internal fun StorageManagementScreen(
                 }
             }
             item(key = "logs") {
-                // [T-storage-clear-logs-caches]
                 SettingsSection(footer = stringResource(R.string.storage_clear_logs_caches_footer)) {
                     Row(
                         modifier = Modifier
@@ -313,9 +283,6 @@ internal fun StorageManagementScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(16.dp),
                         )
-                        // Rows follow as their own lazy items; the card is drawn
-                        // per row (rounded at the first and last) so it still reads
-                        // as one grouped section.
                         else -> Unit
                     }
                 }
@@ -356,8 +323,6 @@ internal fun StorageManagementScreen(
         }
     }
 
-    // [T-storage-orphan-cleanup] With nothing removable now (all of it changed
-    // within the hour) there is nothing to confirm: say why instead.
     orphanConfirmBytes?.let { bytes ->
         if (bytes > 0) {
             MinisAlertDialog(
@@ -418,7 +383,6 @@ internal fun StorageManagementScreen(
             confirmButton = {
                 MinisTextButton(onClick = {
                     showClearLogsDialog = false
-                    // Only logs & caches change, so only they are re-measured.
                     vm.clearLogsAndCaches()
                 }) { Text(stringResource(R.string.storage_clear_logs_caches_confirm)) }
             },
@@ -465,11 +429,6 @@ internal fun StorageManagementScreen(
     }
 }
 
-/**
- * A session row in the storage list. Outside selection it is the usual value
- * row with a chevron; in selection a leading check mark shows the state and
- * the chevron goes, since tapping toggles instead of navigating.
- */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun StorageSessionRow(
@@ -536,7 +495,6 @@ private fun StorageSessionRow(
     }
 }
 
-/** Bottom bar of the selection mode: Clear Files and Delete for the selection. */
 @Composable
 private fun StorageSelectionBar(
     busy: Boolean,
@@ -598,9 +556,6 @@ fun SessionStorageDetailScreen(
     chatDao: ChatDao,
     onBack: () -> Unit,
     onBrowseFiles: (rootPath: String) -> Unit = {},
-    // [T-android-storage-usage-cache] Every measurement this page makes is
-    // also the list row's value; handing it back keeps the list current
-    // (after a clear, or files deleted in the browser) with no second scan.
     onMeasured: (sessionId: String, minisSize: Long, mediaSize: Long) -> Unit = { _, _, _ -> },
 ) {
     val context = LocalContext.current
@@ -611,8 +566,6 @@ fun SessionStorageDetailScreen(
     var mediaSize by remember { mutableLongStateOf(0L) }
     var isClearing by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
-    // [T-android-child-session-delete-storage] This session plus every hidden
-    // child under it: sizes are the subtree's, and "clear" clears them all.
     var memberIds by remember { mutableStateOf(listOf(sessionId)) }
 
     val storage = remember { SessionStorage(context.filesDir) }
@@ -728,13 +681,7 @@ fun SessionStorageDetailScreen(
                     showClearDialog = false
                     isClearing = true
                     scope.launch {
-                        // [T-android-storage-delete-feedback] openminis/openminis#375:
-                        // this used to discard the result and zero the sizes
-                        // unconditionally, so a delete that removed nothing
-                        // still looked like it worked. Report what survived,
-                        // and re-measure rather than assuming zero.
                         val failed = withContext(Dispatchers.IO) {
-                            // Cascade: the root's files and every child's.
                             memberIds.flatMap { storage.deleteFilesDetailed(it).failedPaths }
                         }
                         val remaining = withContext(Dispatchers.IO) {
@@ -821,20 +768,6 @@ private fun StorageOverviewRow(
 
 private fun directorySize(dir: File): Long = SessionStorage.directorySize(dir)
 
-/**
- * [T-storage-clear-logs-caches] What "Logs & Caches" counts and clears.
- *
- * NOT all of cacheDir: this app keeps live state there that must survive —
- * `proot-tmp` (the running shell's /tmp), `pasted_text` (unsent drafts),
- * `share_inbound`, restore/import work dirs, the rootfs backup, rclone config.
- * So the set is an allowlist:
- *   * every log file (daily, crash, exit-info) via AppLogger.clearLogs(),
- *     which also drops the open writer so logging continues;
- *   * regenerable caches, refetched on demand (model lists, models.dev);
- *   * outbound share/export scratch, only entries untouched for an hour, so a
- *     share another app is still reading is not pulled out from under it.
- * The size shown is exactly what clear() removes.
- */
 internal object LogsAndCachesCleaner {
     private val REGENERABLE = listOf("models-cache", "models-dev-cache")
     private val TRANSIENT = listOf("share", "shared", "export-staging", "large-messages")
@@ -847,12 +780,10 @@ internal object LogsAndCachesCleaner {
         }
     }
 
-    /** Clearable cache bytes under [cacheDir] (logs excluded). */
     fun cachesSize(cacheDir: File, now: Long = System.currentTimeMillis()): Long =
         REGENERABLE.sumOf { directorySize(File(cacheDir, it)) } +
             transientEntries(cacheDir, now).sumOf { if (it.isDirectory) directorySize(it) else it.length() }
 
-    /** Delete the clearable caches under [cacheDir] (logs excluded). */
     fun clearCaches(cacheDir: File, now: Long = System.currentTimeMillis()) {
         REGENERABLE.forEach { File(cacheDir, it).deleteRecursively() }
         transientEntries(cacheDir, now).forEach { it.deleteRecursively() }

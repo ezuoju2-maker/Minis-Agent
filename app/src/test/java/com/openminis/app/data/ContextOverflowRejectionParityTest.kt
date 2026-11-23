@@ -7,27 +7,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * Which provider rejections Android recognises as "the request has too many
- * tokens", compared with iOS, and what the loop does with the valve after one.
- *
- * Guards:
- *   - 9aad0ffb5 / df35445ee  T-ctx-measure-outbound — noteContextOverflow raises
- *     the calibration ratio, but only for errors [ContextOverflowGuard] accepts;
- *   - 6a3f9e0da  T-ctx-overflow-no-cross-fallback — a direct-entry session must
- *     not fall back to another vendor on an overflow, which ALSO keys off
- *     [ContextOverflowGuard];
- *   - 0e0a8b339  T-ctx-valve-rearm — "a rejection spends the valve".
- *
- * iOS classifies with `ContextSizeMeter.isContextOverflow` (ContextPolicy.swift),
- * Android with [ContextOverflowGuard]; the two lists have drifted. Every miss on
- * Android means: no ratio raise, no GH#352 self-heal, and — because a
- * ProviderError is `isFallbackable` — a silent answer from a different model
- * on a session pinned to one.
- *
- * Tests marked EXPECTED TO FAIL document bugs found in review; they stay red
- * until production is fixed.
- */
 class ContextOverflowRejectionParityTest {
 
     private val repoRoot: File by lazy {
@@ -51,18 +30,12 @@ class ContextOverflowRejectionParityTest {
         assertTrue(markers.contains("prompt is too long"))
     }
 
-    /** EXPECTED TO FAIL until fixed: "exceeds the context window" / "input exceeds the context" are iOS-only. */
     @Test
     fun `every iOS overflow wording is an overflow on Android too`() {
         val missing = iosMarkers().filterNot { ContextOverflowGuard.isContextOverflow(400, "[400] $it") }
         assertEquals("iOS markers Android does not recognise", emptyList<String>(), missing)
     }
 
-    /**
-     * OpenMinis#133 over HTTP. OpenAIProvider.mapHttpError keeps only
-     * `error.message`, so the `context_length_exceeded` code never reaches the
-     * detail. EXPECTED TO FAIL until fixed.
-     */
     @Test
     fun `OpenMinis 133 wording on an HTTP 400 is an overflow`() {
         val openAi = ProductionSources.read("provider/openai/OpenAIProvider.kt")
@@ -78,13 +51,6 @@ class ContextOverflowRejectionParityTest {
         )
     }
 
-    /**
-     * The same rejection arriving as a Responses `response.failed` event.
-     * OpenAIProvider throws a ProviderError of "code + message" WITHOUT an
-     * httpStatus, and the guard refuses any status-less error — so a
-     * structured `context_length_exceeded` code is ignored. EXPECTED TO FAIL
-     * until the provider passes a status for it (or the guard accepts that code).
-     */
     @Test
     fun `a Responses response_failed context_length_exceeded is an overflow`() {
         val openAi = ProductionSources.read("provider/openai/OpenAIProvider.kt")
@@ -99,10 +65,6 @@ class ContextOverflowRejectionParityTest {
         )
     }
 
-    /**
-     * Anthropic's input + max_tokens rejection matches no marker on either
-     * platform. EXPECTED TO FAIL until fixed.
-     */
     @Test
     fun `Anthropic input plus max_tokens over the limit is an overflow`() {
         assertTrue(
@@ -119,16 +81,6 @@ class ContextOverflowRejectionParityTest {
         assertFalse(ContextOverflowGuard.isContextOverflow(429, "too many tokens per minute"))
     }
 
-    /**
-     * 0e0a8b339 made noteContextOverflow set sentPastExtrapolatedLimitThisLoop
-     * so the valve cannot re-send a request the provider just rejected. When
-     * the GH#352 self-heal finds nothing to offload, the rejection ends the
-     * loop, and runAgentLoop's prologue resets the flag — so the retry
-     * compacts, makes no progress, and fires the valve on the same request.
-     * (On iOS the rejection ALWAYS ends the loop first, so there the fix is
-     * never effective.) EXPECTED TO FAIL until the prologue stops discarding
-     * a rejection's spend.
-     */
     @Test
     fun `the loop prologue does not discard a rejection's spent valve`() {
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
@@ -142,7 +94,6 @@ class ContextOverflowRejectionParityTest {
         assertFalse("runAgentLoop's prologue unconditionally re-arms the valve", prologueReset)
     }
 
-    /** What the valve does on that retry, through the production decision table. */
     @Test
     fun `after a rejection the retry stops rather than re-sending`() {
         val window = 128_000
@@ -156,7 +107,7 @@ class ContextOverflowRejectionParityTest {
             window = window,
             canCompact = false,
             ratio = ratio,
-            uncalibratedSendUsed = true, // the rejection spent it
+            uncalibratedSendUsed = true,
         )
         assertEquals(ContextPolicy.InLoopStep.STOP, step)
     }

@@ -1,45 +1,27 @@
 package com.openminis.app.accessibility
 
-/**
- * [screen-control / incremental-tree] Token-cheap incremental diff of a screen
- * snapshot. `ui dump` currently re-serialises the whole accessibility tree
- * every call; most of it is unchanged between two frames. This computes a
- * stable per-node signature and reports only what actually changed, so the
- * agent can be fed a delta instead of a full tree — faster and far fewer
- * tokens, without losing information (a full snapshot is always reconstructible).
- *
- * Pure JVM logic, no Android dependency: works with any list of node descriptors.
- */
 object ScreenTreeDiff {
 
-    /** A minimal, comparable view of one UI node. */
     data class Node(
-        val id: String,            // stable-ish handle (resource-id or generated index)
+        val id: String,
         val text: String = "",
         val contentDesc: String = "",
         val className: String = "",
-        val bounds: String = "",   // e.g. "0,0-100,50"
-        val flags: Int = 0,        // bitmask: clickable/scrollable/checked/enabled/…
+        val bounds: String = "",
+        val flags: Int = 0,
     ) {
-        /** Signature of everything except the handle: a change here means the node changed. */
         val signature: String get() = "$text\u0000$contentDesc\u0000$className\u0000$bounds\u0000$flags"
     }
 
     data class Delta(
         val added: List<Node>,
-        val removed: List<String>,          // ids no longer present
-        val changed: List<Pair<Node, String>>, // node + its previous signature
+        val removed: List<String>,
+        val changed: List<Pair<Node, String>>,
         val unchangedCount: Int,
     ) {
         val isEmpty: Boolean get() = added.isEmpty() && removed.isEmpty() && changed.isEmpty()
     }
 
-    /**
-     * Diff [current] against [previous]. Identity is [Node.id]; a node with a
-     * changed [Node.signature] at the same id is reported in [Delta.changed].
-     * Duplicate ids are disambiguated by insertion order (occurrence index) so
-     * repeated resource-ids (common in lists) don't collapse incorrectly.
-     */
     fun diff(previous: List<Node>, current: List<Node>): Delta {
         val prevMap = keyed(previous)
         val currMap = keyed(current)
@@ -59,7 +41,6 @@ object ScreenTreeDiff {
         return Delta(added, removed, changed, unchanged)
     }
 
-    /** key = (id, occurrence index) to survive duplicate resource-ids. */
     private fun keyed(nodes: List<Node>): LinkedHashMap<Pair<String, Int>, Node> {
         val counts = HashMap<String, Int>()
         val out = LinkedHashMap<Pair<String, Int>, Node>()
@@ -71,10 +52,6 @@ object ScreenTreeDiff {
         return out
     }
 
-    /**
-     * Render a compact, human/agent-readable delta. Respects [maxChars]; when
-     * the delta is empty it says so, which lets the caller skip re-injection.
-     */
     fun render(delta: Delta, maxChars: Int = 3_000): String {
         if (delta.isEmpty) return "UI unchanged (${delta.unchangedCount} nodes)."
         val sb = StringBuilder()

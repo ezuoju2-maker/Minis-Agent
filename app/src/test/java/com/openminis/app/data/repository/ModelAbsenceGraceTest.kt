@@ -10,28 +10,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-model-absence-grace] A catalog model the provider stops listing
- * must not be deleted on the spot, taking the user's overrides with it.
- * Mirrors iOS `ModelAbsenceGraceTests.swift` (T-model-absence-grace).
- *
- * The report: `gemini-3.8-flash-high` disappeared entirely from the CPA-Mini2
- * provider, and separately a context-window override on that same model
- * "reverted" after a refresh. Those were the same event seen from two sides.
- *
- * [ProviderRepository.replaceEntries] rebuilds an instance's entries from the
- * API response. For a model STILL in the list it already behaved correctly —
- * it looks `prior` up by model id and carries uuid / overrides / isHidden /
- * userModifiedAt forward, replacing only the base. The bug was the other
- * branch: a catalog entry (`isCustom == false`) missing from the response was
- * deleted immediately. `isCustom` entries and voice-template seeds were exempt;
- * ordinary provider-supplied ones — which is where user overrides actually
- * live — were not.
- *
- * This reproduces the decision rule rather than driving the repository, which
- * needs Android context + SharedPreferences. The rule under test is the part
- * that changed; source-level wiring is asserted separately at the bottom.
- */
 class ModelAbsenceGraceTest {
 
     private val grace = ProviderRepository.MODEL_ABSENCE_GRACE_MS
@@ -57,7 +35,6 @@ class ModelAbsenceGraceTest {
         absentSince = absentSince,
     )
 
-    /** Mirrors the FIXED replaceEntries decision for unlisted catalog entries. */
     private fun refresh(
         existing: List<ModelEntry>,
         returned: List<String>,
@@ -66,7 +43,6 @@ class ModelAbsenceGraceTest {
     ): List<ModelEntry> {
         val returnedSet = returned.toSet()
         val out = mutableListOf<ModelEntry>()
-        // Listed models: rebuild carrying prior state, clearing any absence.
         for (id in returned) {
             val prior = existing.firstOrNull { it.baseModel.id == id }
             out.add(
@@ -74,18 +50,15 @@ class ModelAbsenceGraceTest {
                     .copy(absentSince = null),
             )
         }
-        // Unlisted catalog entries: keep within grace, else drop.
         for (e in existing.filter { !it.isCustom && it.baseModel.id !in returnedSet }) {
             val since = e.absentSince ?: nowMs
             if (nowMs - since > grace) continue
             out.add(e.copy(absentSince = since))
         }
-        // Custom entries kept unconditionally (pre-existing behaviour).
         out.addAll(existing.filter { it.isCustom && it.baseModel.id !in returnedSet })
         return out
     }
 
-    /** The OLD rule, so every behavioural claim below is falsifiable. */
     private fun refreshOld(existing: List<ModelEntry>, returned: List<String>): List<ModelEntry> {
         val returnedSet = returned.toSet()
         val out = mutableListOf<ModelEntry>()
@@ -94,7 +67,7 @@ class ModelAbsenceGraceTest {
             out.add(entry(id, contextWindow = prior?.overrides?.contextWindow))
         }
         out.addAll(existing.filter { it.isCustom && it.baseModel.id !in returnedSet })
-        return out // catalog entries not returned are simply gone
+        return out
     }
 
     private fun List<ModelEntry>.find(id: String) = firstOrNull { it.baseModel.id == id }
@@ -108,7 +81,6 @@ class ModelAbsenceGraceTest {
 
     @Test
     fun `a model skipped for one refresh survives with its override`() {
-        // The relay returns a perfectly valid list that merely omits the target.
         val after = refresh(before, listOf("gemini-3.8-flash", "gpt-4o"), t0)
         assertNotNull("entry must survive the refresh", after.find(target))
         assertTrue("marked unavailable", after.find(target)!!.isUnavailableFromProvider)
@@ -147,8 +119,6 @@ class ModelAbsenceGraceTest {
             400_000,
             bumped.find(target)!!.overrides.contextWindow,
         )
-        // A model with no override follows the vendor — the point of not
-        // freezing entries wholesale.
         assertNull("un-overridden model has no override", bumped.find("gpt-4o")!!.overrides.contextWindow)
         assertEquals(
             "…and follows the vendor's base",
@@ -179,8 +149,6 @@ class ModelAbsenceGraceTest {
 
     @Test
     fun `the grace window spans many automatic refreshes`() {
-        // The whole-app refresh window is 6h; the grace must cover far more
-        // than a single unlucky response.
         assertTrue("7d grace >= 20 refresh windows", grace / (6L * 3_600_000) >= 20)
     }
 
@@ -201,8 +169,6 @@ class ModelAbsenceGraceTest {
 
     @Test
     fun `absence is not user intent and must not make an entry look user-modified`() {
-        // Absence is a per-device observation about the provider, not something
-        // the user did — it must not flip isUserModified, which gates sync.
         val absent = entry("m", absentSince = t0)
         assertFalse("absence alone is not user modification", absent.isUserModified)
         assertTrue("but it is reported as unavailable", absent.isUnavailableFromProvider)

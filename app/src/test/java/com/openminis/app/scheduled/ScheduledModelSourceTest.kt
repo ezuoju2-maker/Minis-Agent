@@ -9,13 +9,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * [OpenMinis#445] `minis-scheduled create --model` accepts the same forms as
- * `minis-config set session.primaryModel` (`entry:<id>`, `group:<id>`), a bare
- * entry id (`<instanceId>/<modelId>`), and a bare model id only when exactly
- * one visible entry serves it. Anything else fails at create time instead of
- * being stored verbatim and silently falling back to the default model.
- */
 class ScheduledModelSourceTest {
 
     private val oauth = ScheduledModelSource.EntryRef("inst-oauth/claude-opus", "claude-opus", visible = true)
@@ -108,9 +101,6 @@ class ScheduledModelSourceTest {
         assertNull(ScheduledModelSource.display(null, null))
     }
 
-    // A task created by an older build stored --model verbatim in modelId.
-    // When it fires, a value that names an entry or group is honoured; a bare
-    // model id keeps its old path (no binding) so nothing that worked changes.
     @Test
     fun `a legacy task whose modelId names an entry or group heals at fire time`() {
         assertEquals("inst-key/claude-opus", entryIdOf(ScheduledModelSource.healLegacy("entry:inst-key/claude-opus", entries, groups)!!.bindingJson))

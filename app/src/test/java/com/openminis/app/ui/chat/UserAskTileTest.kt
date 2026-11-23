@@ -13,10 +13,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-user-ask-tile] The user_ask mini preview tile is a miniature of
- * the card (iOS T-user-ask-tile-rich), not a wrench.
- */
 class UserAskTileTest {
 
     private val size = UserAskQuestion(
@@ -81,7 +77,7 @@ class UserAskTileTest {
         assertEquals(6, UserAskTileModel.capacity())
         val many = UserAskTileModel.pendingTile(
             listOf(size.copy(options = (1..4).map { UserAskOption("O$it") })), 0, null,
-        ).lines // question (2) + 4 options = 6
+        ).lines
         assertEquals(0, UserAskTileModel.fitTile(many, 6).second)
         val (shown, more) = UserAskTileModel.fitTile(many + many.last(), 6)
         assertEquals(2, more)

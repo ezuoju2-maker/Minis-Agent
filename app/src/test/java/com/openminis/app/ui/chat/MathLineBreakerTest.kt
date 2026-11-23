@@ -5,7 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [T-android-math-overflow-wrap] Same break-point rules as iOS MathOverflowWrapTests (7238a39d4). */
 class MathLineBreakerTest {
 
     private fun split(s: String) = MathLineBreaker.splitAtTopLevelRelations(s)

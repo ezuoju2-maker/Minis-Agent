@@ -10,15 +10,6 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/**
- * [T-android-skill-scan-parity] Sending a message must not touch the skill
- * directory, and the scan that does run must be linear.
- *
- * Field report (realme RMX5010, 1.14): every send froze the UI for 1.7–2.7 s.
- * buildSystemPrompt() called reloadFromDisk() on the main thread — twice per
- * send — and with 283 of 490 skills missing, the orphan circuit breaker
- * re-queried every row and stat()ed every SKILL.md once per missing skill.
- */
 class SkillScanParityTest {
 
     @get:Rule val tmp = TemporaryFolder()
@@ -26,7 +17,6 @@ class SkillScanParityTest {
     private fun skill(root: File, id: String, body: String = "---\nname: $id\n---\n"): File =
         File(root, id).apply { mkdirs() }.let { dir -> File(dir, "SKILL.md").apply { writeText(body) } }
 
-    // -- Disk listing --
 
     @Test fun `only directories holding a SKILL md count as skills on disk`() {
         val root = tmp.newFolder("skills")
@@ -45,7 +35,6 @@ class SkillScanParityTest {
         assertEquals(0L, SkillDiskSignature.compute(gone))
     }
 
-    // -- Signature: what a shell command can do to /var/minis/skills --
 
     @Test fun `signature is stable when nothing changed`() {
         val root = tmp.newFolder("skills")
@@ -105,7 +94,6 @@ class SkillScanParityTest {
         assertEquals(SkillDiskSignature.compute(r1), SkillDiskSignature.compute(r2))
     }
 
-    // -- Circuit breaker rule (decided once per load) --
 
     @Test fun `the reporter's library trips the breaker`() {
         assertTrue(SkillDiskSignature.breakerTripped(totalCustom = 490, missingCustom = 283))
@@ -126,7 +114,6 @@ class SkillScanParityTest {
         assertFalse(SkillDiskSignature.breakerTripped(totalCustom = 100, missingCustom = 39))
     }
 
-    // -- Source guards: the send path and the scan shape --
 
     private val chatVm by lazy { ProductionSources.read("ui/chat/ChatViewModel.kt") }
     private val repo by lazy { ProductionSources.read("data/repository/SkillRepository.kt") }
@@ -182,7 +169,6 @@ class SkillScanParityTest {
     }
 
     @Test fun `every in-memory edit goes through mutateSkills`() {
-        // The one direct write left is loadAll's guarded commit.
         assertEquals(1, Regex("""_skills\.value = """).findAll(repo).count() -
             Regex("""_skills\.value = transform""").findAll(repo).count())
     }

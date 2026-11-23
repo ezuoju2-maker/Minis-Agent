@@ -11,17 +11,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/**
- * [T-fgs-idle-revival] "Minis Agent running - 0 sessions | Idle" stayed in the
- * shade and on the status-bar chip with no chat open and nothing running.
- *
- * Two defects produced that row:
- *  - a START_STICKY revival (null intent, fresh process, empty tracker) skipped
- *    the nothing-to-run backstop, promoted an idle notification and asked to be
- *    revived again;
- *  - the once-a-second chip refresh labelled a chat the user is present in with
- *    the streaming count and raw tool status, i.e. "0 sessions | Idle".
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
 class FgsIdleRevivalTest {
@@ -35,7 +24,6 @@ class FgsIdleRevivalTest {
 
     @Test
     fun `a sticky revival with nothing to run stops instead of showing an idle notification`() {
-        // A START_STICKY revival delivers a null intent, hence a null action.
         assertTrue(AgentForegroundService.startHasNothingToRun(action = null, shouldRun = false))
     }
 

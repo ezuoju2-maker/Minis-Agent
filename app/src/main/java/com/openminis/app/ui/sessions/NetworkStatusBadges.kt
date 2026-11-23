@@ -38,15 +38,6 @@ import com.openminis.app.network.NetworkStatusMonitor.ProxyLevel
 import com.openminis.app.network.NetworkStatusMonitor.TailscaleLevel
 import com.openminis.app.ui.navigation.Routes
 
-/**
- * [FEAT-261021-07, iOS a6e6c10d1] The small pills under the home screen's
- * title: whether Tailscale is connected and whether the proxy in use
- * answers. Renders nothing unless Network Routing is on and Tailscale or a
- * proxy is in use. At most two pills - Tailscale, and one for proxies (a
- * single proxy is named; several share a "Proxies ×N" pill with the worst
- * state). A tap opens the matching page of Settings > Network through
- * [onOpen] (a route; a single proxy's editor is opened on that page).
- */
 @Composable
 fun NetworkStatusBadges(onOpen: (String) -> Unit) {
     val settings by NetworkHub.settings.collectAsState()
@@ -112,8 +103,6 @@ private fun Pill(icon: ImageVector, name: String, state: String, color: Color, o
     }
 }
 
-// The title slot's text style is titleLarge (28sp line height): without its
-// own line height a 10sp pill is as tall as the title line.
 private val PILL_LINE = 12.sp
 
 private val Green = Color(0xFF34C759)

@@ -87,63 +87,19 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.WeekFields
 import java.util.Locale
 
-/**
- * [T-token-attribution-snapshot] How trustworthy a row's model attribution is.
- *
- * These must stay visually distinct. Lumping them together is what made the
- * original bug invisible: an estimated row looked exactly like a measured one,
- * so nobody could tell that a session's history had been re-attributed to
- * whichever model it currently pointed at.
- */
 internal enum class Attribution {
-    /** A. Per-message snapshot — the model that actually served the request. */
     MEASURED,
 
-    /**
-     * B. Written before the snapshot columns existed. Attributed to the
-     * session's CURRENT model, which may be wrong if the model was ever
-     * switched. Shown, but labelled as an estimate.
-     */
     ESTIMATED,
 
-    /** C. Orphaned row: no snapshot AND no session to guess from. */
     UNKNOWN_SESSION,
 
-    /**
-     * D. Snapshot present, but the model is no longer in the live config
-     * (provider deleted / model removed). Renders normally from the snapshot —
-     * this is the case that used to collapse into "Unknown".
-     */
     MEASURED_REMOVED,
 }
 
-/**
- * [T-token-attribution-snapshot] Map a stored `ProviderType` rawValue back to
- * its display name.
- *
- * Snapshots store the rawValue (`openAI`) rather than the display name
- * (`OpenAI`) precisely so grouping is stable: display names are localized and
- * historically inconsistent — iOS ended up with `Google`, `Gemini` and
- * `Google Gemini` as three separate sections for one provider. An unrecognised
- * rawValue (a provider type removed in a later build) degrades to the raw
- * string rather than vanishing.
- */
 internal fun providerDisplayName(rawValue: String): String =
     runCatching { ProviderType.valueOf(rawValue).displayName }.getOrDefault(rawValue)
 
-/**
- * [T-token-attribution-snapshot] Decide how trustworthy a usage row's model
- * attribution is.
- *
- * Extracted from the Composable so it can be unit-tested on the JVM: this is
- * the rule that decides whether a number is presented as fact or as a guess,
- * and getting it wrong in either direction is invisible in a screenshot.
- *
- * @param modelId resolved id (snapshot, else the session's current model),
- *   or null for an orphaned row with no session to fall back to.
- * @param hasSnapshot whether the row carries a per-message snapshot.
- * @param resolvesInConfig whether that id still exists in the live config.
- */
 internal fun classifyAttribution(
     modelId: String?,
     hasSnapshot: Boolean,
@@ -157,15 +113,11 @@ internal fun classifyAttribution(
 
 private const val TAG = "UsageStats"
 
-/** [T-usage-step2] Colours of the four stacked segments, input -> output. */
 private data class SegmentColors(val input: Color, val cacheWrite: Color, val cacheRead: Color, val output: Color)
 
 @Composable
 private fun segmentColors(): SegmentColors {
     val cs = MaterialTheme.colorScheme
-    // Cache read is the same hue as input at low emphasis: it is the cheap
-    // part of the total, and the legend/values carry it for anyone who cannot
-    // tell the shades apart.
     return SegmentColors(
         input = cs.primary,
         cacheWrite = cs.tertiary,
@@ -174,12 +126,6 @@ private fun segmentColors(): SegmentColors {
     )
 }
 
-/**
- * [T-usage-step2] The Usage page: range tabs, a KPI card, a stacked trend
- * chart, and a provider / model list. Every figure comes from
- * [UsageReportBuilder] (USAGE_METRICS_SPEC.md); this file only lays it out.
- * The report is built off the main thread by [UsageReportLoader].
- */
 @Composable
 fun UsageStatsScreen(
     chatDao: ChatDao,
@@ -190,9 +136,6 @@ fun UsageStatsScreen(
     var groupBy by rememberSaveable { mutableStateOf(UsageGroupBy.PROVIDER) }
     var mergeModels by rememberSaveable { mutableStateOf(true) }
     var reloadKey by rememberSaveable { mutableIntStateOf(0) }
-    // [T-usage-row-cache] The reload the cached rows were read for: a new
-    // reloadKey (opening the page, Retry, a new day) reads fresh rows, while a
-    // tab, a toggle or a rotation regroups the rows already read.
     var readForReload by rememberSaveable { mutableIntStateOf(-1) }
     var report by remember { mutableStateOf<UsageReport?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -200,8 +143,6 @@ fun UsageStatsScreen(
     var loadedDay by remember { mutableStateOf<LocalDate?>(null) }
     val live = remember(providerConfig) { liveConfig(providerConfig) }
 
-    // Day rollover / time-zone change while the page sits in the background:
-    // re-query on resume when the local date moved (spec 7.4).
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -241,8 +182,6 @@ fun UsageStatsScreen(
 
     SettingsScaffold(title = stringResource(R.string.usage_title), onBack = onBack) {
         RangeTabs(range) { range = it }
-        // Switching ranges keeps the previous content on screen under a thin
-        // progress bar instead of flashing an empty page.
         Box(Modifier.fillMaxWidth().height(2.dp).padding(horizontal = 16.dp)) {
             if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         }
@@ -250,7 +189,6 @@ fun UsageStatsScreen(
         when {
             failed && r == null -> ErrorState { reloadKey++ }
             r == null -> Unit
-            // Judged on the range the report was built for, not the tab just tapped.
             r.totals.tokens.total == 0L && (r.rangeStartMs == null || r.query.range == UsageRange.ALL) ->
                 EmptyState(stringResource(R.string.usage_empty_all), null)
             r.totals.tokens.total == 0L -> {
@@ -270,7 +208,6 @@ fun UsageStatsScreen(
     }
 }
 
-/** Live instances and the model -> provider-type map the builder falls back on (spec 8.1). */
 private fun liveConfig(config: ProviderConfig?): Pair<List<LiveInstance>, List<LiveModel>> {
     if (config == null) return emptyList<LiveInstance>() to emptyList()
     val instances = config.instances.map { LiveInstance(it.id, it.providerType.name, it.label) }
@@ -279,7 +216,6 @@ private fun liveConfig(config: ProviderConfig?): Pair<List<LiveInstance>, List<L
     return instances to models
 }
 
-// ─── Header ───────────────────────────────────────────────────────────────────
 
 @Composable
 private fun RangeTabs(selected: UsageRange, onSelect: (UsageRange) -> Unit) {
@@ -326,7 +262,6 @@ private fun dayFormatter(): DateTimeFormatter {
     }
 }
 
-// ─── Overview ─────────────────────────────────────────────────────────────────
 
 @Composable
 private fun OverviewCard(r: UsageReport) {
@@ -364,8 +299,6 @@ private fun OverviewCard(r: UsageReport) {
             Spacer(Modifier.height(12.dp))
             Box(Modifier.fillMaxWidth().height(0.5.dp).background(MaterialTheme.colorScheme.outlineVariant))
             Spacer(Modifier.height(12.dp))
-            // The hit rate is only as good as the share of input it is based on;
-            // under 5% it says nothing and shows the em dash (design 2.3).
             val basis = t.cacheBasis
             val rate = t.hitRate?.takeIf { (basis ?: 0.0) >= 0.05 }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -411,7 +344,6 @@ private fun Legend(color: Color, label: String, value: Long) {
     }
 }
 
-// ─── Trend ────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun TrendCard(r: UsageReport) {
@@ -482,8 +414,6 @@ private fun TrendCard(r: UsageReport) {
                     if (i == selected) drawRect(highlight, Offset(i * slot, 0f), Size(slot, size.height))
                     val total = b.tokens.total
                     if (total == 0L) {
-                        // Empty days keep their place (design 5.5): a faint dashed slot
-                        // rather than a lone bar stretched across the card.
                         if (granularity != UsageGranularity.HOUR && barW >= 4f) {
                             drawRoundRect(placeholder, Offset(left, 0f), Size(barW, size.height), CornerRadius(3f), style = Stroke(1f, pathEffect = dash))
                         }
@@ -500,7 +430,6 @@ private fun TrendCard(r: UsageReport) {
                 }
             }
             Spacer(Modifier.height(4.dp))
-            // At most ~7 axis labels, always including the last bucket.
             val step = ((series.size + 6) / 7).coerceAtLeast(1)
             Row(Modifier.fillMaxWidth()) {
                 series.forEachIndexed { i, b ->
@@ -521,7 +450,6 @@ private fun TrendCard(r: UsageReport) {
     }
 }
 
-// ─── Groups ───────────────────────────────────────────────────────────────────
 
 @Composable
 private fun DimensionBar(groupBy: UsageGroupBy, merge: Boolean, onGroupBy: (UsageGroupBy) -> Unit, onMerge: (Boolean) -> Unit) {
@@ -609,7 +537,6 @@ private fun GroupRow(g: UsageGroup, reportTotal: Long, byModel: Boolean, merged:
             }
             Spacer(Modifier.height(6.dp))
             ShareBar(share ?: 0.0)
-            // The unknown-model bucket keeps its explanation (design 3.4).
             if (byModel && g.key == UsageReportBuilder.UNKNOWN_MODEL) {
                 Text(stringResource(R.string.usage_attr_unknown_session), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
             }
@@ -677,7 +604,6 @@ private fun ShareBar(share: Double) {
     val fill = MaterialTheme.colorScheme.primary
     Canvas(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp))) {
         drawRect(track)
-        // A sliver stays visible so a <1% row does not look empty.
         val w = if (share > 0) (size.width * share.toFloat()).coerceAtLeast(size.height) else 0f
         drawRect(fill, size = Size(w, size.height))
     }
@@ -699,7 +625,6 @@ private fun DetailRow(label: String, value: String) {
     }
 }
 
-// ─── States and footer ────────────────────────────────────────────────────────
 
 @Composable
 private fun ColumnScope.EmptyState(message: String, onShowAll: (() -> Unit)?) {

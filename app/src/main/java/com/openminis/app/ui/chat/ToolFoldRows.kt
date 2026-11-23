@@ -4,12 +4,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * [T-port-fold-tools] The block a list row draws, or null for rows that are
- * not one of a message's blocks (header, typing, usage, error, ...). An
- * assistant text block is drawn as one or more markdown fragments, all
- * belonging to the same block.
- */
 internal fun FlatChatItem.foldBlockId(): String? = when (this) {
     is FlatChatItem.AssistantToolUse -> block.id
     is FlatChatItem.AssistantThinking -> block.id
@@ -18,7 +12,6 @@ internal fun FlatChatItem.foldBlockId(): String? = when (this) {
     else -> null
 }
 
-/** The message a block row belongs to, without the defensive `#n` key suffix. */
 internal fun FlatChatItem.foldMessageId(): String? = when (this) {
     is FlatChatItem.AssistantToolUse -> messageId
     is FlatChatItem.AssistantThinking -> messageId
@@ -27,14 +20,6 @@ internal fun FlatChatItem.foldMessageId(): String? = when (this) {
     else -> null
 }?.substringBefore('#')
 
-/**
- * [T-port-fold-tools] Replace each folded run's rows with one
- * [FlatChatItem.AssistantToolGroup] row, placed where its first member was.
- * An [expanded] run keeps its members after the group row, so tapping the
- * row opens it in place. Rows of other blocks are passed through untouched
- * (same instances), so LazyColumn sees no change for them. With no runs the
- * input list itself is returned.
- */
 internal fun applyToolFolds(
     rows: List<FlatChatItem>,
     runsByMessage: Map<String, List<ToolFoldPlanner.FoldedRun>>,
@@ -75,14 +60,6 @@ internal fun applyToolFolds(
     return out
 }
 
-/**
- * [T-port-fold-tools] One chat's folding state: the setting, which runs the
- * user has opened, which runs have been folded once, and whether the user is
- * browsing (scrolled up). [changes] ticks whenever an input that is not part
- * of the message list changes, so the list pipeline re-folds.
- *
- * Called from the list pipeline's collector, one call at a time.
- */
 internal class ToolFoldController {
     private val _changes = MutableStateFlow(0)
     val changes: StateFlow<Int> = _changes.asStateFlow()
@@ -93,18 +70,11 @@ internal class ToolFoldController {
     @Volatile var enabled: Boolean = false
         set(value) { if (field != value) { field = value; bump() } }
 
-    /** True while the user is scrolled up, reading. */
     @Volatile var browsing: Boolean = false
         set(value) { if (field != value) { field = value; bump() } }
 
-    /** Runs folded at least once: they stay folded (no hold-back). */
     private val foldedOnce = HashSet<String>()
 
-    /**
-     * The rows the last [fold] call published. Their keys are only collected
-     * when a hold-back check needs them (scrolled up, a run not folded yet),
-     * not on every streaming tick.
-     */
     private var shownRows: List<FlatChatItem> = emptyList()
 
     private class Cached(val blocks: List<AssistantBlock>, val streaming: Boolean, val runs: List<ToolFoldPlanner.FoldedRun>)
@@ -117,18 +87,12 @@ internal class ToolFoldController {
 
     private fun bump() { _changes.value = _changes.value + 1 }
 
-    /**
-     * [T-in-chat-search] Opens [runKey] without toggling (a search result in
-     * a folded run must open it, never close an open one). iOS:
-     * expandedToolGroups.insert(run.key).
-     */
     fun expand(runKey: String) {
         if (runKey in _expanded.value) return
         _expanded.value = _expanded.value + runKey
         bump()
     }
 
-    /** [T-in-chat-search] The folded run of [messageId] that holds block [blockId], if any. */
     fun runKeyContaining(messageId: String, blockId: String): String? =
         planCache[messageId]?.runs?.firstOrNull { blockId in it.memberIds }?.key
 
@@ -140,10 +104,6 @@ internal class ToolFoldController {
         return runs
     }
 
-    /**
-     * Fold [rows], built from [messages] (with the live overlay applied to the
-     * message(s) in [live], which take precedence by id).
-     */
     fun fold(rows: List<FlatChatItem>, messages: List<ChatMessage>, live: List<ChatMessage>): List<FlatChatItem> {
         if (!enabled) {
             shownRows = emptyList()
@@ -153,9 +113,6 @@ internal class ToolFoldController {
         val accepted = HashMap<String, List<ToolFoldPlanner.FoldedRun>>()
         var rowKeys: Set<String>? = null
         for (m in messages) {
-            // [T-fold-live-turn] The live copy first: during a turn the stored
-            // message has no tool blocks yet (they stream into the overlay), so
-            // checking the stored one never folded a running task until it ended.
             val message = liveById[m.id] ?: m
             if (message.role != "assistant" || message.toolBlocks.size < ToolFoldPlanner.MINIMUM_TOOL_COUNT) continue
             val runs = runsFor(message)

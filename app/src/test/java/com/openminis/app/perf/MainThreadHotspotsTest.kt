@@ -8,14 +8,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * The two main-thread hotspots found by profiling a task on a Pixel 6 perf
- * build: Compose content capture (10.45% of app CPU) and the shell tile's
- * resource readout parsing /proc/self/smaps on Main every 2 s (5%).
- */
 class MainThreadHotspotsTest {
 
-    // ── [T-android-resource-hud-offmain] ─────────────────────────────────────
 
     private val rollup = """
         00400000-7fffffff ---p 00000000 00:00 0                          [rollup]
@@ -56,7 +50,6 @@ class MainThreadHotspotsTest {
         assertTrue(mem.indexOf("smaps_rollup") in 0 until mem.indexOf("Debug.getMemoryInfo(mi)"))
     }
 
-    // ── [T-android-content-capture-off] ──────────────────────────────────────
 
     @Test
     fun `content capture is switched off once, first thing in onCreate`() {
@@ -64,7 +57,6 @@ class MainThreadHotspotsTest {
         val body = src.substringAfter("override fun onCreate() {")
         val off = body.indexOf("androidx.compose.ui.contentcapture.ContentCaptureManager.isEnabled = false")
         assertTrue(off in 0 until body.indexOf("AgentToolSwitch.migrateLegacyIfNeeded"))
-        // Never flipped back on anywhere: Compose 1.9.1 cannot resume after a pause.
         val all = ProductionSources.mainRoot()!!.walkTopDown().filter { it.extension == "kt" }
             .map { it.readText() }.joinToString("\n")
         assertFalse(all.contains("ContentCaptureManager.isEnabled = true"))

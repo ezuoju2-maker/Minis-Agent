@@ -17,10 +17,6 @@ import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * [T-mcp-oauth-signin-android] Discovery + dynamic registration against a mock
- * MCP server and authorization server (iOS #432; Windows mcp_oauth.rs tests).
- */
 class McpOAuthDiscoveryTest {
 
     private lateinit var server: MockWebServer
@@ -28,7 +24,6 @@ class McpOAuthDiscoveryTest {
     private val registrationBodies = CopyOnWriteArrayList<JSONObject>()
     private val redirect = MCPOAuthController.DEFAULT_REDIRECT_URI
 
-    // Knobs a test turns before it runs discovery.
     private var withHeader = true
     private var protectedStatus = 401
     private var withRegistration = true

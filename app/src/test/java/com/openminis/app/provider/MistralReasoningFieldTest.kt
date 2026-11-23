@@ -14,22 +14,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-android-mistral-reasoning-422] GH OpenMinis#87 / iOS 29065ca0.
- *
- * Mistral's AssistantMessage is a CLOSED schema (additionalProperties:false),
- * so any prior assistant turn carrying `reasoning_content` is rejected with
- * HTTP 422 `extra_forbidden` — every turn of a conversation whose history
- * holds reasoning from an earlier model fails outright.
- *
- * The gate cannot be capability-driven: MiMo/DeepSeek REQUIRE the field's
- * presence on multi-turn history while Mistral FORBIDS it, and neither
- * advertises supportsReasoning. Hence the base-URL vendor flag under test.
- *
- * `isMistral` is `basePath.contains("mistral.ai")`, so pointing MockWebServer
- * at a path containing that literal exercises the real production predicate
- * without needing a Mistral key or network access.
- */
 class MistralReasoningFieldTest {
 
     private lateinit var server: MockWebServer
@@ -45,7 +29,6 @@ class MistralReasoningFieldTest {
         server.shutdown()
     }
 
-    /** A reasoning-capable model, so the echo gate would otherwise be ON. */
     private val reasoningModel = LLMModel(
         id = "mistral-large-latest",
         displayName = "Mistral Large",
@@ -53,7 +36,6 @@ class MistralReasoningFieldTest {
         supportsReasoning = true,
     )
 
-    /** History with a prior assistant turn that captured reasoning — the 422 trigger. */
     private fun historyWithReasoning(): List<LLMMessage> = listOf(
         LLMMessage(LLMMessage.Role.USER, "first question"),
         LLMMessage(
@@ -64,10 +46,6 @@ class MistralReasoningFieldTest {
     )
 
     private fun capture(basePath: String): JSONObject {
-        // Enqueue several identical responses: the provider may retry, and a
-        // drained queue surfaces as a confusing "empty response" TransientError
-        // rather than the assertion we actually care about. We only ever read
-        // the FIRST recorded request below.
         val ok = """{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}"""
         repeat(4) {
             server.enqueue(
@@ -114,8 +92,6 @@ class MistralReasoningFieldTest {
 
     @Test
     fun `mistral detection is case-insensitive`() {
-        // Hosts are case-insensitive and iOS lowercases before the same
-        // contains() test; an uppercased URL must not slip past the guard.
         val body = capture(server.url("/API.MISTRAL.AI/v1").toString().trimEnd('/'))
         assertFalse(
             "uppercase mistral.ai must still suppress reasoning_content: $body",
@@ -125,9 +101,6 @@ class MistralReasoningFieldTest {
 
     @Test
     fun `non-mistral endpoint still echoes reasoning_content`() {
-        // Negative control: the suppression must be scoped to Mistral only.
-        // MiMo / DeepSeek return 400 when multi-turn history LACKS this field,
-        // so over-broad suppression would break them.
         val body = capture(server.url("/v1").toString().trimEnd('/'))
         assertTrue(
             "reasoning_content should still be echoed for non-Mistral vendors: $body",

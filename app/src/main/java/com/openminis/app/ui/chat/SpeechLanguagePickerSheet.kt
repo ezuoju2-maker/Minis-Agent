@@ -38,15 +38,6 @@ import com.openminis.app.speech.SpeechRecognitionManager
 import com.openminis.app.ui.theme.ChatColors
 import java.util.Locale
 
-/**
- * Modal sheet listing the active recognizer's supported languages. Tapping a
- * row selects the locale (which, if called during an active session, cancels
- * and restarts recognition in the new language — see
- * [SpeechRecognitionManager.selectLocale]).
- *
- * Locales are sorted so anything matching the device's system preferences
- * floats to the top, then the remainder alphabetically by display name.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SpeechLanguagePickerSheet(

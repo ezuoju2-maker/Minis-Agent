@@ -9,21 +9,10 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-sub-agents-v1] Cross-platform parity items found by comparing the two
- * implementations after the port.
- *
- * Each of these was a real divergence: the same attribute meaning different
- * things on the two platforms, or a value one side reports and the other
- * silently drops. They are pinned here because nothing else would catch them —
- * both sides compile fine while disagreeing.
- */
 class SubAgentParityTest {
 
     @Test
     fun `the callback model attribute carries the origin, not the legacy tier`() {
-        // iOS puts HelperModelOrigin here. Emitting "primary"/"sub" instead
-        // made the same attribute answer a different question per platform.
         val xml = AgentCallback(
             kind = AgentCallback.Kind.FINISHED,
             jobId = "j", childSessionId = "c", title = "t", status = "done",
@@ -49,8 +38,6 @@ class SubAgentParityTest {
 
     @Test
     fun `a name is resolved despite differing accents and stray whitespace`() {
-        // The name comes back from a model, which may not reproduce accents;
-        // the stored side is user-typed and may carry spaces.
         val roster = SubAgentRoster.normalize(
             listOf(SubAgentDefinition(id = "a", name = " Résumé-agent ", description = "d")),
         )
@@ -75,8 +62,6 @@ class SubAgentParityTest {
 
     @Test
     fun `a named sub agent appears in the child session title and the built-in does not`() {
-        // Verified without a Context by checking the shape the helper builds.
-        // Built-in: "Agent · title"; named: "Agent · Name · title".
         val named = "Agent · Researcher · Survey the repo"
         val plain = "Agent · Survey the repo"
         assertTrue(named.split(" · ").size == 3)
@@ -90,13 +75,6 @@ class SubAgentParityTest {
     }
 }
 
-/**
- * [T-sub-agents-v1] Rows that must never reach the tool schema.
- *
- * The roster feeds `subagent_task.agent`'s enum and the system-prompt roster
- * directly, so anything unaddressable in it becomes something the model can
- * emit but nothing can resolve.
- */
 class SubAgentRosterHygieneTest {
 
     private fun def(id: String, name: String, order: Int = 1) =
@@ -104,8 +82,6 @@ class SubAgentRosterHygieneTest {
 
     @Test
     fun `a nameless definition is dropped rather than advertised as an empty enum value`() {
-        // The settings screen creates one the moment "Add" is tapped, so this
-        // is the ordinary state of a row the user backed out of.
         val out = SubAgentRoster.normalize(listOf(def("a", ""), def("b", "   ")))
         assertEquals(1, out.size)
         assertEquals(SubAgentDefinition.BUILT_IN_ID, out[0].id)
@@ -114,8 +90,6 @@ class SubAgentRosterHygieneTest {
 
     @Test
     fun `two definitions sharing a name keep only the first`() {
-        // Resolution is first-match, so a duplicate is permanently unreachable
-        // while still costing a roster slot on every request.
         val out = SubAgentRoster.normalize(
             listOf(def("a", "Researcher", 1), def("b", "researcher", 2)),
         )

@@ -5,10 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-sched-overlay-negative-clock] After the waiting countdown ends without a
- * new run, the completed capsule must not count up from the next run's time.
- */
 class OverlayClockTest {
 
     @Test fun `a completed clock shows only from an anchor in the past`() {

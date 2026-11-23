@@ -48,20 +48,6 @@ import java.util.Date
 import java.util.Locale
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * Bottom sheet showing memory state for the current session.
- *
- * Three modes share the [StandardChatSheet] shell:
- *   - List: the default — Section 1 auto-injected + Section 2 op-log
- *   - Detail.AutoFile: read-only / editable view of GLOBAL.md or a daily log
- *   - Detail.Write: per-entry view of a memory_write op-log row, with
- *                   Edit / Save / Revoke
- *   - Detail.Get:   per-entry view of a memory_get op-log row
- *
- * The sheet header swaps its leading slot to a back-arrow when in any detail
- * mode; the trailing close X always dismisses the entire sheet, mirroring iOS
- * `NavigationStack` push behavior inside `SessionMemoryView`.
- */
 @Composable
 fun SessionMemorySheet(
     memoryRepository: MemoryRepository,
@@ -74,18 +60,13 @@ fun SessionMemorySheet(
     var mode by remember { mutableStateOf<MemorySheetMode>(MemorySheetMode.List) }
     val autoItems = remember(memoryRepository, context) { buildAutoInjectedItems(context, memoryRepository) }
 
-    // Editing state for the active detail screen. Lives at the sheet level so
-    // a single Save button in the header can read the latest buffer without
-    // threading callbacks through the body composable.
     var isEditing by remember(mode) { mutableStateOf(false) }
     var editedContent by remember(mode) { mutableStateOf("") }
     var savedToastVisible by remember { mutableStateOf(false) }
 
-    // Per-mode dialog state for revoke flow.
     var showRevokeConfirm by remember { mutableStateOf(false) }
     var mutationResult by remember { mutableStateOf<MemoryRepository.EntryMutationResult?>(null) }
 
-    // Auto-dismiss the "Saved" pill after 1.5s (matches iOS).
     LaunchedEffect(savedToastVisible) {
         if (savedToastVisible) {
             delay(1500)
@@ -93,7 +74,6 @@ fun SessionMemorySheet(
         }
     }
 
-    // Reset editing buffer when entering a new detail view.
     LaunchedEffect(mode, isEditing) {
         if (isEditing) {
             editedContent = when (val m = mode) {
@@ -118,7 +98,6 @@ fun SessionMemorySheet(
             {
                 IconButton(onClick = {
                     if (isEditing) {
-                        // Cancel edit, stay on detail.
                         isEditing = false
                     } else {
                         mode = MemorySheetMode.List
@@ -157,18 +136,13 @@ fun SessionMemorySheet(
                     onSave = {
                         try {
                             memoryRepository.saveFile(m.name, editedContent)
-                            // SOUL.md drives [SoulStore.cachedMetadata] which
-                            // backs the chat-bubble header name. The raw
-                            // saveFile() path here bypasses SoulStore.save(),
-                            // so refresh the cache manually to keep readers
-                            // in sync after an in-sheet edit.
                             if (m.name == "SOUL.md") {
                                 com.openminis.app.agent.SoulStore.refreshCache(context)
                             }
                             mode = MemorySheetMode.AutoFile(m.name, editedContent, m.editable)
                             isEditing = false
                             savedToastVisible = true
-                        } catch (_: Exception) { /* fall through; UI toast omitted on failure */ }
+                        } catch (_: Exception) {  }
                     },
                     onRevoke = {},
                 )
@@ -194,8 +168,6 @@ fun SessionMemorySheet(
                     onSave = {
                         val result = onSaveRecord(m.record, editedContent)
                         if (result is MemoryRepository.EntryMutationResult.Success) {
-                            // Update the displayed record in-place so a follow-up
-                            // revoke targets the new body.
                             mode = MemorySheetMode.Write(
                                 m.record.copy(writtenContent = editedContent)
                             )
@@ -227,9 +199,6 @@ fun SessionMemorySheet(
                 showRevokeConfirm = false
                 val result = onRevokeRecord(writeMode.record)
                 mutationResult = result
-                // On success the row is removed from toolRecords by the
-                // ViewModel; pop back to list so the user sees the list
-                // re-render without the row.
                 if (result is MemoryRepository.EntryMutationResult.Success) {
                     mode = MemorySheetMode.List
                 }
@@ -247,12 +216,6 @@ fun SessionMemorySheet(
     }
 }
 
-/**
- * Compact toolbar rendered inside the body (above the main content) for
- * detail screens. Sits inside the body slot so it doesn't compete with the
- * sheet's standard header — keeps the header visually identical across all
- * modes (back-arrow / title / close X).
- */
 @Composable
 private fun DetailToolbar(
     showEdit: Boolean,
@@ -305,7 +268,6 @@ private fun ListBody(
     onGetClick: (MemoryToolRecord) -> Unit,
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize()) {
-        // ── Section 1: Auto-injected ──
         item {
             SettingsSection(
                 header = stringResource(R.string.memory_section_auto_injected),
@@ -322,7 +284,6 @@ private fun ListBody(
             }
         }
 
-        // ── Section 2: Tool Activity (only if non-empty) ──
         if (toolRecords.isNotEmpty()) {
             item {
                 SettingsSection(
@@ -348,11 +309,6 @@ private fun ListBody(
     @Suppress("UNUSED_EXPRESSION") memoryRepository
 }
 
-/**
- * Row for a single memory tool call. Distinct from [SettingsValueRow] because
- * the body needs three lines: title, op-type pill, and a monospace preview of
- * the keywords / content the tool wrote or read.
- */
 @Composable
 private fun MemoryToolRow(
     record: MemoryToolRecord,
@@ -419,9 +375,6 @@ private fun MemoryToolRow(
     }
 }
 
-/**
- * Record of a memory tool call in the current session.
- */
 data class MemoryToolRecord(
     val title: String,
     val isWrite: Boolean,
@@ -431,10 +384,6 @@ data class MemoryToolRecord(
     val keywords: String? = null,
 )
 
-/**
- * Sheet navigation state. Held by [SessionMemorySheet] so a back arrow in the
- * standard sheet header can pop without unmounting the bottom sheet host.
- */
 private sealed class MemorySheetMode {
     data object List : MemorySheetMode()
     data class AutoFile(val name: String, val content: String, val editable: Boolean) : MemorySheetMode()
@@ -445,19 +394,13 @@ private sealed class MemorySheetMode {
 internal data class AutoItem(
     val name: String,
     val detail: String,
-    /** On-disk filename (e.g. "GLOBAL.md" or "2026-04-26.md") used to load full content. */
     val fileName: String,
-    /** Cached full content, snapshot at sheet open — keeps tap responsiveness fast. */
     val content: String,
 )
 
 private fun buildAutoInjectedItems(context: Context, memoryRepository: MemoryRepository): List<AutoItem> {
     val items = mutableListOf<AutoItem>()
 
-    // SOUL.md — persona / identity. Lives in the same memory dir as
-    // GLOBAL.md and is auto-injected into the system prompt by
-    // SystemPromptBuilder.identitySection(). Surfaced here so the user
-    // can see + edit the same file the model sees, mirroring GLOBAL.md.
     val soulContent = memoryRepository.readFile("SOUL.md")
     if (soulContent.isNotBlank()) {
         val lineCount = soulContent.lines().size
@@ -476,7 +419,6 @@ private fun buildAutoInjectedItems(context: Context, memoryRepository: MemoryRep
         ))
     }
 
-    // GLOBAL.md
     val globalContent = memoryRepository.loadGlobalMd()
     if (globalContent.isNotBlank()) {
         val lineCount = globalContent.lines().size
@@ -495,7 +437,6 @@ private fun buildAutoInjectedItems(context: Context, memoryRepository: MemoryRep
         ))
     }
 
-    // Today + yesterday
     val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
     val today = dateFmt.format(Date())
     val yesterday = dateFmt.format(Date(Date().time - 86400_000L))

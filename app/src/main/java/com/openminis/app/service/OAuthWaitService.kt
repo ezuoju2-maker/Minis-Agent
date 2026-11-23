@@ -23,33 +23,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-/**
- * [T-oauth-wait-fgs] A `dataSync` foreground service that exists only while an
- * OAuth sign-in waits for its localhost redirect - see [OAuthWaitKeepAlive] for
- * why. It does no work; being in the foreground is the whole point.
- *
- * Its own type rather than AgentForegroundService (mediaPlayback, which a
- * sign-in is not) or BackupForegroundService (whose lifecycle is a backup's).
- *
- * Lifecycle: [OAuthWaitKeepAlive.begin] starts it for every flow; it stops
- * ITSELF when [OAuthWaitKeepAlive.active] reaches 0 or the last flow passes its
- * deadline. Nobody calls stopService: stopping a service between
- * startForegroundService and its startForeground is exactly the "did not then
- * call startForeground" crash, and stopSelfResult with the latest start id
- * cannot race a start that is already on its way.
- *
- * Compatibility (minSdk 26, targetSdk 35):
- *  - 26-28: ServiceCompat.startForeground drops the type; the channel is
- *    created first, idempotently.
- *  - 29+: started with FOREGROUND_SERVICE_TYPE_DATA_SYNC, matching the manifest
- *    (required from targetSdk 34). Not shortService: that is 34+ only and
- *    capped at 3 minutes, shorter than a sign-in may take.
- *  - 31+: a refused start (ForegroundServiceStartNotAllowedException) is caught
- *    in [start] and in [onStartCommand]; the sign-in continues unprotected.
- *  - 33+: a denied POST_NOTIFICATIONS only hides the notification; the service
- *    still runs, and this flow never asks for the permission.
- *  - 35: the dataSync budget is handled in [onTimeout] by stopping at once.
- */
 class OAuthWaitService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -60,10 +33,6 @@ class OAuthWaitService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         lastStartId = startId
-        // Every startForegroundService must be answered with startForeground
-        // within ~5 s, even one delivered after the flow already ended - so
-        // this comes first, before any other work, and only then do we decide
-        // whether to stay.
         if (!goForeground()) {
             stopSelf(startId)
             return START_NOT_STICKY
@@ -79,8 +48,6 @@ class OAuthWaitService : Service() {
             observing = true
             observe()
         }
-        // NOT_STICKY: after process death there is no flow left to protect;
-        // a restarted service would only show a stale notification.
         return START_NOT_STICKY
     }
 
@@ -91,8 +58,6 @@ class OAuthWaitService : Service() {
                     stopNow("all-flows-ended")
                     return@collectLatest
                 }
-                // Sleep to the earliest deadline, then release what expired;
-                // the count change restarts this block.
                 val next = OAuthWaitKeepAlive.nextDeadline() ?: return@collectLatest
                 delay((next - OAuthWaitKeepAlive.now()).coerceAtLeast(0L) + 1)
                 OAuthWaitKeepAlive.prune()
@@ -100,20 +65,15 @@ class OAuthWaitService : Service() {
         }
     }
 
-    /** True when the service is now in the foreground. */
     private fun goForeground(): Boolean {
         ensureChannel(this)
         return try {
             ServiceCompat.startForeground(
                 this, NOTIFICATION_ID, notification(),
-                // Ignored below API 29 by ServiceCompat.
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
             true
         } catch (e: Exception) {
-            // ForegroundServiceStartNotAllowedException (31+) is an
-            // IllegalStateException; a missing FGS-type permission is a
-            // SecurityException. Either way: no protection, sign-in unaffected.
             AppLogger.error(TAG, "[OAuthWait] startForeground refused: ${e.javaClass.simpleName}: ${e.message}")
             false
         }
@@ -121,7 +81,6 @@ class OAuthWaitService : Service() {
 
     private fun stopNow(reason: String) {
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        // Only if no newer start is on its way; that one re-evaluates.
         val stopped = stopSelfResult(lastStartId)
         AppLogger.info(TAG, "[OAuthWait] service stop reason=$reason stopped=$stopped")
     }
@@ -143,22 +102,12 @@ class OAuthWaitService : Service() {
         return PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE)
     }
 
-    /**
-     * Swiping Minis away also closes the Custom Tab, which lives in Minis's
-     * task: no redirect can come any more, so stop instead of holding a
-     * notification for a sign-in that is gone.
-     */
     override fun onTaskRemoved(rootIntent: Intent?) {
         OAuthWaitKeepAlive.clear("task-removed")
         stopNow("task-removed")
         super.onTaskRemoved(rootIntent)
     }
 
-    /**
-     * The dataSync time budget is used up (Android 15+). Stop NOW: missing
-     * the short grace period after this callback kills the whole process.
-     * A sign-in (minutes) should never get here.
-     */
     override fun onTimeout(startId: Int, fgsType: Int) {
         AppLogger.warning(TAG, "[OAuthWait] dataSync time limit reached - stopping")
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -179,12 +128,6 @@ class OAuthWaitService : Service() {
         const val CHANNEL_ID = "oauth_wait"
         private const val NOTIFICATION_ID = 4301
 
-        /**
-         * Called from [OAuthWaitKeepAlive.begin], i.e. from the user's Sign In
-         * tap with Minis in the foreground. Still guarded: on 31+ a start from
-         * the background throws ForegroundServiceStartNotAllowedException, and
-         * nothing here may break the sign-in.
-         */
         fun start(context: Context) {
             try {
                 ContextCompat.startForegroundService(context, Intent(context, OAuthWaitService::class.java))
@@ -204,7 +147,6 @@ class OAuthWaitService : Service() {
                 NotificationChannel(
                     CHANNEL_ID,
                     context.getString(R.string.oauth_wait_notif_channel),
-                    // LOW: visible, silent, no heads-up.
                     NotificationManager.IMPORTANCE_LOW,
                 ),
             )

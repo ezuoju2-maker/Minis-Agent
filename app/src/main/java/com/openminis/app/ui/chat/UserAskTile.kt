@@ -35,19 +35,7 @@ import com.openminis.app.agent.userask.UserAskResultStatus
 import com.openminis.app.agent.userask.UserAskRisk
 import com.openminis.app.agent.userask.UserAskState
 
-/**
- * [T-android-user-ask-tile] The 100x65dp mini preview tile of a user_ask call
- * in the tool status bar: a miniature of the card instead of a bare wrench
- * (iOS T-user-ask-tile-rich, UserAskSummary.pendingTile / resolvedTile).
- *
- * Waiting: the card's title with the header chip and "1/3", the question (in
- * monospace for a confirm's command), then the options with what is picked so
- * far (○ / ●, ☐ / ☑ for multi-select) or the confirm's ⚠ impact line - tinted
- * blue / orange / red like the card. Answered: each question, with its answer
- * under it ("→ Pear", muted for a timeout / skip / cancel).
- */
 
-// ── Pure model (unit-tested) ───────────────────────────────────────────────
 
 internal enum class UserAskTileTitle { NEEDS_ANSWER, NEEDS_APPROVAL, HIGH_RISK, QUESTION_FOR_YOU }
 
@@ -58,22 +46,18 @@ internal data class UserAskTileLine(val kind: Kind, val text: String, val maxLin
         data object Impact : Kind()
         data object Topic : Kind()
         data class Option(val marker: String, val selected: Boolean) : Kind()
-        /** [text] is the user's own answer; empty = show the status's word instead. */
         data class Answer(val status: UserAskResultStatus, val muted: Boolean) : Kind()
     }
 }
 
 internal data class UserAskTileContent(
     val title: UserAskTileTitle,
-    /** The question's header chip, shown after the title ("Needs your answer · Size"). */
     val header: String?,
-    /** "1/3" on a multi-question ask, else empty. */
     val trailing: String,
     val lines: List<UserAskTileLine>,
 )
 
 internal object UserAskTileModel {
-    /** The fixed tile height and the sizes it is laid out with (iOS UserAskSummaryView.tileSize). */
     const val TILE_HEIGHT = 65f
     const val TITLE_SIZE = 7f
     const val LINE_SIZE = 5.5f
@@ -86,7 +70,6 @@ internal object UserAskTileModel {
         else -> UserAskTileTitle.NEEDS_APPROVAL
     }
 
-    /** Waiting for an answer: question [current] as a miniature card. */
     fun pendingTile(questions: List<UserAskQuestion>, current: Int, answer: UserAskAnswer?): UserAskTileContent {
         val q = questions.getOrNull(current) ?: return UserAskTileContent(UserAskTileTitle.QUESTION_FOR_YOU, null, "", emptyList())
         val lines = mutableListOf<UserAskTileLine>()
@@ -116,14 +99,12 @@ internal object UserAskTileModel {
         )
     }
 
-    /** Not the user's own choice: drawn neutral instead of in the tint. */
     fun isMuted(s: UserAskResultStatus): Boolean = when (s) {
         UserAskResultStatus.DENIED, UserAskResultStatus.TIMEOUT,
         UserAskResultStatus.DISMISSED, UserAskResultStatus.UNAVAILABLE -> true
         else -> false
     }
 
-    /** Settled: each question's text, then its answer. A question with no result entry reads as skipped. */
     fun resolvedTile(questions: List<UserAskQuestion>, results: List<UserAskResolver.Parsed>): UserAskTileContent {
         val lines = mutableListOf<UserAskTileLine>()
         questions.forEachIndexed { i, q ->
@@ -141,17 +122,11 @@ internal object UserAskTileModel {
         return UserAskTileContent(UserAskTileTitle.QUESTION_FOR_YOU, null, "", lines)
     }
 
-    /** How many lines fit under the title: line height ~ 1.25 x size plus 1dp spacing (iOS capacity). */
     fun capacity(tileHeight: Float = TILE_HEIGHT, titleSize: Float = TITLE_SIZE, lineSize: Float = LINE_SIZE): Int {
         val usable = tileHeight - 4 - 3 - (titleSize * 1.25f + 1)
         return maxOf(1, (usable / (lineSize * 1.25f + 1)).toInt())
     }
 
-    /**
-     * Entries that fit [capacity] lines (each costs its maxLines; a two-line
-     * entry squeezed into the last free line keeps one). What does not fit
-     * becomes "+N", which needs a line of its own.
-     */
     fun fitTile(lines: List<UserAskTileLine>, capacity: Int): Pair<List<UserAskTileLine>, Int> {
         if (lines.sumOf { it.maxLines } <= capacity) return lines to 0
         var budget = maxOf(0, capacity - 1)
@@ -166,12 +141,7 @@ internal object UserAskTileModel {
     }
 }
 
-// ── Tile ──────────────────────────────────────────────────────────────────
 
-/**
- * The user_ask tile's content, or [fallback] (the generic tool tile) for a
- * call that never became a question.
- */
 @Composable
 internal fun UserAskThumbContent(block: AssistantBlock, fallback: @Composable () -> Unit) {
     val asks by UserAskCenter.asks.collectAsState()
@@ -227,8 +197,6 @@ private fun UserAskTile(content: UserAskTileContent, tint: Color) {
             )
             if (content.trailing.isNotEmpty()) {
                 Spacer(Modifier.width(2.dp))
-                // Its own line height: the theme's would make the title row
-                // twice as tall as the title.
                 Text(
                     content.trailing, fontSize = lineSize, lineHeight = lineSize * 1.25f,
                     fontWeight = FontWeight.SemiBold, color = tint, maxLines = 1,

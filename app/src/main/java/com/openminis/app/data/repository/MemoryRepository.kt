@@ -7,64 +7,29 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * Manages the memory directory (`minis-global/memory/`).
- * Mirrors iOS memory system:
- *   - GLOBAL.md: user-maintained via Settings; the agent may update it when the user asks
- *   - YYYY-MM-DD.md: daily logs with timestamped entries, agent writes via memory_write
- *   - memory_get: fuzzy keyword search across files
- *   - loadGlobalMemoryFragment() / loadRecentDailyMemoryFragment(): emit
- *     two separate text blocks for the system prompt (mirrors iOS exactly)
- */
 class MemoryRepository(private val memoryDir: File) {
 
     companion object {
         private const val TAG = "MemoryRepository"
         private const val GLOBAL_FILE = "GLOBAL.md"
         private const val MAX_INJECT_LINES = 200
-        // memory_get full-dump (no keywords): cap at 500 lines — matches iOS
-        // `maxTotalLines = 500` in AIChatViewModel+MemoryTools.swift.
         private const val MAX_DUMP_LINES = 500
-        // memory_get keyword search: cap at 60 lines. iOS caps at 60 *entries*
-        // (timestamp-delimited memory_write blocks); Android's keyword search
-        // is line-based with ±2 context windows, so we keep the same algorithm
-        // and align on the 60 magnitude as the line budget.
         private const val MAX_SEARCH_LINES = 60
         private const val MAX_LOOKBACK_DAYS = 30
         private const val MAX_RECENT_FILES = 3
 
-        /**
-         * [XSessionDiag] Vocabulary that suggests an injected daily log describes
-         * a TASK a model might try to resume, rather than a plain fact. Purely a
-         * log tag — nothing branches on it, and both languages are listed because
-         * the reported incidents were Chinese-language sessions.
-         */
         private val DIAG_TASK_KEYWORDS = listOf(
             "任务", "调研", "继续", "接着", "未完成", "下一步",
             "task", "continue", "resume", "TODO",
         )
-        // [T-memory-get-truncate-android] Hard byte ceiling on memory_get
-        // output. Line caps alone (MAX_DUMP_LINES / MAX_SEARCH_LINES) don't
-        // bound bandwidth when a single matched line is itself huge — TG
-        // 37452 hit a 70KB single-call result that froze the chat UI for
-        // several seconds when expanded. 30KB is the comfort budget for
-        // an agent tool result that needs to be both rendered AND fed
-        // back into the next LLM call. Counted as UTF-8 bytes (matches
-        // what the provider sees over the wire).
-        private const val MAX_OUTPUT_BYTES = 30 * 1024  // 30 KB
+        private const val MAX_OUTPUT_BYTES = 30 * 1024
     }
 
     init {
         memoryDir.mkdirs()
     }
 
-    // -- memory_write --
 
-    /**
-     * Append a timestamped entry to today's daily log.
-     * New entries are prepended (newest first).
-     * Returns a success/error message string.
-     */
     fun writeMemory(content: String): String {
         if (content.isBlank()) return "Error: Missing required 'content' parameter"
 
@@ -89,21 +54,14 @@ class MemoryRepository(private val memoryDir: File) {
         }
     }
 
-    // -- memory_get --
 
-    /**
-     * Fuzzy keyword search across memory files.
-     * @param keywords space-separated, case-insensitive, ALL must match
-     * @param scope "daily" (logs only) or "all" (include GLOBAL.md)
-     * @return search results with context lines
-     */
     fun getMemory(keywords: String, scope: String): String {
         val keywordList = keywords.trim()
             .lowercase()
             .split(Regex("\\s+"))
             .filter { it.isNotEmpty() }
 
-        val filesToSearch = mutableListOf<Pair<String, File>>() // label to file
+        val filesToSearch = mutableListOf<Pair<String, File>>()
 
         if (scope == "all") {
             val globalFile = File(memoryDir, GLOBAL_FILE)
@@ -112,7 +70,6 @@ class MemoryRepository(private val memoryDir: File) {
             }
         }
 
-        // Daily logs sorted descending
         val dailyFiles = memoryDir.listFiles()
             ?.filter { it.extension == "md" && it.name != GLOBAL_FILE }
             ?.sortedByDescending { it.name }
@@ -128,20 +85,10 @@ class MemoryRepository(private val memoryDir: File) {
 
         val results = mutableListOf<String>()
         var totalLines = 0
-        // [T-memory-get-truncate-android] UTF-8 byte tally — see
-        // MAX_OUTPUT_BYTES rationale in the companion object. Bytes are
-        // accumulated AFTER appending each result entry; the line check is
-        // still consulted first so we never over-allocate slicing windows.
         var totalBytes = 0
-        // Total ranges/files matched vs. files actually included in the
-        // returned output. Reported in the truncation note so the caller
-        // can tell whether the cap dropped further matches.
         var totalMatchedFiles = 0
         var includedFiles = 0
         var byteCapHit = false
-        // Two separate caps so a full dump (no keywords) gets enough room to
-        // show recent daily logs while keyword searches stay tight enough not
-        // to flood agent context.
         val lineCap = if (keywordList.isEmpty()) MAX_DUMP_LINES else MAX_SEARCH_LINES
 
         for ((label, file) in filesToSearch) {
@@ -151,7 +98,6 @@ class MemoryRepository(private val memoryDir: File) {
             val budget = lineCap - totalLines
 
             val entry: String? = if (keywordList.isEmpty()) {
-                // Return file preview
                 val lines = content.lines()
                 val take = minOf(lines.size, budget)
                 val preview = lines.take(take).joinToString("\n")
@@ -160,7 +106,6 @@ class MemoryRepository(private val memoryDir: File) {
                 totalMatchedFiles += 1
                 "[$label$truncated]\n$preview"
             } else {
-                // Keyword search with ±2 context window
                 val lines = content.lines()
                 val matchedRanges = mutableListOf<IntRange>()
 
@@ -205,12 +150,6 @@ class MemoryRepository(private val memoryDir: File) {
             if (entry != null) {
                 results.add(entry)
                 includedFiles += 1
-                // Byte accounting is conservative: count the entry itself
-                // PLUS the "\n\n" separator between entries (added at the
-                // joinToString tail). We break AFTER appending so a single
-                // large entry never gets silently dropped — the cap acts as
-                // a "this was the last one we'll show" gate, not a guillotine
-                // on the current entry.
                 totalBytes += entry.toByteArray(Charsets.UTF_8).size + 2
                 if (totalBytes >= MAX_OUTPUT_BYTES) byteCapHit = true
             }
@@ -220,10 +159,6 @@ class MemoryRepository(private val memoryDir: File) {
             return "No matches found for keywords: ${keywordList.joinToString(", ")}"
         }
 
-        // Compose the truncation note. Line-cap and byte-cap can both fire;
-        // include whichever applies. Counts use "files" because the loop is
-        // file-by-file — for the agent the distinction between "matched file"
-        // and "matched entry" is fine here, the keyword scope is unambiguous.
         val notes = mutableListOf<String>()
         if (byteCapHit && includedFiles < totalMatchedFiles) {
             val totalKb = totalBytes / 1024
@@ -243,43 +178,19 @@ class MemoryRepository(private val memoryDir: File) {
         return results.joinToString("\n\n") + truncatedNote
     }
 
-    // -- System Prompt Fragment --
 
-    /**
-     * Build the `<memory>` XML fragment for system prompt injection.
-     * Includes GLOBAL.md + up to 3 most recent daily logs (today, yesterday, etc.)
-     */
-    /**
-     * Loads the GLOBAL.md fragment for system-prompt injection. Mirrors iOS
-     * `AIChatViewModel.loadGlobalMemoryFragment()`. Returns null if the file
-     * is missing or empty.
-     */
     fun loadGlobalMemoryFragment(): String? {
         val globalFile = File(memoryDir, GLOBAL_FILE)
         if (!globalFile.exists()) return null
         val content = try { globalFile.readText() } catch (_: Exception) { "" }
-        // Match iOS: literal-empty check (`!content.isEmpty`), not blank.
-        // A whitespace-only file is unusual in practice, but staying byte-for-
-        // byte consistent with iOS keeps the cached system prompt identical
-        // across platforms.
         if (content.isEmpty()) return null
         return "Global memory (GLOBAL.md — user-curated and writable; you may update it when the user asks). Treat these as background context, not standing instructions. If the user's latest message conflicts with or supersedes anything here (different scope, different numbers, different goal), defer to the user's latest message:\n$content"
     }
 
-    /**
-     * Loads up to 3 most recent non-empty daily logs (within a 30-day window)
-     * for system-prompt injection. Mirrors iOS
-     * `AIChatViewModel.loadRecentDailyMemoryFragment()` exactly: same header,
-     * same intro paragraph, same per-entry labels, same 200-line cap, same
-     * "(N more lines, use memory_get to search)" continuation.
-     */
     fun loadRecentDailyMemoryFragment(): String? {
         val dateFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val now = Date()
         val fragments = mutableListOf<String>()
-        // [XSessionDiag] Names of the logs actually injected, for the diagnostic
-        // line below. Collected alongside `fragments` so the log can name the
-        // source files rather than just a count.
         val injectedFiles = mutableListOf<String>()
         var dayOffset = 0
 
@@ -311,16 +222,6 @@ class MemoryRepository(private val memoryDir: File) {
 
         if (fragments.isEmpty()) return null
 
-        // [XSessionDiag] Hypothesis 3: these fragments are injected into EVERY
-        // session's system prompt, so a task described in a previous session's
-        // daily log is visible to a brand-new chat. The prompt already asks the
-        // model not to resume them ("they describe past tasks, not the current
-        // one"), but that is a prompt-level defence only — a weak model can and
-        // did ignore it (the noVNC incident: "为了你最早那句需求").
-        //
-        // Logged: which files were injected, how large, and whether the text
-        // carries task-resumption vocabulary. The keyword scan is READ-ONLY and
-        // used solely to tag the log line — it feeds no decision.
         run {
             val body = fragments.joinToString("\n\n")
             val hits = DIAG_TASK_KEYWORDS.filter { body.contains(it, ignoreCase = true) }
@@ -339,7 +240,6 @@ class MemoryRepository(private val memoryDir: File) {
         }
     }
 
-    // -- File Management (for Settings UI) --
 
     data class MemoryFileInfo(
         val name: String,
@@ -349,14 +249,10 @@ class MemoryRepository(private val memoryDir: File) {
         val preview: String,
     )
 
-    /**
-     * List all memory files: GLOBAL.md first, then daily logs descending.
-     */
     fun listAllFiles(): List<MemoryFileInfo> {
         val dateFmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
         val items = mutableListOf<MemoryFileInfo>()
 
-        // GLOBAL.md always first
         val globalFile = File(memoryDir, GLOBAL_FILE)
         val globalContent = if (globalFile.exists()) try { globalFile.readText() } catch (_: Exception) { "" } else ""
         val globalModDate = if (globalFile.exists()) dateFmt.format(Date(globalFile.lastModified())) else ""
@@ -368,7 +264,6 @@ class MemoryRepository(private val memoryDir: File) {
             preview = firstContentLine(globalContent),
         ))
 
-        // Daily logs sorted descending
         val dailyFiles = memoryDir.listFiles()
             ?.filter { it.extension == "md" && it.name != GLOBAL_FILE }
             ?.sortedByDescending { it.name }
@@ -407,42 +302,19 @@ class MemoryRepository(private val memoryDir: File) {
     }
 
     fun deleteFile(name: String): Boolean {
-        if (name == GLOBAL_FILE) return false // Cannot delete GLOBAL.md
+        if (name == GLOBAL_FILE) return false
         return File(memoryDir, name).delete()
     }
 
-    // -- Entry-level operations (used by Session Memory revoke/edit) --
 
-    /**
-     * Result of [revokeEntry] / [replaceEntryBody]. Mirrors iOS
-     * `revokeEntry` / `replaceEntryInLog` return shapes.
-     */
     sealed class EntryMutationResult {
-        /** Entry found in [dateStr].md and the requested mutation succeeded. */
         data class Success(val dateStr: String) : EntryMutationResult()
 
-        /** Scanned today + yesterday but the body never matched. */
         data object NotFound : EntryMutationResult()
 
-        /** Match found but writing the new file content failed. */
         data class IOError(val message: String) : EntryMutationResult()
     }
 
-    /**
-     * Remove a memory_write entry whose body matches [writtenContent] from
-     * today's or yesterday's daily log. Mirrors iOS
-     * `MemoryWriteDetailView.revokeEntry()`.
-     *
-     * Each entry on disk is `<!-- YYYY-MM-DD HH:mm:ss -->\n{body}\n\n`. The
-     * comment marker is the canonical entry boundary; we split on it via
-     * regex, locate the entry whose trimmed body equals the trimmed
-     * [writtenContent], then erase the entire range (marker + body +
-     * trailing whitespace).
-     *
-     * Scope is intentionally limited to today + yesterday to match iOS — older
-     * entries are presumed already syndicated into the model's longer-term
-     * memory and shouldn't be silently mutated by an undo button.
-     */
     fun revokeEntry(writtenContent: String): EntryMutationResult {
         val trimmedTarget = writtenContent.trim()
         val candidates = candidateDateStrings()
@@ -476,11 +348,6 @@ class MemoryRepository(private val memoryDir: File) {
         return EntryMutationResult.NotFound
     }
 
-    /**
-     * Replace the body of an existing memory_write entry whose body matches
-     * [oldContent], substituting [newContent]. Same scoping/matching rules as
-     * [revokeEntry]. Mirrors iOS `MemoryWriteDetailView.replaceEntryInLog()`.
-     */
     fun replaceEntryBody(oldContent: String, newContent: String): EntryMutationResult {
         val trimmedOld = oldContent.trim()
         val trimmedNew = newContent.trim()
@@ -501,8 +368,6 @@ class MemoryRepository(private val memoryDir: File) {
                 val body = content.substring(bodyStart, entryEnd)
                 if (body.trim() != trimmedOld) continue
 
-                // iOS replaces with `trimmed + "\n\n"` so the on-disk
-                // separator between entries stays uniform.
                 val replacement = "$trimmedNew\n\n"
                 val newFileContent = content.replaceRange(bodyStart, entryEnd, replacement)
                 return try {
@@ -524,7 +389,6 @@ class MemoryRepository(private val memoryDir: File) {
         return listOf(fmt.format(now), fmt.format(Date(now.time - 86400_000L)))
     }
 
-    // -- Internal --
 
     private fun formatFileSize(bytes: Long): String {
         if (bytes < 1024) return "$bytes B"

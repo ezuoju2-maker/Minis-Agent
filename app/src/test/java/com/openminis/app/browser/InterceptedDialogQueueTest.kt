@@ -7,15 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-js-dialogs-256] Semantics of the agent browser's intercepted-dialog
- * queue: bounded retention, oldest-first eviction with an honest count, and
- * drain-exactly-once.
- *
- * The interception itself (WebChromeClient answering with a default rather than
- * showing a modal) needs a real WebView and is verified on-device; what is
- * pinned here is the bookkeeping that decides what the model actually gets told.
- */
 class InterceptedDialogQueueTest {
 
     private fun q(max: Int = InterceptedDialogQueue.DEFAULT_MAX_EVENTS) =
@@ -49,8 +40,6 @@ class InterceptedDialogQueueTest {
 
     @Test
     fun `confirm reports the false it was given, not a silent success`() {
-        // The whole point of the fix: the agent answered false on the user's
-        // behalf and the model has to know that specifically.
         val queue = q()
         queue.add(kind = "confirm", message = "Delete everything?", defaultResponse = "false")
         val r = queue.drainReport()!!
@@ -92,7 +81,7 @@ class InterceptedDialogQueueTest {
         queue.add(message = "m1")
         queue.add(message = "m2")
         queue.add(message = "m3")
-        queue.add(message = "m4")   // evicts m1
+        queue.add(message = "m4")
         assertEquals(3, queue.size)
         val r = queue.drainReport()!!
         assertFalse("oldest was dropped", r.contains("m1"))
@@ -103,7 +92,7 @@ class InterceptedDialogQueueTest {
     @Test
     fun `dropped count is reported honestly`() {
         val queue = q(max = 2)
-        repeat(5) { queue.add(message = "m$it") }   // 3 evicted
+        repeat(5) { queue.add(message = "m$it") }
         val r = queue.drainReport()!!
         assertTrue("says how many were lost", r.contains("(3 earlier dialogs dropped"))
         assertTrue("names the cap", r.contains("most recent 2"))
@@ -119,7 +108,7 @@ class InterceptedDialogQueueTest {
     @Test
     fun `dropped counter resets after a drain`() {
         val queue = q(max = 1)
-        queue.add(); queue.add()                 // 1 dropped
+        queue.add(); queue.add()
         assertTrue(queue.drainReport()!!.contains("1 earlier dialog dropped"))
         queue.add()
         val second = queue.drainReport()!!
@@ -147,8 +136,6 @@ class InterceptedDialogQueueTest {
 
     @Test
     fun `concurrent records do not lose or corrupt entries`() {
-        // record() runs on the UI thread (WebChromeClient) while drainReport()
-        // runs on the action coroutine — the two genuinely race.
         val queue = q(max = 1000)
         val threads = (1..8).map { t ->
             Thread { repeat(50) { queue.add(message = "t$t-$it") } }

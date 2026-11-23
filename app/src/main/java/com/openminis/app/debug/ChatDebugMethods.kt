@@ -9,14 +9,6 @@ import com.openminis.app.service.SessionActivityTracker
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Read-only `chat.*` RPC handlers — Phase 1.
- *
- * Mirrors the `chat.sessions.*` / `chat.messages.list` / `chat.models.list`
- * shape from `docs/debug-server-api.md`. Mutation handlers (`chat.prompt`,
- * `chat.retry`, `chat.session.cancel`, `chat.session.delete`) land in Phase 2
- * once the headless ChatViewModel runner is wired.
- */
 internal object ChatDebugMethods {
 
     private fun chat(context: Context): ChatRepository =
@@ -39,8 +31,6 @@ internal object ChatDebugMethods {
 
         for (session in all) {
             if (emitted >= limit) break
-            // Cheap "is empty" probe — load the most recent message preview to
-            // gate the includeEmpty filter without joining all messages.
             val lastParts = repo.dao.lastMessageParts(session.id)
             if (!includeEmpty && lastParts == null) continue
 
@@ -51,8 +41,6 @@ internal object ChatDebugMethods {
                 put("modelId", session.modelId)
                 put("modelName", modelDisplay)
                 put("source", session.source ?: JSONObject.NULL)
-                // [T-scheduled-active-session-android] Processing (own loop, sub
-                // agents or own scheduled task due); isStreaming = the loop alone.
                 put("isRunning", SessionActivityTracker.isProcessing(session.id))
                 put("isStreaming", SessionActivityTracker.isActive(session.id))
                 put("memoryEnabled", session.memoryEnabled == 1)
@@ -133,9 +121,6 @@ internal object ChatDebugMethods {
             put("role", m.role)
             put("createdAt", m.createdAt)
         }
-        // partsJson is a JSON array of {type, value/...} blocks; surface it
-        // as-is so callers see what's stored. Pull a flat `content` view for
-        // text-only consumption.
         val parts = try { org.json.JSONArray(m.partsJson) } catch (_: Exception) { null }
         if (parts != null) {
             obj.put("parts", parts)
@@ -155,7 +140,6 @@ internal object ChatDebugMethods {
             if (tools.length() > 0) obj.put("toolCalls", tools)
             if (attachments.length() > 0) obj.put("attachments", attachments)
         } else {
-            // Legacy/unstructured payload — return raw.
             obj.put("content", m.partsJson)
         }
         m.tokenUsage?.let {

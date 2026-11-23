@@ -9,26 +9,16 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * [T-android-vad-reentrant-release] Field report: three SIGSEGVs in two hours,
- * fault addr 0x38, at libRealtimeCutVadLibrary.so
- * `RealTimeCutVAD::algorithm+0x2a4` ← `process` ← `process_vad_audio` ←
- * `VADWrapper.processAudio`. The library fires onVoiceEnd from inside
- * algorithm(); ProviderSpeechRecognitionEngine stops the take there on a
- * silence close, which reached release() on the same thread through the
- * re-entrant monitor and freed the object algorithm() was still running on.
- */
 class ReentrantSafeReleaseTest {
 
-    /** Stands in for the native VAD: records whether it is used after being freed. */
     private class FakeNative {
         var freed = false
         var usedAfterFree = false
         val log = mutableListOf<String>()
         fun process(onCallback: () -> Unit) {
             log += "enter"
-            onCallback() // onVoiceEnd, from inside algorithm()
-            if (freed) usedAfterFree = true // algorithm() touching `this` again
+            onCallback()
+            if (freed) usedAfterFree = true
             log += "exit"
         }
     }
@@ -125,7 +115,6 @@ class ReentrantSafeReleaseTest {
         assertTrue(src.contains("vad.tearDown()"))
         val code = src.lines().filterNot { it.trimStart().startsWith("//") || it.trimStart().startsWith("*") }
             .joinToString("\n")
-        // The VADWrapper is only ever released by the gate's own lambda.
         assertEquals(
             "no direct VADWrapper release outside the gate", 1,
             Regex("""\bit\.release\(\)|\bw\??\.release\(\)|\bwrapper\.release\(\)""").findAll(code).count(),

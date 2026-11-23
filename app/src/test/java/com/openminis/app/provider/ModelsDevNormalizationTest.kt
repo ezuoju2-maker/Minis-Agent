@@ -11,17 +11,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-modelsdev-id-normalization] A relay model id such as
- * `code-buddy/deepseek-v4.1-flash` matched no models.dev entry on Android, so
- * the model fell back to the id heuristic: a 128K window (compaction at 108K),
- * no output cap, no effort tiers (the picker offered xhigh, which DeepSeek does
- * not accept). iOS resolves it through normalization + a majority vote
- * (ModelsDevAPI.swift:127-132, buildStage2Index); Android now does the same.
- */
 class ModelsDevNormalizationTest {
 
-    // -- normalization --
 
     @Test
     fun `namespace, case and version separators normalize to one key`() {
@@ -45,7 +36,6 @@ class ModelsDevNormalizationTest {
         assertNotEquals(ModelsDevApi.normalizedModelKey("glm-5.2"), ModelsDevApi.normalizedModelKey("glm-5.1"))
     }
 
-    // -- the majority vote --
 
     private fun entry(id: String, ctx: Int?, efforts: List<String>?) = ModelsDevApi.ModelDevEntry(
         id = id, name = null, family = null, contextWindow = ctx, maxOutputTokens = null,
@@ -99,7 +89,6 @@ class ModelsDevNormalizationTest {
         assertEquals("relay: vote", 1, ModelsDevApi.resolveDevEntry(reg, "Custom", "relay/GPT_X.1")!!.contextWindow)
     }
 
-    // -- against the bundled catalog --
 
     private val registry by lazy {
         val assets = java.io.File(ProductionSources.mainRoot()!!.parentFile.parentFile.parentFile.parentFile, "assets")
@@ -125,7 +114,6 @@ class ModelsDevNormalizationTest {
     @Test
     fun `enriched, the model offers no xhigh and leaves the 128K heuristic`() {
         val bare = LLMModel("code-buddy/deepseek-v4.1-flash", "deepseek-v4.1-flash", "Custom")
-        // The field value: no catalog match -> LLMModel.contextWindowTokens heuristic.
         assertEquals(128_000, bare.contextWindowTokens)
         assertTrue("no tiers declared -> no data-driven narrowing", bare.selectableThinkingLevels.isEmpty())
 
@@ -147,7 +135,6 @@ class ModelsDevNormalizationTest {
         assertNull(ModelsDevApi.resolveDevEntry(registry, "OpenAI", "definitely-not-a-model-xyz"))
     }
 
-    // -- [T-android-maxtokens-stale-log] --
 
     @Test
     fun `max_tokens is sized from the request being sent, not from the previous turn`() {

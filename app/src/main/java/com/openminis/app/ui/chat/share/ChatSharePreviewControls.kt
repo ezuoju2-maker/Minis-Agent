@@ -57,19 +57,8 @@ import com.openminis.app.R
 import com.openminis.app.ui.theme.LocalChatPalette
 import kotlinx.coroutines.delay
 
-/**
- * Room the previews leave above their content so the format switch (10dp from the
- * top, ~38dp tall) covers nothing until the user scrolls.
- */
 internal const val FORMAT_SWITCH_CLEARANCE = 56f
 
-/**
- * [T-multi-select-share] The preview's floating "Long Image | PDF" switch: a floating
- * capsule with a sliding selection pill, switched by tapping a segment or swiping
- * across it (left → PDF, right → Long Image). When the selection is too long for one
- * image, "Long Image" is dimmed and a tap on it only explains why (iOS
- * ChatShareFormatSwitch).
- */
 @Composable
 internal fun ChatShareFormatSwitch(
     format: ChatExportOptions.Format,
@@ -87,7 +76,6 @@ internal fun ChatShareFormatSwitch(
         }
         if (value != format) onSelect(value)
     }
-    // Segment frames, for the pill that slides between them.
     val frames = remember { mutableStateMapOf<ChatExportOptions.Format, SegmentFrame>() }
     val frame = frames[format]
     val pillX by animateDpAsState(with(density) { (frame?.x ?: 0f).toDp() }, spring(dampingRatio = 0.8f, stiffness = 500f), label = "pillX")
@@ -141,7 +129,6 @@ internal fun ChatShareFormatSwitch(
     }
 }
 
-/** A segment's place in the switch, in px, for the pill that slides between them. */
 private data class SegmentFrame(val x: Float, val width: Float, val height: Float)
 
 @Composable
@@ -178,13 +165,8 @@ private fun FormatSegment(
     }
 }
 
-/** One toast: its text and whether it is a tip (info icon) rather than a confirmation. */
 internal class ChatShareToastMessage(val text: String, val info: Boolean = false)
 
-/**
- * A short self-dismissing capsule near the bottom, iOS MinisToast's look: black at
- * 80%, a white icon and white text, shown for 1.6 s.
- */
 @Composable
 internal fun ChatShareToast(message: ChatShareToastMessage?, onDone: (ChatShareToastMessage) -> Unit, modifier: Modifier = Modifier) {
     var shown by remember { mutableStateOf<ChatShareToastMessage?>(null) }
@@ -202,8 +184,6 @@ internal fun ChatShareToast(message: ChatShareToastMessage?, onDone: (ChatShareT
         visible = visible,
         enter = fadeIn(tween(250)),
         exit = fadeOut(tween(300)),
-        // The preview's content area already ends at the control strip, above
-        // the navigation bar; the toast sits just above the strip.
         modifier = modifier.padding(bottom = 16.dp, start = 24.dp, end = 24.dp),
     ) {
         val m = shown ?: return@AnimatedVisibility
@@ -233,22 +213,14 @@ internal fun ChatShareToast(message: ChatShareToastMessage?, onDone: (ChatShareT
     }
 }
 
-/** One toggle of the preview's control strip. */
 internal class ChatShareControl(
     val icon: ImageVector,
     val label: String,
-    /** On its non-default side: drawn in the accent colour. */
     val active: Boolean,
     val onClick: () -> Unit,
     val iconRotation: Float = 0f,
 )
 
-/**
- * [T-multi-select-share] A photo-editor style control strip at the bottom — width,
- * tables, appearance — one icon toggle per option, showing its current state (icon
- * + "dimension: value" label), accent-coloured on its non-default side. A tap flips
- * it and re-renders; the caller shows a "Switched to …" toast (iOS controlBar).
- */
 @Composable
 internal fun ChatShareControlStrip(items: List<ChatShareControl>) {
     val accent = MaterialTheme.colorScheme.primary
@@ -282,7 +254,6 @@ internal fun ChatShareControlStrip(items: List<ChatShareControl>) {
                     style = androidx.compose.ui.text.TextStyle(color = color, fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center),
                     maxLines = 1,
                     softWrap = false,
-                    // One line, shrinking to 80% before it would be cut (iOS minimumScaleFactor 0.8).
                     autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(minFontSize = 8.8.sp, maxFontSize = 11.sp),
                 )
             }

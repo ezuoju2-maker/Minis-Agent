@@ -6,18 +6,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-model-row-premature-wrap] Port of iOS b86aabda4 + 74025d909: a model
- * row's name (or id) and its tags share one line only when the whole line
- * fits; otherwise the name keeps the full width and the tags drop below.
- */
 class FitOrWrapLineTest {
 
     @Test
     fun `whole line fits - one line`() {
-        // Name 180 + gap 4 + tags (pill + Active badge) 60 = 244.
         assertTrue(FitOrWrapRules.fitsOnOneLine(300, leadWidth = 180, separatorWidth = null, tagsWidth = 60, gap = 4))
-        // Exactly full is still one line.
         assertTrue(FitOrWrapRules.fitsOnOneLine(244, leadWidth = 180, separatorWidth = null, tagsWidth = 60, gap = 4))
     }
 
@@ -28,10 +21,8 @@ class FitOrWrapLineTest {
 
     @Test
     fun `separator counts with its own gap`() {
-        // id 150 + 4 + dot 4 + 4 + chips 60 = 222
         assertTrue(FitOrWrapRules.fitsOnOneLine(222, leadWidth = 150, separatorWidth = 4, tagsWidth = 60, gap = 4))
         assertFalse(FitOrWrapRules.fitsOnOneLine(221, leadWidth = 150, separatorWidth = 4, tagsWidth = 60, gap = 4))
-        // Without the dot the same line fits in 214.
         assertTrue(FitOrWrapRules.fitsOnOneLine(214, leadWidth = 150, separatorWidth = null, tagsWidth = 60, gap = 4))
     }
 
@@ -57,7 +48,6 @@ class FitOrWrapLineTest {
         assertFalse("no FlowRow of name/id + chips is left in the chat picker", picker.contains("FlowRow("))
 
         val unified = ProductionSources.read("ui/components/UnifiedModelPickerSheet.kt")
-        // (Its LazyColumn keeps a legitimate weight(1f, fill = false); no row does.)
         assertFalse(unified.contains("FlowRow("))
         assertFalse(unified.contains("style = MaterialTheme.typography.bodyMedium,\n                                            modifier = Modifier.weight(1f, fill = false)"))
         assertEquals("member name line + provider id line", 2, unified.split("FitOrWrapLine(").size - 1)

@@ -4,11 +4,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-in-chat-search] Source guards on how Search in Chat is wired into the
- * chat screen (iOS ChatSearchEngineTests [5]): the entry points, the rows it
- * searches, and the composer it replaces.
- */
 class ChatSearchWiringTest {
 
     private val main = listOf(File("src/main"), File("app/src/main")).first { it.isDirectory }

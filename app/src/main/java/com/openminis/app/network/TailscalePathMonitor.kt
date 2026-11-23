@@ -11,21 +11,6 @@ import java.net.NetworkInterface
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Feeds the OS network state to the embedded Tailscale node: the Android
- * counterpart of the NWPathMonitor in iOS `TailscaleNode.startPathMonitor`.
- *
- * Tailscale's network monitor cannot read it itself on Android: since API 30
- * an app may not bind a NETLINK_ROUTE socket, so Go's `net.Interfaces()`
- * fails, and tailscale's Android build only polls every 10 minutes. On every
- * default-network callback this pushes
- *  - the default interface name (LinkProperties.interfaceName, "" when lost),
- *  - the interface list (java.net.NetworkInterface, which Android permits),
- * then wakes the monitor. See deps/rclone-mobile/tsnet/netmon_app.go.
- *
- * Started with the node and never stopped: one default-network callback is
- * cheap, and a node restarted later finds the state already current.
- */
 object TailscalePathMonitor {
 
     private const val TAG = "Network"
@@ -43,7 +28,6 @@ object TailscalePathMonitor {
             AppLogger.warning(TAG, "[Net][TS] ConnectivityManager unavailable; netmon keeps its own view")
             return
         }
-        // Seed before the first callback, which can lag on a cold start.
         val active = cm.activeNetwork
         update(active?.let { cm.getLinkProperties(it) }?.interfaceName.orEmpty(), "initial")
         cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
@@ -73,7 +57,6 @@ object TailscalePathMonitor {
         }
     }
 
-    /** JSON array of tsnet.AppInterface: name, index, mtu, flags, "ip/len" addresses. */
     internal fun interfacesJson(): JSONArray {
         val out = JSONArray()
         val all = runCatching { NetworkInterface.getNetworkInterfaces()?.toList() }.getOrNull().orEmpty()
@@ -81,7 +64,6 @@ object TailscalePathMonitor {
             val addrs = JSONArray()
             for (ia in ni.interfaceAddresses) {
                 val a = ia.address ?: continue
-                // Strip the "%wlan0" scope suffix; Go's netip rejects zones in prefixes.
                 val host = (a.hostAddress ?: continue).substringBefore('%')
                 val len = ia.networkPrefixLength.toInt().takeIf { it >= 0 } ?: if (a is Inet6Address) 128 else 32
                 addrs.put("$host/$len")

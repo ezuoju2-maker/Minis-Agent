@@ -7,19 +7,6 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-row-keys-stable] User report: while re-reading the previous
- * reply, the list jumped ten-plus lines the moment the new turn's first
- * thinking / tool output arrived (and again when the turn ended).
- *
- * Cause: the previous reply was split one-row-per-paragraph or merged into
- * ~2000-char chunks depending on whether a NEWER assistant message existed.
- * The streaming pipeline builds its frozen prefix from msgs.take(splitIdx),
- * which cuts the new turn's placeholder off, so the answer flipped between
- * the full build and the prefix build - same mdblock keys, different text.
- * The rule is now "rows depend only on the message": streaming or seen live
- * on this screen -> split; cold history -> merged.
- */
 class ChatRowKeyStabilityTest {
 
     private fun user(id: String, text: String) = ChatMessage(id = id, role = "user", content = text)
@@ -33,12 +20,10 @@ class ChatRowKeyStabilityTest {
         id = id, role = "assistant", content = "", isStreaming = true, isAwaitingModelResponse = true,
     )
 
-    /** 8 paragraphs of ~400 chars: merging packs them into fewer, larger rows. */
     private val longReply = (1..8).joinToString("\n\n") { n ->
         "Paragraph $n. " + "The plane trees along the avenue change with every season. ".repeat(7)
     }
 
-    /** (key, rawText) of the markdown rows belonging to [messageId]. */
     private fun rowsOf(items: List<FlatChatItem>, messageId: String) =
         items.filterIsInstance<FlatChatItem.AssistantMarkdownBlock>()
             .filter { it.messageId == messageId }
@@ -50,7 +35,6 @@ class ChatRowKeyStabilityTest {
         val merged = rowsOf(buildFlatChatItems(msgs), "a1")
         val split = rowsOf(buildFlatChatItems(msgs, liveMessageIds = setOf("a1")), "a1")
         assertTrue("merging packs 8 paragraphs into fewer rows", merged.size < split.size)
-        // Same key, different text: the anchor survives but points elsewhere.
         assertEquals(merged[1].first, split[1].first)
         assertNotEquals(merged[1].second, split[1].second)
     }
@@ -58,15 +42,12 @@ class ChatRowKeyStabilityTest {
     @Test
     fun `the previous reply keeps identical rows through a whole new turn`() {
         val tracker = LiveMessageTracker()
-        // Turn 1 streams on this screen.
         val streaming1 = listOf(user("u1", "write"), assistant("a1", longReply, streaming = true))
         val live = { msgs: List<ChatMessage>, stream: Set<String> -> tracker.update(msgs, stream) }
         val reference = rowsOf(buildFlatChatItems(streaming1, liveMessageIds = live(streaming1, setOf("a1"))), "a1")
 
         val done1 = listOf(user("u1", "write"), assistant("a1", longReply))
-        // Turn 1 ended; turn 2 sent; its placeholder appended (full build).
         val sent = done1 + user("u2", "next") + placeholder("a2")
-        // First output of turn 2: frozen prefix cut at the placeholder.
         val prefix = sent.take(3)
         val ended = done1 + user("u2", "next") + assistant("a2", "short answer")
 

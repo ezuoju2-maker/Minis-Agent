@@ -1,8 +1,5 @@
 package com.openminis.app.browser
 
-/**
- * All browser actions available to the agent, mirroring iOS BrowserAction.
- */
 enum class BrowserAction(val value: String) {
     NAVIGATE("navigate"),
     SCREENSHOT("screenshot"),
@@ -27,42 +24,16 @@ enum class BrowserAction(val value: String) {
     SCROLL_AND_COLLECT("scroll_and_collect"),
     WAIT_FOR_DOM_STABLE("wait_for_dom_stable");
 
-    /**
-     * [T-browser-readaction-follow-tab-and-yolo-android] True when this action
-     * opens / replaces the page (navigate) and may therefore fan out to
-     * a fresh tab under the implicit-tab grace window. False for
-     * operate-current-page actions (execute_js, get_text, click, …) which must
-     * follow selectedTabId.
-     */
     val opensNewPage: Boolean get() = this in opensNewPageActions
 
     companion object {
         private val map = entries.associateBy { it.value }
         fun fromString(s: String): BrowserAction? = map[s]
 
-        /** Actions that visually change the page and warrant an auto-snapshot. */
         val visualChangeActions: Set<BrowserAction> = setOf(
             NAVIGATE, CLICK, SCROLL, HOVER, TYPE
         )
 
-        /**
-         * [T-browser-readaction-follow-tab-and-yolo-android] Actions that open
-         * or replace the page in a tab — these are the ONLY actions that should
-         * fan out to a fresh tab when an implicit (tab_id-less) call lands while
-         * the previously-used tab is still inside its inUse grace window. The
-         * grace-based fan-out exists so N back-to-back *navigates* open N
-         * distinct tabs instead of trampling tab 0.
-         *
-         * Every other action operates on the CURRENT page (read DOM, click,
-         * scroll, screenshot, …). For those, fanning out to a fresh/other tab
-         * is exactly the #612/#614 bug: `navigate A → execute_js` ran the JS on
-         * a different (blank or stale) tab because navigate's tab was still in
-         * grace. Those actions must follow `selectedTabId` (the most-recently
-         * navigated tab), never fan out. See [opensNewPage].
-         *
-         * NEW_TAB / CLOSE_TAB / LIST_TABS / SET_VIEWPORT are handled at the pool
-         * level before tab acquisition, so they're intentionally absent here.
-         */
         val opensNewPageActions: Set<BrowserAction> = setOf(
             NAVIGATE
         )
@@ -106,11 +77,6 @@ enum class UserAgentProfile(val value: String) {
     companion object {
         fun fromString(s: String): UserAgentProfile? = entries.find { it.value == s }
 
-        /**
-         * [ISS-033] A user_agent argument: case-insensitive, "-" read as "_",
-         * and "desktop" / "mobile" accepted as aliases. Null when unknown - it
-         * used to fall back to mobile silently, so "desktop" switched to MOBILE.
-         */
         fun parse(raw: String?): UserAgentProfile? {
             val s = raw?.trim()?.lowercase()?.replace('-', '_') ?: return null
             return when (s) {

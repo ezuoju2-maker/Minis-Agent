@@ -5,20 +5,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-/**
- * [T-photos-positional-path] `android-photos import` must accept the file path
- * positionally (`import <file>`) as well as via `--path <file>`, matching
- * apple-photos on iOS.
- *
- * The path is resolved with `args.get("path") ?: args.positional.getOrNull(1)`
- * — index 1 because positional[0] is the subcommand itself. These cases pin the
- * interaction with OffloadArgs' real parsing rules, which are non-obvious:
- * `--compact` is a declared boolean flag (so it must NOT swallow the following
- * path), while an undeclared flag like `--album-name` consumes its next token.
- */
 class PhotosImportPathArgTest {
 
-    /** Mirrors the resolution expression in PhotosOffloadHandler.handleImport. */
     private fun resolvePath(argv: List<String>): String? {
         val args = OffloadArgs(argv)
         return args.get("path") ?: args.positional.getOrNull(1)
@@ -46,8 +34,6 @@ class PhotosImportPathArgTest {
 
     @Test
     fun `boolean output flag does not swallow the positional path`() {
-        // --compact is declared boolean at parser level; without that, it would
-        // greedily consume the path as its value.
         assertEquals("/c/p.jpg", resolvePath(listOf("import", "--compact", "/c/p.jpg")))
     }
 

@@ -15,33 +15,13 @@ import org.json.JSONObject
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-/**
- * [T-android-provider-voice] VoiceProvider base class — Android port of iOS
- * VoiceProvider.swift.
- *
- * Implements the OpenAI-compatible /v1/audio/transcriptions (ASR) and
- * /v1/audio/speech (TTS) endpoints. Vendor subclasses override the hook
- * methods to adapt non-OpenAI request/response shapes. `transcribe`/
- * `synthesize` are open (not final): vendors whose response envelope differs
- * (MiniMax/Doubao wrap audio in base64 JSON) override them wholesale.
- */
 open class VoiceProvider(
     val providerId: String,
     val baseURL: String,
     val apiKey: String? = null,
 ) {
-    /**
-     * [T-android-provider-entry-rules] The instance's custom User-Agent, set by
-     * [VoiceProviderFactory]. Voice requests are hand-built per vendor and
-     * carried no User-Agent at all (OkHttp's own), unlike every chat request.
-     */
     var customUserAgent: String? = null
 
-    /**
-     * Shadows the shared [Companion.httpClient] for every request this provider
-     * sends (same connection pool): the instance's custom User-Agent, else the
-     * branded default - unless a vendor request set its own User-Agent.
-     */
     private val baseHttpClient: OkHttpClient by lazy {
         Companion.httpClient.newBuilder().addInterceptor { chain ->
             val request = chain.request()
@@ -55,33 +35,22 @@ open class VoiceProvider(
         }.build()
     }
 
-    /**
-     * [FEAT-261021-16] Speech requests follow the default route in Settings >
-     * Network (voice providers have no route of their own); [baseHttpClient]
-     * itself when nothing is configured.
-     */
     val httpClient: OkHttpClient get() = com.openminis.app.network.NetworkHttp.client(com.openminis.app.network.NetworkHttp.DEFAULT_TAG, baseHttpClient)
 
     companion object {
         private const val TAG = "VoiceProvider"
 
-        /** TTS responses can be large and slow — generous timeouts (iOS: 120s). */
         val httpClient: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)
             .build()
 
-        /**
-         * Reduce a language tag (e.g. "zh-CN", "zh-Hans-CN", "en") to its
-         * ISO-639-1 two-letter primary code ("zh", "en") — what Whisper expects.
-         */
         fun iso6391(tag: String?): String? {
             val trimmed = tag?.trim()?.takeIf { it.isNotEmpty() } ?: return null
             return trimmed.split('-', '_').firstOrNull()?.lowercase(Locale.ROOT)
         }
 
-        /** Wrap 16-bit little-endian mono PCM in a minimal WAV container. */
         fun wrapPcm16InWav(pcm: ByteArray, sampleRate: Int): ByteArray {
             val channels = 1
             val bitsPerSample = 16
@@ -95,7 +64,7 @@ open class VoiceProvider(
             header.put("WAVE".toByteArray(Charsets.US_ASCII))
             header.put("fmt ".toByteArray(Charsets.US_ASCII))
             header.putInt(16)
-            header.putShort(1)                       // PCM
+            header.putShort(1)
             header.putShort(channels.toShort())
             header.putInt(sampleRate)
             header.putInt(byteRate)
@@ -107,7 +76,6 @@ open class VoiceProvider(
         }
     }
 
-    // -- Entry points ---------------------------------------------------------
 
     open suspend fun transcribe(request: VoiceInputRequest): VoiceInputResponse {
         val model = request.resolvedModel
@@ -131,25 +99,20 @@ open class VoiceProvider(
         return executeRequest(req)
     }
 
-    // -- Capability flags (override) -----------------------------------------
 
     open val supportsVoiceInput: Boolean get() = true
     open val supportsVoiceOutput: Boolean get() = true
 
-    // -- Endpoint paths (override) -------------------------------------------
 
     open fun voiceInputEndpointPath(): String = "/v1/audio/transcriptions"
     open fun voiceOutputEndpointPath(): String = "/v1/audio/speech"
 
-    // -- Default model / voice (override) ------------------------------------
 
     open fun defaultVoiceInputModel(): String = "whisper-1"
     open fun defaultVoiceOutputModel(): String = "tts-1"
     open fun defaultVoiceOutputVoice(): String = "alloy"
 
-    // -- Request construction (override to customize format) -----------------
 
-    /** Build the ASR request. Default: OpenAI multipart/form-data. */
     open fun buildVoiceInputRequest(request: VoiceInputRequest): Request {
         val url = composedUrlString(voiceInputEndpointPath())
         val multipart = MultipartBody.Builder()
@@ -159,8 +122,6 @@ open class VoiceProvider(
                 request.audioData.toRequestBody("audio/wav".toMediaType()),
             )
             .addFormDataPart("model", request.model ?: defaultVoiceInputModel())
-        // Whisper/OpenAI-compatible APIs expect an ISO-639-1 TWO-LETTER code and
-        // reject region-qualified ids like "zh-CN" with HTTP 400.
         iso6391(request.language)?.let { multipart.addFormDataPart("language", it) }
         multipart.addFormDataPart("response_format", request.responseFormat.wireValue)
         request.prompt?.let { multipart.addFormDataPart("prompt", it) }
@@ -170,7 +131,6 @@ open class VoiceProvider(
         return builder.build()
     }
 
-    /** Build the TTS request. Default: OpenAI JSON body. */
     open fun buildVoiceOutputRequest(request: VoiceOutputRequest): Request {
         val url = composedUrlString(voiceOutputEndpointPath())
         val body = JSONObject().apply {
@@ -187,7 +147,6 @@ open class VoiceProvider(
         return builder.build()
     }
 
-    /** Parse the ASR response. Default: OpenAI JSON, falling back to plain text. */
     open fun parseVoiceInputResponse(data: ByteArray, request: VoiceInputRequest): VoiceInputResponse {
         val text = String(data, Charsets.UTF_8)
         runCatching {
@@ -200,26 +159,18 @@ open class VoiceProvider(
                 )
             }
         }
-        // Some compatible endpoints return raw text.
         if (text.isNotEmpty()) return VoiceInputResponse(text = text)
         throw VoiceProviderException.Parse("Empty or undecodable ASR response")
     }
 
-    /** Inject auth header. Default: Bearer token. */
     open fun applyVoiceAuth(builder: Request.Builder) {
         val key = apiKey?.takeIf { it.isNotEmpty() } ?: return
         builder.header("Authorization", "Bearer $key")
     }
 
-    // -- Helpers --------------------------------------------------------------
 
     open fun effectiveBaseURL(): String = baseURL.trimEnd('/')
 
-    /**
-     * Join the base URL with an endpoint path, avoiding a duplicated version
-     * segment (e.g. Groq's base already ends in /v1 and our default paths start
-     * with /v1/ — naive concatenation yields /v1/v1/… → 404).
-     */
     fun composedUrlString(path: String): String {
         val base = effectiveBaseURL()
         var p = path
@@ -232,12 +183,6 @@ open class VoiceProvider(
         return base + p
     }
 
-    /**
-     * Whether an error response means the credential itself was rejected,
-     * which surfaces as "check the API key". Default: any 401/403. Vendors
-     * whose 401 also covers other failures override this so those keep
-     * their own message ([T-openrouter-voice-catalog]).
-     */
     open fun isAuthFailure(code: Int, body: ByteArray?): Boolean = code == 401 || code == 403
 
     suspend fun executeRequest(request: Request): ByteArray = withContext(Dispatchers.IO) {
@@ -255,16 +200,7 @@ open class VoiceProvider(
         }
     }
 
-    // -- Chat-based ASR (audio+text multimodal chat models) -------------------
 
-    /**
-     * Whether this model transcribes via chat completions instead of the
-     * Whisper-style transcriptions endpoint. DEFAULT IS THE TRANSCRIPTIONS
-     * ENDPOINT — audio-capable CHAT models are a small enumerable family
-     * (gpt*audio*, qwen*audio*, *omni*); dedicated ASR models are an open set
-     * and must be the fallback. Model NAME is the signal — modality bits can't
-     * distinguish a hand-annotated Whisper from a true audio chat model.
-     */
     open fun usesChatBasedASR(model: com.openminis.app.data.model.LLMModel): Boolean {
         val id = model.id.lowercase()
         if (id.contains("omni")) return true
@@ -272,11 +208,6 @@ open class VoiceProvider(
         return id.contains("gpt") || id.contains("qwen")
     }
 
-    /**
-     * Transcribe audio via chat completions. The system prompt forces the model
-     * to output ONLY the verbatim transcription so it behaves like a dedicated
-     * ASR engine.
-     */
     open suspend fun transcribeChatBased(request: VoiceInputRequest): VoiceInputResponse {
         val url = composedUrlString("/v1/chat/completions")
         val audioBase64 = Base64.encodeToString(request.audioData, Base64.NO_WRAP)

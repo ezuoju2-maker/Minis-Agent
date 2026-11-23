@@ -8,13 +8,6 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-thinking-row-follows-run] User report 2026-10-07: the chat said
- * "… is thinking" while the composer showed SEND and no background capsule
- * existed. The log shows a model switch during an auto-retry: the job was
- * cancelled, the run state and the activity tracker were cleared, and the
- * placeholder bubble kept its "running" flags.
- */
 class ThinkingRowSettleTest {
 
     private fun user(id: String) = ChatMessage(id = id, role = "user", content = "hi")
@@ -26,7 +19,6 @@ class ThinkingRowSettleTest {
 
     @Test
     fun `the placeholder of a cancelled attempt shows the thinking row until it is settled`() {
-        // What the loop leaves behind when its job is cancelled before the first chunk.
         val left = listOf(user("u1"), assistant("a1", content = "done"), user("u2"), assistant("a2", streaming = true, awaiting = true))
         assertEquals("this is the row in the screenshot", listOf("a2"), typingRows(left).map { it.messageId })
 
@@ -68,19 +60,15 @@ class ThinkingRowSettleTest {
         assertEquals("boom", settled[1].error)
     }
 
-    // -- wiring --
 
     private val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
 
     @Test
     fun `the thinking row is settled from the run state on every exit, and at once on a model switch`() {
-        // The safety net: any transition to "not streaming".
         assertTrue(vm.contains("isStreaming.collect { streaming ->\n                if (!streaming) settleThinkingRows(\"run-ended\")"))
-        // Never while a run is in progress.
         val settle = vm.substringAfter("private fun settleThinkingRows(site: String) {").substringBefore("\n    }\n")
         assertTrue(settle.trimStart().startsWith("if (_isStreaming.value) return"))
         assertTrue("pending streamed text is flushed first", settle.indexOf("flushAllStreamingDeltas()") < settle.indexOf("ThinkingRowSettle.settled(_messages.value)"))
-        // The path of the report: a model switch that cancels the retry ladder.
         val seam = vm.substringAfter("private fun cancelWorkBoundToPreviousModel(reason: String) {").substringBefore("private fun isBoundToAbandonedModel")
         val stop = seam.indexOf("_isStreaming.value = false")
         val settled = seam.indexOf("settleThinkingRows(\"switch-model\")")
@@ -90,10 +78,8 @@ class ThinkingRowSettleTest {
 
     @Test
     fun `what each of the three indicators reads`() {
-        // Thinking row: the bubble's own flags.
         assertTrue(ProductionSources.read("ui/chat/ChatFlatItems.kt")
             .contains("if (message.isStreaming && (!hasVisibleContent || message.isAwaitingModelResponse)) {"))
-        // Background capsule: the activity tracker, cleared by the same seam.
         val seam = vm.substringAfter("private fun cancelWorkBoundToPreviousModel(reason: String) {").substringBefore("private fun isBoundToAbandonedModel")
         assertTrue(seam.contains("SessionActivityTracker.setInactive(activeSessionId)"))
     }

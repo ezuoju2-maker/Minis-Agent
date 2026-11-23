@@ -7,15 +7,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-/**
- * [T-builtin-accounts] Persistence + token lifecycle for account-login platforms
- * that are not part of the generic OAuth providers (Qoder, MiniMax Code).
- *
- * Stored in the same encrypted prefs file the OAuth managers use, one entry per
- * **platform + region**, so a single "sign out" clears exactly one account and
- * the domestic / international sites of the same brand never overwrite each
- * other (their tokens are not interchangeable).
- */
 object BuiltInAccountStore {
     private const val TAG = "BuiltInAccountStore"
     private const val PREFS = "oauth_prefs"
@@ -35,7 +26,6 @@ object BuiltInAccountStore {
     private fun key(platform: String, region: String) = "builtin_account_${platform}_$region"
     private fun activeKey(platform: String) = "builtin_region_$platform"
 
-    /** Region the chat provider should use for this platform (last one visited). */
     fun activeRegion(context: Context, platform: String): String {
         val stored = prefs(context).getString(activeKey(platform), null)
         val regions = regions(platform)
@@ -47,7 +37,6 @@ object BuiltInAccountStore {
         prefs(context).edit().putString(activeKey(platform), region).apply()
     }
 
-    /** True when at least one site of this platform has a stored account. */
     fun hasAnyAccount(context: Context, platform: String): Boolean =
         regions(platform).any { load(context, platform, it.id) != null }
 
@@ -95,11 +84,6 @@ object BuiltInAccountStore {
         prefs(context).edit().remove(key(platform, region)).apply()
     }
 
-    /**
-     * A usable bearer for the chat request: returns the stored token of the
-     * active region, refreshing first when it is within two minutes of expiry.
-     * Null when signed out.
-     */
     suspend fun validToken(context: Context, platform: String): String? = withContext(Dispatchers.IO) {
         val api = api(platform) ?: return@withContext null
         val regions = regions(platform)

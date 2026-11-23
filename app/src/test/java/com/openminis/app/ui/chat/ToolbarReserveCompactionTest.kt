@@ -6,16 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-toolbar-reserve-compaction] The list's bottom reserve and the
- * floating tool bar must agree on whether the bar is there.
- *
- * The bar is mounted from [floatingToolBarBlocks], which leaves out replies
- * above the compaction divider (T-android-toolbar-after-compaction). The
- * reserve kept its own predicate over every reply, so a compacted session
- * whose tool calls were all above the divider showed no bar yet still kept
- * the bar-plus-preview gap (79 dp instead of 20 dp) under the last message.
- */
 class ToolbarReserveCompactionTest {
 
     private fun tool(id: String, kind: String = "tool_use", status: ToolBlockStatus? = ToolBlockStatus.SUCCESS) =

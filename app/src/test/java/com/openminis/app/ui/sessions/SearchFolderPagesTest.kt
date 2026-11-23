@@ -7,11 +7,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-search-folder-pages] A folder in a search result set shows 20 matches at
- * a time with a "Show N more (M left)" row (iOS e709a821e), on the pager the
- * normal list already uses. Vectors from iOS SearchFolderPagesTests.
- */
 class SearchFolderPagesTest {
 
     private fun folder(id: String) = FolderEntity(id = id, name = "F-$id", createdAt = 0, updatedAt = 0)
@@ -53,23 +48,19 @@ class SearchFolderPagesTest {
     }
 
     @Test fun `search pages are kept apart from the normal ones`() {
-        // Every result folder pages, not only "the open one".
         assertEquals(mapOf("x" to 2, "y" to 3), FolderPages.afterSearchShowMore(mapOf("x" to 2), "y", 2))
-        // The normal list ignores search pages, and a search ignores the normal ones.
         val normal = partitionByFolder(matches("a", 45), listOf(folder("a")), expandedFolderId = "a", nowMs = 0,
             folderPages = mapOf("a" to 1), searchFolderPages = mapOf("a" to 3)).first.single()
         assertEquals(20, normal.ids.size)
         val search = partitionByFolder(matches("a", 45), listOf(folder("a")), expandedFolderId = "a", nowMs = 0,
             folderPages = mapOf("a" to 3), searchResultsActive = true).first.single()
         assertEquals(20, search.ids.size)
-        // As on iOS, search pages apply in select mode too.
         assertEquals(20, block(45, selecting = true).ids.size)
     }
 
     @Test fun `wiring - reset points and the Show more row`() {
         val vm = ProductionSources.read("ui/sessions/SessionListViewModel.kt")
         val collect = vm.substringAfter("val folderHits = SearchFolders.matchedFolderIds(folders.value, q)").substringBefore("isSearching.value = false")
-        // A new result set and a cleared query each start from the first page.
         assertEquals(2, collect.split("searchFolderPages.value = emptyMap()").size - 1)
         assertTrue(vm.contains("searchFolderPages.update { FolderPages.afterSearchShowMore(it, folderId, pagesShown) }"))
         val screen = ProductionSources.read("ui/sessions/SessionListScreen.kt")

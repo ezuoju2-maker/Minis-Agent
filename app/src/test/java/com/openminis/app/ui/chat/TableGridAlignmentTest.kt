@@ -5,25 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-table-row-uniform-height] [T-android-table-cell-font-body-size]
- *
- * Reported on a Pixel 4a (2026-09-24, screenshot): in a chat table the first
- * column's row borders sat ~8px lower than the other columns', and every
- * vertical divider broke into offset segments at each row. The table text
- * was also visibly smaller than the reply around it.
- *
- * - Each cell paints its own right/bottom divider from its own size, and a
- *   shorter cell was centred in its row, so its lines floated. Cells differ
- *   in height since MdText trims the outer half-leading: a single line is as
- *   tall as its font, and a cell with CJK text (fallback font) is taller than Latin
- *   ("23–32°C").
- * - Cells were a fixed 14.sp against a 16.sp × font-scale body; iOS sets
- *   them in the body size.
- *
- * RenderTable is a Compose Layout, which does not run on the JVM, so its
- * contract is pinned against source; the visual check is on device.
- */
 class TableGridAlignmentTest {
 
     private val table by lazy {
@@ -40,8 +21,6 @@ class TableGridAlignmentTest {
     @Test
     fun `row heights are settled before any cell is measured`() {
         val rows = table.indexOf("maxIntrinsicHeight(colW[colIdx])")
-        // The cell measure, not the word-width textMeasurer.measure( used by
-        // the column planner (T-android-table-column-width-plan).
         val measure = table.indexOf(CELL_MEASURE)
         assertTrue("row height must come from every cell's intrinsic height", rows >= 0)
         assertTrue("…and before the single measure() of each cell", measure > rows)

@@ -6,17 +6,6 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-/**
- * Per-row model entry. Primary key is the composite "{instanceId}/{modelId}"
- * to align with iOS ProviderConfigDB and keep group/agent-loop references
- * portable across platforms. The legacy random-UUID id form is rewritten
- * to this shape during the first JSON→DB migration; group memberEntryIds
- * and agentLoopModelEntryIds are rewritten in lockstep so refs don't dangle.
- *
- * baseModel + overrides are stored as serialized JSON strings (single
- * source of truth via the same kotlinx.serialization Json instance used
- * by the legacy mirror).
- */
 @Entity(
     tableName = "provider_model_entries",
     foreignKeys = [ForeignKey(

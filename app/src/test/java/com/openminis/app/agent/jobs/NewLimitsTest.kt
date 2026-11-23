@@ -22,16 +22,6 @@ import org.junit.Before
 import org.junit.Test
 import java.util.UUID
 
-/**
- * [T-new-limits] 6 session slots, and sub agents capped at 3 PER PARENT
- * conversation (not a global 3), outside those 6 slots.
- *
- * What these pin: parents count independently, a full parent at the head of
- * the delegation queue cannot starve another parent's entries behind it, the
- * queue bound is per parent, a scheduled child-of-current fire waits for its
- * parent's slot instead of overrunning it, and session slots pair — including
- * a turn cancelled while it was still waiting for one.
- */
 class NewLimitsTest {
 
     private val p = "P-" + UUID.randomUUID()
@@ -63,7 +53,6 @@ class NewLimitsTest {
     private fun queued(parent: String, tool: String) =
         AgentJobRegistry.QueuedDelegation(parentSessionId = parent, argsJson = "{}", toolUseId = tool)
 
-    // ── Constants ───────────────────────────────────────────────────────────
 
     @Test
     fun `the shipped caps are 6 sessions, 3 sub agents per parent, 10 queued per parent`() {
@@ -72,7 +61,6 @@ class NewLimitsTest {
         assertEquals(10, AgentJobRegistry.MAX_QUEUED_DELEGATIONS_PER_PARENT)
     }
 
-    // ── Per-parent counting ────────────────────────────────────────────────
 
     @Test
     fun `a parent's children count only against that parent`() {
@@ -100,10 +88,6 @@ class NewLimitsTest {
 
     @Test
     fun `the debug override applies per parent`() {
-        // [test-variant] debugSet* is a no-op in non-DEV_TOOLS builds
-        // (githubRelease sets DEV_TOOLS=false); the override simply cannot be
-        // applied here. Skip only this DEV_TOOLS-specific case; the shipped-cap
-        // and per-parent behaviour is covered by the other tests.
         assumeTrue(
             "debug override needs a DEV_TOOLS build",
             AgentJobRegistry.debugSetMaxConcurrentChildJobs(1) == 1,
@@ -117,7 +101,6 @@ class NewLimitsTest {
         assertTrue(AgentJobRegistry.canStartChildJob(p))
     }
 
-    // ── Queue: per-parent bound and no head-of-line blocking ───────────────
 
     @Test
     fun `the queue bound is per parent`() {
@@ -157,8 +140,6 @@ class NewLimitsTest {
 
         AgentJobRegistry.finish(pJobs[0].id, AgentJobState.DONE, "ok")
 
-        // A queued re-entry takes its slot asynchronously, so one drain must not
-        // start the parent's whole backlog on a single free slot.
         assertEquals(listOf("p1"), started)
         assertTrue(AgentJobRegistry.isQueued("p2"))
     }
@@ -181,14 +162,13 @@ class NewLimitsTest {
         assertFalse("full and nothing finishes → false", AgentJobRegistry.awaitChildSlot(p, 50))
         val waiter = async(Dispatchers.Default) { AgentJobRegistry.awaitChildSlot(p, 5_000) }
         delay(50)
-        repeat(3) { child(q) }  // another parent's children do not free P
+        repeat(3) { child(q) }
         delay(50)
         assertFalse(waiter.isCompleted)
         AgentJobRegistry.finish(pJobs[1].id, AgentJobState.DONE, "ok")
         assertTrue(withTimeout(5_000) { waiter.await() })
     }
 
-    // ── Scheduled child-of-current path ────────────────────────────────────
 
     private fun task(mode: ScheduledTargetMode) = ScheduledTask(
         label = "t", timeOfDayHour = 9, timeOfDayMinute = 0,
@@ -220,7 +200,6 @@ class NewLimitsTest {
             gate.contains("run(context, task, waitForCompletion = false, scheduledFire = scheduledFire)"))
     }
 
-    // ── Session slots ──────────────────────────────────────────────────────
 
     @Test
     fun `a turn cancelled while waiting for a slot does not let an extra turn in`() = runBlocking {
@@ -233,7 +212,6 @@ class NewLimitsTest {
             holders.forEach { SessionConcurrencyManager.acquireSlot(it) }
             assertEquals(max, SessionConcurrencyManager.runningSessions.value.size)
 
-            // Mirrors a stream job: acquire inside try, release in finally.
             val waiting = launch(Dispatchers.Default) {
                 try { SessionConcurrencyManager.acquireSlot(cancelled) }
                 finally { SessionConcurrencyManager.releaseSlot(cancelled) }

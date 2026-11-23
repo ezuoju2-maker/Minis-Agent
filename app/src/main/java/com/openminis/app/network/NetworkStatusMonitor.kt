@@ -13,19 +13,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/**
- * [FEAT-261021-07, iOS a6e6c10d1] Live state behind the small pills under
- * the title on the home screen: whether Tailscale is connected and whether
- * each proxy in use answers. Users who turned Tailscale on or set a proxy
- * long ago may not remember it when connections misbehave; the pills make
- * the routing visible. With nothing configured the pills, and this
- * monitor's work, are absent.
- *
- * A proxy in use is probed (NetworkHub.testProxy) when the app comes to the
- * front, when its settings change, and every [PROBE_INTERVAL_MS] while the
- * app is in front; a settling Tailscale node is asked for its state every
- * [TICK_MS]. Nothing runs in the background.
- */
 object NetworkStatusMonitor {
 
     private const val TAG = "Network"
@@ -44,17 +31,14 @@ object NetworkStatusMonitor {
     @Volatile
     private var inFront = false
 
-    /** Proxies that some route actually sends traffic through. A proxy that is only saved gets no pill. */
     fun proxiesInUse(s: NetworkSettings): List<ProxyServer> {
         if (s.forceDirect) return emptyList()
         val routes = (listOf(s.defaultRoute) + s.scopes.values + s.providerRoutes.values).toSet()
         return s.proxies.filter { "proxy:${it.id}" in routes }
     }
 
-    /** Whether the pills have anything to show (and the monitor anything to do). */
     fun wanted(s: NetworkSettings): Boolean = s.nodeWanted || proxiesInUse(s).isNotEmpty()
 
-    /** Called by NetworkHub.init: follows every settings change. */
     fun start(settings: StateFlow<NetworkSettings>) {
         scope.launch { settings.collect { settingsChanged(it) } }
     }
@@ -102,9 +86,6 @@ object NetworkStatusMonitor {
     @Synchronized
     private fun tick() {
         val s = NetworkHub.settings.value
-        // Running and NeedsLogin stay put until the user acts; the entry
-        // health check refreshes them every 30 s anyway. Anything else is on
-        // its way somewhere, so look more often.
         val ts = NetworkHub.tailscale.value
         if (s.nodeWanted && !ts.isLoggedIn && !ts.needsLogin) NetworkHub.refreshStatus()
         probeStale(s)
@@ -139,18 +120,11 @@ object NetworkStatusMonitor {
             )
             synchronized(this@NetworkStatusMonitor) {
                 inFlight -= proxy.id
-                // Dropped or edited while the probe ran: its result describes
-                // settings that no longer exist.
                 if (proxy in proxiesInUse(NetworkHub.settings.value)) _proxyHealth.update { it + (proxy.id to health) }
             }
         }
     }
 
-    /**
-     * What a pill says, ordered by severity so several proxies show their
-     * worst. Real traffic failing ([NetworkAlertCenter.failing]) beats an
-     * older successful probe; the alert clears itself once the proxy recovers.
-     */
     enum class ProxyLevel { AVAILABLE, CHECKING, UNAVAILABLE }
 
     fun proxyLevel(id: String, health: Map<String, ProxyHealth>, failing: Set<NetworkAlertEvent.Subject>): ProxyLevel = when {
@@ -160,19 +134,14 @@ object NetworkStatusMonitor {
         else -> ProxyLevel.CHECKING
     }
 
-    /** The Tailscale pill's state, the same reading of the node as the status row in Settings > Network. */
     enum class TailscaleLevel { CONNECTING, CONNECTED, UNAVAILABLE, NOT_LOGGED_IN, AWAITING_APPROVAL, NOT_CONNECTED }
 
     fun tailscaleLevel(ts: TailscaleStatus, applying: Boolean, lastError: String?, failing: Boolean): TailscaleLevel = when {
         applying && !ts.running -> TailscaleLevel.CONNECTING
-        // Real connections through the node keep failing: say so even though
-        // the node itself reports Running.
         ts.isLoggedIn -> if (failing) TailscaleLevel.UNAVAILABLE else TailscaleLevel.CONNECTED
         ts.needsLogin -> TailscaleLevel.NOT_LOGGED_IN
         ts.backendState == "NeedsMachineAuth" -> TailscaleLevel.AWAITING_APPROVAL
         ts.running -> TailscaleLevel.CONNECTING
-        // Enabled but not running: still starting, or failed to start (the
-        // reason is in Settings > Network).
         lastError == null -> TailscaleLevel.CONNECTING
         else -> TailscaleLevel.NOT_CONNECTED
     }

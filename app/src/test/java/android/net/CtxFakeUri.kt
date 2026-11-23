@@ -1,11 +1,5 @@
 package android.net
 
-/**
- * A concrete android.net.Uri for InputAttachment (whose uri is non-null): the
- * unit-test android.jar only has the abstract class, whose constructor is
- * package-private — hence this test-only file in android.net. Never read by
- * the code under test — attachments are opened through the injected openStream.
- */
 class CtxFakeUri(private val id: String) : Uri() {
     override fun buildUpon(): Builder? = null
     override fun getAuthority(): String? = null

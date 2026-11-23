@@ -14,13 +14,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
-/**
- * [T-readaloud-volume] One read-aloud volume (0..2, default 1.0, persisted in
- * voice_prefs/readReplies.volume) drives BOTH playback paths: the system
- * engine's KEY_PARAM_VOLUME and the provider MediaPlayer's setVolume, plus
- * [T-readaloud-volume-boost] a LoudnessEnhancer on each path's audio session
- * for the part above 100 %.
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
 class ReadAloudVolumeTest {
@@ -29,7 +22,6 @@ class ReadAloudVolumeTest {
 
     private fun prefs() = app.getSharedPreferences("voice_prefs", Context.MODE_PRIVATE)
 
-    /** VoiceOutputState is a process singleton whose init() runs once; reset it. */
     private fun reinit() {
         VoiceOutputState::class.java.getDeclaredField("prefs").apply {
             isAccessible = true
@@ -131,7 +123,6 @@ class ReadAloudVolumeTest {
         val src = ProductionSources.read("speech/TextToSpeechManager.kt")
         assertTrue(src.contains("putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, speechVolume)"))
         assertTrue(src.contains("putInt(TextToSpeech.Engine.KEY_PARAM_SESSION_ID, audioSessionId)"))
-        // Every speak path builds its params through buildSpeechParams.
         assertEquals(
             Regex("""tts\?\.speak\(""").findAll(src).count(),
             Regex("""val params = buildSpeechParams\(\)""").findAll(src).count(),

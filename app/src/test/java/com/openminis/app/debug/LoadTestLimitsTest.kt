@@ -10,11 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
-/**
- * [T-loadtest-limits] The DEV_TOOLS-only runtime overrides of the concurrency
- * caps used by on-device load tests: defaults unchanged, clamped, resettable,
- * and the admission paths read the effective value.
- */
 class LoadTestLimitsTest {
 
     @After
@@ -26,7 +21,6 @@ class LoadTestLimitsTest {
 
     @Test
     fun `defaults are the shipped caps`() {
-        // [T-new-limits] 6 session slots; 3 sub agents PER parent conversation.
         assertEquals(6, SessionConcurrencyManager.maxConcurrent)
         assertEquals(3, AgentJobRegistry.maxConcurrentChildJobsPerParent)
         assertEquals(10, AgentJobRegistry.MAX_QUEUED_DELEGATIONS_PER_PARENT)
@@ -35,9 +29,6 @@ class LoadTestLimitsTest {
 
     @Test
     fun `set, clamp and reset`() {
-        // [test-variant] debugSet* is a no-op in non-DEV_TOOLS builds; the
-        // setters cannot be exercised here (the DEV_TOOLS-gated source pins
-        // are checked by the other tests). Skip this one on such variants.
         assumeTrue(
             "debug setters need a DEV_TOOLS build",
             SessionConcurrencyManager.debugSetMaxConcurrent(16) == 16,
@@ -74,8 +65,6 @@ class LoadTestLimitsTest {
 
     @Test
     fun `limits RPC keeps the childJobs key and accepts the per-parent alias`() {
-        // [T-new-limits] Load-test scripts already send `childJobs`; it keeps
-        // working and now means "per parent". `childJobsPerParent` wins.
         val rpc = ProductionSources.read("debug/LoadTestDebugMethods.kt")
         assertTrue(rpc.contains("\"childJobsPerParent\""))
         assertTrue(rpc.contains("\"childJobs\""))

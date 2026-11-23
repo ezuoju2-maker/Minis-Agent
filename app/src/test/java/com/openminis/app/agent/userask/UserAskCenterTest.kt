@@ -17,10 +17,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-port-user-ask] The runtime: a tool call waits on the card, and the card,
- * the timeout, Stop and a new user message each end the wait - first one wins.
- */
 class UserAskCenterTest {
 
     private var now = 1_000_000_000L
@@ -39,7 +35,6 @@ class UserAskCenterTest {
         "options" to listOf(mapOf("label" to "SQLite"), mapOf("label" to "Postgres")))
     private val confirm = mapOf("type" to "confirm", "question" to "rm -rf build/", "impact" to "deletes build output", "risk" to "high")
 
-    /** Start the tool call, wait until its ask is registered, return (deferred, requestId). */
     private fun start(scope: kotlinx.coroutines.CoroutineScope, args: String, tool: String = "tc1", minutes: Int = 5) =
         scope.async(start = CoroutineStart.UNDISPATCHED) {
             UserAskToolRunner.execute(args, tool, "sess-1", "Title", minutes, nowMs = now, requestId = "req-$tool")
@@ -123,7 +118,6 @@ class UserAskCenterTest {
         assertEquals(listOf(UserAskResultStatus.DISMISSED), UserAskResolver.statuses(out))
         val a = UserAskCenter.ask("tc1")!!
         assertEquals(UserAskDismissReason.SUPERSEDED_BY_USER_MESSAGE, a.dismissReason)
-        // First one wins: a late answer changes nothing.
         UserAskCenter.submitQuestion(a.requestId, 0)
         assertEquals(UserAskState.DISMISSED, UserAskCenter.ask("tc1")!!.state)
     }
@@ -147,7 +141,6 @@ class UserAskCenterTest {
         assertEquals(UserAskState.ANSWERED, seen.last())
     }
 
-    // ── Source guards ───────────────────────────────────────────────────────
 
     @Test fun `logs never carry the user's answer text`() {
         for (f in listOf("agent/userask/UserAskCenter.kt", "agent/userask/UserAskToolRunner.kt")) {
@@ -172,21 +165,15 @@ class UserAskCenterTest {
     @Test fun `the view model wires exposure, dispatch, prompt, Stop and supersede`() {
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
         assertTrue(vm.contains("userAskExposed = userAskExposedThisRun,"))
-        // Exposure decided right before every run's system prompt.
         val builds = Regex("""val baseSystemPrompt = buildSystemPrompt\(\)""").findAll(vm).count()
         assertEquals(builds, Regex("""decideUserAskExposureForRun\([^)]*\)\s*// \[T-port-user-ask\]\n\s*val baseSystemPrompt = buildSystemPrompt\(\)""").findAll(vm).count())
         assertTrue(vm.contains("decideUserAskExposureForRun(interactive = !headless, userAskAnswer = userAskAnswer)"))
-        // The prompt line exists only when exposed.
         val prompt = vm.substringAfter("val userAskPromptLine = when {").substringBefore("}")
         assertTrue(prompt.contains("!userAskExposedThisRun -> \"\""))
         assertTrue(vm.contains("\${browserPromptBullet}\${userAskPromptLine}"))
-        // Dispatcher.
-        // Dispatcher: refuses when not exposed ([T-user-ask-exposure-guard]), else runs the card.
-        // [T-user-ask-deferred] ...a deferred run gets the immediate call, any other the waiting one.
         val dispatch = vm.substringAfter("com.openminis.app.agent.userask.UserAskPromptText.TOOL_NAME -> if (!userAskExposedThisRun) {").take(2000)
         assertTrue(dispatch.contains("} else if (userAskDeferredThisRun) {"))
         assertTrue(dispatch.contains("} else\n                com.openminis.app.agent.userask.UserAskToolRunner.execute("))
-        // Stop and a new user message.
         val cancel = vm.substringAfter("    fun cancelStream(keepBackground: Boolean = false) {").substringBefore("\n    }\n")
         assertTrue(cancel.contains("UserAskCenter.dismissPending(\n            activeSessionId, com.openminis.app.agent.userask.UserAskDismissReason.STOPPED,"))
         val enqueue = vm.substringAfter("    fun enqueuePrompt(").substringBefore("\n    }\n")

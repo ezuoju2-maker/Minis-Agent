@@ -4,27 +4,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-log-stdout-double-write] Lines the app already wrote itself must
- * not be written a second time when they come back through the logcat tail.
- *
- * `AppLogger.startCapture()` does two things at once: it redirects
- * `System.out`/`System.err` into the log file, and it spawns a
- * `logcat --pid=self` tail that also writes into the same file. The platform
- * copies stdout to logcat, so every `println` arrives twice — once as
- * `[STDOUT] …`, once as `[LOGCAT] … I/System.out(pid): …`. Confirmed on the
- * 2026-09-15 field log: 8 `T-HANG-DIAG` lines for 4 real events.
- *
- * `writeLogcatLine` already filtered `Minis.*` and `AppLogger` for exactly this
- * reason; `System.out` / `System.err` were the gap.
- *
- * The real method is private and touches file state, so this mirrors its tag
- * extraction and predicate. That keeps the test honest about its scope — it
- * covers the DECISION (which tags are echoes of our own writes), not the I/O.
- */
 class LogcatEchoFilterTest {
 
-    /** Mirror of writeLogcatLine's tag parse + skip rule. */
     private fun isEcho(rawLine: String): Boolean {
         val slashIdx = rawLine.indexOf('/')
         val parenIdx = if (slashIdx >= 0) rawLine.indexOf('(', slashIdx) else -1
@@ -49,8 +30,6 @@ class LogcatEchoFilterTest {
 
     @Test
     fun `framework and other-app lines are still captured`() {
-        // The whole point of the tail is these; over-filtering would silently
-        // lose the GC and ANR evidence this log gets pulled for.
         assertFalse(isEcho("09-15 13:59:43.310 I/m.openminis.app(26955): NativeAlloc concurrent mark compact GC freed 204MB"))
         assertFalse(isEcho("09-15 14:00:07.563 I/HangDetector(26955): hang count reset after quiet period"))
         assertFalse(isEcho("09-15 14:00:01.000 I/Choreographer(26955): Davey! duration=1526ms"))
@@ -58,8 +37,6 @@ class LogcatEchoFilterTest {
 
     @Test
     fun `a tag that merely starts with System is not treated as an echo`() {
-        // `System.out` is matched exactly, not by prefix — SystemUI/SystemClock
-        // must keep flowing.
         assertFalse(isEcho("09-15 14:00:01.000 I/SystemUI(26955): something"))
         assertFalse(isEcho("09-15 14:00:01.000 I/SystemClock(26955): something"))
     }

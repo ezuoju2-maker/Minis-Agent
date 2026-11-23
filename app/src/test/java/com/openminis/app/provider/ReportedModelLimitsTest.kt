@@ -15,18 +15,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [OpenMinis#438] A custom OpenAI-compatible endpoint that reports
- * `context_length` / `max_output_tokens` on /v1/models is believed: the values
- * are read, and models.dev no longer replaces them. Before, a routing-prefixed
- * id (`cn:deepseek-v4-pro`) matched no catalog key and fell to a 128K guess,
- * and an id that did match took another provider's (possibly larger) window.
- */
 class ReportedModelLimitsTest {
 
     private fun limits(json: String) = OpenAIModelsApi.reportedLimits(JSONObject(json))
 
-    // ── parsing ───────────────────────────────────────────────────────
 
     @Test
     fun `the issue's shape`() {
@@ -67,7 +59,6 @@ class ReportedModelLimitsTest {
         assertEquals(null to null, limits("""{"id":"m"}"""))
     }
 
-    // ── models.dev merge: the endpoint's value wins, the catalog fills gaps ──
 
     private fun dev(context: Int?, output: Int?) = ModelsDevApi.ModelDevEntry(
         id = "deepseek-v4-pro", name = "DeepSeek V4 Pro", family = null,
@@ -104,7 +95,6 @@ class ReportedModelLimitsTest {
         assertEquals(16_000, twice.maxOutputTokens)
     }
 
-    // ── the fetch itself ──────────────────────────────────────────────
 
     private lateinit var server: MockWebServer
 
@@ -135,9 +125,6 @@ class ReportedModelLimitsTest {
         assertNull("no catalog match, nothing reported", m.contextWindow)
     }
 
-    // [T-anthropic-list-reported-limits] The same response sample as the
-    // Windows test (minis-providers models_api.rs ios_vectors_reported_limits,
-    // "issue #438 body"), served to an Anthropic-type instance on a relay.
     private val issue438Body =
         """{"object":"list","data":[{"id":"cn:deepseek-v4-pro","object":"model","owned_by":"workbuddy","context_length":1000000,"max_output_tokens":393216}]}"""
 
@@ -175,7 +162,6 @@ class ReportedModelLimitsTest {
         assertNull(m.limitsReportedByEndpoint)
     }
 
-    // ── saved data ────────────────────────────────────────────────────
 
     @Test
     fun `a model saved before the field existed loads, and the field round-trips`() {

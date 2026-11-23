@@ -4,11 +4,6 @@ import com.openminis.app.data.db.FolderEntity
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * [T-android-group-picker-recent] The Move to Group picker lists the most
- * recently active group first: the later of its newest member session's
- * updatedAt and its own record time; ties keep the incoming order.
- */
 class GroupPickerOrderTest {
 
     private fun folder(id: String, created: Long, updated: Long = created) =

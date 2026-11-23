@@ -46,22 +46,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 
-/**
- * [#467] "Show full thinking": the whole thinking text of a finished block
- * in a full-screen dialog (the style of the earlier over-100K viewer it
- * replaces), never expanded inside the chat list.
- *
- * The text is split by [ThinkingChunking] off the main thread and shown as
- * lazy items, a few chunks at first and a batch more each time the end of
- * what is shown scrolls into view. Each batch's first frame is timed; a slow
- * one switches to one chunk per tap of "Load more" ([ThinkingChunking.paceAfter]),
- * so a device that cannot keep up is never frozen by automatic loading.
- * "Copy All" copies the full text, whatever is on screen; the shown text is
- * selectable.
- *
- * [content] is the text when the dialog opened: the entry is only offered
- * once the block has finished streaming.
- */
 @Composable
 fun ThinkingFullDialog(content: String, onDismiss: () -> Unit) {
     val context = LocalContext.current
@@ -72,7 +56,6 @@ fun ThinkingFullDialog(content: String, onDismiss: () -> Unit) {
     }
     var revealed by remember(content) { mutableIntStateOf(0) }
     var pacing by remember(content) { mutableStateOf(ThinkingChunking.Pacing()) }
-    // Bumped per batch; the watchdog below times that batch's first frame.
     var batchStartedAt by remember(content) { mutableStateOf(0L) }
     LaunchedEffect(chunks) {
         chunks?.let { revealed = ThinkingChunking.initialCount(it) }
@@ -119,7 +102,6 @@ fun ThinkingFullDialog(content: String, onDismiss: () -> Unit) {
                             clipboard.setText(AnnotatedString(ThinkingChunking.copyText(content)))
                             Toast.makeText(context, R.string.terminal_copied_all, Toast.LENGTH_SHORT).show()
                         } catch (e: RuntimeException) {
-                            // A text past the Binder transaction limit cannot go to the clipboard.
                             Toast.makeText(context, R.string.thinking_full_copy_failed, Toast.LENGTH_SHORT).show()
                         }
                     }) {
@@ -158,8 +140,6 @@ fun ThinkingFullDialog(content: String, onDismiss: () -> Unit) {
                             }
                             if (ThinkingChunking.hasMore(revealed, list.size)) {
                                 item(key = "more") {
-                                    // The end of what is shown came into view: the next batch
-                                    // (iOS LazyRevealChunks footer onAppear).
                                     if (pacing.auto) LaunchedEffect(revealed) { reveal() }
                                     Row(
                                         horizontalArrangement = Arrangement.Center,
@@ -178,4 +158,3 @@ fun ThinkingFullDialog(content: String, onDismiss: () -> Unit) {
         }
     }
 }
-

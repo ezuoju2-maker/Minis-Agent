@@ -74,17 +74,6 @@ import com.openminis.app.ui.components.MinisTextButton
 import com.openminis.app.ui.components.SectionTextField
 import kotlin.math.roundToInt
 
-/**
- * Detail / edit screen for one ModelGroup. Adopted T79 sectioned style:
- * Name, Routing Strategy (+ optional Fallback Trigger sub-section),
- * Members (reorderable), and Actions. Each section gets a header and an
- * explanatory footer caption, matching the iOS-side detail screens.
- *
- * Uses a manually-rolled Scaffold instead of SettingsScaffold because
- * the members list needs LazyColumn for reordering — SettingsScaffold's
- * verticalScroll wrapper would conflict with the lazy list's infinite-
- * height measure.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelGroupDetailScreen(
@@ -108,11 +97,6 @@ fun ModelGroupDetailScreen(
     val focusManager = LocalFocusManager.current
     var strategy by remember { mutableStateOf(group.strategy) }
     var fallbackStrategy by remember { mutableStateOf(group.fallbackStrategy) }
-    // T312: Session Defaults — keyed on group.id so navigating to another
-    // group via NavBackStack rebuilds these from the new group's persisted
-    // values. Using `group` as key would also re-fire on every config
-    // refresh (since `group` is recomputed from the StateFlow each
-    // recomposition); id-keyed remember is the stable alternative.
     var defaultThinkingLevel by remember(group.id) {
         mutableStateOf(group.defaultThinkingLevel)
     }
@@ -120,16 +104,12 @@ fun ModelGroupDetailScreen(
         mutableStateOf(group.contextLimitTokens)
     }
 
-    // Local copy of member IDs for live reorder
     var memberIds by remember(group.memberEntryIds) { mutableStateOf(group.memberEntryIds.toList()) }
     var entryToRemove by remember { mutableStateOf<String?>(null) }
-    // [T-quota-group-member-pill] Provider whose quota sheet is open.
     var quotaSheetInstanceId by remember { mutableStateOf<String?>(null) }
 
     val lazyListState = rememberLazyListState()
     val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        // from.index / to.index are LazyColumn global indices (include header items).
-        // Use the item key (entryId string) to find the correct position in memberIds.
         val fromKey = from.key as? String ?: return@rememberReorderableLazyListState
         val toKey = to.key as? String ?: return@rememberReorderableLazyListState
         val fromIdx = memberIds.indexOf(fromKey)
@@ -164,7 +144,6 @@ fun ModelGroupDetailScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            // ── Name section ──────────────────────────────────────────
             item {
                 SettingsSection(
                     header = stringResource(R.string.model_group_detail_name),
@@ -190,7 +169,6 @@ fun ModelGroupDetailScreen(
                 }
             }
 
-            // ── Routing Strategy ──────────────────────────────────────
             item {
                 SettingsSection(
                     header = stringResource(R.string.model_group_detail_routing_strategy),
@@ -219,7 +197,6 @@ fun ModelGroupDetailScreen(
                 }
             }
 
-            // ── Fallback Trigger (only when strategy = fallback) ──────
             if (strategy == RoutingStrategy.fallback) {
                 item {
                     SettingsSection(
@@ -250,7 +227,6 @@ fun ModelGroupDetailScreen(
                 }
             }
 
-            // ── Members section header ───────────────────────────────
             item {
                 Spacer(Modifier.height(20.dp))
                 Text(
@@ -279,15 +255,10 @@ fun ModelGroupDetailScreen(
                 }
             } else {
                 itemsIndexed(memberIds, key = { _, id -> id }) { _, entryId ->
-                    // [T-android-provider-voice] System voice sentinels aren't
-                    // persisted entries — resolve them to virtual entries so the
-                    // default Voice Input/Output members render normally instead
-                    // of as stale rows (mirrors iOS system virtual entries).
                     val entry = config.modelEntries.find { it.id == entryId }
                         ?: com.openminis.app.data.model.SystemVoiceEntries.resolve(entryId)
 
                     if (entry == null) {
-                        // Stale member: UUID no longer resolves to any ModelEntry
                         ReorderableItem(reorderState, key = entryId) { _ ->
                             ListItem(
                                 headlineContent = {
@@ -328,15 +299,9 @@ fun ModelGroupDetailScreen(
                             )
                         }
                     } else {
-                        // Normal member row
                         val instance = config.instances.find { it.id == entry.providerInstanceId }
                         val instanceLabel = instance?.label
                         val providerDisabled = instance?.isEnabled == false
-                        // [T-android-model-absence-grace] The provider stopped
-                        // listing this model. The entry (and its overrides) is
-                        // retained through the grace window, so say why the row
-                        // is dimmed instead of letting it look normal — or, as
-                        // before, letting it silently vanish from the group.
                         val notListed = entry.isUnavailableFromProvider
                         var showMenu by remember { mutableStateOf(false) }
 
@@ -344,15 +309,9 @@ fun ModelGroupDetailScreen(
                             ListItem(
                                 modifier = Modifier.alpha(if (providerDisabled || notListed) 0.4f else 1f),
                                 headlineContent = {
-                                    // [T-model-row-premature-wrap] Name and quota pill on
-                                    // one line when they fit, else the name keeps the width
-                                    // and the pill drops below, as in the model picker.
                                     com.openminis.app.ui.components.FitOrWrapLine(
                                         lead = { Text(entry.model.displayName) },
                                         tags = {
-                                            // [T-quota-group-member-pill] The model's (or its
-                                            // account's) quota; this page has no other way to
-                                            // the provider's quota. Tap opens the quota sheet.
                                             if (instance != null && !providerDisabled) {
                                                 com.openminis.app.ui.quota.ModelQuotaMemberPill(
                                                     instanceId = entry.providerInstanceId,
@@ -410,13 +369,6 @@ fun ModelGroupDetailScreen(
                 }
             }
 
-            // ── Add models: directly under the member list it acts on ────────
-            // Previously this sat at the very bottom, below Session Defaults and
-            // immediately above the destructive "Delete group" button. That put
-            // an additive action two sections away from the list it appends to,
-            // and pair-adjacent to a destructive one — easy to mis-tap and hard
-            // to find. Placing it right after the list makes the relationship
-            // obvious and leaves "Delete group" alone at the bottom.
             item {
                 Spacer(Modifier.height(12.dp))
                 MinisOutlinedButton(
@@ -429,7 +381,6 @@ fun ModelGroupDetailScreen(
                 }
             }
 
-            // ── Session Defaults (T312, mirrors iOS ModelGroupDetailView) ────
             item {
                 SettingsSection(
                     header = stringResource(R.string.model_group_detail_session_defaults),
@@ -440,7 +391,6 @@ fun ModelGroupDetailScreen(
                         title = stringResource(R.string.model_group_detail_enable_reasoning),
                         checked = reasoningEnabled,
                         onCheckedChange = { on ->
-                            // iOS parity: ON defaults to MEDIUM, OFF clears to null.
                             val newLevel = if (on) ThinkingLevel.MEDIUM else null
                             defaultThinkingLevel = newLevel
                             providerRepository.updateGroup(
@@ -452,22 +402,6 @@ fun ModelGroupDetailScreen(
                         showDivider = reasoningEnabled,
                     )
                     if (reasoningEnabled) {
-                        // [T-android-thinking-level-arch] The group's thinking
-                        // CEILING is the HIGHEST level any reasoning-capable
-                        // member supports — max(), not min() (mirrors iOS
-                        // e51fef5d/53388728). min() was wrong twice:
-                        //   1. A non-reasoning member (e.g. an image model with
-                        //      effectiveMaxThinkingLevel == OFF) dragged the
-                        //      ceiling to OFF and emptied the Intensity picker,
-                        //      leaving "Enable Reasoning" on with no selector.
-                        //   2. Even among reasoning members it capped the group at
-                        //      the WEAKEST model — a group of [Opus MAX, a HIGH
-                        //      model] would only offer up to High, hiding the tiers
-                        //      Opus supports.
-                        // The per-request clamp (provider layer) still caps to the
-                        // ACTUAL model at send time, so offering the true ceiling
-                        // here is safe. Exclude OFF; fall back to XHIGH when no
-                        // member reasons (only reached with reasoning enabled).
                         val groupMaxThinkingLevel = remember(group.memberEntryIds, config.modelEntries) {
                             group.memberEntryIds
                                 .mapNotNull { entryId ->
@@ -489,8 +423,6 @@ fun ModelGroupDetailScreen(
                                 ThinkingLevel.OFF -> stringResource(R.string.model_group_detail_thinking_low)
                             }
                         }
-                        // Steps exclude OFF (the toggle above carries OFF
-                        // semantics) and everything above the group ceiling.
                         val cases = ThinkingLevel.entries
                             .filter { it != ThinkingLevel.OFF && it.rank <= groupMaxThinkingLevel.rank }
                             .map { it to labelFor(it) }
@@ -517,21 +449,10 @@ fun ModelGroupDetailScreen(
                                             index = idx,
                                             count = cases.size,
                                         ),
-                                        // [T-android-thinking-segment-overflow]
-                                        // Same six-segment overflow as the sub
-                                        // agent editor, which was ported from
-                                        // here: without this the labels break
-                                        // mid-word ("Medi/um", "XHig/h"). The
-                                        // check icon is redundant next to the
-                                        // selected segment's fill and was
-                                        // costing ~24dp of label width.
                                         icon = {},
                                     ) {
                                         Text(
                                             label,
-                                            // One size below labelSmall: six segments on a phone leave
-                                    // ~55dp each, and labelSmall's 11sp still made
-                                    // "Medium" the widest thing in the row.
                                     fontSize = 10.sp,
                                     lineHeight = 12.sp,
                                             maxLines = 1,
@@ -543,22 +464,11 @@ fun ModelGroupDetailScreen(
                         }
                     }
                     val contextEnabled = contextLimitTokens != null
-                    // T-android-ctx-slider-cap (port iOS fa77f493): the slider
-                    // is now a fixed 7-stop ladder decoupled from member-model
-                    // metadata. We no longer derive an `unlimitedTokens` cap
-                    // from `max(member.contextWindow)`, because that field is
-                    // unreliable (image-output / router models report no
-                    // window, falling through to the 128K heuristic default)
-                    // and silently shrunk the picker. Per-model enforcement
-                    // still happens at runtime via the consumer of
-                    // `contextLimitTokens` (min(groupLimit, modelLimit)).
                     SettingsSwitchRow(
                         title = stringResource(R.string.model_group_detail_limit_context_window),
                         checked = contextEnabled,
                         onCheckedChange = { on ->
                             if (on) {
-                                // Restore last user-selected value verbatim,
-                                // defaulting to 128K for first-time activation.
                                 val restored = group.lastContextLimitTokens ?: 100_000
                                 contextLimitTokens = restored
                                 providerRepository.updateGroup(
@@ -568,9 +478,6 @@ fun ModelGroupDetailScreen(
                                     )
                                 )
                             } else {
-                                // Stash the current value into lastContextLimitTokens
-                                // before nulling contextLimitTokens, so toggle ON
-                                // can restore it (even after navigating away).
                                 val stash = contextLimitTokens
                                 contextLimitTokens = null
                                 providerRepository.updateGroup(
@@ -605,10 +512,6 @@ fun ModelGroupDetailScreen(
                 }
             }
 
-            // ── Destructive action: delete group ──────────────────────
-            // "Add models" used to share this block; it now sits directly under
-            // the member list, so the only thing left at the bottom is the
-            // destructive action, with nothing adjacent to mis-tap.
             item {
                 Spacer(Modifier.height(20.dp))
                 MinisButton(
@@ -631,7 +534,6 @@ fun ModelGroupDetailScreen(
         com.openminis.app.ui.quota.QuotaDetailSheet(instanceId = id, onDismiss = { quotaSheetInstanceId = null }, halfHeight = false)
     }
 
-    // Confirm remove model from group
     if (entryToRemove != null) {
         val removingId = entryToRemove!!
         val removingEntry = config.modelEntries.find { it.id == removingId }
@@ -661,7 +563,6 @@ fun ModelGroupDetailScreen(
         )
     }
 
-    // Confirm delete group
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
@@ -685,25 +586,6 @@ fun ModelGroupDetailScreen(
     }
 }
 
-/**
- * Discrete-step max-context slider that mirrors iOS `ContextLimitSlider`
- * (ModelGroupDetailView.swift). Step labels: every 100K from 100K to 1M,
- * then Unlimited.
- *
- * Fixed ladder, always shown verbatim regardless of which models (if
- * any) are in the group. The previous behaviour clipped the ladder to the
- * largest member-declared context window, but model metadata is unreliable
- * (e.g. image-output / router models report no window and fall through to
- * the 128K heuristic default) and the per-model field is already enforced
- * at runtime when assembling requests via `min(groupLimit, modelLimit)`.
- * Keeping the ladder fixed makes the UI a pure user-intent slider —
- * "I want this group to cap context at N" — and removes the entire family
- * of bugs where adding/removing a model would silently shrink the picker.
- *
- * The "Unlimited" stop maps to `Int.MAX_VALUE` in the binding; the runtime
- * consumer treats anything `>= Int.MAX_VALUE` as "no override, use the
- * model's native window".
- */
 private const val CONTEXT_LIMIT_UNLIMITED_SENTINEL: Int = Int.MAX_VALUE
 
 private val CONTEXT_LIMIT_PRESETS = (100_000..1_000_000 step 100_000).toList()
@@ -723,8 +605,6 @@ private fun ContextLimitSlider(
         CONTEXT_LIMIT_PRESETS.map { Step(formatPresetLabel(it), it) } +
             Step(unlimitedLabel, CONTEXT_LIMIT_UNLIMITED_SENTINEL)
     }
-    // Track the selected stop by index. Snap to nearest stop <= value
-    // so legacy saved values (e.g. 128K) land on the next stop down (100K).
     var selectedIndex by remember(steps, value) {
         mutableStateOf(
             when {

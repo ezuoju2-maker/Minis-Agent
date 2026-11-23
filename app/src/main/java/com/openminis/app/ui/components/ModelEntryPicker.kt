@@ -52,40 +52,17 @@ import com.openminis.app.data.model.isVoiceOutputCandidate
 import com.openminis.app.data.model.hasImageInput
 import com.openminis.app.data.model.normalizeModalities
 
-/**
- * [T-android-provider-voice] First-class modality scoping for the shared
- * picker — Android port of iOS ModelPickerConfig.explicitPreferModality.
- * iOS expresses preference as a ModelModality bitset with a superset match;
- * in practice the only prefs used are the two voice directions, so Android
- * models them directly:
- *
- *  - [AUDIO_INPUT]  — ASR scenario: only audio-consuming entries qualify,
- *    and the System Recognition (Online/Offline) virtual entries lead.
- *  - [AUDIO_OUTPUT] — TTS scenario: only audio-producing entries qualify,
- *    and the System Voice (Auto) virtual entry leads.
- *
- * When a filter is active the picker also injects the matching System
- * virtual entries as their own leading "System" section (iOS
- * candidateEntries appends systemASROnline/Offline / systemTTS). Callers in
- * a voice scenario should keep provider sections expanded (iOS d4e3798f
- * seedCollapse: multi-voice vendors would fold all-but-one voice).
- */
 enum class PickerModalityFilter {
     AUDIO_INPUT,
     AUDIO_OUTPUT,
-    // [T-android-vision-group] Vision scenario: only image-consuming entries
-    // qualify. No System virtual entry — there is no on-device vision engine.
     IMAGE_INPUT;
 
     fun matches(model: LLMModel): Boolean = when (this) {
-        // [T-openrouter-voice-catalog] Voice candidates, not raw audio flags:
-        // an OpenRouter chat model that merely hears audio is not an ASR engine.
         AUDIO_INPUT -> model.isVoiceInputCandidate
         AUDIO_OUTPUT -> model.isVoiceOutputCandidate
         IMAGE_INPUT -> model.hasImageInput
     }
 
-    /** System virtual entries that serve this direction, in display order. */
     fun systemEntries(): List<ModelEntry> = when (this) {
         AUDIO_INPUT -> listOf(SystemVoiceEntries.asrOnline, SystemVoiceEntries.asrOffline)
         AUDIO_OUTPUT -> listOf(SystemVoiceEntries.tts)
@@ -93,24 +70,6 @@ enum class PickerModalityFilter {
     }
 }
 
-/**
- * T185 — shared multi-select picker for model entries.
- *
- * Pre-T185 the agent-loop add sheet (`AgentLoopAddSheets.kt`) and
- * `AddModelsToGroupScreen` rendered the same conceptual list with
- * different visuals: the former a plain ModalBottomSheet with bare
- * tap-and-add rows, the latter a sectioned multi-select with collapsible
- * per-provider cards, search, and a confirm button. User reported the
- * mismatch (T185) — the iOS counterparts use the same sectioned-list
- * style for both. Extract the AddModelsToGroupScreen layout into a
- * reusable [LazyListScope] extension so both call sites share one
- * implementation.
- *
- * [modelEntryPickerItems] is consumed inside a parent `LazyColumn`
- * rather than being a self-contained Composable so the caller controls
- * the surrounding chrome (Scaffold + TopAppBar + confirm button) and
- * retains access to the LazyListState for reorder / scroll-to.
- */
 @OptIn(ExperimentalLayoutApi::class)
 fun LazyListScope.modelEntryPickerItems(
     instances: List<ProviderInstance>,
@@ -123,29 +82,10 @@ fun LazyListScope.modelEntryPickerItems(
     @StringRes emptySearchTextRes: Int,
     @StringRes searchPlaceholderRes: Int,
     @StringRes clearContentDescriptionRes: Int,
-    // [T-android-model-quick-test] Optional per-row Quick Test button. When
-    // provided, each model row shows a compact bolt icon that opens the shared
-    // QuickTestSheet for that entry (the caller owns the sheet + repository).
     onQuickTest: ((ModelEntry) -> Unit)? = null,
-    // [T-android-provider-voice] Modality scoping (see PickerModalityFilter):
-    // null = no filtering (all entries, no System injection) — the pre-voice
-    // behavior every existing caller keeps by default.
     modalityFilter: PickerModalityFilter? = null,
-    // Ids to exclude from the injected System entries (e.g. ids already in the
-    // target group). Regular entries are excluded by the caller via
-    // [availableEntries]; System entries are built here, hence this knob.
     excludeIds: Set<String> = emptySet(),
-    // Localized display label for the injected System provider section.
-    // Resolved by the Composable caller via stringResource (this extension is
-    // not @Composable); mirrors iOS String(localized: "System").
     systemProviderLabel: String = "System",
-    /**
-     * [T-picker-search-debounce] The search result from
-     * [rememberModelEntryPickerSections]. Pass it: this function runs in the
-     * LazyColumn content block, which re-runs on every keystroke because it
-     * reads [searchQuery] for the field, so searching HERE would redo the whole
-     * ranking per character. Null computes it inline (undebounced).
-     */
     sections: ModelSearch.Result<ProviderInstance>? = null,
 ) {
     val result = sections ?: modelEntryPickerSearch(
@@ -155,8 +95,6 @@ fun LazyListScope.modelEntryPickerItems(
     val isSearching = searchQuery.value.isNotBlank()
     val instanceWithEntries = result.sections.map { it.key to it.entries }
 
-    // Force expand everything while searching so the user actually
-    // sees results — collapsed sections during search would hide hits.
     val effectiveCollapsed = if (isSearching) emptySet() else collapsedInstanceIds.value
 
     item("__search__") {
@@ -204,11 +142,6 @@ fun LazyListScope.modelEntryPickerItems(
             ) {
                 Text(
                     instance.label.ifEmpty { instance.providerType.displayName },
-                    // [T-android-model-picker-polish] Section headers outrank
-                    // their rows. titleSmall is 14sp Medium while model names
-                    // are bodyMedium SemiBold — same size, heavier weight — so
-                    // the header read as the weaker of the two. Matches the
-                    // chat model picker.
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -216,8 +149,6 @@ fun LazyListScope.modelEntryPickerItems(
                 )
                 Box(
                     modifier = Modifier
-                        // Neutral disclosure control, 24dp — a tinted or
-                        // oversized circle competes with the provider name.
                         .size(24.dp)
                         .background(
                             MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
@@ -241,10 +172,6 @@ fun LazyListScope.modelEntryPickerItems(
                     )
                 }
             }
-            // [T-android-model-picker-polish] Hairline under the provider name.
-            // The rows below are models, not more provider chrome; without a
-            // rule the header read as the first list item. Matches the chat
-            // model picker.
             HorizontalDivider(
                 modifier = Modifier.padding(start = 20.dp, end = 16.dp),
                 thickness = 0.5.dp,
@@ -253,8 +180,6 @@ fun LazyListScope.modelEntryPickerItems(
         }
 
         if (isCollapsed) {
-            // Collapsed preview: first row + "N models" hint to remind the
-            // user how many are inside the section without expanding.
             item(key = "collapsed_${instance.id}") {
                 val firstEntry = entries.firstOrNull() ?: return@item
                 val isSelected = firstEntry.id in selectedIds
@@ -281,9 +206,6 @@ fun LazyListScope.modelEntryPickerItems(
                         modifier = Modifier.weight(1f),
                     )
                     Text(
-                        // Was the hardcoded English "N models" — the one raw
-                        // string in a picker whose every other label is a
-                        // resource, so Chinese users saw "413 models".
                         androidx.compose.ui.res.pluralStringResource(
                             R.plurals.model_picker_models_count,
                             entries.size,
@@ -295,10 +217,6 @@ fun LazyListScope.modelEntryPickerItems(
                 }
             }
         } else {
-            // [T-picker-search-cap] One lazy item per row, so a provider with
-            // thousands of models composes only what is on screen. Each row
-            // paints its own slice of the card: rounded top on the first,
-            // rounded bottom on the last.
             itemsIndexed(entries, key = { _, e -> "entry_${instance.id}_${e.id}" }) { index, entry ->
                 val cardShape = when {
                     entries.size == 1 -> RoundedCornerShape(12.dp)
@@ -335,19 +253,6 @@ fun LazyListScope.modelEntryPickerItems(
                                     entry.model.displayName,
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
-                                // [T-model-row-premature-wrap] Id, "·" and the
-                                // modality chips (iOS entryRow modalityBadges: img /
-                                // audio / video / pdf and the -out variants) on one
-                                // line when they fit; else the id keeps the full width
-                                // and the chips drop, together, to the line below.
-                                //
-                                // [T-android-modality-chip] Never a plain Row: an
-                                // overflowing chip there was squeezed until Compose
-                                // wrapped it character-by-character ("img-out" as a
-                                // vertical letter column that inflated the row). The
-                                // shared ModalityBadge (maxLines=1 + softWrap=false)
-                                // stops a chip breaking internally; FitOrWrapLine
-                                // gives the chips their own line instead of squeezing.
                                 val badges = modalityBadges(entry.model)
                                 FitOrWrapLine(
                                     separator = if (badges.isNotEmpty()) {
@@ -365,8 +270,6 @@ fun LazyListScope.modelEntryPickerItems(
                                     tags = { badges.forEach { badge -> ModalityBadge(badge) } },
                                 )
                             }
-                            // System virtual entries have no cloud endpoint to
-                            // smoke-test — no bolt on those rows.
                             if (onQuickTest != null && !SystemVoiceEntries.isSystemEntryId(entry.id)) {
                                 IconButton(
                                     onClick = { onQuickTest(entry) },
@@ -392,7 +295,6 @@ fun LazyListScope.modelEntryPickerItems(
         }
     }
 
-    // [T-picker-search-cap] Say when a search was truncated.
     if (isSearching && result.truncated) {
         item("__search_cap_footer__") {
             Text(
@@ -430,11 +332,6 @@ private fun SelectionDot(isSelected: Boolean) {
     )
 }
 
-/**
- * [T-android-provider-voice] Non-text modality chips for a model row —
- * mirrors iOS UnifiedModelPicker.modalityBadges (same labels, same order:
- * inputs first, then outputs; text never badged).
- */
 fun modalityBadges(model: LLMModel): List<String> {
     val ins = model.inputModalities.normalizeModalities() ?: emptyList()
     val outs = model.outputModalities.normalizeModalities() ?: emptyList()
@@ -449,18 +346,6 @@ fun modalityBadges(model: LLMModel): List<String> {
     return badges
 }
 
-/**
- * [T-android-modality-chip] One modality chip, iOS entryRow badge recipe
- * (UnifiedModelPicker.swift:1109): 9pt medium, tertiarySystemFill rounded-3
- * background. Two Android-specific constraints baked in:
- *  - fill is onSurface@8% rather than surfaceContainerHighest — the chips sit
- *    ON surfaceContainerHigh cards, where the container tone is the same
- *    color and the "gray capsule" disappeared entirely;
- *  - maxLines=1 + softWrap=false so a chip can NEVER break internally.
- *    Compose Text in an overflowing Row wraps character-by-character
- *    ("audio-out" rendered as a vertical letter column); hosts place chips
- *    in a FitOrWrapLine so overflow moves whole chips to the next line.
- */
 @Composable
 fun ModalityBadge(badge: String) {
     Text(
@@ -480,10 +365,6 @@ fun ModalityBadge(badge: String) {
     )
 }
 
-/**
- * [T-model-row-premature-wrap] The dim "·" between a model id and its modality
- * chips (iOS entryRow: caption2, quaternary). Only drawn when both share a line.
- */
 @Composable
 fun ModelRowSeparatorDot() {
     Text(
@@ -493,11 +374,6 @@ fun ModelRowSeparatorDot() {
     )
 }
 
-/**
- * The model pickers' green "Active" badge: marks the member a Model Group is
- * currently using (iOS UnifiedModelPicker `activeBadge`). Shared so every
- * picker row draws the same capsule.
- */
 @Composable
 fun ModelActiveBadge() {
     Text(
@@ -517,19 +393,14 @@ fun ModelActiveBadge() {
     )
 }
 
-/** Provider color dot — same RGB across ChatScreen, AddModelsToGroup, and
- *  the agent-loop sheets so the visual cue stays consistent everywhere. */
 fun providerDotColor(providerType: ProviderType?): Color = when (providerType) {
     ProviderType.anthropic -> Color(0xFFAB47BC)
     ProviderType.gemini -> Color(0xFF42A5F5)
     ProviderType.openAI -> Color(0xFF4CAF50)
     ProviderType.openRouter -> Color(0xFF00BCD4)
     ProviderType.xAI -> Color(0xFFFF7043)
-    ProviderType.kimiCode -> Color(0xFF5C6BC0) // indigo — Kimi accent
-    ProviderType.githubCopilot -> Color(0xFF6E5494) // purple — GitHub accent
-    // [T-android-provider-type-parity] Responses API instances are
-    // OpenAI under the hood — same green dot. Undrivable types share
-    // the neutral gray used for "no provider".
+    ProviderType.kimiCode -> Color(0xFF5C6BC0)
+    ProviderType.githubCopilot -> Color(0xFF6E5494)
     ProviderType.openAIResponses -> Color(0xFF4CAF50)
     ProviderType.workBuddy -> Color(0xFF4D6BFE)
     ProviderType.qoder -> Color(0xFF111111)
@@ -539,11 +410,6 @@ fun providerDotColor(providerType: ProviderType?): Color = when (providerType) {
     null -> Color(0xFF8E8E93)
 }
 
-/**
- * [T-picker-search-debounce] The [modelEntryPickerItems] search, debounced and
- * remembered, for the composable that hosts the LazyColumn: typing re-runs
- * the ranking only when the debounced query (or the inputs) change.
- */
 @androidx.compose.runtime.Composable
 fun rememberModelEntryPickerSections(
     instances: List<ProviderInstance>,
@@ -559,12 +425,6 @@ fun rememberModelEntryPickerSections(
     }
 }
 
-/**
- * Sections for [modelEntryPickerItems]: the System section (modality filter
- * active) first, then each enabled provider's entries newest-first, searched
- * with [ModelSearch.search] (ranked, provider-name hits whole, capped).
- * [query] must be normalized.
- */
 internal fun modelEntryPickerSearch(
     instances: List<ProviderInstance>,
     availableEntries: List<ModelEntry>,
@@ -573,36 +433,20 @@ internal fun modelEntryPickerSearch(
     excludeIds: Set<String>,
     systemProviderLabel: String,
 ): ModelSearch.Result<ProviderInstance> {
-    // System section leads when a modality filter is active (iOS: the System
-    // synthetic instance is first in entriesByInstance).
     val systemPair: Pair<ProviderInstance, List<ModelEntry>>? = modalityFilter
         ?.systemEntries()
         ?.filter { it.id !in excludeIds }
         ?.takeIf { it.isNotEmpty() }
         ?.let { SystemVoiceEntries.syntheticInstance(systemProviderLabel) to it }
 
-    // One pass grouping entries by provider (was one full scan per provider).
     val byInstance = availableEntries
         .filter { modalityFilter == null || modalityFilter.matches(it.model) }
         .groupBy { it.providerInstanceId }
     val base = listOfNotNull(systemPair) + instances
         .filter { it.isEnabled && !SystemVoiceEntries.isSystemEntryId(it.id) }
         .mapNotNull { instance ->
-            // [T-model-release-ranking] Newest first within each provider
-            // section. Callers hand us a list filtered straight off the config
-            // snapshot, which carries raw insertion order — not the release
-            // ranking ProviderRepository's accessors apply. Sorting here fixes
-            // every caller of this shared picker at once.
-            //
-            // The System-voice section above is deliberately NOT sorted: it is
-            // built in its own meaningful order, and being synthetic it has no
-            // catalog entry to rank by. Provider-hosted voices (Azure ~39,
-            // MiMo 9) DO pass through here and are also undated; they degrade
-            // to the comparator's final key, display name, which is a stable
-            // and readable order for a voice list — not a regression.
             val entries = byInstance[instance.id] ?: return@mapNotNull null
             instance to com.openminis.app.data.repository.ModelEntryRanking.sortedByReleaseRank(entries)
         }
-    // Ties in relevance keep this newest-first order (ModelSearch.rank is stable).
     return ModelSearch.search(base, { it.label.ifEmpty { it.providerType.displayName } }, query)
 }

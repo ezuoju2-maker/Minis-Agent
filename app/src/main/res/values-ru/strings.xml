@@ -1,4 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Minis</string>
     <string name="new_chat">Новый чат</string>
@@ -1911,7 +1910,6 @@
     <string name="chat_share_n_selected">Выбрано: %1$d</string>
     <string name="chat_share_select_all">Выбрать все</string>
     <string name="chat_share_deselect_all">Снять выделение со всех</string>
-    <!-- [T-port-user-ask] user_ask card and settings; text from the iOS string catalog. -->
     <string name="user_ask_needs_answer">Нужен ваш ответ</string>
     <string name="user_ask_needs_approval">Нужно ваше разрешение</string>
     <string name="user_ask_high_risk">Действие высокого риска</string>
@@ -1954,17 +1952,14 @@
     <string name="user_ask_setting_indefinitely">Без ограничения</string>
     <string name="user_ask_setting_minutes">%1$d мин</string>
     <string name="user_ask_setting_footer">Позволяет ассистенту просить вас выбрать вариант или подтвердить рискованное действие перед выполнением — карточкой в чате. Только в чатах, где вы участвуете, — никогда для субагентов, Быстрых команд и запланированных задач. Если выключено, ассистент решает сам и не выполняет рискованных действий без вашего согласия.</string>
-    <!-- [T-android-user-ask-notify] user_ask background notification. -->
     <string name="user_ask_setting_notify">Уведомлять в фоне</string>
     <string name="user_ask_notif_high_risk">Нужно разрешение · Высокий риск</string>
     <string name="user_ask_notif_open_app">Открыть приложение</string>
     <string name="user_ask_notif_hidden_body">Вопрос ждёт вашего ответа</string>
     <string name="user_ask_notif_channel_name">Вопросы для вас</string>
     <string name="user_ask_notif_channel_description">Вопросы ассистента, пока Minis работает в фоне; ответить можно прямо в уведомлении</string>
-    <!-- [T-tool-preview-longpress-close] Long-press the tool status bar preview -->
     <string name="tool_preview_close_menu">Закрыть окно предпросмотра</string>
     <string name="tool_preview_closed_toast">Окно предпросмотра закрыто. Включить его снова можно в разделе Настройки &gt; Внешний вид.</string>
-    <!-- [T-mcp-oauth-signin-android] MCP browser sign-in (iOS #432) -->
     <string name="mcp_form_auth_mode">Авторизация</string>
     <string name="mcp_form_auth_none">Нет</string>
     <string name="mcp_signin_not_signed_in">Вход не выполнен</string>

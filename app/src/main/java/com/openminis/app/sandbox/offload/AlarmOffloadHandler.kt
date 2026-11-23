@@ -17,29 +17,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/**
- * android-alarm — schedule alarms and timers, list, or cancel them.
- *
- * Mirrors apple-alarm (NativeOffloads/AlarmOffload.m) — same set/timer/
- * cancel CLI surface so prompts and the agent loop are platform-agnostic:
- *   android-alarm set --time HH:MM|ISO --label L [--repeat ONCE|DAILY|WEEKDAYS]
- *   android-alarm timer --duration <seconds|5m|1h> [--label L]
- *   android-alarm list
- *   android-alarm cancel --id <alarm_id>
- *   android-alarm cancel --all
- *
- * Legacy positional forms are kept as aliases so older prompts and
- * scripts continue to work without changes:
- *   android-alarm schedule <HH:MM> [...]
- *   android-alarm timer <seconds> [...]
- *   android-alarm cancel <alarm_id>
- */
 class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
-    // T268: AlarmOffloadManager dependency dropped — this handler is now a
-    // pure intent-dispatch surface (system Clock's SET_ALARM / SET_TIMER /
-    // SHOW_ALARMS). The manager + its SharedPreferences are still around so
-    // the one-shot ghost migration in MinisApp.onCreate can flush any
-    // pre-T266 entries; the manager will be deleted once that bake is over.
 
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
         val args = OffloadArgs(request.argv.drop(1))
@@ -68,11 +46,8 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
         }
     }
 
-    // ── Subcommand handlers ─────────────────────────────────────────────
 
     private fun handleSet(args: OffloadArgs): NativeOffloadResult {
-        // Time can come from --time (preferred, apple-alarm parity) or as a
-        // legacy positional second arg (`schedule HH:MM`).
         val timeStr = args.get("time") ?: args.positional.getOrNull(1)
             ?: return NativeOffloadResult(2, "android-alarm set: --time <HH:MM|ISO> is required\n")
         val (hour, minute) = parseTimeArg(timeStr)
@@ -87,12 +62,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
                 2,
                 "android-alarm: invalid --repeat '$repeat' (use ONCE, DAILY, WEEKDAYS)\n",
             )
-        // T266: single-source schedule via the system Clock app. The internal
-        // AlarmOffloadManager.scheduleAlarm + SharedPreferences path is gone:
-        // dual-writing produced ghost reminders that fired only inside Minis
-        // and confused users who expected to manage everything in their phone
-        // Clock UI. Any OEM that refuses ACTION_SET_ALARM (no Clock app, or a
-        // permission-stripped fork) is now a hard error — no silent fallback.
         val systemErr = scheduleViaSystemClock(label, hour, minute, mode)
         if (systemErr != null) {
             val body = JSONObject().put("error", "system_clock_unavailable")
@@ -108,23 +77,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
         return emitEnvelope("set", data, args)
     }
 
-    /**
-     * T266: single-source schedule via the system Clock app
-     * ([AlarmClock.ACTION_SET_ALARM] + `EXTRA_SKIP_UI=true`). Returns null
-     * on success, or a human-readable error string on failure.
-     *
-     * Pixel / AOSP Clock honors SKIP_UI and silently inserts the alarm;
-     * OEM forks may force a confirmation dialog (see [emitEnvelope]
-     * oem_hint). On Android 11+ resolveActivity returns non-null because
-     * AndroidManifest declares <queries> for SET_ALARM; the
-     * com.android.alarm.permission.SET_ALARM permission is required (T262-1).
-     *
-     * Was previously called trySystemSchedule and returned
-     * "ok" | "fallback_internal_only" so the caller could degrade to a
-     * Minis-internal AlarmManager copy. T266 retired that fallback —
-     * dual-writing produced ghost alarms that fired only inside Minis
-     * and confused users who managed everything in the phone Clock UI.
-     */
     private fun scheduleViaSystemClock(
         label: String,
         hour: Int,
@@ -136,9 +88,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
             putExtra(AlarmClock.EXTRA_MINUTES, minute)
             putExtra(AlarmClock.EXTRA_MESSAGE, label)
             putExtra(AlarmClock.EXTRA_SKIP_UI, true)
-            // EXTRA_DAYS expects ArrayList<Int> of Calendar.SUNDAY..SATURDAY.
-            // ONCE → omit; the system Clock interprets absence as a one-shot
-            // alarm scheduled for the next matching HH:MM (today or tomorrow).
             when (mode) {
                 RepeatMode.DAILY -> putExtra(
                     AlarmClock.EXTRA_DAYS,
@@ -165,9 +114,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
         } catch (e: ActivityNotFoundException) {
             "No system Clock app handles ACTION_SET_ALARM. Install or re-enable a Clock app."
         } catch (e: SecurityException) {
-            // T262-1: deskclock's HandleSetApiCalls is permission-protected
-            // (com.android.alarm.permission.SET_ALARM, normal protection).
-            // If this fires the manifest declaration regressed.
             "System Clock refused the alarm — SET_ALARM permission missing or revoked: ${e.message}"
         } catch (e: Throwable) {
             "System Clock dispatch failed: ${e.message ?: e.javaClass.simpleName}"
@@ -175,8 +121,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
     }
 
     private fun handleTimer(args: OffloadArgs): NativeOffloadResult {
-        // Duration can come from --duration (apple-alarm parity, accepts
-        // shorthand) or as a legacy positional second arg (`timer 300`).
         val durationStr = args.get("duration") ?: args.positional.getOrNull(1)
             ?: return NativeOffloadResult(
                 2,
@@ -189,13 +133,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
             )
         if (secs <= 0) return NativeOffloadResult(2, "android-alarm: duration must be positive\n")
         val label = args.get("label") ?: "Timer"
-        // T266b: single-source timer via the system Clock app
-        // (AlarmClock.ACTION_SET_TIMER, API 19+). Same rationale as T266 set:
-        // the previous internal AlarmManager.setExactAndAllowWhileIdle path
-        // produced timers that fired only inside Minis with no Clock UI to
-        // pause/resume/dismiss. Pixel/Google Clock honors EXTRA_SKIP_UI for
-        // SET_TIMER too — verified via pm resolve-activity returning
-        // com.google.android.deskclock/.HandleSetApiCalls on Pixel 4a + 6.
         val systemErr = startSystemTimer(label, secs)
         if (systemErr != null) {
             val body = JSONObject().put("error", "system_clock_unavailable")
@@ -211,12 +148,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
         return emitEnvelope("timer", data, args)
     }
 
-    /**
-     * T266b: dispatch [AlarmClock.ACTION_SET_TIMER] with EXTRA_LENGTH +
-     * EXTRA_MESSAGE + EXTRA_SKIP_UI=true. Returns null on success, or a
-     * human-readable error string on failure. Mirrors
-     * [scheduleViaSystemClock] for alarms.
-     */
     private fun startSystemTimer(label: String, durationSec: Int): String? {
         val intent = Intent(AlarmClock.ACTION_SET_TIMER).apply {
             putExtra(AlarmClock.EXTRA_LENGTH, durationSec)
@@ -236,16 +167,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
         }
     }
 
-    /**
-     * T268: list / cancel / open all converge on the same action — launch
-     * the system Clock app's alarm view via [AlarmClock.ACTION_SHOW_ALARMS].
-     * The system Clock does not expose a stable query API for third-party
-     * inspection (`AlarmClock.ACTION_DISMISS_ALARM` only targets the
-     * currently-ringing alarm), so the agent cannot enumerate or
-     * selectively cancel; the user manages everything from the Clock UI.
-     * `list` and `cancel` are kept as aliases of `open` purely so older
-     * prompts and shell scripts don't break — they print the same body.
-     */
     private fun handleOpen(args: OffloadArgs): NativeOffloadResult {
         val intent = Intent(AlarmClock.ACTION_SHOW_ALARMS)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -278,15 +199,8 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
         return h to m
     }
 
-    /**
-     * Accept HH:MM (parsed against today's calendar) or ISO 8601 like
-     * "2026-02-25T14:00", "2026-02-25T14:00:00Z". Both forms collapse to the
-     * (hour, minute) pair the manager expects — manager will roll forward to
-     * the next day if HH:MM is already past. Mirrors apple-alarm parseTime.
-     */
     private fun parseTimeArg(s: String): Pair<Int, Int>? {
         parseHHMM(s)?.let { return it }
-        // Try a few common ISO 8601 forms.
         val patterns = listOf(
             "yyyy-MM-dd'T'HH:mm:ss'Z'",
             "yyyy-MM-dd'T'HH:mm:ssXXX",
@@ -305,10 +219,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
         return null
     }
 
-    /**
-     * Mirror apple-alarm `parseDuration`: accept raw seconds or shorthand
-     * 30s / 5m / 1h / 2d. Returns total seconds, or null on bad input.
-     */
     private fun parseDuration(s: String): Int? {
         val trimmed = s.trim().lowercase()
         if (trimmed.isEmpty()) return null
@@ -325,10 +235,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
         }
     }
 
-    /**
-     * Format a Date as ISO 8601 `yyyy-MM-dd'T'HH:mm:ssXXX` to match
-     * apple-alarm `noff_format_date`. Stable across locales.
-     */
     private fun formatIso(date: Date): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
         return sdf.format(date)
@@ -340,10 +246,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
         minute: Int,
         mode: RepeatMode,
     ): JSONObject {
-        // T266: id no longer threaded through — system Clock owns the
-        // identity and there's no Minis-side equivalent to surface. Compute
-        // the actual fire time (today vs tomorrow roll-forward) so the
-        // model sees a real timestamp not just HH:MM.
         val cal = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hour)
             set(Calendar.MINUTE, minute)
@@ -362,9 +264,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
     }
 
     private fun buildTimerEnvelope(label: String, durationSec: Int): JSONObject {
-        // T266b: id no longer threaded through — system Clock owns the
-        // identity. fires_at remains useful so the agent can describe
-        // when the timer will go off.
         val firesAt = Date(System.currentTimeMillis() + durationSec * 1000L)
         return JSONObject().apply {
             put("label", label)
@@ -375,12 +274,6 @@ class AlarmOffloadHandler(private val context: Context) : NativeOffloadHandler {
         }
     }
 
-    /**
-     * Emit an apple-alarm-style envelope: `{ok:true, tool, action, data}`.
-     * formatBody handles --compact / -q so nothing extra to do here.
-     * OEM hint is appended as a note string on `data` so it survives quiet
-     * extraction (which keeps only `data`).
-     */
     private fun emitEnvelope(action: String, data: JSONObject, args: OffloadArgs): NativeOffloadResult {
         val needsHint = OsCompat.isXiaomi || OsCompat.isHuawei ||
             Build.MANUFACTURER.equals("OPPO", ignoreCase = true) ||

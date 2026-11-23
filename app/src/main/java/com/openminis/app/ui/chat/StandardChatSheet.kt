@@ -36,28 +36,6 @@ import com.openminis.app.R
 import com.openminis.app.ui.theme.ChatColors
 import kotlinx.coroutines.launch
 
-/**
- * Standardized half-screen modal sheet used by every popup launched from the
- * chat input "⋯" menu. Mirrors [CompactSummarySheet]: 90% screen height by
- * default, the same header row (optional leading action / centered title /
- * close button), 0.5dp separator, and a body slot that fills the rest. The
- * body stays independent — each call site supplies its own [content].
- *
- * Uses a compact custom drag handle: the Material3 default reserves ~22dp of
- * padding above and below the indicator, which produced too much whitespace
- * between the indicator and the title — this version tightens it to 6dp / 4dp.
- *
- * [heightFraction] lets a caller request a smaller detent — for example
- * [TokenUsageSheet] passes 0.5f to match iOS's `.medium` detent
- * (AIChatView.swift:508). The fraction is clamped to (0, 1] so callers can't
- * accidentally collapse the sheet to nothing.
- *
- * [onBack] lets a sheet with inner pages take system back first: return true
- * when it handled the press (e.g. popped a page), false to close the sheet as
- * usual. Needed because the sheet's own back-dismiss is registered on the
- * window at overlay priority (Android 13+), ahead of any BackHandler in
- * [content], so with it on, a BackHandler inside the sheet never runs.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StandardChatSheet(
@@ -105,11 +83,6 @@ fun StandardChatSheet(
     }
 }
 
-/**
- * Slim replacement for [androidx.compose.material3.BottomSheetDefaults.DragHandle].
- * Same 32×4 indicator pill, but with 6dp top + 4dp bottom padding so the title
- * sits closer to the indicator than the Material default (22dp / 22dp).
- */
 @Composable
 private fun CompactDragHandle() {
     Box(
@@ -130,11 +103,6 @@ private fun CompactDragHandle() {
     }
 }
 
-/**
- * Shared header row used by all chat sheets — close button on the right,
- * centered title, and an optional leading slot. Reserving a 48.dp slot on the
- * left when [leadingAction] is null keeps the title optically centered.
- */
 @Composable
 fun StandardChatSheetHeader(
     title: String,

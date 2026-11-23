@@ -42,18 +42,6 @@ import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
 
-/**
- * [T-config-readable] Logs → Config Changes → one record. Port of iOS
- * ConfigAuditDetailView (70f7871d7).
- *
- * Shows what the change meant in words (the readable description stored with
- * the row when it was requested), then the raw setting path and full old / new
- * JSON. Rows written before readable descriptions existed have no
- * description; they say so and show the raw change only — names are NOT
- * re-derived from today's data, which could have changed since. The
- * description and the raw change are separate sections with their own
- * headers, so no hairline is drawn inside a section here (iOS dec7c238a).
- */
 @Composable
 fun ConfigAuditDetailScreen(entryId: String, onBack: () -> Unit) {
     val log = remember { ConfigAuditLog.get() }
@@ -72,8 +60,6 @@ fun ConfigAuditDetailScreen(entryId: String, onBack: () -> Unit) {
     var result by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     SettingsScaffold(title = stringResource(R.string.config_audit_detail_title), onBack = onBack) {
-        // A record that no longer exists (pruned past the 1000-row cap while
-        // this page was open) closes the page rather than showing an empty one.
         val e = entry ?: return@SettingsScaffold
 
         SettingsSection {
@@ -181,8 +167,6 @@ fun ConfigAuditDetailScreen(entryId: String, onBack: () -> Unit) {
                     confirmRevert = false
                     reverting = true
                     scope.launch {
-                        // The Logs screen cannot stack the approval dialog, so
-                        // this dialog is the confirmation (same as the list).
                         val res = withContext(Dispatchers.IO) {
                             ConfigBridge.auditRevert(
                                 id = e.id,
@@ -234,7 +218,6 @@ private fun RawBlock(title: String, value: String) {
     }
 }
 
-/** Who made the change, in words (iOS ConfigAuditDetailView.actorLabel). */
 @Composable
 private fun detailActorLabel(actor: ConfigAuditActor): String = when (actor) {
     ConfigAuditActor.AGENT -> stringResource(R.string.config_audit_actor_assistant)

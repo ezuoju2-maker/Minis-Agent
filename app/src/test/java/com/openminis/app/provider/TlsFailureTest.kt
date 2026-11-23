@@ -15,20 +15,14 @@ import java.security.cert.CertificateExpiredException
 import javax.net.ssl.SSLHandshakeException
 import javax.net.ssl.SSLPeerUnverifiedException
 
-/**
- * [T-android-tls-trust-error] A rejected certificate is named, explained and not
- * retried; a connection that merely dropped mid-handshake stays a network error.
- */
 class TlsFailureTest {
 
     private fun handshake(cause: Throwable) =
         SSLHandshakeException("java.security.cert.CertPathValidatorException: ${cause.message}").apply { initCause(cause) }
 
     @Test fun `the field report's trust-anchor failure is UNTRUSTED`() {
-        // OkHttp / Conscrypt shape: SSLHandshakeException <- CertificateException <- CertPathValidatorException.
         val e = handshake(CertificateException(CertPathValidatorException("Trust anchor for certification path not found.")))
         assertEquals(Kind.UNTRUSTED, TlsFailure.classify(e))
-        // Matched on the message too, for a platform that wraps it differently.
         assertEquals(Kind.UNTRUSTED, TlsFailure.classify(SSLHandshakeException("Trust anchor for certification path not found.")))
     }
 
@@ -60,7 +54,6 @@ class TlsFailureTest {
         assertFalse(err.isNetworkError)
         assertTrue("another group member is usually another host", err.isFallbackable)
         assertFalse(ChatViewModel.shouldSplitOnError(err))
-        // The message names the host, says what to check, keeps the raw reason.
         val msg = err.message!!
         assertTrue(msg.contains("relay.example.cn"))
         assertTrue(msg.contains("proxy"))
@@ -70,7 +63,6 @@ class TlsFailureTest {
 
     @Test fun `every kind has localized text and an English fallback`() {
         for (kind in Kind.values()) assertTrue(com.openminis.app.data.model.CertificateErrorText.english(kind, "h.example").contains("h.example"))
-        // mainRoot() = src/main/java/com/openminis/app -> src/main/res
         val res = ProductionSources.mainRoot()!!.parentFile.parentFile.parentFile.parentFile.resolve("res")
         for (locale in listOf("values", "values-zh", "values-zh-rTW")) {
             val xml = res.resolve("$locale/strings.xml").readText()
@@ -92,7 +84,6 @@ class TlsFailureTest {
             val tls = map.indexOf("TlsFailure.toLLMError(error, basePath)")
             assertTrue(path, tls >= 0 && tls < map.indexOf("LLMError.NetworkError(error)"))
         }
-        // The same-model retry gate stays keyed on the two transient classes.
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
         assertTrue(vm.contains("val isTransient = actual is com.openminis.app.data.model.LLMError.NetworkError ||\n" +
             "                        actual is com.openminis.app.data.model.LLMError.TransientError"))

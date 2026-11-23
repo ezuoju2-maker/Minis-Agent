@@ -12,13 +12,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * [T-port-composer-hint-debug] `debug.chat.usageHint`: show the composer's
- * usage line with chosen figures in the chat on screen, so the context /
- * quota carousel can be tested on a device without filling 70% of a context
- * window. DEV_TOOLS builds only: the debug server does not run in release, and
- * ChatViewModel.debugShowContextUsageHint refuses there as well.
- */
 internal object UsageHintDebugMethods {
 
     suspend fun show(context: Context, params: JSONObject): JSONObject {

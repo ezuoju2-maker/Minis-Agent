@@ -19,28 +19,6 @@ import com.openminis.app.network.TailscaleNode
 import com.openminis.app.network.TailscalePeer
 import com.openminis.app.network.TailscaleStatus
 
-/**
- * [FEAT-261021-03] minis-config for Settings > Network - port of iOS
- * NetworkConfigFields.swift (FEAT-261019-01). Everything the Network page
- * shows can be read, and everything it lets the user change can be set:
- *
- *   network.routingEnabled            master switch (false = Restore Direct Connections)
- *   network.defaultRoute              direct | tailscale | proxy:<id or name>
- *   network.routes.<scope>            shell / browser / mcp / backup, + default
- *   network.tailscale.enabled|hostname|acceptRoutes|exitNode|exitNodeDNS|exitNodeFailClosed
- *   network.tailscale.loggedIn        false = Sign Out
- *   network.tailscale.authKey         write-only: Log In with Auth Key
- *   network.tailscale.signOutAndClear write true: Sign Out and Clear
- *   network.tailscale.status          read-only: state, login link, devices
- *   network.status                    read-only: local entry and last error
- *   proxies.<id>.*                    ProxiesCollection
- *   providers.<id>.networkRoute       ProvidersCollection, uses [NetworkConfigRoute]
- *
- * Paths, values and wording match iOS so the agent's knowledge carries over.
- * iOS's network.bonjourEnabled is left out: Android has no minis-bonjour.
- * Every write goes through NetworkHub, exactly like the Settings page, so it
- * applies at once and an open page updates live.
- */
 internal object NetworkConfigFields {
 
     fun build(envVars: EnvVarRepository): List<ConfigField> = routing() + tailscale(envVars)
@@ -138,7 +116,6 @@ internal object NetworkConfigFields {
             reader = { ConfigValue.Bool(NetworkHub.settings.value.acceptRoutes) },
             writer = { v -> NetworkHub.update { it.copy(acceptRoutes = (v as ConfigValue.Bool).value) } },
         ),
-        // [FEAT-261021-23, iOS 45510cce2] Exit node privacy for the shell (both off by default).
         ClosureField(
             path = "network.tailscale.exitNodeDNS",
             displayName = "Exit Node DNS",
@@ -261,17 +238,7 @@ internal object NetworkConfigFields {
         }
 }
 
-/**
- * Route strings as minis-config reads and writes them: the raw NetworkRoute
- * values the settings store ("default", "direct", "tailscale", "proxy:<id>").
- * Pure (the proxy list is passed in) so JVM tests cover it.
- */
 internal object NetworkConfigRoute {
-    /**
-     * Keywords are case-insensitive; a proxy is accepted as `proxy:<id>`,
-     * `proxy:<name>` or a bare id / name, and stored as `proxy:<id>`.
-     * Unknown text is passed on unchanged for [validate] to name.
-     */
     fun normalize(v: ConfigValue, proxies: List<ProxyServer>): ConfigValue {
         val s = (v as? ConfigValue.Str)?.value?.trim() ?: throw ConfigError.TypeMismatch("string")
         when (s.lowercase()) {
@@ -304,7 +271,6 @@ internal object NetworkConfigRoute {
         }
     }
 
-    /** Exact id first, then a unique case-insensitive name (or host:port). */
     private fun proxyId(ref: String, proxies: List<ProxyServer>): String? {
         proxies.firstOrNull { it.id == ref }?.let { return it.id }
         val named = proxies.filter { it.displayName.equals(ref, ignoreCase = true) }
@@ -313,11 +279,6 @@ internal object NetworkConfigRoute {
 }
 
 internal object NetworkConfigTailscale {
-    /**
-     * Fresh node status (the hub's copy is refreshed only while the Network
-     * page polls). Skipped unless the node is wanted and was started in this
-     * process, so a disabled Tailscale never calls into Go.
-     */
     fun status(): TailscaleStatus {
         if (!NetworkHub.settings.value.nodeWanted || !TailscaleNode.nodeTouched) return TailscaleStatus()
         return runCatching { TailscaleStatus.parse(TailscaleNode.status()) }.getOrDefault(TailscaleStatus())

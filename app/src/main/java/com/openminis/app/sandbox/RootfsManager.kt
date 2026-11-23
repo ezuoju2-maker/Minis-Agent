@@ -15,28 +15,15 @@ import java.io.InputStream
 import java.nio.charset.Charset
 import java.util.zip.GZIPInputStream
 
-/**
- * Observable state for rootfs installation. Mirrors the conceptual iOS
- * `downloadRootfs(progress:)` contract: discrete phases with a 0..1 fraction
- * during the long-running extract step. Neither platform actually downloads
- * the rootfs from the network today — it ships bundled as an asset — so
- * "progress" tracks asset-stream consumption (compressed bytes) instead of
- * HTTP transfer. The fraction semantics are identical from the UI's viewpoint.
- */
 sealed class RootfsInstallState {
     object Idle : RootfsInstallState()
     object Preparing : RootfsInstallState()
-    /** progress in 0f..1f, based on compressed asset bytes consumed. */
     data class Extracting(val progress: Float) : RootfsInstallState()
     object Finalizing : RootfsInstallState()
     object Installed : RootfsInstallState()
     data class Failed(val error: String) : RootfsInstallState()
 }
 
-/**
- * Manages Ubuntu 24.04 rootfs installation and PRoot binary extraction.
- * Corresponds to iOS RootfsManager.swift.
- */
 class RootfsManager private constructor(private val context: Context) {
 
     val rootfsDir: File = File(context.filesDir, "ubuntu-rootfs")
@@ -48,23 +35,11 @@ class RootfsManager private constructor(private val context: Context) {
         get() = rootfsDir.exists() && archFile.exists() &&
                 archFile.readText().trim() == ARCH
 
-    /**
-     * Observable install progress. UI layers (OnboardingScreen,
-     * RootfsManagementScreen) bind this and render a progress bar during
-     * `installIfNeeded()` / `reset()`. Emits `Installed` on success and
-     * `Failed` on error so callers can surface retry affordances.
-     */
     private val _installState = MutableStateFlow<RootfsInstallState>(
         if (isInstalled) RootfsInstallState.Installed else RootfsInstallState.Idle
     )
     val installState: StateFlow<RootfsInstallState> = _installState.asStateFlow()
 
-    /**
-     * Install Ubuntu 24.04 rootfs from assets if not already present.
-     * Extracts ubuntu-24.04-rootfs.tar.gz using manual POSIX tar parsing.
-     * Progress is published to [installState] (Preparing → Extracting(f) →
-     * Finalizing → Installed / Failed).
-     */
     suspend fun installIfNeeded() = withContext(Dispatchers.IO) {
         if (isInstalled) {
             Log.d(TAG, "Rootfs already installed at $rootfsDir")
@@ -76,14 +51,11 @@ class RootfsManager private constructor(private val context: Context) {
             _installState.value = RootfsInstallState.Preparing
             Log.i(TAG, "Installing Ubuntu 24.04 rootfs...")
 
-            // Clean up any partial install
             if (rootfsDir.exists()) {
                 rootfsDir.deleteRecursively()
             }
             rootfsDir.mkdirs()
 
-            // Extract rootfs from assets.
-            // AAPT may decompress .tar.gz → .tar automatically, so try both names.
             val assetName = try {
                 context.assets.open(ROOTFS_ASSET).close()
                 ROOTFS_ASSET
@@ -91,20 +63,13 @@ class RootfsManager private constructor(private val context: Context) {
                 ROOTFS_ASSET_TAR
             }
 
-            // Asset size for progress calculation — compressed length (for .gz)
-            // or uncompressed length (for .tar). openFd() fails for 0-length
-            // assets on some devices; fall back to 0 which disables progress.
             val assetTotal: Long = try {
                 context.assets.openFd(assetName).use { it.length }
             } catch (_: Exception) { 0L }
 
-            // Emit an initial 0% so the UI flips from Preparing → progress bar.
             _installState.value = RootfsInstallState.Extracting(0f)
 
             context.assets.open(assetName).use { rawAsset ->
-                // Wrap the ASSET stream (not the gzip stream) so progress tracks
-                // compressed bytes consumed — monotonic and matches the size we
-                // have a total for. Throttle updates to avoid flooding the StateFlow.
                 val progressStream = ProgressInputStream(rawAsset, assetTotal) { fraction ->
                     _installState.value = RootfsInstallState.Extracting(fraction)
                 }
@@ -119,29 +84,17 @@ class RootfsManager private constructor(private val context: Context) {
 
             _installState.value = RootfsInstallState.Finalizing
 
-            // Write arch marker
             archFile.writeText(ARCH)
 
-            // Pre-create /var/minis directories. Mirrors iOS
-            // RootfsManager.swift:76-80 (attachments/offloads/workspace/skills/
-            // shared) plus Android-specific `memory` kept from prior parity work.
-            // T219-6: also pre-create `mounts/` so PRoot's `-b host:/var/minis/mounts/<name>`
-            // has the parent directory to bind into; without this, PRoot silently
-            // skips bind mounts whose target path doesn't exist.
             val minisSubdirs = listOf("attachments", "offloads", "workspace", "skills", "memory", "shared", "mounts")
             for (subdir in minisSubdirs) {
                 File(rootfsDir, "var/minis/$subdir").mkdirs()
             }
 
-            // Pre-create /opt/bin — appears in PATH so users can drop third-party
-            // binaries here without first `mkdir -p`. Matches iOS PATH layout.
             File(rootfsDir, "opt/bin").mkdirs()
 
-            // Write resolv.conf from system DNS (fallback to 8.8.8.8)
             refreshDns()
 
-            // Flag a fresh install so MirrorSpeedTestViewModel.autoDetectOnceIfNeeded()
-            // picks the fastest mirror for each category on first boot.
             context.getSharedPreferences("mirror_settings", Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean("rootfs.freshInstall", true)
@@ -156,12 +109,8 @@ class RootfsManager private constructor(private val context: Context) {
         }
     }
 
-    /** Directory containing extracted native libraries (read-only, executable). */
     val nativeLibDir: File = File(context.applicationInfo.nativeLibraryDir)
 
-    /**
-     * Verify PRoot binary is available in the native library directory.
-     */
     suspend fun installProotIfNeeded() = withContext(Dispatchers.IO) {
         if (!prootBinary.exists() || !prootBinary.canExecute()) {
             throw IllegalStateException(
@@ -170,18 +119,10 @@ class RootfsManager private constructor(private val context: Context) {
             )
         }
 
-        // No libtalloc staging: deps/build_proot.sh links talloc statically
-        // (the binary carries no DT_NEEDED for libtalloc.so), so there is no
-        // shared object to version-rename. Older builds shipped libtalloc.so
-        // in jniLibs and copied it here as libtalloc.so.2.
 
         Log.d(TAG, "PRoot binary available at $prootBinary")
     }
 
-    /**
-     * Reset rootfs. Optionally keeps user data (/root).
-     * Returns the backup directory if keepUserData is true, null otherwise.
-     */
     suspend fun reset(keepUserData: Boolean = false): File? = withContext(Dispatchers.IO) {
         var backupDir: File? = null
 
@@ -197,7 +138,6 @@ class RootfsManager private constructor(private val context: Context) {
         rootfsDir.deleteRecursively()
         installIfNeeded()
 
-        // Restore user data
         if (backupDir != null && backupDir.exists()) {
             val rootHome = File(rootfsDir, "root")
             backupDir.copyRecursively(rootHome, overwrite = true)
@@ -207,17 +147,11 @@ class RootfsManager private constructor(private val context: Context) {
         backupDir
     }
 
-    /**
-     * Calculate the total size of the rootfs directory in bytes.
-     */
     suspend fun getRootfsSize(): Long = withContext(Dispatchers.IO) {
         if (!rootfsDir.exists()) return@withContext 0L
         calculateDirSize(rootfsDir)
     }
 
-    /**
-     * Restore user data from a backup directory into /root.
-     */
     suspend fun restoreUserData(backupDir: File) = withContext(Dispatchers.IO) {
         if (!backupDir.exists()) return@withContext
         val rootHome = File(rootfsDir, "root")
@@ -227,31 +161,9 @@ class RootfsManager private constructor(private val context: Context) {
         Log.i(TAG, "User data restored from $backupDir")
     }
 
-    /**
-     * [T-android-storage-symlink-inflation] Third copy of the sizing walk —
-     * routed through the shared one instead of keeping a following variant
-     * alive here.
-     *
-     * This was hand-rolled recursion over `listFiles()`, and both `isDirectory`
-     * and `length()` RESOLVE symlinks: a link to a directory was descended into
-     * and its whole subtree counted again (once per link pointing at it), and a
-     * link to a file was counted as a second copy of the target. That is the
-     * same defect 754e65eac fixed in `SessionStorage.directorySize` and
-     * `DebugRPCHandler.dirSize`, and missing it here is why the "Rootfs 管理"
-     * screen still read 40.25 GB after the Storage screen had been corrected —
-     * two screens sizing the same directory and disagreeing by an order of
-     * magnitude.
-     *
-     * It was also the only one of the three with no cycle protection: a
-     * `a/loop -> a` symlink recursed until StackOverflowError rather than
-     * merely over-counting.
-     */
     private fun calculateDirSize(dir: File): Long =
         com.openminis.app.data.session.SessionStorage.directorySize(dir)
 
-    /**
-     * Ensure session-specific directories exist on the host filesystem.
-     */
     fun ensureSessionDirs(sessionId: String) {
         val sessionBase = File(context.filesDir, "minis-sessions/$sessionId")
         val subdirs = listOf("attachments", "offloads", "workspace", "browser")
@@ -260,21 +172,9 @@ class RootfsManager private constructor(private val context: Context) {
         }
     }
 
-    /**
-     * Read system DNS servers and search domains from ConnectivityManager,
-     * then write resolv.conf into the Ubuntu 24.04 rootfs.
-     * Mirrors iOS ISHKernel.configureDns / refreshDns.
-     * Falls back to 8.8.8.8 / 8.8.4.4 if no system DNS available.
-     */
     fun refreshDns() {
         if (!rootfsDir.exists()) return
 
-        // [T-container-network-dns] (OpenMinis#396) Custom mode: the user's
-        // servers, verbatim, on every call — install, boot and each network
-        // change all land here, so a network switch can no longer wash them
-        // out. Custom with no usable server resolves to System (see
-        // ContainerDns.plan), so this can never write a resolv.conf with no
-        // nameserver. Auto (the default) is the code below, unchanged.
         val plan = ContainerDns.plan(context)
         if (plan is ContainerDns.Plan.Custom) {
             Log.i(TAG, "[DNS] custom mode: ${plan.servers.joinToString(", ")}")
@@ -290,14 +190,12 @@ class RootfsManager private constructor(private val context: Context) {
             val linkProps: LinkProperties? = if (network != null) cm.getLinkProperties(network) else null
 
             if (linkProps != null) {
-                // Search domains
                 val domains = linkProps.domains
                 if (!domains.isNullOrBlank()) {
                     resolvConf.append("search $domains\n")
                     Log.i(TAG, "[DNS] search domains: $domains")
                 }
 
-                // Nameservers
                 val dnsServers = linkProps.dnsServers
                 if (dnsServers.isNotEmpty()) {
                     for (server in dnsServers) {
@@ -311,7 +209,6 @@ class RootfsManager private constructor(private val context: Context) {
             Log.w(TAG, "[DNS] Failed to read system DNS: ${e.message}")
         }
 
-        // Fallback to public DNS if no system servers were found
         if (!resolvConf.contains("nameserver")) {
             Log.i(TAG, "[DNS] no system DNS — using fallback: 8.8.8.8, 8.8.4.4")
             resolvConf.append("nameserver 8.8.8.8\n")
@@ -332,31 +229,14 @@ class RootfsManager private constructor(private val context: Context) {
         }
     }
 
-    /**
-     * Copy every file under `assets/default_mount/` into the rootfs, preserving
-     * the directory layout. Mirrors iOS RootfsManager.applyDefaultMountOverlay
-     * (src/ios/iSH/RootfsManager.swift:153-225) — runs on every boot so shipping
-     * updated profile scripts / URL wrappers with an app release just works.
-     *
-     * Files under `bin` / `sbin` paths get the execute bit set. Existing files
-     * are overwritten so users see the latest shipped version even if they
-     * previously edited the file — matching iOS behavior.
-     *
-     * No-op when the asset dir is missing or the rootfs hasn't been extracted.
-     */
     suspend fun applyDefaultMountOverlay() = withContext(Dispatchers.IO) {
         if (!rootfsDir.exists()) {
             Log.d(TAG, "[DefaultMount] rootfs missing, skipping overlay")
             return@withContext
         }
 
-        // [T-git-createobject-rename] #409: before any shell can run git,
-        // repair the invalid core.createObject an older minis.sh wrote.
         migrateSystemGitConfig()
 
-        // AssetManager.list() returns an empty array for both "leaf file" and
-        // "missing path", so probe for children before recursing — otherwise
-        // a missing overlay dir would be mistaken for a single leaf file.
         val rootEntries = try {
             context.assets.list(DEFAULT_MOUNT_ASSET)
         } catch (t: Throwable) {
@@ -376,43 +256,18 @@ class RootfsManager private constructor(private val context: Context) {
             return@withContext
         }
 
-        // Mirror iOS removeExternallyManagedMarker() — drop PEP 668 marker so
-        // `pip install` Just Works inside this embedded Ubuntu 24.04 rootfs even
-        // when the shipped pip.conf isn't being read (e.g. pip invoked with
-        // --isolated or via a venv). Safe: this is a single-tenant sandbox.
         val markerRemoved = removeExternallyManagedMarker()
 
-        // [T-mcp-cli-readonly-android] Make the shipped minis-mcp-cli Python lib
-        // read-only inside the guest so a user can't `vi`-tamper the bundled
-        // scripts (mirrors iOS #707). Scoped to /usr/local/lib/minis-mcp-cli/
-        // ONLY — the wrapper at /usr/local/bin/minis-mcp-cli stays executable +
-        // writable (app-managed). Re-applied on every boot AFTER the copy; the
-        // copyAssetDir leaf-copy above re-opens read-only files writable first,
-        // so the next app-upgrade overlay still overwrites cleanly.
         val lockedCount = lockMcpCliLibReadOnly()
 
         val elapsedMs = (System.nanoTime() - startNs) / 1_000_000.0
         Log.i(TAG, "[DefaultMount] Done. $fileCount file(s) overlaid, $markerRemoved EXTERNALLY-MANAGED marker(s) removed, $lockedCount minis-mcp-cli lib path(s) locked read-only in %.1fms".format(elapsedMs))
     }
 
-    /**
-     * [T-mcp-cli-readonly-android] Set the `/usr/local/lib/minis-mcp-cli/`
-     * subtree read-only for the guest: directories 0555 (read+execute, no
-     * write), files 0444 (read-only). Java's File API has no octal chmod, so
-     * we use setWritable(false, false) + setReadable(true, false)
-     * (+ setExecutable(true, false) on dirs) — the `false` ownerOnly arg makes
-     * the permission apply to all users, matching the setReadable style used
-     * for libtalloc above. Returns the number of paths adjusted; 0 if the lib
-     * dir is absent. Idempotent — the pre-copy unlock in copyAssetDir keeps the
-     * upgrade path working across boots.
-     */
     private fun lockMcpCliLibReadOnly(): Int {
         val libDir = File(rootfsDir, "usr/local/lib/minis-mcp-cli")
         if (!libDir.isDirectory) return 0
         var count = 0
-        // walkBottomUp so child files are locked before their parent dir loses
-        // write — dir mode doesn't gate chmod of already-visited children, but
-        // bottom-up keeps the intent clear and avoids any traversal surprise.
         for (f in libDir.walkBottomUp()) {
             f.setWritable(false, false)
             f.setReadable(true, false)
@@ -422,21 +277,6 @@ class RootfsManager private constructor(private val context: Context) {
         return count
     }
 
-    /**
-     * Remove the PEP 668 EXTERNALLY-MANAGED marker file from every
-     * `usr/lib/python3*` directory in the rootfs. Mirrors iOS
-     * RootfsManager.removeExternallyManagedMarker (src/ios/iSH/RootfsManager.swift:228-239).
-     * Returns the number of markers removed.
-     */
-    /**
-     * [T-git-createobject-rename] openminis/openminis#409: older builds ran
-     * `git config --system core.createObject copy` from minis.sh. `copy` is
-     * not a valid value, so every git command in the sandbox died with
-     * "invalid mode for object creation". Removes that line from the guest's
-     * /etc/gitconfig on the host side (no shell needed). Everything else in
-     * the file is kept byte for byte; running it again changes nothing.
-     * Returns the number of lines removed.
-     */
     private fun migrateSystemGitConfig(): Int = migrateGitConfigFile(File(rootfsDir, "etc/gitconfig"))
 
     private fun removeExternallyManagedMarker(): Int {
@@ -454,23 +294,11 @@ class RootfsManager private constructor(private val context: Context) {
         return removed
     }
 
-    /**
-     * Recursively copy an assets path into [targetBase]. Returns the number of
-     * regular files written. Files under /bin/, /sbin/, /usr/bin/, /usr/sbin/,
-     * /usr/local/bin/, /usr/local/sbin/ get the execute bit set.
-     */
     private fun copyAssetDir(assetPath: String, targetBase: File, prefix: String = ""): Int {
         val entries = context.assets.list(assetPath) ?: return 0
         if (entries.isEmpty()) {
-            // Leaf: asset is a file. Copy it.
             val dest = File(targetBase, prefix)
             dest.parentFile?.mkdirs()
-            // [T-mcp-cli-readonly-android] A prior boot may have set this file
-            // (and its dir) read-only — the minis-mcp-cli lib subtree, locked
-            // below. Re-open both writable before overwriting, otherwise an app
-            // upgrade can't replace the shipped file: truncating an existing
-            // file needs write on the FILE, and creating a new one needs write
-            // on the PARENT DIR. No-op when already writable / not yet present.
             dest.parentFile?.setWritable(true, true)
             if (dest.exists()) dest.setWritable(true, true)
             context.assets.open(assetPath).use { input ->
@@ -495,13 +323,7 @@ class RootfsManager private constructor(private val context: Context) {
         return BIN_DIR_PREFIXES.any { normalized.startsWith(it) }
     }
 
-    // --- POSIX tar extraction ---
 
-    /**
-     * Extract a POSIX tar stream into the target directory.
-     * Handles regular files, directories, and symlinks.
-     * Does not depend on any external library.
-     */
     internal fun extractTar(input: InputStream, targetDir: File) {
         val header = ByteArray(512)
 
@@ -509,7 +331,6 @@ class RootfsManager private constructor(private val context: Context) {
             val bytesRead = readFully(input, header)
             if (bytesRead < 512) break
 
-            // Check for end-of-archive (two consecutive zero blocks)
             if (header.all { it == 0.toByte() }) break
 
             val name = extractString(header, 0, 100)
@@ -519,7 +340,6 @@ class RootfsManager private constructor(private val context: Context) {
             val linkName = extractString(header, 157, 100)
             val mode = modeOctal.trim().toIntOrNull(8) ?: 0
 
-            // Handle GNU/POSIX long names via prefix field (bytes 345-500)
             val prefix = extractString(header, 345, 155)
             val fullName = if (prefix.isNotEmpty()) "$prefix/$name" else name
 
@@ -530,11 +350,9 @@ class RootfsManager private constructor(private val context: Context) {
 
             when (typeFlag) {
                 '5', 'D' -> {
-                    // Directory
                     outFile.mkdirs()
                 }
                 '2' -> {
-                    // Symbolic link
                     outFile.parentFile?.mkdirs()
                     try {
                         java.nio.file.Files.createSymbolicLink(
@@ -542,12 +360,10 @@ class RootfsManager private constructor(private val context: Context) {
                             java.nio.file.Paths.get(linkName)
                         )
                     } catch (_: Exception) {
-                        // Symlinks may fail on some Android versions; skip
                         Log.w(TAG, "Failed to create symlink: $fullName -> $linkName")
                     }
                 }
                 '0', '\u0000' -> {
-                    // Regular file (type '0' or null/legacy)
                     outFile.parentFile?.mkdirs()
                     outFile.outputStream().use { output ->
                         var remaining = size
@@ -560,19 +376,16 @@ class RootfsManager private constructor(private val context: Context) {
                             remaining -= n
                         }
                     }
-                    // Preserve executable permission from tar header
                     if (mode and 0b001_001_001 != 0) {
                         outFile.setExecutable(true, false)
                     }
-                    // Skip padding to next 512-byte boundary
                     val remainder = (size % 512).toInt()
                     if (remainder != 0) {
                         skipFully(input, (512 - remainder).toLong())
                     }
-                    continue // Already consumed data + padding
+                    continue
                 }
                 '1' -> {
-                    // Hard link — create a copy
                     outFile.parentFile?.mkdirs()
                     val linkTarget = File(targetDir, linkName)
                     if (linkTarget.exists()) {
@@ -580,11 +393,9 @@ class RootfsManager private constructor(private val context: Context) {
                     }
                 }
                 else -> {
-                    // Unknown type, skip data
                 }
             }
 
-            // Skip data blocks for non-file entries that we didn't consume above
             if (typeFlag != '0' && typeFlag != '\u0000' && size > 0) {
                 val blocks = (size + 511) / 512 * 512
                 skipFully(input, blocks)
@@ -623,12 +434,6 @@ class RootfsManager private constructor(private val context: Context) {
         }
     }
 
-    /**
-     * InputStream wrapper that reports cumulative bytes read as a 0..1 fraction.
-     * Throttles updates so each +1% bump emits at most once. Designed to wrap
-     * the asset stream (not the gzip stream) so progress is monotonic against
-     * a size we can cheaply know up front.
-     */
     private class ProgressInputStream(
         inner: InputStream,
         private val total: Long,
@@ -668,7 +473,6 @@ class RootfsManager private constructor(private val context: Context) {
     companion object {
         private const val TAG = "RootfsManager"
 
-        /** [T-git-createobject-rename] Apply [migrateGitConfigText] to [file] in place; 0 when it is absent. */
         internal fun migrateGitConfigFile(file: File): Int {
             if (!file.isFile) return 0
             return try {
@@ -689,22 +493,6 @@ class RootfsManager private constructor(private val context: Context) {
             }
         }
 
-        /**
-         * [T-git-createobject-rename] The /etc/gitconfig text with every
-         * invalid `createObject` entry of a `[core]` section removed, and how
-         * many lines went.
-         *
-         * - The section name and the key are matched case-insensitively, as
-         *   Git does.
-         * - The value is valid only if it is exactly `link` or `rename`: Git
-         *   compares the value case-sensitively (anything else, a missing
-         *   value included, is fatal).
-         * - Quotes and trailing `#` / `;` comments are ignored when reading
-         *   the value.
-         * - Other sections, other keys, comments, blank lines and the line
-         *   endings are kept as they are. An emptied `[core]` header is kept
-         *   too (harmless).
-         */
         internal fun migrateGitConfigText(text: String): Pair<String, Int> {
             val lines = text.split("\n")
             val out = ArrayList<String>(lines.size)
@@ -734,7 +522,6 @@ class RootfsManager private constructor(private val context: Context) {
 
         private val VALID_CREATE_OBJECT = setOf("link", "rename")
 
-        /** A git-config value without quotes or a trailing comment; null when the key has no `=`. */
         private fun gitConfigValue(raw: String, hasEquals: Boolean): String? {
             if (!hasEquals) return null
             val sb = StringBuilder()
@@ -754,11 +541,6 @@ class RootfsManager private constructor(private val context: Context) {
         private const val PROOT_ASSET = "proot-aarch64"
         private const val DEFAULT_MOUNT_ASSET = "default_mount"
 
-        /**
-         * Rootfs paths whose contents must be executable. Matches iOS
-         * RootfsManager.swift:199 byte-for-byte so the same overlay tree
-         * produces identical file modes on both platforms.
-         */
         private val BIN_DIR_PREFIXES = listOf(
             "/bin/",
             "/sbin/",

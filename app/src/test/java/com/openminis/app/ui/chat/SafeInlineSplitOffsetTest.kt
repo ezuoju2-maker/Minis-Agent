@@ -4,28 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-inline-code-poisons-split] `safeInlineSplitOffset` decides how much
- * of a streaming message can be frozen and reused instead of re-parsed on every
- * throttle tick. Returning 0 means "no safe boundary" → the WHOLE message is
- * re-parsed, every tick.
- *
- * The reported bug (2026-09-02): a long reply kept flickering between styled and
- * raw markdown — already-bold text dropped back to literal `**…**` and re-styled
- * a moment later, repeatedly. Cause: this scanner counted `**` by parity but did
- * not know that parseInline resolves an inline-code span FIRST. One stray
- * backtick-wrapped `**` (a glob, an `ls **` example, `` `a**b` ``) therefore
- * flipped boldStar with nothing to flip it back, so no later newline could ever
- * be marked safe and the offset was pinned at 0 for the rest of the stream.
- *
- * These tests pin both halves: the offset must recover after code spans, and the
- * split must stay SEMANTICALLY safe (the caller concatenates
- * `parse(prefix) + parse(suffix)`, so a boundary inside an open span would
- * corrupt the render).
- */
 class SafeInlineSplitOffsetTest {
 
-    /** Longer than INCREMENTAL_MIN_CHARS(1500) + INCR_TAIL_MARGIN(256). */
     private fun pad(lines: Int = 90) =
         (1..lines).joinToString("\n") { "$it. 这是一行足够长的正文内容用于撑开增量解析的阈值" } + "\n"
 
@@ -58,9 +38,6 @@ class SafeInlineSplitOffsetTest {
 
     @Test
     fun `unclosed backtick is treated as a literal, matching parseInline`() {
-        // findInlineCodeClose stops at '\n', so this backtick never closes.
-        // parseInline emits it literally; the scanner must agree and keep
-        // scanning rather than swallowing the rest of the line.
         val text = "1. 孤立反引号 ` 后面还有 **加粗** 内容\n" + pad() + "z".repeat(300)
         val offset = safeInlineSplitOffset(text)
         assertTrue("an unclosed backtick must not pin the offset, got $offset", offset > 0)
@@ -68,8 +45,6 @@ class SafeInlineSplitOffsetTest {
 
     @Test
     fun `an open bold span still blocks the split`() {
-        // The conservative guarantee this function exists to provide: while a
-        // real `**` is open, no newline after it may be declared safe.
         val text = "1. 开头 **还没有闭合\n" + pad() + "z".repeat(300)
         val offset = safeInlineSplitOffset(text)
         assertEquals(

@@ -9,11 +9,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [FEAT-261021-07] Port of iOS a6e6c10d1: the home screen's Tailscale / proxy
- * pills - when they show, what they say, and that nothing runs for an
- * unconfigured app.
- */
 class NetworkStatusMonitorTest {
 
     private val a = ProxyServer(id = "A", name = "Mac Proxy", host = "10.0.0.2", port = 8080)
@@ -40,7 +35,6 @@ class NetworkStatusMonitorTest {
         assertEquals(ProxyLevel.AVAILABLE, NetworkStatusMonitor.proxyLevel("A", mapOf("A" to ProxyHealth.AVAILABLE), emptySet()))
         assertEquals(ProxyLevel.CHECKING, NetworkStatusMonitor.proxyLevel("A", emptyMap(), emptySet()))
         assertEquals(ProxyLevel.UNAVAILABLE, NetworkStatusMonitor.proxyLevel("B", mapOf("B" to ProxyHealth.UNAVAILABLE), emptySet()))
-        // Several proxies share one pill with the worst state.
         assertEquals(ProxyLevel.UNAVAILABLE, listOf(ProxyLevel.AVAILABLE, ProxyLevel.UNAVAILABLE, ProxyLevel.CHECKING).max())
         assertEquals(ProxyLevel.CHECKING, listOf(ProxyLevel.AVAILABLE, ProxyLevel.CHECKING).max())
     }

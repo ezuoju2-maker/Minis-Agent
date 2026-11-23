@@ -86,10 +86,6 @@ import com.openminis.app.ui.components.decorativePhase
 import com.openminis.app.ui.components.decorativePingPong
 import androidx.compose.ui.graphics.graphicsLayer
 
-/**
- * Bottom sheet presenting the browser tab pool with tab bar, URL bar,
- * WebView, and navigation controls. Mirrors iOS BrowserSheetView.
- */
 @Composable
 fun BrowserSheet(
     tabPool: BrowserTabPool,
@@ -109,15 +105,12 @@ fun BrowserSheet(
     val canGoBack = selectedTab?.manager?.canGoBack?.collectAsState()?.value ?: false
     val canGoForward = selectedTab?.manager?.canGoForward?.collectAsState()?.value ?: false
     val isAgentBusy = tabPool.isAgentBusy
-    // [ISS-033] The selected tab's own mode (set_user_agent can make it differ
-    // from the default); the default only when no tab is open.
     val defaultProfile = tabPool.currentUserAgentProfile.collectAsState().value
     val userAgentProfile = selectedTab?.manager?.profileFlow?.collectAsState()?.value ?: defaultProfile
 
     var urlInput by remember(currentURL) { mutableStateOf(currentURL) }
     var showHistory by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
-    // [T-android-browser-download-ux] Downloads panel + badge state.
     var showDownloads by remember { mutableStateOf(false) }
     val downloadEntries by tabPool.downloads.collectAsState()
 
@@ -125,18 +118,10 @@ fun BrowserSheet(
     val secondaryBg = MaterialTheme.colorScheme.surfaceContainer
     val tertiaryBg = MaterialTheme.colorScheme.surfaceContainerHigh
 
-    // Mirror iOS onAppear: ensure at least one tab exists when the sheet opens.
-    // Callers should also call `ensureTabForUI()` before flipping the sheet
-    // visible so the first composition sees a non-empty tab list; this is a
-    // defensive fallback.
     LaunchedEffect(Unit) {
         if (tabs.isEmpty()) tabPool.ensureTabForUI()
     }
 
-    // Prevent the bottom sheet from swallowing WebView scroll gestures.
-    // Returning the full delta as "consumed" on pre-scroll keeps the sheet's
-    // nested-scroll dispatcher from dragging the sheet down when the user
-    // scrolls inside a webpage.
     val webViewScrollGuard = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset = available
@@ -147,8 +132,6 @@ fun BrowserSheet(
         title = pageTitle.ifEmpty { stringResource(R.string.browser_title) },
         onDismiss = onDismiss,
         leadingAction = {
-            // UA-profile icon doubles as the entry point to settings, matching
-            // the prior centered-title-with-icon affordance.
             IconButton(onClick = { showSettings = true }) {
                 Icon(
                     when (userAgentProfile) {
@@ -163,9 +146,6 @@ fun BrowserSheet(
         },
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // ── Tab Bar with leading "+" and trailing History icon ──
-            // (Add/History flank the tabs row so all tab-related controls
-            // sit on one line, leaving the URL bar uncluttered below.)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -224,9 +204,6 @@ fun BrowserSheet(
                 }
             }
 
-            // ── URL Bar ── (compact 36dp pill — OutlinedTextField defaults to
-            // ~56dp which dominates the sheet header; users want to spend the
-            // space on the WebView.)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -307,7 +284,6 @@ fun BrowserSheet(
                 )
             }
 
-            // ── WebView + overlays ──
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -315,13 +291,6 @@ fun BrowserSheet(
                     .nestedScroll(webViewScrollGuard),
             ) {
                 if (selectedTab != null && currentURL.isNotEmpty()) {
-                    // Only mount the WebView once there's something to display.
-                    // Mounting an empty WebView (no URL loaded) corrupts the
-                    // OpenGL swap behavior for the hosting ModalBottomSheet —
-                    // sibling Compose UI (top nav, URL bar, tab chips) draws
-                    // blank white on the first-open case until the WebView
-                    // has real content. Keep it out of the hierarchy until
-                    // the user navigates somewhere.
                     BrowserWebView(
                         webView = selectedTab.manager.webView,
                         modifier = Modifier.fillMaxSize(),
@@ -343,15 +312,11 @@ fun BrowserSheet(
                 if (isAgentBusy) {
                     AgentBrowsingOverlay(
                         accent = accent,
-                        // [T-android-browser-release-all-semantics] Takeover
-                        // hands the wheel to the user — the page they are
-                        // looking at must stay exactly as it is.
                         onTakeover = { tabPool.releaseAllTabsToUser() },
                     )
                 }
             }
 
-            // ── Download progress banner ──
             val activeDownload by tabPool.activeDownload.collectAsState()
             activeDownload?.let { dl ->
                 Row(
@@ -387,7 +352,6 @@ fun BrowserSheet(
                 }
             }
 
-            // ── Bottom Toolbar ──
             HorizontalDivider()
             Row(
                 modifier = Modifier
@@ -409,10 +373,6 @@ fun BrowserSheet(
                     enabled = canGoForward && !isAgentBusy,
                     onClick = { selectedTab?.manager?.goForward() },
                 )
-                // [T-android-browser-download-ux] Downloads entry: shows while
-                // the session has ANY download records, disappears when the
-                // user clears the last one; the badge counts in-flight +
-                // unviewed terminal entries and hides at 0 (iOS v2 spec).
                 if (downloadEntries.isNotEmpty()) {
                     val badgeCount = tabPool.downloadBadgeCount(downloadEntries)
                     androidx.compose.material3.BadgedBox(
@@ -462,10 +422,6 @@ fun BrowserSheet(
     if (showHistory) {
         BrowserHistorySheet(
             historyStore = BrowserHistoryStore.getInstance(context),
-            // [T-android-browser-history-no-tab] C1: with no tabs open,
-            // selectedTab is null and the old safe-call silently dropped the
-            // navigation. Create a tab first (same path as the "+" button);
-            // if the pool refuses (MAX_TABS), just dismiss the sheet.
             onNavigate = { url ->
                 scope.launch {
                     val tab = selectedTab ?: tabPool.newTabFromUI()
@@ -550,13 +506,8 @@ private fun ToolbarIcon(
     }
 }
 
-/** Globe icon with a spinning arc border when loading. */
 @Composable
 private fun BrowserAddressBarIcon(isLoading: Boolean, accent: Color) {
-    // [T-android-decorative-anim-perf] Clock only while loading (nothing to
-    // spin otherwise), and the rotation moves to the layer lambda below —
-    // `.rotate(angle)` read the value in composition, recomposing the icon
-    // every frame on top of the spinner's own animation.
     Box(
         modifier = Modifier.size(24.dp),
         contentAlignment = Alignment.Center,
@@ -568,11 +519,6 @@ private fun BrowserAddressBarIcon(isLoading: Boolean, accent: Color) {
             tint = if (isLoading) accent else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (isLoading) {
-            // [T-android-decorative-anim-perf] DecorativeSpinner, not Material's:
-            // rotating Material's indicator from our clock still left its OWN
-            // InfiniteTransition asking for every frame, which is the whole
-            // reason the chat spinners were swapped. A page load during agent
-            // browsing is long-lived, so this one matters.
             DecorativeSpinner(
                 color = accent,
                 modifier = Modifier.size(22.dp),
@@ -583,13 +529,8 @@ private fun BrowserAddressBarIcon(isLoading: Boolean, accent: Color) {
     }
 }
 
-/** Breathing-light overlay shown when the agent is controlling the browser. */
 @Composable
 private fun AgentBrowsingOverlay(accent: Color, onTakeover: () -> Unit) {
-    // [T-android-decorative-anim-perf] The breathing dot used to rebuild
-    // `accent.copy(alpha = …)` in composition every frame; now the alpha is
-    // a layer property read from the shared tick and the background colour
-    // is constant.
     val tick = rememberDecorativeTick()
 
     Box(
@@ -639,7 +580,6 @@ private fun AgentBrowsingOverlay(accent: Color, onTakeover: () -> Unit) {
     }
 }
 
-/** Normalize URL input: search terms → Google search, bare domains → https:// prefix. */
 private fun normalizeURLInput(input: String): String {
     val trimmed = input.trim()
     if (trimmed.contains("://")) return trimmed

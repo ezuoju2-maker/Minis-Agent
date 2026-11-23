@@ -8,19 +8,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-overlay-ring-outside] / [T-overlay-ring-track] / [T-overlay-logo-disc]
- * (#333) The capsule's spinner is a faint full-circle track with a short bright
- * arc, drawn outside the logo circle and touching it, in one style for every
- * logo; a Soul image / emoji sits on one opaque neutral disc, filling the
- * circle; a night-mode switch reloads the logo; the ring is as far from the
- * capsule's left edge as from its top and bottom ([T-overlay-ring-even-margins]).
- */
 class OverlayLogoRingTest {
 
     private val src = ProductionSources.read("service/ToolOverlayController.kt")
 
-    // ── Geometry: outside the logo, no gap ──────────────────────────────────
 
     @Test
     fun `the stroke's inner edge is the logo's edge and the whole stroke lies outside it, at every density`() {
@@ -32,7 +23,6 @@ class OverlayLogoRingTest {
             assertEquals("d=$density no gap", logo / 2f, inner, 0.001f)
             assertEquals("d=$density outer edge = logo radius + stroke", logo / 2f + stroke, outer, 0.001f)
             assertEquals(logo / 2f + stroke / 2f, OverlayRingGeometry.arcCentreRadiusPx(logo, 0f, stroke), 0.001f)
-            // The view holds the whole stroke, with less than a pixel to spare per side.
             val box = OverlayRingGeometry.ringBoxPx(logo, 0f, stroke)
             assertTrue("d=$density box=$box clips the stroke", box / 2f >= outer - 0.001f)
             assertTrue("d=$density box=$box too large", box / 2f < outer + 1f)
@@ -42,12 +32,10 @@ class OverlayLogoRingTest {
 
     @Test
     fun `Pixel 4a numbers - 26dp logo at 2_75x, 1_5dp and 2dp strokes`() {
-        // 1.5dp = 4.125px: 79.75 exact -> 72 + 2 x ceil(4.125) = 82.
         assertEquals(82, OverlayRingGeometry.ringBoxPx(72, 0f, 4.125f))
         assertEquals(38.0625f, OverlayRingGeometry.arcCentreRadiusPx(72, 0f, 4.125f), 0.001f)
         assertEquals(36f, OverlayRingGeometry.arcInnerRadiusPx(72, 0f, 4.125f), 0.001f)
         assertEquals(40.125f, OverlayRingGeometry.arcOuterRadiusPx(72, 0f, 4.125f), 0.001f)
-        // 2dp = 5.5px: 83 exact -> 72 + 2 x ceil(5.5) = 84.
         assertEquals(84, OverlayRingGeometry.ringBoxPx(72, 0f, 5.5f))
         assertEquals(36f, OverlayRingGeometry.arcInnerRadiusPx(72, 0f, 5.5f), 0.001f)
         assertEquals(41.5f, OverlayRingGeometry.arcOuterRadiusPx(72, 0f, 5.5f), 0.001f)
@@ -66,13 +54,11 @@ class OverlayLogoRingTest {
         assertTrue(src.contains("container.clipToPadding = false"))
     }
 
-    // ── Track and arc ───────────────────────────────────────────────────────
 
     @Test
     fun `the track is the arc's own blue at a lower alpha`() {
         assertTrue("spinner colour unchanged", src.contains("private val RING_COLOR = Color.argb(230, 120, 200, 255)"))
         assertTrue(src.contains("private val RING_TRACK_COLOR = Color.argb(RING_TRACK_ALPHA, 120, 200, 255)"))
-        // Visible but clearly fainter than the arc (alpha 230).
         assertTrue("track alpha $RING_TRACK_ALPHA", RING_TRACK_ALPHA in 64..102)
     }
 
@@ -96,13 +82,11 @@ class OverlayLogoRingTest {
         assertTrue(src.contains("ringColor = RING_COLOR,\n            trackColor = RING_TRACK_COLOR,"))
     }
 
-    // ── Even margins around the ring ────────────────────────────────────────
 
     @Test
     fun `the leading padding puts the ring as far from the left edge as from the top and bottom`() {
         assertTrue(src.contains("private const val CAPSULE_HEIGHT_DP = 46"))
         assertTrue(src.contains("private const val LOGO_SIZE_DP = 26"))
-        // (46 - (26 + 2 x 1.5)) / 2 = 8.5dp above and below; + one stroke of overhang = 10dp.
         assertEquals(8.5f, OverlayMargins.ringToTopDp(46f, 26f, RING_STROKE_DP_VALUE), 0.001f)
         assertEquals(10f, OverlayMargins.startPaddingDp(46f, 26f, RING_STROKE_DP_VALUE), 0.001f)
         assertTrue(src.contains("private const val CAPSULE_PADDING_START_DP = 10"))
@@ -120,10 +104,8 @@ class OverlayLogoRingTest {
             assertTrue("d=$density left=$left top=$top", Math.abs(left - top) <= 1.001f)
             assertTrue("d=$density left=$left bottom=$bottom", Math.abs(left - bottom) <= 1.001f)
             assertTrue("d=$density ring inside the capsule", left > 0f && top > 0f)
-            // The old 6dp padding was 4dp (one stroke short of half the difference) tighter.
             assertTrue("d=$density", top - OverlayMargins.ringToStartPx(dpToPx(6, density), stroke) > 3f * density)
         }
-        // Pixel 4a: padding 28px, capsule 127px, logo 72px, stroke 4.125px.
         assertEquals(23.875f, OverlayMargins.ringToStartPx(28, 4.125f), 0.001f)
         assertEquals(22.875f to 23.875f, OverlayMargins.ringToTopBottomPx(127, 72, 4.125f))
     }
@@ -134,14 +116,12 @@ class OverlayLogoRingTest {
         assertTrue(src.contains(
             "val maxW = (fixedCapsuleWidthPx() - dpToPx(CAPSULE_PADDING_START_DP + CAPSULE_NON_TEXT_DP)).coerceAtLeast(dpToPx(80))"))
         assertFalse("the hard-coded 76dp is gone", src.contains("dpToPx(76)"))
-        // 26 logo + 6 its margin + 14 close + 10 its margin + 14 right padding.
         assertTrue(src.contains("rightMargin = dpToPx(6)"))
         assertTrue(src.contains("val s = dpToPx(14)"))
         assertTrue(src.contains("leftMargin = dpToPx(10)"))
         assertEquals(70, 26 + 6 + 14 + 10 + 14)
     }
 
-    // ── Night-mode switch ───────────────────────────────────────────────────
 
     @Test
     fun `a night-mode switch reloads the logo without waiting for a state update`() {
@@ -152,7 +132,6 @@ class OverlayLogoRingTest {
             logoFor.contains("lastLogoToolName = toolName\n        logoAppliedNight = isNightNow()"))
     }
 
-    // ── Identity disc ───────────────────────────────────────────────────────
 
     @Test
     fun `soul image and emoji sit on the opaque neutral disc, the image filling the circle`() {

@@ -62,14 +62,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * [T-android-scheduled-tasks-design / T-android-scheduled-tasks-run-records]
- * List + manage scheduled tasks. Entry point from SessionListScreen's
- * TopAppBar; tap a row to edit, FAB to create, switch to enable/disable.
- * Long-press opens a menu: Edit / Run records / Delete (with confirm).
- * The row no longer shows a result preview — execution history lives in
- * the Run records screen.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduledTasksScreen(
@@ -105,10 +97,6 @@ fun ScheduledTasksScreen(
                         )
                     }
                 },
-                // [T-android-sched-badge-toggle] A menu rather than a row in the
-                // list: the list holds task cards and is replaced by the empty
-                // state when there are none, so a row would vanish exactly when
-                // the count is zero.
                 actions = {
                     Box {
                         IconButton(onClick = { showMenu = true }) {
@@ -278,8 +266,6 @@ private fun ScheduledTaskRow(
             SettingsSwitch(checked = task.enabled, onCheckedChange = onToggle)
         }
 
-        // [T-android-scheduled-tasks-run-records] Long-press menu: Edit / Run
-        // records / Delete (delete is confirmed by the caller's dialog).
         com.openminis.app.ui.components.MinisMenu(
             expanded = menuExpanded,
             onDismissRequest = { menuExpanded = false },
@@ -314,8 +300,6 @@ internal fun formatScheduleSummary(task: ScheduledTask): String {
     val nextSuffix = task.nextTriggerMs()?.let {
         " · next ${SimpleDateFormat("MMM d HH:mm", Locale.getDefault()).format(Date(it))}"
     } ?: ""
-    // [T-android-scheduled-triggers] Tasks the assistant created with
-    // minis-scheduled's relative triggers, described in the CLI's own terms.
     when (task.triggerKind) {
         com.openminis.app.scheduled.ScheduledTriggerKind.AFTER ->
             return "Once after ${com.openminis.app.scheduled.ScheduledTaskDetailModel.formatDuration(task.delaySec ?: 0L)}$nextSuffix"

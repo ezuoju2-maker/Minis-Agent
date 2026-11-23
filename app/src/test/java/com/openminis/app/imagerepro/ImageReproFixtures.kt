@@ -8,30 +8,9 @@ import java.util.zip.DeflaterOutputStream
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Test-only image fixtures and wire parsers for the image-pipeline repro suite.
- * Nothing here copies production code:
- * images are generated with the JDK (java.util.zip / javax.imageio), sizes are
- * read from the format headers by an independent parser, and request bodies
- * are walked generically for every provider's image shape.
- *
- * JVM limit that shapes the whole suite: unit tests run against the mockable
- * android.jar with `isReturnDefaultValues = true`, so BitmapFactory decodes
- * nothing (outWidth/outHeight = 0, decode* = null). Every production resize
- * (ImageBudget.downscaleForModel / compressBytes, ReadImageTool,
- * resizeJpegToMaxEdge) is therefore a no-op here. Pixel outcomes ON A DEVICE
- * are derived from the production arithmetic (ImageBudget.fitWithin), and the
- * JVM's pass-through is reported as such, never as device behaviour.
- */
 object ImageReproFixtures {
 
-    // ── generators ──────────────────────────────────────────────────────────
 
-    /**
-     * A real, valid PNG of [w]×[h] (8-bit RGB, or RGBA when [alpha]),
-     * streamed row by row so a 2760×21891 image never exists as a bitmap.
-     * Solid colour; alpha rows are fully transparent.
-     */
     fun png(w: Int, h: Int, alpha: Boolean = false, rgb: Int = 0x3366CC): ByteArray {
         val bpp = if (alpha) 4 else 3
         val out = ByteArrayOutputStream()
@@ -67,12 +46,6 @@ object ImageReproFixtures {
         d.writeInt(crc.value.toInt())
     }
 
-    /**
-     * A real baseline JPEG of [w]×[h] encoded by the JDK's ImageIO (default
-     * quality 0.75). Reached through reflection: the Android unit-test compile
-     * classpath has no java.desktop module, the test JVM does. Grayscale keeps
-     * the 1080×32768 case at a 35 MB raster.
-     */
     fun jpeg(w: Int, h: Int, gray: Boolean = false): ByteArray = awtEncode(w, h, if (gray) 10 else 5, "jpg")
 
     private fun awtEncode(w: Int, h: Int, type: Int, format: String): ByteArray {
@@ -80,7 +53,6 @@ object ImageReproFixtures {
         val biClass = Class.forName("java.awt.image.BufferedImage")
         val img = biClass.getConstructor(Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
             .newInstance(w, h, type)
-        // Fill with a mid colour so the image is not all-zero.
         val g = biClass.getMethod("createGraphics").invoke(img)
         val gClass = Class.forName("java.awt.Graphics")
         val colorClass = Class.forName("java.awt.Color")
@@ -98,19 +70,13 @@ object ImageReproFixtures {
         return out.toByteArray()
     }
 
-    /**
-     * [jpeg] with an EXIF APP1 segment declaring Orientation = [orientation],
-     * inserted straight after SOI. Stored pixels stay [w]×[h]; a decoder that
-     * honours EXIF shows h×w for orientation 6.
-     */
     fun jpegWithExifOrientation(w: Int, h: Int, orientation: Int): ByteArray {
         val base = jpeg(w, h)
         val tiff = ByteArrayOutputStream().also { b ->
-            // Little-endian TIFF header, one IFD entry: 0x0112 SHORT 1 = orientation.
             b.write(byteArrayOf(0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00))
-            b.write(byteArrayOf(0x01, 0x00)) // 1 entry
+            b.write(byteArrayOf(0x01, 0x00))
             b.write(byteArrayOf(0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, orientation.toByte(), 0x00, 0x00, 0x00))
-            b.write(byteArrayOf(0x00, 0x00, 0x00, 0x00)) // next IFD
+            b.write(byteArrayOf(0x00, 0x00, 0x00, 0x00))
         }.toByteArray()
         val payload = "Exif".toByteArray(Charsets.US_ASCII) + byteArrayOf(0, 0) + tiff
         val len = payload.size + 2
@@ -118,18 +84,12 @@ object ImageReproFixtures {
         return base.copyOfRange(0, 2) + app1 + base.copyOfRange(2, base.size)
     }
 
-    /**
-     * NOT a decodable HEIC: an ISO-BMFF `ftyp heic` box followed by filler.
-     * The JDK cannot encode HEIC; this only exercises sniffing / labelling.
-     */
     fun heicHeaderOnly(size: Int = 4096): ByteArray =
         byteArrayOf(0x00, 0x00, 0x00, 0x18) + "ftypheic".toByteArray(Charsets.US_ASCII) +
             byteArrayOf(0, 0, 0, 0) + "mif1heic".toByteArray(Charsets.US_ASCII) + ByteArray(size)
 
-    /** A small real BMP (24-bit) — a KNOWN-unaccepted format, used as a gate probe. */
     fun bmp(w: Int = 4, h: Int = 4): ByteArray = awtEncode(w, h, 5, "bmp")
 
-    // ── independent header parser ───────────────────────────────────────────
 
     data class Dim(val format: String, val width: Int, val height: Int, val exifOrientation: Int? = null) {
         val longEdge: Int get() = maxOf(width, height)
@@ -179,7 +139,6 @@ object ImageReproFixtures {
         return null
     }
 
-    // ── request-body image extraction (all four wire shapes) ────────────────
 
     data class WireImage(
         val shape: String,
@@ -192,7 +151,6 @@ object ImageReproFixtures {
             "$shape $mime ${bytes.size}B b64=$base64Length ${dim?.let { "${it.format} ${it.width}x${it.height}" } ?: "dims=?"}"
     }
 
-    /** Every inline image in [body], in document order, whatever the provider. */
     fun wireImages(body: Any?): List<WireImage> {
         val out = mutableListOf<WireImage>()
         fun dataUrl(shape: String, url: String) {
@@ -230,7 +188,6 @@ object ImageReproFixtures {
         return out
     }
 
-    /** All string leaves in [body] (to look for placeholders). */
     fun strings(body: Any?): List<String> {
         val out = mutableListOf<String>()
         fun walk(v: Any?) {

@@ -13,10 +13,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-scheduled-active-session-android] Which chats a scheduled task keeps
- * processing between its fires (port of iOS sessionsKeptActiveBySchedule).
- */
 class ScheduledSessionHoldTest {
 
     private val now = 1_800_000_000_000L
@@ -56,11 +52,9 @@ class ScheduledSessionHoldTest {
     }
 
     @Test fun `a finished or cancelled task holds nothing`() {
-        // ONCE / AFTER / an INTERVAL's last fire are disabled by their alarm.
         assertNull(held(task(enabled = false)))
         assertNull(held(task(kind = ScheduledTriggerKind.AFTER, enabled = false)))
         assertNull(held(task(kind = ScheduledTriggerKind.CALENDAR, repeat = ScheduledRepeatMode.ONCE, enabled = false)))
-        // A repeating calendar task past its end date, or with no days chosen.
         assertNull(held(task(kind = ScheduledTriggerKind.CALENDAR, endDateMs = now - 3 * 86_400_000L)))
         assertNull(held(task(kind = ScheduledTriggerKind.CALENDAR, repeat = ScheduledRepeatMode.CUSTOM, customDays = emptySet())))
     }
@@ -102,7 +96,6 @@ class ScheduledSessionHoldTest {
     }
 
     @Test fun `a fire being run keeps its chat even after the alarm disabled the task`() {
-        // The LAST fire of --count: rescheduleNext disabled it before the run.
         val last = task(enabled = false)
         assertNull(held(last))
         assertEquals("S", ScheduledSessionHold.runHold(last))
@@ -111,11 +104,11 @@ class ScheduledSessionHoldTest {
     }
 
     @Test fun `run holds are counted, so overlapping holders do not release early`() {
-        ScheduledSessionHold.beginRun("T")   // the alarm receiver's handoff
-        ScheduledSessionHold.beginRun("T")   // run()'s own hold
-        ScheduledSessionHold.endRun("T")     // handoff done
+        ScheduledSessionHold.beginRun("T")
+        ScheduledSessionHold.beginRun("T")
+        ScheduledSessionHold.endRun("T")
         assertTrue("T" in ScheduledSessionHold.runningTaskIds.value)
-        ScheduledSessionHold.endRun("T")     // loop finished
+        ScheduledSessionHold.endRun("T")
         assertFalse("T" in ScheduledSessionHold.runningTaskIds.value)
     }
 
@@ -140,7 +133,6 @@ class ScheduledSessionHoldTest {
         assertEquals("S", ScheduledTask.fromJson(JSONObject(t.toJson().toString())).creatorSessionId)
         assertNull(ScheduledTask.fromJson(JSONObject(task(creator = null).toJson().toString())).creatorSessionId)
         assertFalse("absent when null, so old builds read it unchanged", task(creator = null).toJson().has("creatorSessionId"))
-        // The editor rebuilds the task without knowing its creator.
         val edited = ScheduledTaskManager.mergeBookkeeping(t.copy(creatorSessionId = null, label = "renamed"), t)
         assertEquals("S", edited.creatorSessionId)
     }

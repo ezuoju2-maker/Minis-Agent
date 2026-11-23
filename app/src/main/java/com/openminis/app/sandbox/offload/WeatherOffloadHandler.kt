@@ -11,37 +11,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
 
-/**
- * android-weather — fetch weather from Open-Meteo (no API key needed).
- *
- * Mirrors apple-weather (NativeOffloads/WeatherOffload.m): same five
- * subcommands and same flag names so prompts and the agent loop are
- * platform-agnostic.
- *
- * Usage:
- *   android-weather current   --lat L --lon N
- *   android-weather hourly    --lat L --lon N [--hours N]
- *   android-weather daily     --lat L --lon N [--days N]
- *   android-weather alerts    --lat L --lon N
- *   android-weather report    --lat L --lon N [--hours N] [--days N]
- *
- * Backwards compatibility:
- *   - Legacy positional `android-weather <lat> <lon>` still works and
- *     emits the pre-T63 plain-text report.
- *   - `--lng` is accepted as an alias for `--lon` (apple-weather naming).
- *
- * Open-Meteo hosts in the EU — mainland-China users on China Mobile/
- * Telecom see higher latency and occasional timeouts. The handler returns
- * a structured error in that case so the model can explain the situation.
- */
 class WeatherOffloadHandler(private val context: Context) : NativeOffloadHandler {
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
         val args = OffloadArgs(request.argv.drop(1))
         if (args.hasFlag("h", "help")) return NativeOffloadResult(0, HELP)
 
-        // Subcommand model (T63). When the first positional is one of the
-        // five known subcommands, route through the typed JSON path.
-        // Otherwise fall back to the legacy `<lat> <lon>` plain-text form.
         val sub = args.positional.firstOrNull()
         if (sub in SUBCOMMANDS) {
             return handleSubcommand(sub!!, args)
@@ -49,10 +23,8 @@ class WeatherOffloadHandler(private val context: Context) : NativeOffloadHandler
         return handleLegacy(args)
     }
 
-    // ── Subcommand path (T63) ────────────────────────────────────────────
 
     private fun handleSubcommand(sub: String, args: OffloadArgs): NativeOffloadResult {
-        // Coordinates — flag form preferred; --lng accepted as iOS alias.
         val lat = args.getDouble("lat")
             ?: return NativeOffloadResult(2, "android-weather $sub: --lat <latitude> is required\n")
         val lon = args.getDouble("lon", "lng")
@@ -77,14 +49,11 @@ class WeatherOffloadHandler(private val context: Context) : NativeOffloadHandler
             "daily"   -> dailyBlock(json, maxDays)
             "alerts"  -> alertsBlock()
             "report"  -> reportBlock(json, maxHours, maxDays, lat, lon)
-            else -> JSONObject() // unreachable — guarded by SUBCOMMANDS
+            else -> JSONObject()
         }
         return NativeOffloadResult(0, OffloadOutput.formatBody(data.toString(2), args) + "\n")
     }
 
-    /** Pluck `current` from Open-Meteo response, normalize numeric fields,
-     *  and mirror apple-weather's per-field shape (temperature, feels_like,
-     *  humidity, precipitation, wind, conditions). */
     private fun currentBlock(json: JSONObject): JSONObject {
         val current = json.optJSONObject("current") ?: return JSONObject()
         val units = json.optJSONObject("current_units")
@@ -104,8 +73,6 @@ class WeatherOffloadHandler(private val context: Context) : NativeOffloadHandler
             .put("conditions", weatherCodeToDescription(current.optInt("weather_code")))
     }
 
-    /** Slice the hourly arrays into a list of per-hour records, capped at
-     *  [maxHours] (mirrors apple-weather hourly subarray capping). */
     private fun hourlyBlock(json: JSONObject, maxHours: Int): JSONObject {
         val hourly = json.optJSONObject("hourly") ?: return JSONObject().put("hourly", JSONArray()).put("count", 0)
         val times = hourly.optJSONArray("time")
@@ -128,7 +95,6 @@ class WeatherOffloadHandler(private val context: Context) : NativeOffloadHandler
         return JSONObject().put("hourly", arr).put("count", arr.length())
     }
 
-    /** Slice daily arrays similarly. apple-weather caps to maxDays. */
     private fun dailyBlock(json: JSONObject, maxDays: Int): JSONObject {
         val daily = json.optJSONObject("daily") ?: return JSONObject().put("daily", JSONArray()).put("count", 0)
         val times = daily.optJSONArray("time")
@@ -157,21 +123,12 @@ class WeatherOffloadHandler(private val context: Context) : NativeOffloadHandler
         return JSONObject().put("daily", arr).put("count", arr.length())
     }
 
-    /**
-     * Open-Meteo doesn't expose government weather alerts (NWS-style).
-     * Mirror apple-weather's empty-alerts shape and surface a structured
-     * note so the model knows alerts aren't supported on this backend
-     * rather than silently returning an empty list.
-     */
     private fun alertsBlock(): JSONObject =
         JSONObject()
             .put("alerts", JSONArray())
             .put("count", 0)
             .put("note", "Open-Meteo does not provide weather alerts. For severe-weather alerts use a region-specific service (e.g. NWS in the US, JMA in Japan, NMC in China).")
 
-    /** Combined dump matching apple-weather report (current + hourly +
-     *  daily + alerts + location). Sliced sub-blocks share the same shape
-     *  as the individual subcommands. */
     private fun reportBlock(json: JSONObject, maxHours: Int, maxDays: Int, lat: Double, lon: Double): JSONObject {
         val timezone = json.optString("timezone", "unknown")
         return JSONObject()
@@ -182,7 +139,6 @@ class WeatherOffloadHandler(private val context: Context) : NativeOffloadHandler
             .put("location", JSONObject().put("latitude", lat).put("longitude", lon).put("timezone", timezone))
     }
 
-    // ── Legacy plain-text path (pre-T63) ─────────────────────────────────
 
     private fun handleLegacy(args: OffloadArgs): NativeOffloadResult {
         if (args.positional.size < 2) {
@@ -208,12 +164,7 @@ class WeatherOffloadHandler(private val context: Context) : NativeOffloadHandler
         }
     }
 
-    // ── Errors / helpers ─────────────────────────────────────────────────
 
-    /**
-     * When Open-Meteo fails, add a CN-specific hint so users on Chinese
-     * networks understand why the EU-hosted endpoint might be slow.
-     */
     private fun augmentedError(text: String, args: OffloadArgs): String {
         val msg = text.trimEnd().removePrefix("Error:").trim().ifEmpty { "unknown network error" }
         val inChina = looksChina()
@@ -239,11 +190,6 @@ class WeatherOffloadHandler(private val context: Context) : NativeOffloadHandler
         } catch (_: Throwable) { false }
     }
 
-    /**
-     * WMO Weather interpretation codes to human-readable descriptions.
-     * Duplicated from WeatherManager so the JSON path doesn't need to
-     * round-trip through plain-text formatting just to get descriptions.
-     */
     private fun weatherCodeToDescription(code: Int): String = when (code) {
         0 -> "Clear sky"
         1 -> "Mainly clear"

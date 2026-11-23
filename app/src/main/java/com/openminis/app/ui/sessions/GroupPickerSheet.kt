@@ -42,51 +42,19 @@ import com.openminis.app.ui.components.MinisSmallButton
 import com.openminis.app.ui.components.SectionDesign
 import com.openminis.app.ui.components.SectionTextField
 
-/**
- * [T-android-session-grouping] What the user chose in the group picker.
- *
- * Ported from iOS `FolderPickerSheet.Choice`. Modelled as a sealed type rather
- * than a nullable folder id so "file into nothing" is a distinct, named
- * decision instead of an ambiguous null.
- */
 sealed interface GroupChoice {
     data class Existing(val folderId: String) : GroupChoice
 
     data class Create(val name: String, val description: String?) : GroupChoice
 
-    /** "No Group" — detach the session(s) from whatever group they are in. */
     data object RemoveFromGroup : GroupChoice
 }
 
-/**
- * [T-android-group-picker-recent] The Move to Group picker's order: most
- * recently active group first. A group's activity is the later of its newest
- * member session's `updatedAt` ([lastActivity], by group id) and its own
- * record time (`updatedAt` / `createdAt`: a rename or pin, or when it was
- * made). So an empty group ranks by its own record time. Ties keep [folders]'
- * incoming order — the sort is stable — so the result never jitters between
- * opens.
- *
- * The picker is where the user is most likely filing into a group they are
- * working in right now; the session list's own group order (pins first) is a
- * different question and is deliberately left as it is.
- */
 internal fun groupPickerOrder(folders: List<FolderEntity>, lastActivity: Map<String, Long>): List<FolderEntity> =
     folders.sortedByDescending { f ->
         maxOf(f.updatedAt, f.createdAt, lastActivity[f.id] ?: Long.MIN_VALUE)
     }
 
-/**
- * The group picker. ONE sheet serves both the single-session context menu and
- * the multi-select toolbar, deliberately — iOS keeps them unified so the two
- * flows cannot drift apart, and the same applies here.
- *
- * @param sessionCount how many sessions are being filed; drives the title.
- * @param anyFiled true when at least ONE of them currently has a group. Gates
- *   the "No Group" row: offering it for an already-ungrouped session is a
- *   no-op control, which reads as broken. "Any" rather than "all" so a mixed
- *   multi-selection still gets the option.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GroupPickerSheet(
@@ -96,8 +64,6 @@ fun GroupPickerSheet(
     anyFiled: Boolean,
     onChoose: (GroupChoice) -> Unit,
     onDismiss: () -> Unit,
-    // [T-android-group-ai-suggest] AI Suggest wiring. Defaulted so the sheet
-    // still composes without it (previews / any future caller that has no VM).
     suggesting: Boolean = false,
     suggestFailed: Boolean = false,
     suggestion: SessionListViewModel.GroupSuggestion? = null,
@@ -107,9 +73,6 @@ fun GroupPickerSheet(
     var newName by remember { mutableStateOf("") }
     var newDesc by remember { mutableStateOf("") }
 
-    // A create suggestion PREFILLS the fields and waits for the user's Create
-    // tap — it never files anything on its own. Keyed on the suggestion so a
-    // re-run overwrites, while ordinary typing in between is left alone.
     val createSuggestion = suggestion as? SessionListViewModel.GroupSuggestion.Create
     androidx.compose.runtime.LaunchedEffect(createSuggestion) {
         if (createSuggestion != null) {
@@ -119,9 +82,6 @@ fun GroupPickerSheet(
     }
 
     val trimmedName = newName.trim()
-    // Case- and whitespace-insensitive, so "Work" and "work " collide. Names
-    // are not unique in the schema, but silently minting a second identical
-    // group is never what the user meant — we offer the existing one instead.
     val duplicate = remember(trimmedName, folders) {
         if (trimmedName.isEmpty()) null
         else folders.firstOrNull { it.name.trim().equals(trimmedName, ignoreCase = true) }
@@ -142,23 +102,17 @@ fun GroupPickerSheet(
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
             )
 
-            // ── Create a new group inline ──────────────────────────────────
             SectionTextField(
                 value = newName,
                 onValueChange = { newName = it },
                 placeholder = stringResource(R.string.group_new_name_hint),
                 modifier = Modifier.padding(horizontal = 20.dp),
                 containerColor = SectionDesign.screenBackgroundColor(),
-                // [T-android-sheet-textfield-inset] The modifier padding above
-                // insets the CARD; without this the glyphs still sit flush
-                // against the card's own left edge (user-reported).
                 contentHorizontalPadding = 16.dp,
             )
             Spacer(Modifier.height(8.dp))
             SectionTextField(
                 value = newDesc,
-                // Hard-cap at the storage limit as the user types, so the field
-                // can never hold text the repository would silently truncate.
                 onValueChange = { newDesc = it.take(FolderEntity.DESC_MAX_CHARS) },
                 placeholder = stringResource(R.string.group_desc_hint),
                 modifier = Modifier.padding(horizontal = 20.dp),
@@ -167,9 +121,6 @@ fun GroupPickerSheet(
             )
 
             if (duplicate != null) {
-                // Not a hard block: the warning doubles as a shortcut into the
-                // group that already exists, which is what the user almost
-                // always wanted.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -198,10 +149,6 @@ fun GroupPickerSheet(
                 }
             }
 
-            // ── ✨ AI Suggest merge proposal ────────────────────────────────
-            // A merge is NOT prefilled into the fields (there is nothing to
-            // create), so it gets its own confirm row — one tap files into the
-            // proposed group, ignoring it costs nothing.
             (suggestion as? SessionListViewModel.GroupSuggestion.Merge)?.let { merge ->
                 Row(
                     modifier = Modifier
@@ -218,16 +165,12 @@ fun GroupPickerSheet(
                     )
                     Spacer(Modifier.size(12.dp))
                     Text(
-                        // Group name is user data — interpolated, not a key.
                         stringResource(R.string.group_suggest_merge, merge.folderName),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             }
 
-            // Bottom row of the create area: AI Suggest leading, Create
-            // trailing — same layout and same two independent tap targets as
-            // iOS FolderPickerSheet.
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -254,9 +197,6 @@ fun GroupPickerSheet(
                         }
                         Spacer(Modifier.size(8.dp))
                         Text(
-                            // Failure degrades to the manual flow (this sheet
-                            // already IS the manual flow) — the label just
-                            // invites a retry rather than blocking anything.
                             stringResource(
                                 if (suggestFailed) R.string.group_suggest_failed
                                 else R.string.group_suggest,
@@ -276,16 +216,10 @@ fun GroupPickerSheet(
                             ),
                         )
                     },
-                    // Disabled on duplicate: the warning row above is the way
-                    // forward, so Create never produces a confusing twin.
                     enabled = trimmedName.isNotEmpty() && duplicate == null,
                 ) { Text(stringResource(R.string.group_create)) }
             }
 
-            // ── Existing groups ────────────────────────────────────────────
-            // "No Group" leads the list as its FIRST row (user request): it is
-            // a peer filing choice, not a destructive action, and trailing the
-            // whole group list buried it below the fold once the list grew.
             if (folders.isNotEmpty() || anyFiled) {
                 Text(
                     text = stringResource(R.string.group_section_header),
@@ -303,9 +237,6 @@ fun GroupPickerSheet(
                                 subtitle = hint,
                                 icon = Icons.Default.FolderOff,
                                 onClick = { onChoose(GroupChoice.RemoveFromGroup) },
-                                // Merge the two lines for screen readers;
-                                // announced separately they read as unrelated
-                                // fragments.
                                 modifier = Modifier.semantics(mergeDescendants = true) {
                                     contentDescription = label
                                     stateDescription = hint
@@ -316,8 +247,6 @@ fun GroupPickerSheet(
                     items(folders, key = { it.id }) { folder ->
                         val count = memberCounts[folder.id] ?: 0
                         GroupRow(
-                            // Group names are user data — rendered verbatim,
-                            // never through a string lookup.
                             title = folder.name,
                             subtitle = folder.description?.takeIf { it.isNotBlank() }
                                 ?: if (count > 0) stringResource(R.string.group_n_chats, count)

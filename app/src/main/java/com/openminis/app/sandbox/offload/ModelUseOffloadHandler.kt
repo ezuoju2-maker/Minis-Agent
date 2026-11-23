@@ -19,20 +19,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/**
- * `minis-model-use` — list, search, and invoke LLM models from Ubuntu 24.04 shell.
- * Mirrors iOS ModelUseOffload.m + ModelUseOffloadBridge.swift.
- *
- * Subcommands:
- *   minis-model-use list [--provider <name>] [--modality <m>]
- *   minis-model-use search <query> [--provider <name>] [--modality <m>]
- *   minis-model-use run --model <id_or_name> [--input <path>] [--output <path>]
- *                       [--system <text>] [--system-file <path>]
- *                       [--max-tokens N] [--temperature F]
- *
- * Only entries/groups exposed via the "Available Models in Agent Loop" section
- * in Settings > Model Groups are visible (see ProviderRepository.resolvedAgentLoopEntries).
- */
 class ModelUseOffloadHandler(
     private val context: Context,
     private val providerRepository: ProviderRepository,
@@ -114,25 +100,14 @@ class ModelUseOffloadHandler(
     }
 
     private fun cmdRun(args: OffloadArgs, request: NativeOffloadRequest): NativeOffloadResult {
-        // [T-offload-caller-session] The chat this run belongs to: the session
-        // whose /var/minis this shell sees, i.e. the PARENT for a sub agent
-        // (iOS resolves the caller from the task's fs_context, which a helper
-        // shares with its parent; b99e4da87). Used for the provider's session
-        // header and for where generated media and --output files are written.
-        // The raw MINIS_CHAT_SESSION_ID is the helper's own hidden session, so
-        // its images landed in minis-sessions/<helperId>/attachments: not at
-        // the /var/minis/attachments path the guest was told, and never
-        // visible from the parent chat.
         val caller = OffloadCallerSession.resolve(request.sessionId)
         val callerSid = caller.sid
         AppLogger.info(TAG, "[ModelUse] run caller=${callerSid?.take(8) ?: "nil"} via=${caller.source}")
         val modelArg = args.get("model")
             ?: return NativeOffloadResult(2, "--model is required. Usage: minis-model-use run --model <id_or_name>\n")
 
-        // Optional provider scoping — disambiguates when multiple instances expose the same model_id.
         val providerFilter = args.get("provider")
 
-        // Resolve entry (restricted to agent-loop-visible)
         val entry = resolveEntry(modelArg, providerFilter)
             ?: return NativeOffloadResult(
                 2,
@@ -147,17 +122,7 @@ class ModelUseOffloadHandler(
                     .toString() + "\n",
             )
 
-        // Modality precheck: if --output extension implies a media modality
-        // the model doesn't advertise, fail fast before hitting the API.
-        // Mirrors iOS ModelUseOffloadBridge.performRun:208-228.
         val outputPath = args.get("output")
-        // [T-android-model-use-relative-output] A relative --output can't be
-        // resolved reliably: this handler runs in-process and does NOT inherit
-        // the shell's cwd, so PRootKernel.resolveHostPath would silently drop a
-        // relative path onto the rootfs root (e.g. "gen_output.json" ->
-        // <rootfs>/gen_output.json) and report an unreadable bare-relative path
-        // that read_image later rejects. Fail fast with a clear message asking
-        // for an absolute path instead. `file://` URLs are already absolute.
         if (outputPath != null && !outputPath.startsWith("/") && !outputPath.startsWith("file://")) {
             return NativeOffloadResult(
                 2,
@@ -198,10 +163,8 @@ class ModelUseOffloadHandler(
             )
         }
 
-        // System prompt: --system takes precedence over --system-file
         val explicitSystem = args.get("system") ?: args.get("system-file")?.let { readLinuxPath(it) }
 
-        // Parse input messages: --input <path> | stdin
         val inputText = when {
             args.get("input") != null -> readLinuxPath(args.get("input")!!)
                 ?: return NativeOffloadResult(
@@ -220,7 +183,6 @@ class ModelUseOffloadHandler(
                     .toString() + "\n",
             )
         } catch (e: AudioInputError) {
-            // [GH#67] Malformed input_audio → explicit error, not a silent drop.
             return NativeOffloadResult(
                 2,
                 JSONObject().put("error", "audio_input_error")
@@ -228,15 +190,10 @@ class ModelUseOffloadHandler(
                     .toString() + "\n",
             )
         }
-        // Any `role: system` messages from the input JSON are folded into the
-        // system prompt — the Android LLMMessage enum only exposes user/assistant.
         val inlineSystem = parsed.filter { it.role == "system" }
             .joinToString("\n") { it.content }
         val nonSystem = parsed.filter { it.role != "system" }
 
-        // [GH#67] Audio input needs a model that declares the audio input
-        // modality — explicit error instead of the historical silent drop.
-        // Mirrors iOS ModelUseOffloadBridge's hasAudioInput gate.
         if (nonSystem.any { it.audios.isNotEmpty() } &&
             "audio" !in entry.model.inputModalities.orEmpty()
         ) {
@@ -255,13 +212,6 @@ class ModelUseOffloadHandler(
 
         val messages = nonSystem.map { textMessage(it.role, it.content, it.audios) }
         val hasAudioInput = messages.any { it.audioParts.isNotEmpty() }
-        // [T-android-model-use-multimodal] Forward image_url blocks as the
-        // top-level `imageParts` argument — providers (OpenAI / Anthropic /
-        // Gemini) attach these to the LAST user message in the conversation
-        // when building the wire request. Collecting images from the LAST
-        // user-role ParsedMessage matches that contract: any image attached
-        // to an earlier turn would be silently ignored on the provider side
-        // (this is a known limitation; iOS has the same per-call shape).
         val imageParts = nonSystem.lastOrNull { it.role == "user" }?.images.orEmpty()
         val systemPrompt = when {
             explicitSystem != null && inlineSystem.isNotEmpty() -> "$explicitSystem\n\n$inlineSystem"
@@ -273,12 +223,8 @@ class ModelUseOffloadHandler(
         val maxTokens = args.get("max-tokens")?.toIntOrNull() ?: 4096
         val temperature = args.get("temperature")?.toDoubleOrNull()
 
-        // Build provider + call — runBlocking is acceptable here: this handler
-        // is invoked off the main thread by the offload server.
         val instance = providerRepository.instance(entry.providerInstanceId)
             ?: return NativeOffloadResult(2, "minis-model-use run: provider instance not found\n")
-        // [T-android-provider-entry-rules] Same credential rule as every other
-        // entry: refreshed OAuth token, keyless/OAuth-held credentials allowed.
         val apiKey = kotlinx.coroutines.runBlocking { providerRepository.requestCredential(instance) }
             ?: return NativeOffloadResult(
                 2,
@@ -286,21 +232,11 @@ class ModelUseOffloadHandler(
                     .put("message", "No API key configured for provider ${entry.model.provider}.")
                     .toString() + "\n",
             )
-        // [T-android-opencode-subtask-session] The calling chat's id, so an
-        // OpenCode Go model gets its required `x-opencode-session` header and
-        // does not answer 400 "Request is missing x-opencode-session". This
-        // run is that chat's traffic (iOS b99e4da87 / 4d002af1c tag it the
-        // same way). The header itself is still gated on the OpenCode host and
-        // on a persisted id inside the provider, so no other endpoint sees it.
         val provider = ProviderFactory.create(
             instance, apiKey, entry.model, context,
             sessionId = callerSid, overrides = entry.overrides,
         )
 
-        // [GH#67] input_audio serialization is implemented for the OpenAI
-        // chat/completions + responses paths only. Other provider types would
-        // drop the audio at their own serialization layer — fail loudly here
-        // instead. Mirrors iOS ModelUseOffloadBridge.
         if (hasAudioInput && provider !is com.openminis.app.provider.openai.OpenAIProvider) {
             return NativeOffloadResult(
                 2,
@@ -315,11 +251,6 @@ class ModelUseOffloadHandler(
             )
         }
 
-        // [T-android-model-use-passthrough-mode] Explicit passthrough envelope —
-        // the raw-mode escape hatch. Checked before image routing and message
-        // dispatch because body_mode=replace requests may carry no messages at
-        // all. Only OpenAI-compatible providers; others error clearly. Mirrors
-        // iOS ModelUseOffloadBridge passthrough branch.
         val ptSpec = parsePassthroughEnvelope(inputText)
         if (ptSpec.active) {
             val openAI = provider as? com.openminis.app.provider.openai.OpenAIProvider
@@ -345,17 +276,6 @@ class ModelUseOffloadHandler(
             )
         }
 
-        // [T-android-model-use-passthrough-mode GH#72] Standard mode: promote the
-        // explicit `extra_body` / `extra_headers` envelope (previously image-
-        // path-only) to the chat/responses text path too, and honor a custom
-        // absolute `endpoint` path. Explicit envelope only — implicit unknown
-        // top-level keys stay image-path-only so the chat schema keeps its
-        // OpenAI top-level semantics. Mirrors iOS standard-mode promotion.
-        // [T-model-use-passthrough-warnings] `callWarnings` collects every
-        // provided-but-ignored/downgraded field (starting with envelope-
-        // lookalike warnings from the passthrough parser); `appliedExtras`
-        // confirms which passthrough capabilities actually took effect. Both
-        // are attached to the final result JSON. Mirrors iOS performRun.
         val callWarnings = ptSpec.warnings.toMutableList()
         val appliedExtras = JSONObject()
         (provider as? com.openminis.app.provider.openai.OpenAIProvider)?.let { openAI ->
@@ -377,15 +297,6 @@ class ModelUseOffloadHandler(
             }
         }
 
-        // [T-android-image-endpoint-mode] Image-output routing (mirrors iOS
-        // ModelUseOffloadBridge image branch). For OpenAI-compatible API-key
-        // instances whose target model emits images, route through
-        // /v1/images/generations per the instance's imageEndpointMode (with
-        // auto-probe + cache), instead of the chat-completions path. OAuth
-        // instances are excluded — the Codex gpt-image-2 path is handled inside
-        // OpenAIProvider's isCodexImageModel branch on the normal sendMessage
-        // call below, and a Codex OAuth token can't reach the Images API. On a
-        // route-missing failure (auto mode) we fall through to the chat path.
         val imageRouted = tryImageGenerationRoute(
             entry = entry,
             instance = instance,
@@ -422,17 +333,7 @@ class ModelUseOffloadHandler(
             )
         }
 
-        // Write output — media-first if the model returned image/audio/video and
-        // --output has a media extension, else fall back to text. Mirrors iOS
-        // ModelUseOffloadBridge.performRun (non-streaming branch).
         val sessionId = callerSid
-        // [T-android-model-use-no-media-fails] A run that had to produce media
-        // — the caller asked for a .png/.mp3/... output, or the model can only
-        // output images — and got none must FAIL, not exit 0. Otherwise the
-        // agent reads success, writes ![](minis://attachments/...) for a file
-        // that was never written, and the user sees an image that "exists"
-        // but cannot be opened. That included writing the model's text reply
-        // INTO the requested out.png, so the phantom even had a file.
         val mediaRequired = (outputPath != null && (isImageExt(outputExt) || isAudioExt(outputExt) || isVideoExt(outputExt))) ||
             ("image" in outputs && "text" !in outputs)
         if (mediaRequired && response.mediaAttachments.isEmpty()) {
@@ -442,10 +343,6 @@ class ModelUseOffloadHandler(
         val ts = System.currentTimeMillis() / 1000
         val modelSlug = entry.model.id.replace("/", "_")
         if (outputPath != null) {
-            // [T-android-model-use-session-scoped-write] Prefer the caller
-            // session's own host dir; fall back to the global resolver only when
-            // sessionId is null or the path isn't a session-scoped /var/minis
-            // subdir. Guaranteed absolute here (relative --output rejected above).
             val hostFile = sessionScopedHostFile(outputPath, sessionId)
                 ?: PRootKernel.resolveHostPath(outputPath)
                 ?: return NativeOffloadResult(
@@ -474,8 +371,6 @@ class ModelUseOffloadHandler(
                 hostFile.writeText(response.text)
             }
         } else if (response.mediaAttachments.isNotEmpty()) {
-            // [T-android-model-use-session-scoped-write] Auto-save to the caller
-            // session's attachments dir, not the global (last-writer-wins) mount.
             val attachDir = sessionScopedHostFile("/var/minis/attachments", sessionId)
                 ?: PRootKernel.resolveHostPath("/var/minis/attachments")
             if (attachDir != null) {
@@ -515,12 +410,6 @@ class ModelUseOffloadHandler(
         )
     }
 
-    /**
-     * [T-android-image-endpoint-mode] Parsed image-generation knobs from the
-     * input JSON top level (native /images/generations shape) with
-     * `generation_config` as a lower-priority fallback. Mirrors iOS
-     * ModelUseOffloadBridge.parseImageGenerationConfig.
-     */
     private data class ImageGenConfig(
         val prompt: String? = null,
         val n: Int = 1,
@@ -540,7 +429,6 @@ class ModelUseOffloadHandler(
         var size: String? = null
         var quality: String? = null
 
-        // generation_config first (lower priority).
         obj.optJSONObject("generation_config")?.let { gc ->
             val gn = if (gc.has("n")) gc.optInt("n", 1)
             else if (gc.has("number_of_images")) gc.optInt("number_of_images", 1) else 1
@@ -548,13 +436,11 @@ class ModelUseOffloadHandler(
             size = gc.safeOptString("size", "").ifEmpty { gc.safeOptString("image_size", "").ifEmpty { null } }
             quality = gc.safeOptString("quality", "").ifEmpty { null }
         }
-        // Top-level overrides.
         obj.safeOptString("prompt", "").takeIf { it.isNotEmpty() }?.let { prompt = it }
         if (obj.has("n")) n = maxOf(1, obj.optInt("n", n))
         obj.safeOptString("size", "").takeIf { it.isNotEmpty() }?.let { size = it }
         obj.safeOptString("quality", "").takeIf { it.isNotEmpty() }?.let { quality = it }
 
-        // Endpoint override (image_endpoint / endpoint / generation_config.image_endpoint).
         val rawEndpoint = obj.safeOptString("image_endpoint", "").ifEmpty {
             obj.safeOptString("endpoint", "").ifEmpty {
                 obj.optJSONObject("generation_config")?.safeOptString("image_endpoint", "").orEmpty()
@@ -571,22 +457,12 @@ class ModelUseOffloadHandler(
         return ImageGenConfig(prompt, n, size, quality, endpoint)
     }
 
-    /**
-     * [T-android-model-use-image-passthrough GH#62] Provider-specific extras
-     * forwarded verbatim to the /images/generations request.
-     */
     private data class ImagePassthrough(
         val body: Map<String, Any?> = emptyMap(),
         val headers: Map<String, String> = emptyMap(),
         val path: String? = null,
     )
 
-    /**
-     * Keys the handler already interprets itself — never treated as implicit
-     * passthrough body fields, so existing callers' structure/behavior is
-     * unchanged. (Explicit `extra_body` can still re-introduce any of these.)
-     * Mirrors iOS ModelUseOffloadBridge.imageReservedKeys.
-     */
     private val imageReservedKeys: Set<String> = setOf(
         "messages", "model", "chat_model", "prompt", "n", "number_of_images",
         "size", "image_size", "quality", "generation_config", "endpoint",
@@ -594,19 +470,6 @@ class ModelUseOffloadHandler(
         "stream", "temperature", "max_tokens",
     )
 
-    /**
-     * [T-android-model-use-image-passthrough GH#62] Parse passthrough extras from
-     * the input JSON. Two complementary modes, both fully optional and additive
-     * (absent → empty, old calls unaffected):
-     *   • Explicit envelope: `extra_body` (object), `extra_headers` (string map),
-     *     `endpoint_path` (string). Unambiguous; recommended in help.
-     *   • Implicit: any TOP-LEVEL key not in [imageReservedKeys] is folded into
-     *     the body — so `{"prompt":..,"image":"data:..","size":"2K"}` just
-     *     works for Seedream-style image-to-image without an envelope.
-     * Explicit `extra_body` wins over implicit keys on conflict. Values are kept
-     * as raw org.json types so JSONObject.put() re-serializes them faithfully.
-     * Mirrors iOS ModelUseOffloadBridge.parseImagePassthrough.
-     */
     private fun parseImagePassthrough(
         inputJson: String,
         warnings: MutableList<String> = mutableListOf(),
@@ -617,14 +480,10 @@ class ModelUseOffloadHandler(
         } catch (_: Throwable) { null } ?: return ImagePassthrough()
 
         val body = LinkedHashMap<String, Any?>()
-        // Implicit: unknown top-level keys → body.
         for (key in obj.keys()) {
             if (key in imageReservedKeys) continue
             body[key] = obj.opt(key)
         }
-        // Explicit envelope overrides/augments the implicit keys.
-        // [T-model-use-passthrough-warnings] Type mismatches warn instead of
-        // silently skipping (deduped against the standard-mode parser's copy).
         obj.opt("extra_body")?.takeIf { it != JSONObject.NULL }?.let { raw ->
             if (raw is JSONObject) {
                 for (key in raw.keys()) body[key] = raw.opt(key)
@@ -660,9 +519,7 @@ class ModelUseOffloadHandler(
         return ImagePassthrough(body, headers, path)
     }
 
-    // MARK: - Call feedback [T-model-use-passthrough-warnings]
 
-    /** Human-readable JSON type name for warning messages. Mirrors iOS jsonTypeName. */
     private fun jsonTypeName(v: Any?): String = when (v) {
         null, JSONObject.NULL -> "null"
         is String -> "string"
@@ -673,13 +530,6 @@ class ModelUseOffloadHandler(
         else -> v.javaClass.simpleName
     }
 
-    /**
-     * Append collected `warnings` and `applied_extras` to a result's JSON body.
-     * Both are omitted when empty (no noise on clean calls); warnings are
-     * de-duplicated (the same type mismatch can be seen by more than one
-     * parser on the image path). Non-JSON outputs pass through unchanged.
-     * Mirrors iOS ModelUseOffloadBridge.attachCallFeedback.
-     */
     private fun attachCallFeedback(
         result: NativeOffloadResult,
         warnings: List<String>,
@@ -704,27 +554,17 @@ class ModelUseOffloadHandler(
         return NativeOffloadResult(result.exitCode, body.toString(2) + "\n")
     }
 
-    // MARK: - Passthrough mode [T-android-model-use-passthrough-mode]
 
-    /**
-     * Explicit passthrough envelope: verbatim body/headers/endpoint, raw
-     * (unparsed) response output. Mirrors iOS ModelUseOffloadBridge.PassthroughSpec.
-     */
     private data class PassthroughSpec(
         val active: Boolean = false,
-        val endpoint: String? = null,        // "/abs/path?q" (absolute) or "rel/segment"
+        val endpoint: String? = null,
         val method: String = "POST",
         val headers: Map<String, String> = emptyMap(),
         val body: Map<String, Any?> = emptyMap(),
-        val bodyMode: String = "merge",      // "merge" | "replace"
-        /** [T-model-use-passthrough-warnings] Ignored/downgraded-field feedback. */
+        val bodyMode: String = "merge",
         val warnings: List<String> = emptyList(),
     )
 
-    /**
-     * Parse the top-level `passthrough` object into a [PassthroughSpec].
-     * Mirrors iOS ModelUseOffloadBridge.parsePassthroughEnvelope.
-     */
     private fun parsePassthroughEnvelope(inputJson: String): PassthroughSpec {
         val obj = try {
             val t = inputJson.trim()
@@ -735,8 +575,6 @@ class ModelUseOffloadHandler(
         val envRaw: Any? = obj.opt("passthrough")
         val env = envRaw as? JSONObject
         if (env == null) {
-            // [T-model-use-passthrough-warnings] Exact key absent or wrong
-            // type — surface the two silent failure shapes. Mirrors iOS.
             if (envRaw != null && envRaw != JSONObject.NULL) {
                 warnings.add(
                     "Top-level 'passthrough' is not a JSON object (actual type: ${jsonTypeName(envRaw)}) — " +
@@ -776,7 +614,6 @@ class ModelUseOffloadHandler(
         }
         var method = "POST"
         env.opt("method")?.takeIf { it != JSONObject.NULL }?.let { mRaw ->
-            // PATCH included — provider-native update APIs use it. Mirrors iOS.
             val allowed = setOf("GET", "POST", "PUT", "DELETE", "PATCH")
             val m = (mRaw as? String)?.uppercase()
             if (m != null && m in allowed) {
@@ -831,11 +668,6 @@ class ModelUseOffloadHandler(
         return PassthroughSpec(true, endpoint, method, headers, bodyMode = bodyMode, body = body, warnings = warnings)
     }
 
-    /**
-     * Standard-mode chat `extra_body`: the EXPLICIT envelope only (implicit
-     * unknown top-level keys stay image-path-only, per iOS). Values kept as raw
-     * org.json types so JSONObject.put re-serializes them faithfully.
-     */
     private fun parseChatExtraBody(inputJson: String, warnings: MutableList<String>): Map<String, Any?> {
         val obj = try {
             val t = inputJson.trim()
@@ -844,7 +676,6 @@ class ModelUseOffloadHandler(
         val raw = obj.opt("extra_body")?.takeIf { it != JSONObject.NULL } ?: return emptyMap()
         val extra = raw as? JSONObject
         if (extra == null) {
-            // [T-model-use-passthrough-warnings] type-mismatch feedback
             warnings.add(
                 "extra_body is not a JSON object (actual type: ${jsonTypeName(raw)}) — ignored. " +
                     "Wrap your fields in an object: \"extra_body\":{...}.",
@@ -856,7 +687,6 @@ class ModelUseOffloadHandler(
         return out
     }
 
-    /** Standard-mode `extra_headers` (string map). */
     private fun parseExtraHeaders(inputJson: String, warnings: MutableList<String>): Map<String, String> {
         val obj = try {
             val t = inputJson.trim()
@@ -886,16 +716,6 @@ class ModelUseOffloadHandler(
         return out
     }
 
-    /**
-     * Parse a CUSTOM absolute endpoint path from top-level `endpoint` /
-     * `image_endpoint` values. A value starting with "/" is an absolute path
-     * replacing the entire URL path after scheme+host. Symbolic values
-     * (auto/images-gen/chat) return null. Mirrors iOS parseCustomEndpointPath.
-     *
-     * Note: on Android these arrive inside the input JSON (not as translated
-     * argv), so unlike iOS there is no rootfs-dataPath prefix to strip — the
-     * value is used verbatim.
-     */
     private fun parseCustomEndpointPath(inputJson: String): String? {
         val obj = try {
             val t = inputJson.trim()
@@ -906,13 +726,6 @@ class ModelUseOffloadHandler(
         return if (raw.startsWith("/")) raw else null
     }
 
-    /**
-     * Execute a raw passthrough request and build the metadata result. The
-     * response is NOT parsed — full raw bytes go to --output (or, when
-     * text-decodable and small, inline into the result). An unwritable --output
-     * degrades to inline text + `output_error` instead of failing a call whose
-     * HTTP request already completed. Mirrors iOS performRawPassthrough.
-     */
     private fun performRawPassthrough(
         spec: PassthroughSpec,
         entry: ModelEntry,
@@ -923,14 +736,9 @@ class ModelUseOffloadHandler(
         outputPath: String?,
         sessionId: String?,
     ): NativeOffloadResult {
-        // Baseline body for merge mode: the standard OpenAI-shape conversion
-        // (messages + system + max_tokens), so callers add ONLY their extras.
-        // replace mode: spec.body verbatim (model unlocked — user owns it).
         val warnings = spec.warnings.toMutableList()
         val bodyObject: JSONObject? = if (spec.bodyMode == "replace") {
             if (spec.body.isEmpty()) {
-                // Legit for GET-style calls, but a common symptom of body
-                // content nested at the wrong JSON level — say so. Mirrors iOS.
                 warnings.add(
                     "body_mode=replace but body is empty or missing — this request was sent with NO body. " +
                         "If that is not what you intended, check that your fields are nested inside " +
@@ -955,7 +763,7 @@ class ModelUseOffloadHandler(
                 baseline.put("stream", false)
             }
             for ((k, v) in spec.body) baseline.put(k, v ?: JSONObject.NULL)
-            baseline.put("model", entry.model.id)   // merge mode locks model
+            baseline.put("model", entry.model.id)
             baseline
         }
 
@@ -1000,8 +808,6 @@ class ModelUseOffloadHandler(
                     logModelUseWrite(outputPath, hostFile, sessionId)
                     out.put("output_file", outputPath)
                 } catch (e: Throwable) {
-                    // Don't fail the whole call over an unwritable --output — the
-                    // request already succeeded. Surface it + fall back to inline.
                     out.put("output_error", "Could not write --output at $outputPath: ${e.message}")
                     inlineTextIfPossible(result.data, out)
                 }
@@ -1019,15 +825,10 @@ class ModelUseOffloadHandler(
             out.put("warnings", JSONArray(warnings))
         }
         Log.i(TAG, "[ModelUseRoute] raw-passthrough done status=${result.status} bytes=${result.data.size} url=${result.url} warnings=${warnings.size}")
-        // Non-2xx → non-zero exit code (raw body still delivered), else 0.
         val code = if (result.status in 200..299) 0 else 1
         return NativeOffloadResult(code, out.toString(2) + "\n")
     }
 
-    /**
-     * Inline a UTF-8-decodable response into the result (truncated at 64KB);
-     * binary responses get a hint to re-run with --output. Mirrors iOS.
-     */
     private fun inlineTextIfPossible(data: ByteArray, out: JSONObject) {
         val text = try { String(data, Charsets.UTF_8).takeIf { data.isEmpty() || it.toByteArray(Charsets.UTF_8).contentEquals(data) } } catch (_: Throwable) { null }
         if (text != null) {
@@ -1039,13 +840,6 @@ class ModelUseOffloadHandler(
         }
     }
 
-    /**
-     * [T-android-image-endpoint-mode] Heuristic: does this provider error mean
-     * the /images/generations route doesn't exist on this base URL? Only then
-     * does auto-mode fall back to chat completions — real errors (auth, content
-     * moderation, model-not-found) propagate unchanged. Mirrors iOS
-     * looksLikeEndpointMissing.
-     */
     private fun looksLikeEndpointMissing(message: String): Boolean {
         val m = message.lowercase()
         return m.contains("404") ||
@@ -1058,14 +852,6 @@ class ModelUseOffloadHandler(
             m.contains("405")
     }
 
-    /**
-     * [T-android-image-endpoint-mode] Attempt image-output routing through
-     * /v1/images/generations. Returns a completed [NativeOffloadResult] when
-     * the image path produced output, or null to fall through to the normal
-     * chat-completions sendMessage path (chatCompletions mode, auto-fallback,
-     * or "not an image route" — e.g. non-image model / OAuth / non-OpenAI).
-     * Mirrors iOS ModelUseOffloadBridge step 4.
-     */
     private fun tryImageGenerationRoute(
         entry: ModelEntry,
         instance: com.openminis.app.data.model.ProviderInstance,
@@ -1081,7 +867,6 @@ class ModelUseOffloadHandler(
         val outputs = entry.model.outputModalities.orEmpty()
         val wantsImageOutput = "image" in outputs
         val openAI = provider as? com.openminis.app.provider.openai.OpenAIProvider
-        // Only OpenAI-compatible API-key instances with an image-output model.
         if (!wantsImageOutput || openAI == null) return null
         val pType = instance.providerType
         if (pType != ProviderType.openAI && pType != ProviderType.openRouter && pType != ProviderType.xAI) return null
@@ -1092,14 +877,6 @@ class ModelUseOffloadHandler(
             ?: fallbackPromptMessages.lastOrNull { it.role == "user" }?.content
             ?: ""
 
-        // [T-android-model-use-image-passthrough GH#62] Forward arbitrary
-        // provider-specific body fields, an endpoint-path override, and extra
-        // headers straight through to the /images/generations request — lets
-        // callers drive models our fixed schema never modeled (e.g. Volcengine
-        // Seedream image-to-image via the `image` body field) with no persisted
-        // config. Set on the per-call provider so every generateImage call site
-        // below picks them up; nothing leaks across runs (the provider is built
-        // fresh per model-use invocation).
         val passthrough = parseImagePassthrough(inputJson, callWarnings)
         openAI.imageExtraBody = passthrough.body
         openAI.imagePathOverride = passthrough.path
@@ -1113,19 +890,8 @@ class ModelUseOffloadHandler(
             )
         }
 
-        // A pure image generator (image_output but NOT text_output) can ONLY
-        // use the Images API — never let a stale cached chatCompletions pin it
-        // to the chat endpoint (which 401s "Missing scopes"). Mixed text+image
-        // models keep auto/probe/fallback.
         val isPureImageGenerator = "image" in outputs && "text" !in outputs
 
-        // [T-android-image-edit-endpoint] Input-image requests now route to
-        // /v1/images/edits via editImage, matching iOS ModelUseOffloadBridge —
-        // the endpoint whose absence made this return image_edit_not_supported.
-        // Only a PURE image generator takes that route: a mixed text+image model
-        // still declines to chat, which forwards imageParts to the model and is
-        // the better channel for "look at this image and answer" requests. That
-        // split is the pre-existing guard semantics, deliberately unchanged.
         if (inputImages.isNotEmpty() && !isPureImageGenerator) {
             Log.i(
                 TAG,
@@ -1148,11 +914,8 @@ class ModelUseOffloadHandler(
                 "effective=$effectiveMode",
         )
 
-        // chatCompletions → no image route; fall through to normal sendMessage.
         if (effectiveMode == com.openminis.app.data.model.ImageEndpointMode.chatCompletions) return null
 
-        // imagesGenerations (forced/cached/pure) → call directly; a failure here
-        // is terminal (no silent fallback) so the caller sees the real error.
         if (effectiveMode == com.openminis.app.data.model.ImageEndpointMode.imagesGenerations) {
             val response = try {
                 runBlocking {
@@ -1176,8 +939,6 @@ class ModelUseOffloadHandler(
             return writeImageResult(entry, response, outputPath, outputExt, "images_generations", sessionId)
         }
 
-        // auto mode: probe /images/generations; cache the result; on a
-        // route-missing 4xx, cache chatCompletions and fall through to chat.
         val response = try {
             runBlocking {
                 if (inputImages.isEmpty()) {
@@ -1199,9 +960,8 @@ class ModelUseOffloadHandler(
                 providerRepository.setImageEndpointResolved(
                     instance.id, com.openminis.app.data.model.ImageEndpointMode.chatCompletions,
                 )
-                return null // fall through to chat path
+                return null
             }
-            // Real error (auth/moderation/network) — surface it, don't fall through.
             Log.w(TAG, "[ModelUseRoute] auto probe failed (non-route): ${e.message}", e)
             val hint = imageParamHint(entry)
             val base = e.message ?: "image_generation_failed"
@@ -1215,12 +975,6 @@ class ModelUseOffloadHandler(
         return writeImageResult(entry, response, outputPath, outputExt, "images_generations", sessionId)
     }
 
-    /**
-     * [T-android-image-endpoint-mode] Write an image-generation [response] to
-     * --output (media-first when the path is an image extension) and build the
-     * standard model-use result JSON. Shared shape with cmdRun's media-write
-     * branch.
-     */
     private fun writeImageResult(
         entry: ModelEntry,
         response: com.openminis.app.data.model.LLMResponse,
@@ -1231,18 +985,12 @@ class ModelUseOffloadHandler(
     ): NativeOffloadResult {
         val mediaFiles = JSONArray()
         val firstMedia = response.mediaAttachments.firstOrNull()
-        // [T-android-model-use-no-media-fails] The image endpoint exists to
-        // return an image; an empty list (content filter, quota, provider
-        // quirk) is a failure, never a success with a warning attached.
         if (firstMedia == null) {
             return noMediaResult(entry, response.text, outputPath, endpoint = endpointUsed)
         }
         val ts = System.currentTimeMillis() / 1000
         val modelSlug = entry.model.id.replace("/", "_")
         if (outputPath != null) {
-            // [T-android-model-use-session-scoped-write] Session-scoped first,
-            // global resolver as fallback. --output is absolute here (relative
-            // rejected in cmdRun before the API call).
             val hostFile = sessionScopedHostFile(outputPath, sessionId)
                 ?: PRootKernel.resolveHostPath(outputPath)
                 ?: return NativeOffloadResult(
@@ -1265,8 +1013,6 @@ class ModelUseOffloadHandler(
                 hostFile.writeText(response.text)
             }
         } else if (response.mediaAttachments.isNotEmpty()) {
-            // [T-android-model-use-session-scoped-write] Auto-save to the caller
-            // session's attachments dir, not the global (last-writer-wins) mount.
             val attachDir = sessionScopedHostFile("/var/minis/attachments", sessionId)
                 ?: PRootKernel.resolveHostPath("/var/minis/attachments")
             if (attachDir != null) {
@@ -1297,12 +1043,6 @@ class ModelUseOffloadHandler(
         return NativeOffloadResult(0, body.toString(2) + "\n")
     }
 
-    /**
-     * [T-android-model-use-no-media-fails] Exit 1 with a machine-readable
-     * error and the model's own text (usually the refusal / moderation
-     * reason), and no file written — so neither the exit code nor the disk
-     * suggests an image exists.
-     */
     private fun noMediaResult(
         entry: ModelEntry,
         text: String,
@@ -1325,24 +1065,6 @@ class ModelUseOffloadHandler(
         return NativeOffloadResult(1, body.toString(2) + "\n")
     }
 
-    /**
-     * [T-android-model-use-session-scoped-write] Resolve a `/var/minis/<sub>/...`
-     * Linux path to the caller session's OWN host directory, bypassing the
-     * global (last-writer-wins) PRootKernel.bindMounts map. That global map is
-     * overwritten by ExecutionCoordinator.buildSessionBindMounts on every shell
-     * build, so PRootKernel.resolveHostPath("/var/minis/attachments") returns
-     * whichever session built a shell most recently — a model-use call from
-     * session A could then write into session B's attachments dir while the
-     * response reports the abstract `/var/minis/attachments/...` path, which A's
-     * shell (mounted to A's dir) can't read. Mirrors iOS da4b6c5d, which routes
-     * the write to minisAttachmentsPersistentDir(for: callerSid).
-     *
-     * Session-scoped subdirs are attachments/offloads/workspace/browser (see
-     * buildSessionBindMounts). For those, host dir = filesDir/minis-sessions/
-     * <sid>/<sub>/<rest>. Returns null when [sessionId] is null (caller then
-     * falls back to the global resolveHostPath and logs the degrade) or the path
-     * isn't a session-scoped `/var/minis/<sub>` path.
-     */
     private fun sessionScopedHostFile(linuxPath: String, sessionId: String?): File? {
         if (sessionId == null) return null
         val m = Regex("^/var/minis/(attachments|offloads|workspace|browser)(/.*)?$").find(linuxPath)
@@ -1353,9 +1075,6 @@ class ModelUseOffloadHandler(
         return if (rest.isEmpty()) base else File(base, rest)
     }
 
-    /** [T-android-model-use-session-scoped-write] One-line audit of a model-use
-     *  write so the response path vs on-disk host path vs session scoping is
-     *  greppable when diagnosing "file disappears / wrong session" reports. */
     private fun logModelUseWrite(responsePath: String, hostFile: File, sessionId: String?) {
         Log.i(
             "ModelUseImage",
@@ -1364,11 +1083,6 @@ class ModelUseOffloadHandler(
         )
     }
 
-    /**
-     * If [entry] is an image_output model, return a hint listing the params it
-     * actually accepts, so a failed sendMessage tells the caller how to retry.
-     * Empty string for non-image models.
-     */
     private fun imageParamHint(entry: ModelEntry): String {
         if ("image" !in entry.model.outputModalities.orEmpty()) return ""
         val pType = providerRepository.instance(entry.providerInstanceId)?.providerType
@@ -1383,8 +1097,6 @@ class ModelUseOffloadHandler(
                   {"messages":[{"role":"user","content":"<prompt>"}],
                    "generation_config":{"aspect_ratio":"16:9","image_size":"2K"}}
             """.trimIndent()
-            // [T-android-provider-type-parity] Same /v1/images/generations
-            // shape as OpenAI.
             ProviderType.openAI, ProviderType.openRouter, ProviderType.openAIResponses -> """
                 Hint — ${entry.model.displayName} is an OpenAI-compatible image model. Pass image params at the top level of the input JSON (matches /v1/images/generations):
                   n         integer, number of images (default 1)
@@ -1403,13 +1115,8 @@ class ModelUseOffloadHandler(
                 Explicit-envelope example:
                   {"messages":[{"role":"user","content":"<prompt>"}],"extra_body":{"image":"<url-or-data-uri>","seed":42},"extra_headers":{"X-Custom":"1"},"endpoint_path":"/api/v3/images/generations"}
             """.trimIndent()
-            // xAI (Grok) / Kimi Coding have no image-output models in the
-            // current catalog — fall through to empty hint like Anthropic.
             ProviderType.anthropic, ProviderType.xAI, ProviderType.kimiCode,
-            // [T-copilot-provider] Copilot exposes no image-output model.
             ProviderType.githubCopilot,
-            // [T-android-provider-type-parity] No image-param hint for types
-            // this build cannot drive.
             ProviderType.antigravity, ProviderType.unsupported, ProviderType.workBuddy,
             ProviderType.qoder, ProviderType.minimaxCode, null -> ""
         }
@@ -1436,14 +1143,10 @@ class ModelUseOffloadHandler(
         else -> mime.substringAfterLast("/", "bin")
     }
 
-    // ─── Helpers ────────────────────────────────────────────────────────────
 
     private fun resolveEntry(idOrName: String, providerFilter: String? = null): ModelEntry? {
         val all = providerRepository.resolvedAgentLoopEntries()
 
-        // Apply --provider filter first: match against instance label (case-insensitive)
-        // OR instance UUID. Restricts the lookup pool so the same model_id under
-        // multiple providers can be picked unambiguously.
         val pool = if (providerFilter.isNullOrEmpty()) all else {
             val pf = providerFilter.lowercase()
             all.filter { entry ->
@@ -1453,8 +1156,6 @@ class ModelUseOffloadHandler(
         }
         if (pool.isEmpty()) return null
 
-        // 0. Qualified `<instance_label>/<model_id>` — split on FIRST '/' only
-        //    since model_id itself may contain '/' (e.g. "deepseek-ai/DeepSeek-V4").
         val slash = idOrName.indexOf('/')
         if (slash > 0 && slash < idOrName.length - 1) {
             val labelPart = idOrName.substring(0, slash).lowercase()
@@ -1467,13 +1168,9 @@ class ModelUseOffloadHandler(
             }?.let { return it }
         }
 
-        // Exact ID
         pool.find { it.model.id == idOrName }?.let { return it }
-        // Exact display name
         pool.find { it.model.displayName == idOrName }?.let { return it }
-        // Entry UUID
         pool.find { it.id == idOrName }?.let { return it }
-        // Case-insensitive prefix / contains
         val q = idOrName.lowercase()
         pool.find { it.model.id.lowercase().startsWith(q) }?.let { return it }
         pool.find { it.model.displayName.lowercase().contains(q) }?.let { return it }
@@ -1489,11 +1186,6 @@ class ModelUseOffloadHandler(
             providerRepository.instance(entry.providerInstanceId),
         )
 
-    /**
-     * Modality filter: matches iOS behavior. Terms are comma-separated and
-     * checked against input/output modality lists. All requested terms must
-     * be satisfied for an entry to pass.
-     */
     private fun matchesModality(entry: ModelEntry, filter: String): Boolean {
         val inputs = entry.model.inputModalities.orEmpty()
         val outputs = entry.model.outputModalities.orEmpty()
@@ -1522,37 +1214,13 @@ class ModelUseOffloadHandler(
         return try { hostFile.readText() } catch (_: Throwable) { null }
     }
 
-    /**
-     * One parsed message from the input JSON, carrying both text content
-     * and any image attachments extracted from a content array. Images
-     * collected here are forwarded to [LLMProvider.sendMessage]'s
-     * `imageParts` parameter (which providers attach to the last user
-     * message), not embedded in [LLMMessage.content] — that field stays
-     * a plain string so providers don't see a stringified `[{type:...}]`
-     * payload they can't parse.
-     */
     private data class ParsedMessage(
         val role: String,
         val content: String,
         val images: List<LLMMessage.ImagePart>,
-        /** [GH#67] input_audio blocks extracted from the content array. */
         val audios: List<LLMMessage.AudioPart> = emptyList(),
     )
 
-    /**
-     * Parse messages from stdin text or a JSON file. Preserves `system`
-     * messages so the caller can merge them into systemPrompt. Image
-     * parts (OpenAI-style `{"type":"image_url","image_url":{"url":...}}`
-     * blocks) are extracted into [ParsedMessage.images] — previously
-     * they were silently dropped during the content-array reduction and
-     * the model received text-only input, which is why Jackson saw the
-     * `NO_IMAGE` response (T-android-model-use-multimodal).
-     *
-     * Accepted shapes:
-     * - `{"messages":[{"role":"user","content":"..."}]}` — OpenAI-style
-     * - `[{"role":"...","content":"..."}, ...]` — array of messages
-     * - Plain text → wrapped as a single user message
-     */
     private fun parseMessages(text: String): List<ParsedMessage> {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return emptyList()
@@ -1567,15 +1235,10 @@ class ModelUseOffloadHandler(
                 return parseMessageArray(JSONArray(trimmed))
             }
         } catch (e: ImageInputError) {
-            // Deliberate hard errors from block parsing must NOT be swallowed
-            // by the plain-text fallback — otherwise the whole input JSON gets
-            // sent to the model as literal text (observed with a malformed
-            // input_audio block during GH#67 verification).
             throw e
         } catch (e: AudioInputError) {
             throw e
         } catch (_: Throwable) {
-            // Fall through to plain-text handling
         }
         return listOf(ParsedMessage("user", trimmed, emptyList()))
     }
@@ -1603,16 +1266,9 @@ class ModelUseOffloadHandler(
                             try {
                                 imgs.add(resolveImageUrl(url))
                             } catch (e: ImageInputError) {
-                                // Don't silently drop — surface to the agent so it
-                                // can correct the URL or fall back to text.
                                 throw e
                             }
                         } else if (type == "input_audio") {
-                            // [GH#67] input_audio was previously skipped with no
-                            // trace — the request went out text-only. Parse the
-                            // official OpenAI shape; malformed blocks are a hard
-                            // input error, not a silent drop. Mirrors iOS
-                            // parseOpenAIMessages.
                             val audioObj = part.optJSONObject("input_audio")
                                 ?: throw AudioInputError(
                                     "input_audio block is malformed. Expected " +
@@ -1633,7 +1289,7 @@ class ModelUseOffloadHandler(
                         }
                     }
                 }
-                else -> { /* leave both buffers empty → message skipped below */ }
+                else -> {  }
             }
             if (textBuf.isEmpty() && imgs.isEmpty() && auds.isEmpty()) continue
             out.add(ParsedMessage(role, textBuf.toString(), imgs, auds))
@@ -1641,26 +1297,7 @@ class ModelUseOffloadHandler(
         return out
     }
 
-    /**
-     * Resolve an OpenAI-style image_url string to raw bytes + MIME.
-     * Mirrors iOS ModelUseOffloadBridge.resolveImageURL (subset that the
-     * Android offload path actually needs):
-     *
-     *  - `data:<mime>;base64,<...>` → inline base64
-     *  - `file:///<host-path>` → direct host read
-     *  - `/var/minis/<scope>/<path>` or `/<abs/linux/path>` → via
-     *    [PRootKernel.resolveHostPath] (which already handles
-     *    `/var/minis/` bind mounts longest-prefix)
-     *  - `http(s)://` → throw with a hint to download via shell_execute
-     *    first (matches iOS — avoids egressing user content)
-     *  - anything else (relative paths, unknown schemes) → throw
-     *
-     * Throws [ImageInputError] on any unresolvable URL so the CLI exits
-     * non-zero with a descriptive message instead of silently feeding
-     * the model an image-less request (the prior failure mode).
-     */
     private fun resolveImageUrl(url: String): LLMMessage.ImagePart {
-        // data:<mime>;base64,<base64>
         if (url.startsWith("data:")) {
             val rest = url.substring(5)
             val semi = rest.indexOf(';')
@@ -1678,7 +1315,6 @@ class ModelUseOffloadHandler(
             return LLMMessage.ImagePart(data = bytes, mimeType = mime)
         }
 
-        // http(s):// — surface the iOS-parity message
         if (url.startsWith("http://") || url.startsWith("https://")) {
             throw ImageInputError(
                 "http(s):// image URLs are not supported by minis-model-use. " +
@@ -1687,9 +1323,6 @@ class ModelUseOffloadHandler(
             )
         }
 
-        // file:///abs/path → strip prefix, treat as host path; fall back
-        // to resolveHostPath so bind-mounted /var/minis/* still works
-        // when callers write file:///var/minis/... .
         val linuxPath = when {
             url.startsWith("file://") -> url.removePrefix("file://")
             url.startsWith("/") -> url
@@ -1732,7 +1365,6 @@ class ModelUseOffloadHandler(
 
     private class ImageInputError(message: String) : RuntimeException(message)
 
-    /** [GH#67] Malformed/undecodable input_audio block — hard input error. */
     private class AudioInputError(message: String) : RuntimeException(message)
 
     private fun textMessage(
@@ -1752,15 +1384,6 @@ class ModelUseOffloadHandler(
         private const val NO_MODELS_HINT =
             "No models available. Go to Settings > Model Groups to add models that the agent can use."
 
-        /** Appended to non-empty list/search results so the agent knows how to invoke a model.
-         *  Three forms are supported by `run --model`:
-         *    1. Plain `model_id` (e.g. `claude-sonnet-4-6`) — works when unique.
-         *    2. `instance_label/model_id` (e.g. `deepseek/deepseek-v4-flash`) — required when
-         *       the same model_id is configured under multiple provider instances.
-         *    3. `--model <model_id> --provider <instance_label>` — equivalent to (2),
-         *       preferred when the model_id itself contains slashes.
-         *  `entry_id` (UUID) also works but is opaque; prefer the human-readable forms.
-         */
         private const val USAGE_HINT =
             "To invoke a model, pass `--model <model_id>` to `minis-model-use run`. " +
             "If multiple providers expose the same `model_id`, disambiguate either with " +
@@ -1768,10 +1391,6 @@ class ModelUseOffloadHandler(
             "or with `--model <model_id> --provider <instance_label>` " +
             "(e.g. `--model deepseek-v4-flash --provider deepseek`). " +
             "The opaque `entry_id` (UUID) is also accepted. " +
-            // [T-android-model-use-image-passthrough GH#62] Progressive-disclosure
-            // breadcrumbs: surface capability keywords up front so the model knows
-            // what's possible and which model's per-entry `hint` to read for the
-            // exact param shape.
             "Capabilities by modality (run without --model, or inspect a model's `hint` field, " +
             "for the exact JSON shape): text generation, image generation, image-to-image, " +
             "image editing, audio (TTS/STT), embeddings. " +

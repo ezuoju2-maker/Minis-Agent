@@ -13,32 +13,11 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
-/**
- * Host-side endpoint of the proot `native_offload` extension.
- *
- * The guest issues `execve("<handler-name>", argv, envp)`; the proot
- * extension sends argv/env/cwd over an abstract unix socket to this
- * server. The server dispatches to the registered [NativeOffloadHandler],
- * writes the handler's combined output into a tmpfile inside the guest's
- * /tmp, and replies with `(exit_code, guest_tmpfile_path)`. The extension
- * then rewrites the execve into `/bin/cat <tmpfile>` so the guest sees
- * the handler output as plain stdout.
- *
- * Mirrors iOS `native_offload_add_handler` + `native_offload_exec`.
- */
 data class NativeOffloadRequest(
     val pid: Int,
     val argv: List<String>,
     val env: Map<String, String>,
     val cwd: String,
-    /**
-     * T340: chat session id forwarded by the agent shell via the
-     * `MINIS_CHAT_SESSION_ID` env var. Lets [OffloadPermissionManager]
-     * scope ASK_ONCE grants/denials per-chat-session instead of using
-     * a single process-wide bucket. Null when the offload originates
-     * outside a chat (e.g. interactive terminal) — handlers fall back
-     * to `OFFLOAD_GLOBAL_SESSION_ID` in that case.
-     */
     val sessionId: String? = null,
 )
 
@@ -51,109 +30,43 @@ fun interface NativeOffloadHandler {
     fun handle(request: NativeOffloadRequest): NativeOffloadResult
 }
 
-/** [T-native-offload-peer-uid] Only this app's own uid may use the offload socket. */
 internal object PeerCheck {
     fun allowed(peerUid: Int, myUid: Int): Boolean = peerUid >= 0 && peerUid == myUid
 }
 
-/** [T-offload-cloexec-api29] Os.fcntlInt is public SDK API from 30 (R) on. */
 internal fun canSetCloseOnExec(sdkInt: Int): Boolean = sdkInt >= 30
 
 object NativeOffloadServer {
     private const val TAG = "NativeOffloadServer"
-    /**
-     * [T-native-offload-bind] Prefix of the abstract socket name; the full
-     * name is [socketName]. It is never used on its own: the bare
-     * "native-offload" is what every earlier build bound.
-     */
     private const val SOCKET_NAME_PREFIX = "native-offload"
-    private const val MAGIC_REQ = 0x46464F4E  // 'N' 'O' 'F' 'F' little-endian
-    private const val MAGIC_RSP = 0x52464F4E  // 'N' 'O' 'F' 'R'
+    private const val MAGIC_REQ = 0x46464F4E
+    private const val MAGIC_RSP = 0x52464F4E
     private const val VERSION = 1
 
-    /** [T-android-offload-tmp-leak] Filename prefix of a handler reply file. */
     private const val REPLY_PREFIX = ".native-offload-"
 
-    /**
-     * How long a reply file may live before the in-session sweep may remove it.
-     *
-     * The real gap between writing the file and the rewritten `/bin/cat` reading
-     * it is sub-millisecond, so 10 minutes is enormously conservative — it
-     * exists only so a stopped/slow tracee can never lose its output.
-     */
     private const val REPLY_TTL_MS = 10 * 60 * 1000L
 
-    /** Run the opportunistic sweep every N replies, not on every single one. */
     private const val SWEEP_EVERY_N_REPLIES = 50L
 
-    /**
-     * [T-native-offload-bind] The abstract socket this app instance listens
-     * on: `native-offload-<uid>-<pid>`, e.g. `native-offload-10379-4242`.
-     *
-     * Abstract unix names are global to the network namespace, not to the
-     * app. A fixed "native-offload" therefore collided with anything else on
-     * the device holding that name - a second Minis in an app-clone / work
-     * profile / secondary user (same package, different uid), a fork built
-     * from this code, or a leftover process. The bind then failed and, since
-     * it threw from Application.onCreate, the app could never start again.
-     * The uid differs for every such instance (userId * 100000 + appId).
-     *
-     * [GH-440] The pid makes the name unique per process as well, so it no
-     * longer relies on exactly one process per uid calling [start]: today
-     * that holds only because the `:acra` reporter returns from
-     * MinisApp.onCreate first, and any process added later would have
-     * silently lost offload to whichever bound first. It also means a
-     * previous process of this app (or, below API 30 where the socket is not
-     * close-on-exec, a guest process that inherited it) can no longer hold
-     * the name this one needs. Suggested in the GH #440 patch.
-     *
-     * proot gets the name only through `--native-offload=<name>:<handlers>`
-     * from the four launchers, which all read it here, so the name is not
-     * persisted anywhere and the proot extension needs no change.
-     */
     val socketName: String by lazy {
         socketNameFor(android.os.Process.myUid(), android.os.Process.myPid())
     }
 
     internal fun socketNameFor(uid: Int, pid: Int): String = "$SOCKET_NAME_PREFIX-$uid-$pid"
 
-    /** First background retry delays, then [RETRY_STEADY_MS] until it binds. */
     private val RETRY_DELAYS_MS = longArrayOf(50L, 100L, 200L, 400L, 800L, 2_000L, 5_000L, 10_000L)
     private const val RETRY_STEADY_MS = 30_000L
 
-    /** How long a shell launcher waits for a bind that is being retried. */
     const val AWAIT_LISTENING_MS = 2_000L
 
-    /**
-     * Launchers wait only within this window after the first bind failed.
-     * It covers the usual cause - the previous process of this app still
-     * releasing the name for a moment after a restart. Past it, the name is
-     * held for real and waiting would only add [AWAIT_LISTENING_MS] to every
-     * shell command while degraded.
-     */
     private const val AWAIT_WINDOW_MS = 5_000L
 
     private val handlers = ConcurrentHashMap<String, NativeOffloadHandler>()
     private val counter = AtomicLong(0)
 
-    /**
-     * [GH #453] Most offload calls served at once; one more is answered
-     * "busy" (exit 75) instead of getting a thread. Each call holds a worker
-     * thread (about 1 MB of stack) until its handler returns, and the protocol
-     * has no cancel message, so a handler that never returns used to leak its
-     * thread for the life of the process. The known never-returning waits are
-     * now bounded (OffloadPermissionManager.DECISION_TIMEOUT_MS), but the long
-     * legitimate ones remain - `minis-scheduled run` waits for a whole agent
-     * run (up to ~90 min), `model_use` for a full model reply, and each
-     * sub-agent's shell can have one in flight. 128 is far above what those
-     * need together and far below where thread creation fails, so this only
-     * ever turns an unknown leak into a visible, logged error instead of a
-     * crash. Rejecting rather than queueing: a queue behind stuck handlers
-     * would hang every later command.
-     */
     internal const val MAX_CONCURRENT_CALLS = 128
 
-    /** [GH #453] Exit code of a call refused at [MAX_CONCURRENT_CALLS] (EX_TEMPFAIL). */
     internal const val EXIT_BUSY = 75
 
     internal val inFlight = OffloadInFlight()
@@ -162,15 +75,12 @@ object NativeOffloadServer {
     private var serverSocket: LocalServerSocket? = null
     private var acceptThread: Thread? = null
 
-    /** [T-native-offload-bind] Non-null while a background bind retry runs. */
     @Volatile
     private var retryThread: Thread? = null
 
-    /** When the first bind failed (uptime ms), 0 when not degraded. */
     @Volatile
     private var degradedSinceMs = 0L
 
-    /** True once the server is bound and accepting. */
     val isListening: Boolean get() = serverSocket != null
 
     @Volatile
@@ -184,19 +94,6 @@ object NativeOffloadServer {
         Log.d(TAG, "register '$name' (total=${handlers.size})")
     }
 
-    /**
-     * Bind the server. Never throws and never sleeps on the caller's thread.
-     *
-     * [T-native-offload-bind] One synchronous attempt, as before, so on the
-     * normal path the socket is listening before onCreate returns and before
-     * any shell can start. If that attempt fails (the name is held by
-     * someone else), the app keeps running without native offload: the
-     * offload CLIs report themselves unavailable (see [awaitListening] and
-     * the handler stubs) and a daemon thread retries the bind in the
-     * background until it succeeds. Previously this threw from
-     * Application.onCreate after ~1.55 s of sleeps on the main thread, and a
-     * name held for longer than that put the app into an endless crash loop.
-     */
     @Synchronized
     fun start(rootfsDir: File) {
         rootfsTmpDir = File(rootfsDir, "tmp")
@@ -213,15 +110,6 @@ object NativeOffloadServer {
         retryThread = thread(name = "native-offload-rebind", isDaemon = true) { retryBindLoop() }
     }
 
-    /**
-     * Wait up to [timeoutMs] for the server to be listening. Returns at once
-     * when it already is (the normal case), when no bind is pending, on the
-     * main thread, or once [AWAIT_WINDOW_MS] have passed since the first
-     * bind failed. Shell launchers pass `--native-offload` only when this
-     * returns true: a proot pointed at a name nobody of ours serves either
-     * fails each offload silently or, when another process holds the name
-     * without accepting, blocks in connect/read forever.
-     */
     fun awaitListening(timeoutMs: Long = AWAIT_LISTENING_MS): Boolean {
         if (serverSocket != null) return true
         if (retryThread == null) return false
@@ -245,22 +133,7 @@ object NativeOffloadServer {
             null
         }
 
-    /**
-     * [T-native-offload-cloexec] Keep the listening socket out of every
-     * process we exec. Without FD_CLOEXEC the terminal's proot and every
-     * guest process under it (fork+execve in pty_bridge.c) held the bound
-     * name, so one of them outliving the app would keep the name taken and
-     * every later launch would find it in use. Nothing needs to inherit it:
-     * proot connects by name.
-     */
     private fun setCloseOnExec(s: LocalServerSocket) {
-        // [T-offload-cloexec-api29] Os.fcntlInt is public only from API 30. On
-        // 26-29 it is a greylisted hidden method: linking it throws
-        // NoSuchMethodError - an Error, not an Exception - which killed the
-        // process from the bind-retry thread the first time a shell started
-        // (Android 10, 1.15-beta.3). Below 30 the socket stays inheritable, as
-        // it was before f61d6f472; a stale holder of the name is already
-        // handled by the bind-retry loop.
         if (!canSetCloseOnExec(android.os.Build.VERSION.SDK_INT)) {
             Log.i(TAG, "FD_CLOEXEC on the offload socket skipped below API 30")
             return
@@ -302,41 +175,9 @@ object NativeOffloadServer {
         Log.i(TAG, "listening on abstract socket '$socketName' " +
             "handlers=${handlers.keys.sorted()} tmpDir=${rootfsTmpDir?.absolutePath}")
 
-        // [T-android-offload-tmp-leak] Sweep reply files orphaned by earlier
-        // app processes. See sweepStaleReplies for why this is safe here and
-        // why the mechanism leaks in the first place.
         sweepStaleReplies(all = true)
     }
 
-    /**
-     * [T-android-offload-tmp-leak] Delete `.native-offload-*` reply files.
-     *
-     * WHY THESE LEAK. Each offload call writes the handler's combined output to
-     * `<rootfs>/tmp/.native-offload-<pid>-<seq>` and returns the GUEST path;
-     * proot's native_offload extension then rewrites the tracee's execve into
-     * `/bin/cat <tmpfile>`. So the host cannot delete the file at reply time —
-     * `cat` has not run yet, and deleting it would turn every offload call into
-     * "No such file or directory". Nothing else ever removed them either
-     * (`delete`/`cleanup` were zero occurrences in this file), so one file
-     * accumulated per offload call, forever: measured on a dev device, 35 files
-     * spanning 12 days and surviving many app restarts, growing +1 per call.
-     * On a heavy user's device this reached thousands of files / GBs, showing
-     * up as an inflated "Shell container" figure on the storage screen.
-     *
-     * WHY DELETING IS SAFE HERE.
-     *  - [all] = true is used at server start. Any file present then belongs to
-     *    a PREVIOUS app process: its tracee died with that process, so no `cat`
-     *    can still be pending on it.
-     *  - [all] = false keeps files younger than [REPLY_TTL_MS] and is used
-     *    opportunistically while serving. The TTL is what makes it safe: it only
-     *    ever removes files far older than the microseconds between writing the
-     *    reply and the rewritten `cat` reading it. A pathologically stopped
-     *    tracee (SIGSTOP between execve-enter and the read) is the sole way to
-     *    exceed it, and that already means the caller is not reading its output.
-     *
-     * Failures are logged and swallowed: a leaked temp file must never break an
-     * offload call.
-     */
     private fun sweepStaleReplies(all: Boolean) {
         val dir = rootfsTmpDir ?: return
         try {
@@ -393,8 +234,6 @@ object NativeOffloadServer {
                     }
                 }
             } catch (t: Throwable) {
-                // pthread_create failed (GH #453's OutOfMemoryError): refuse
-                // this call and keep accepting rather than lose the server.
                 inFlight.release()
                 Log.w(TAG, "could not start an offload worker: $t")
                 try { client.close() } catch (_: Exception) {}
@@ -402,11 +241,6 @@ object NativeOffloadServer {
         }
     }
 
-    /**
-     * [GH #453] Answer a call over [MAX_CONCURRENT_CALLS] on the accept thread:
-     * read its request (proot sends it at once; 2 s read timeout), reply busy
-     * with the commands currently holding the slots.
-     */
     private fun rejectBusy(client: LocalSocket) {
         val busy = inFlight.summary()
         val now = System.currentTimeMillis()
@@ -435,20 +269,12 @@ object NativeOffloadServer {
         }
     }
 
-    /** [GH #453] `command:count(oldest Ns)` for the calls in flight, for logs. */
     fun inFlightSummary(): String = inFlight.summary()
 
-    /** [T-native-offload-peer-uid] First accepted peer uid, logged once. */
     @Volatile
     private var loggedPeerUid = false
 
     private fun handleClient(client: LocalSocket) {
-        // [T-native-offload-peer-uid] Abstract sockets have no filesystem
-        // permissions: any app on the device could connect and drive these
-        // handlers (contacts, photos, model calls with the user's keys). The
-        // only legitimate client is proot - it connects from the tracer
-        // process itself, which always runs as this app's uid (`-0` fakes
-        // root only inside the guest). Refuse every other uid.
         val peerUid = try { client.peerCredentials.uid } catch (e: Exception) { -1 }
         if (!PeerCheck.allowed(peerUid, android.os.Process.myUid())) {
             Log.w(TAG, "refused offload client uid=$peerUid (expected ${android.os.Process.myUid()})")
@@ -470,8 +296,6 @@ object NativeOffloadServer {
 
         val t0 = System.nanoTime()
         val handler = handlers[name]
-        // [GH #453] Name the thread after its command, so a thread count by
-        // name (JankDiag, tombstone summary) says which command holds them.
         if (handler != null) {
             runCatching { Thread.currentThread().name = OffloadInFlight.workerThreadName(name) }
             inFlight.begin(name)
@@ -505,7 +329,6 @@ object NativeOffloadServer {
 
     private class WireRequest(val pid: Int, val argv: List<String>, val env: Map<String, String>, val cwd: String)
 
-    /** The request frame, or null (logged) for a bad magic / version. */
     private fun readRequest(input: DataInputStream): WireRequest? {
         val magic = input.readLEInt()
         if (magic != MAGIC_REQ) {
@@ -536,7 +359,6 @@ object NativeOffloadServer {
         return WireRequest(pid, argv, env, cwd)
     }
 
-    /** Write [result]'s output to its reply file and send the response frame; returns the guest path. */
     private fun writeReply(output: DataOutputStream, pid: Int, result: NativeOffloadResult): String {
         val tmpDir = rootfsTmpDir ?: throw IllegalStateException("server not started")
         tmpDir.mkdirs()
@@ -545,13 +367,6 @@ object NativeOffloadServer {
         tmpHost.writeText(result.output)
         val tmpGuest = "/tmp/${tmpHost.name}"
 
-        // [T-android-offload-tmp-leak] Bound growth WITHIN a long-running
-        // process. The start-time sweep only catches files from previous
-        // processes, but a single session can issue thousands of offload calls
-        // (agent loops shelling out repeatedly), so without this the leak simply
-        // moves from "across restarts" to "within one run". Age-gated, so the
-        // file just written — and any other still awaiting its `cat` — is never
-        // touched. Sampled rather than run per reply to keep the hot path cheap.
         if (seq % SWEEP_EVERY_N_REPLIES == 0L) sweepStaleReplies(all = false)
 
         output.writeLEInt(MAGIC_RSP)
@@ -561,7 +376,6 @@ object NativeOffloadServer {
         return tmpGuest
     }
 
-    // ---- little-endian helpers ----
 
     private fun DataInputStream.readLEInt(): Int {
         val buf = ByteArray(4)

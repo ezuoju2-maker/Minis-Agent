@@ -10,46 +10,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-compact-summary-dropped] The compact summary has to survive
- * SERIALIZATION, not just assembly.
- *
- * The bug this pins: `effectiveAgentHistory()` injected the
- * `<context-summary>` envelope by rewriting only `LLMMessage.content`. Every
- * persisted message also carries `contentParts` (its partsJson round-trips
- * into a Text part), and the provider serializers prefer parts when they
- * exist — the Responses builder emits `textParts.joinToString("")` for a user
- * turn and never reads `msg.content`. So on a session whose anchor was not the
- * last message, the summary was built, logged (`summaryChars=734` in
- * CompactDiag) and then silently dropped on the way to the wire: the model
- * received NEITHER the compacted turns NOR the summary standing in for them.
- *
- * Why these tests are shaped this way:
- *
- *  - They assert the **request body**, because the body is what was wrong. The
- *    five pre-existing compact tests (budget / fallback / split predicate /
- *    tool pairing / divider placement) all cover the PRODUCTION of a
- *    compaction — whether a summary string gets generated, how failures retry,
- *    where the divider row lands. Not one of them looks at what reaches the
- *    model, which is exactly why this survived four months undetected. A test
- *    asserting "a summary was produced" passes against the bug.
- *
- *  - They cover BOTH serialization branches. The defect was a
- *    two-representations-one-updated mistake, so a test that exercises only
- *    the `content` path would still pass with the parts path broken (and vice
- *    versa). `contentParts.isNotEmpty()` is the branch selector in both
- *    builders, so each case below is pinned by a message shaped to take a
- *    different side of it.
- *
- * [injectSummary] is kept byte-for-byte equivalent to the production injection
- * in `ChatViewModel.effectiveAgentHistoryUncounted()`. If the two drift, the
- * `parts-carrying` case is the one that fails — the same way
- * CompactToolPairingTest mirrors its production algorithm rather than
- * constructing a ChatViewModel (which needs a Context, a DB and a provider).
- */
 class CompactSummaryOnTheWireTest {
 
-    /** The real envelope, verbatim from ChatViewModel. */
     private fun summaryWrappedText(summary: String): String =
         "<context-summary>\n" +
             "The following is a summary of the earlier conversation that was compacted to save context space.\n" +
@@ -57,10 +19,6 @@ class CompactSummaryOnTheWireTest {
             summary +
             "\n</context-summary>"
 
-    /**
-     * Mirror of the production injection: prepend the envelope onto the first
-     * post-anchor user turn, updating BOTH representations.
-     */
     private fun injectSummary(target: LLMMessage, summary: String): LLMMessage {
         val wrapped = summaryWrappedText(summary)
         val parts = if (target.contentParts.isEmpty()) {
@@ -93,14 +51,8 @@ class CompactSummaryOnTheWireTest {
         useResponsesAPI = useResponses,
     )
 
-    /** Every string anywhere in the body — the summary must show up in one. */
     private fun bodyText(body: JSONObject): String = body.toString()
 
-    // ── Branch 1: persisted message (carries contentParts) ────────────────
-    //
-    // This is the shape that actually broke. A message loaded from the DB
-    // always has a Text part, so both builders take the parts branch and
-    // `content` is never read.
 
     private fun persistedUserTurn(text: String) = LLMMessage(
         role = LLMMessage.Role.USER,
@@ -109,7 +61,6 @@ class CompactSummaryOnTheWireTest {
         dbMessageId = "db-1",
     )
 
-    /** A synthesized turn, as the compactAll path produces: no parts at all. */
     private fun synthesizedUserTurn(text: String) =
         LLMMessage(role = LLMMessage.Role.USER, content = text)
 
@@ -166,13 +117,6 @@ class CompactSummaryOnTheWireTest {
         )
     }
 
-    // ── Branch 2: synthesized message (content only, no parts) ────────────
-    //
-    // This is the shape `/compact` produces — a standalone summary turn built
-    // by `LLMMessage(role = USER, content = summaryWrappedText)`. It was never
-    // broken, and that is precisely why the bug hid for so long: the common
-    // entry point took the safe branch. Pinned so a future "simplify the
-    // serializer" change cannot break the path that currently works.
 
     @Test
     fun `standalone summary turn survives the Responses API path`() {
@@ -205,7 +149,6 @@ class CompactSummaryOnTheWireTest {
         assertTrue(text.contains("STANDALONE-SUMMARY"))
     }
 
-    // ── The injection itself ───────────────────────────────────────────────
 
     @Test
     fun `injection updates both representations, not just content`() {
@@ -227,8 +170,6 @@ class CompactSummaryOnTheWireTest {
 
     @Test
     fun `injection into a turn with no text part prepends one instead of editing a non-text part`() {
-        // An image- or tool-only turn has no Text part to prepend onto. The
-        // summary must still get in, without disturbing what is already there.
         val toolOnly = LLMMessage(
             role = LLMMessage.Role.USER,
             content = "",

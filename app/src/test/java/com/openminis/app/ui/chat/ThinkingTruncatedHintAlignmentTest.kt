@@ -5,11 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-thinking-hint-align] The "showing last 8K of 10K characters" hint above a
- * truncated thinking block lines up with the thinking text: the text has no
- * horizontal inset, so the hint must not have one either.
- */
 class ThinkingTruncatedHintAlignmentTest {
 
     @Test

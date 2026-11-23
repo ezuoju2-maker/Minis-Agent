@@ -88,44 +88,25 @@ fun SettingsScreen(
     onRootfsClick: () -> Unit = {},
     onBackupClick: () -> Unit = {},
     onEnvVarsClick: () -> Unit = {},
-    /** [T-net-android-phase2] Settings › Network › Network Routing. */
     onNetworkClick: () -> Unit = {},
-    /** [FEAT-261021-04] The other rows of the Network section. */
     onTailscaleClick: () -> Unit = {},
     onProxiesClick: () -> Unit = {},
     onContainerDnsClick: () -> Unit = {},
     onSkillsClick: () -> Unit = {},
     onTerminalClick: () -> Unit = {},
     onMemoryClick: () -> Unit = {},
-    /** [T-p2-agent-settings] Settings › Agents (delegation on/off), below Memory. */
     onAgentsClick: () -> Unit = {},
     onAgentToolsClick: () -> Unit = {},
-    // [T-mcp-integration-android] MCP Integrations page, listed directly below
-    // Memory. Default no-op for callers that haven't wired the route yet.
     onMcpClick: () -> Unit = {},
-    // [T-soul-md] Soul settings page lives between Skills and Memory in the
-    // Agent Runtime section; default no-op for callers that haven't wired
-    // the route yet.
     onSoulClick: () -> Unit = {},
     onPermissionsClick: () -> Unit = {},
     onUsageClick: () -> Unit = {},
     onAppearanceClick: () -> Unit = {},
     onLogsClick: () -> Unit = {},
-    // T219-2: Mount External Folders entry. Default no-op for any caller
-    // that hasn't wired the route yet.
     onMountedFoldersClick: () -> Unit = {},
-    // T235: Shared Folders entry (Shared / Skills / Memory). Default no-op
-    // for back-compat with callers wired before T235.
     onSharedFoldersClick: () -> Unit = {},
-    // [T-workbuddy] Discover → Built-in Models (account login, zero-config).
     onBuiltInModelsClick: () -> Unit = {},
-    // T50: Background & Notifications screen (battery optimisation +
-    // OEM autostart guidance). Default no-op so older callers/tests
-    // don't need to be retrofitted.
     onBackgroundClick: () -> Unit = {},
-    // Hook accepted for forward-compat with AppNavigation's About route. The
-    // About row below still has a TODO onClick in HEAD; future settings-bucket
-    // work will wire this through.
     onAboutClick: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -151,7 +132,6 @@ fun SettingsScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState()),
         ) {
-            // -- LLM Providers --
             SettingsSection(
                 title = stringResource(R.string.settings_section_llm_providers),
                 footer = stringResource(R.string.settings_section_llm_providers_footer),
@@ -180,9 +160,6 @@ fun SettingsScreen(
                 )
             }
 
-            // -- Discover (placeholder) --
-            // Built-in Models and Plugin Market entry points. Placeholder only —
-            // no screen/route is wired yet; tapping shows a "coming soon" toast.
             SettingsSection(title = stringResource(R.string.settings_section_discover)) {
                 SettingsItem(
                     icon = Icons.Outlined.Memory,
@@ -193,7 +170,6 @@ fun SettingsScreen(
                 )
             }
 
-            // -- Appearance --
             SettingsSection(title = stringResource(R.string.settings_section_appearance)) {
                 SettingsItem(
                     icon = Icons.Outlined.Palette,
@@ -205,19 +181,7 @@ fun SettingsScreen(
                 )
             }
 
-            // -- Agent Runtime --
-            // [T-android-settings-runtime-order] Row order matches iOS
-            // (ContentView.swift, Section "Agent Runtime"): Agent Tools, Sub
-            // Agents, Skills, Soul, Memory, MCP, Environment Variables.
-            //
-            // The order is not alphabetical or historical — it runs from what
-            // the agent may DO (tools, and who it may hand work to) to what it
-            // is made OF (skills, identity, memory) and finally to what it
-            // connects to (MCP, env). Android had grown its own order simply by
-            // appending each row as it landed, which put the two capability
-            // switches in the middle of the identity rows.
             SettingsSection(title = stringResource(R.string.settings_section_agent_runtime)) {
-                // [T-tools-granular-switches] Which optional tools the agent may use.
                 SettingsItem(
                     icon = Icons.Outlined.Handyman,
                     iconColor = Color(0xFF5E5CE6),
@@ -239,7 +203,6 @@ fun SettingsScreen(
                     subtitle = stringResource(R.string.settings_skills_subtitle),
                     onClick = onSkillsClick,
                 )
-                // [T-soul-md] Between Skills and Memory, as on iOS.
                 SettingsItem(
                     icon = Icons.Outlined.AutoAwesome,
                     iconColor = Color(0xFFFF9500),
@@ -254,10 +217,6 @@ fun SettingsScreen(
                     subtitle = stringResource(R.string.settings_memory_subtitle),
                     onClick = onMemoryClick,
                 )
-                // [T-mcp-integration-android] MCP Integrations — below Memory.
-                // [T-android-mcp-icon-distinct] Dashboard (2x2 block grid) instead of
-                // Extension so MCP no longer shares the Skills row's puzzle-piece icon —
-                // the grid reads as "multiple composed blocks/servers". teal unchanged.
                 SettingsItem(
                     icon = Icons.Outlined.Dashboard,
                     iconColor = Color(0xFF30B0C7),
@@ -275,7 +234,6 @@ fun SettingsScreen(
                 )
             }
 
-            // -- Storage --
             SettingsSection(title = stringResource(R.string.settings_section_storage)) {
                 SettingsItem(
                     icon = Icons.Outlined.Inventory2,
@@ -308,9 +266,6 @@ fun SettingsScreen(
                 )
             }
 
-            // -- Network -- [FEAT-261021-04, iOS c77be4fb6] its own section below
-            // Storage: Network Routing, Tailscale, Proxies and the Shell
-            // Container DNS (until now only on the Rootfs page).
             SettingsSection(title = stringResource(R.string.network_title)) {
                 SettingsItem(
                     icon = Icons.Outlined.Lan,
@@ -343,7 +298,6 @@ fun SettingsScreen(
                 )
             }
 
-            // -- Permissions --
             SettingsSection(title = stringResource(R.string.settings_section_permissions)) {
                 SettingsItem(
                     icon = Icons.Outlined.Shield,
@@ -355,7 +309,6 @@ fun SettingsScreen(
                 )
             }
 
-            // -- Background & Notifications (T50) --
             SettingsSection(
                 title = stringResource(R.string.bg_section_header),
                 footer = stringResource(R.string.bg_section_footer),
@@ -370,7 +323,6 @@ fun SettingsScreen(
                 )
             }
 
-            // -- Logs --
             SettingsSection(title = stringResource(R.string.settings_section_logs)) {
                 SettingsItem(
                     icon = Icons.Outlined.Description,
@@ -382,9 +334,7 @@ fun SettingsScreen(
                 )
             }
 
-            // -- About --
             SettingsSection(title = stringResource(R.string.settings_section_about)) {
-                // [T-update-channels] The update badge's Settings layer.
                 val updateBadge by com.openminis.app.data.UpdateStateStore.hasUpdateBadge.collectAsState()
                 SettingsItem(
                     icon = Icons.Outlined.Info,
@@ -399,7 +349,6 @@ fun SettingsScreen(
                     iconColor = Color(0xFF007AFF),
                     title = stringResource(R.string.settings_privacy_policy),
                     subtitle = null,
-                    // iOS canonical URL — ContentView.swift / AddProviderView.swift
                     onClick = { openExternalUrl(context, "https://openminis.github.io/privacy-policy.html") },
                 )
                 SettingsItem(
@@ -476,23 +425,6 @@ private fun FeedbackSheetItem(
     }
 }
 
-/**
- * Build the GitHub Issues "new bug report" URL with the body pre-filled
- * from the existing bug-report template. Platform / OS version / app
- * version / device model are injected so the report arrives ready to
- * triage instead of asking the user to fill in environment details.
- *
- * URL shape:
- *   https://github.com/OpenMinis/OpenMinis/issues/new
- *     ?template=bug_report.md
- *     &title=[Bug]
- *     &body=<percent-encoded markdown>
- *
- * The body is a Markdown template with sections for Problem Summary,
- * Basic Information (table — auto-filled), Steps to Reproduce, Error
- * Details (fenced code block), Expected Behavior, and Additional
- * Information.
- */
 private fun buildBugReportUrl(): String {
     val osVersion = android.os.Build.VERSION.RELEASE
     val sdkInt = android.os.Build.VERSION.SDK_INT
@@ -501,10 +433,6 @@ private fun buildBugReportUrl(): String {
     val manufacturer = android.os.Build.MANUFACTURER
     val model = android.os.Build.MODEL
 
-    // Body matches the spec template. Triple-backtick fences are written
-    // as "```" — they survive percent-encoding cleanly. Indentation here
-    // is significant: trimIndent() removes the common Kotlin indentation
-    // but preserves the Markdown structure as-is.
     val body = """
         ## 📝 Problem Summary
 
@@ -541,10 +469,6 @@ private fun buildBugReportUrl(): String {
     """.trimIndent()
 
     val encodedBody = java.net.URLEncoder.encode(body, "UTF-8")
-    // Title carries a "[Bug] " prefix with a trailing space so the cursor
-    // lands after it on GitHub's page; encode the space as %20 explicitly
-    // since URLEncoder turns spaces into '+' which GitHub also accepts but
-    // the spec calls for the literal "[Bug] " form.
     val title = java.net.URLEncoder.encode("[Bug] ", "UTF-8")
     return "https://github.com/OpenMinis/OpenMinis/issues/new" +
         "?template=bug_report.md" +
@@ -552,11 +476,6 @@ private fun buildBugReportUrl(): String {
         "&body=$encodedBody"
 }
 
-/**
- * Compose a `mailto:` URL with a prefilled subject and body that include
- * app version, Android version, and device model. Mirrors iOS
- * `ContentView.makeFeedbackEmailURL()`.
- */
 private fun buildFeedbackMailto(): String {
     val body = """
         Please describe your feedback:
@@ -574,9 +493,6 @@ private fun buildFeedbackMailto(): String {
     return "mailto:dev@openminis.app?subject=$subject&body=$encodedBody"
 }
 
-/**
- * A grouped settings section with header and optional footer, matching iOS grouped List sections.
- */
 @Composable
 private fun SettingsSection(
     title: String,
@@ -588,7 +504,6 @@ private fun SettingsSection(
             .fillMaxWidth()
             .padding(top = 20.dp),
     ) {
-        // Section header
         Text(
             text = title.uppercaseForDisplay(),
             style = MaterialTheme.typography.labelSmall,
@@ -598,7 +513,6 @@ private fun SettingsSection(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
         )
 
-        // Section card
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -609,7 +523,6 @@ private fun SettingsSection(
             content()
         }
 
-        // Section footer
         if (footer != null) {
             Text(
                 text = footer,
@@ -622,10 +535,6 @@ private fun SettingsSection(
     }
 }
 
-/**
- * A single settings row item with colored icon, title, optional subtitle, and chevron.
- * Styled to match iOS settings rows with SF Symbol-like colored circle icons.
- */
 @Composable
 private fun SettingsItem(
     icon: ImageVector,
@@ -634,7 +543,6 @@ private fun SettingsItem(
     subtitle: String?,
     onClick: () -> Unit,
     showDivider: Boolean = true,
-    // [T-update-channels] A small dot before the chevron.
     badge: Boolean = false,
 ) {
     Column {
@@ -645,7 +553,6 @@ private fun SettingsItem(
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Colored circle icon (matching iOS settings style)
             Box(
                 modifier = Modifier
                     .size(30.dp)
@@ -665,7 +572,6 @@ private fun SettingsItem(
 
             Spacer(Modifier.width(14.dp))
 
-            // Title + subtitle
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(1.dp),
@@ -689,7 +595,6 @@ private fun SettingsItem(
                 Spacer(Modifier.width(8.dp))
             }
 
-            // Chevron
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
@@ -698,7 +603,6 @@ private fun SettingsItem(
             )
         }
 
-        // Divider between items (inset to match icon alignment)
         if (showDivider) {
             Box(
                 modifier = Modifier
@@ -710,4 +614,3 @@ private fun SettingsItem(
         }
     }
 }
-

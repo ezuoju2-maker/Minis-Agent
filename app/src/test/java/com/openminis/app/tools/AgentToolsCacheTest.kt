@@ -7,12 +7,6 @@ import org.junit.Test
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 
-/**
- * [perf-tool-schema-cache] makeAgentTools is memoized by its full argument
- * signature. These tests pin the two properties that make the cache safe:
- * identical args return the SAME list (the perf win), and any changed flag
- * returns a FRESH list so toggles/renames take effect (correctness).
- */
 class AgentToolsCacheTest {
 
     private fun make(

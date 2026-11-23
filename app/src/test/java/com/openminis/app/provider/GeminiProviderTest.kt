@@ -39,7 +39,6 @@ class GeminiProviderTest {
         server.shutdown()
     }
 
-    // -- sendMessage response parsing --
 
     @Test
     fun `sendMessage parses Gemini response`() = runBlocking {
@@ -133,7 +132,6 @@ class GeminiProviderTest {
         assertEquals("Hello world!", response.text)
     }
 
-    // -- Request construction --
 
     @Test
     fun `sendMessage includes API key in URL`() = runBlocking {
@@ -216,12 +214,7 @@ class GeminiProviderTest {
         assertTrue(!config.has("temperature"))
     }
 
-    // -- [T-gemini-empty-part-oneof-400] empty text part never shipped --
 
-    // Gemini rejects {"text": ""} with a 400: contents[N].parts[M].data:
-    // required oneof field 'data' must have one initialized field. An empty
-    // user/model text must be substituted (never an empty string, never an
-    // empty parts[]). Regression for the Gemini 3.5 Flash "tool format errors".
     @Test
     fun `sendMessage never sends empty text part for empty content`() = runBlocking {
         server.enqueue(MockResponse().setBody("""{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}"""))
@@ -249,7 +242,6 @@ class GeminiProviderTest {
         assertEquals("hello world", text)
     }
 
-    // -- Streaming --
 
     @Test
     fun `streamMessage parses SSE chunks`() = runBlocking {
@@ -360,7 +352,6 @@ class GeminiProviderTest {
         assertEquals(3, usageChunks[0].usage.outputTokens)
     }
 
-    // -- Error handling --
 
     @Test(expected = LLMError.InvalidApiKey::class)
     fun `sendMessage throws on 401`() = runBlocking {
@@ -396,18 +387,12 @@ class GeminiProviderTest {
         throw AssertionError("Expected TransientError")
     }
 
-    // -- Provider metadata --
 
     @Test
     fun `provider name is Google`() {
         assertEquals("Google", provider.name)
     }
 
-    // ── [T21] thoughtSignature round-trip / parallel batch / audio_output ───
-    //
-    // Pins e7cf8331a (all-or-nothing per message, GH#179 / #155), the
-    // functionCall→ToolCallComplete signature capture, and 4b6121833 (no
-    // thinkingConfig / systemInstruction for audio-output models, OpenMinis#226).
 
     private fun gemini(id: String, outputModalities: List<String>? = null) = GeminiProvider(
         apiKey = "test-key",
@@ -440,11 +425,6 @@ class GeminiProviderTest {
         }
     }
 
-    /**
-     * Round trip: the signature streamed on a functionCall part (a SIBLING of
-     * `functionCall`, not nested) is captured on ToolCallComplete, and once
-     * persisted on the ToolUse part it is replayed at the same position.
-     */
     @Test
     fun `functionCall thoughtSignature is captured from the stream and replayed on history`() = runBlocking {
         val p = gemini("gemini-3-flash-preview")
@@ -460,7 +440,6 @@ class GeminiProviderTest {
         assertEquals("a", complete.args.getString("task"))
         assertEquals("SIG-1", complete.thoughtSignature)
 
-        // Replay: the persisted signature goes back as a sibling of functionCall.
         val history = listOf(
             LLMMessage(LLMMessage.Role.USER, "go"),
             LLMMessage(LLMMessage.Role.ASSISTANT, "", contentParts = listOf(toolUse(complete.id, complete.thoughtSignature))),
@@ -475,11 +454,6 @@ class GeminiProviderTest {
         assertEquals(listOf("functionResponse"), partKinds(body.getJSONArray("contents").getJSONObject(2).getJSONArray("parts")))
     }
 
-    /**
-     * e7cf8331a — one signature for a parallel batch of three: the batch is
-     * replayed WHOLE or downgraded WHOLE. Sending the signed call alone with its
-     * siblings as text is what Gemini rejects as "Corrupted thought signature".
-     */
     @Test
     fun `a parallel batch with one signature is downgraded whole, a fully signed one replays whole`() = runBlocking {
         val p = gemini("gemini-3-flash-preview")
@@ -508,7 +482,6 @@ class GeminiProviderTest {
         assertEquals(listOf("functionResponse", "functionResponse", "functionResponse"), partKinds(signedUser))
     }
 
-    /** The whole special case stays behind `gemini-3`: 2.x replays unsigned calls structurally. */
     @Test
     fun `gemini 2_x replays unsigned calls as functionCall without a signature`() = runBlocking {
         val p = gemini("gemini-2.5-flash")
@@ -524,11 +497,6 @@ class GeminiProviderTest {
         assertEquals(listOf("functionCall"), partKinds(modelParts))
     }
 
-    /**
-     * OpenMinis#226 — an audio-output (TTS) model rejects both `thinkingConfig`
-     * and `systemInstruction` with 400, even at a non-OFF level and even though
-     * its id also matches a family pattern. It gets `responseModalities:["AUDIO"]`.
-     */
     @Test
     fun `audio_output model gets no thinkingConfig and no systemInstruction`() = runBlocking {
         for (id in listOf("gemini-2.5-flash-preview-tts", "gemini-3.1-flash-tts-preview")) {
@@ -541,7 +509,6 @@ class GeminiProviderTest {
         }
     }
 
-    /** Control: a text model at the same level DOES get its thinkingConfig and system instruction. */
     @Test
     fun `text model at HIGH keeps thinkingConfig and systemInstruction`() = runBlocking {
         val p = gemini("gemini-3-flash-preview")
@@ -551,30 +518,21 @@ class GeminiProviderTest {
         assertTrue(!body.getJSONObject("generationConfig").has("responseModalities"))
     }
 
-    // ── [GH#384] usageMetadata: thoughts tokens + context cache ──────────────
-    // Two defects in the old six-line extractUsage: only `candidatesTokenCount`
-    // was read as output (Gemini 3.x bills thinking separately in
-    // `thoughtsTokenCount`), and `cachedContentTokenCount` was never read while
-    // `promptTokenCount` — the FULL input — went straight through as
-    // `inputTokens`. Numbers below are real captures against gemini-3.8-flash.
 
     private fun usage(json: String) = GeminiProvider.parseUsageMetadata(JSONObject(json))
 
     @Test
     fun `extractUsage combines candidates and thoughts tokens for output`() {
-        // Captured: prompt 11, candidates 20, thoughts 310, total 341.
         val u = usage("""{"promptTokenCount":11,"candidatesTokenCount":20,
                           "totalTokenCount":341,"thoughtsTokenCount":310}""")
         assertEquals("thinking tokens must not be dropped", 330, u.outputTokens)
         assertEquals(11, u.inputTokens)
         assertNull("no cache in this capture", u.cacheReadInputTokens)
-        // The API's own invariant: total = prompt + candidates + thoughts.
         assertEquals(341, u.inputTokens + u.outputTokens)
     }
 
     @Test
     fun `extractUsage calculates fresh input when cache hit present`() {
-        // Captured final chunk of a 49k-token prompt.
         val u = usage("""{"promptTokenCount":49016,"candidatesTokenCount":7,
                           "totalTokenCount":49527,"cachedContentTokenCount":45026,
                           "thoughtsTokenCount":504}""")
@@ -583,15 +541,12 @@ class GeminiProviderTest {
         assertEquals("output = 7 + 504", 511, u.outputTokens)
         assertEquals("context size stays the full prompt", 49016, u.latestContextTokens)
 
-        // The point of subtracting: hit rate is cacheRead / (input + cacheRead),
-        // so passing the full prompt through would halve 91.8% to 47.8%.
         val rate = u.cacheReadInputTokens!!.toDouble() / (u.inputTokens + u.cacheReadInputTokens!!)
         assertTrue("hit rate ~91.8%, got $rate", kotlin.math.abs(rate - 0.918) < 0.001)
     }
 
     @Test
     fun `extractUsage stays backward compatible without cache or thoughts`() {
-        // Gemini 1.5 / non-thinking: neither new field present.
         val u = usage("""{"promptTokenCount":100,"candidatesTokenCount":40,"totalTokenCount":140}""")
         assertEquals(100, u.inputTokens)
         assertEquals(40, u.outputTokens)
@@ -601,7 +556,6 @@ class GeminiProviderTest {
 
     @Test
     fun `extractUsage treats a zero cache count as absent`() {
-        // Otherwise every uncached call would render a 0% cache row.
         val u = usage("""{"promptTokenCount":100,"candidatesTokenCount":40,"cachedContentTokenCount":0}""")
         assertNull(u.cacheReadInputTokens)
         assertEquals("input untouched", 100, u.inputTokens)
@@ -627,9 +581,6 @@ class GeminiProviderTest {
 
     @Test
     fun `streamMessage preserves the late cache across multi-chunk events`() = runBlocking {
-        // Gemini emits usageMetadata on EVERY chunk but names
-        // cachedContentTokenCount only on the last one. ChatViewModel keeps the
-        // last usage chunk, so the final values are what the UI shows.
         val sse = buildString {
             appendLine("""data: {"candidates":[{"content":{"parts":[{"text":"a"}]}}],"usageMetadata":{"promptTokenCount":49016,"candidatesTokenCount":3,"thoughtsTokenCount":504}}""")
             appendLine()
@@ -651,8 +602,6 @@ class GeminiProviderTest {
         assertEquals("…with the matching fresh input", 3990, last.inputTokens)
         assertEquals("…and the full prompt as context", 49016, last.latestContextTokens)
 
-        // The earlier chunks legitimately report no cache and the FULL prompt —
-        // which is why a consumer must not fold input with max() across them.
         assertNull("an early chunk reports no cache", usages.first().cacheReadInputTokens)
         assertEquals("…and the full prompt as input", 49016, usages.first().inputTokens)
     }

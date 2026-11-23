@@ -1,17 +1,5 @@
 package com.openminis.app.harness
 
-/**
- * v2.0 · Memory & interoperability contracts.
- *
- * Memory (Letta blocks + mem0 write-time extraction + Graphiti validity windows)
- * is implemented with plain Kotlin collections and persisted through MiniJson —
- * no vector DB, no FTS5 dependency, no Android. A 1B on-device model is enough
- * for the optional "extract fact" call; the default path is deterministic rules.
- *
- * MCP / A2A are represented as *contracts* (DTOs + validation), not a network
- * stack: the host plugs in OkHttp/Ktor. The security rules here are the ones
- * mobile MCP adapters get wrong most often (mcp-mobile's published pitfalls).
- */
 
 class MemoryCore(private val clock: () -> Long = { 0L }) {
 
@@ -19,7 +7,6 @@ class MemoryCore(private val clock: () -> Long = { 0L }) {
     data class Episode(val goal: String, val outcome: String, val steps: Int, val costMicros: Long, val at: Long)
     enum class Op { ADD, UPDATE, DELETE, NOOP }
 
-    /** Letta-style always-visible context blocks (small, human-editable). */
     private val blocks = LinkedHashMap<String, String>()
     private val facts = ArrayList<Fact>()
     private val episodes = ArrayList<Episode>()
@@ -34,7 +21,6 @@ class MemoryCore(private val clock: () -> Long = { 0L }) {
     fun setBlock(name: String, value: String) { blocks[name] = value.take(2_000) }
     fun block(name: String): String? = blocks[name]
 
-    /** Injected into every request; cheap and fully inspectable by the user. */
     fun contextBlocks(): String = buildString {
         blocks.forEach { (k, v) -> if (v.isNotEmpty()) append("[").append(k).append("] ").append(v).append('\n') }
         val active = activeFacts(clock())
@@ -44,11 +30,6 @@ class MemoryCore(private val clock: () -> Long = { 0L }) {
         }
     }
 
-    /**
-     * mem0-style ADD / UPDATE / DELETE decision at WRITE time. A fact is never
-     * deleted: its validity window is closed (Graphiti), so "what was true last
-     * week" remains answerable and an undo is trivial.
-     */
     fun upsertFact(key: String, value: String, now: Long = clock()): Op {
         val k = key.trim()
         if (k.isEmpty()) return Op.NOOP
@@ -77,7 +58,6 @@ class MemoryCore(private val clock: () -> Long = { 0L }) {
         if (episodes.size > 200) episodes.removeAt(0)
     }
 
-    /** Rolling summary + big-result externalisation (OpenHands context compression). */
     fun compact(events: List<AgentEvent>, maxChars: Int = 2_000): String {
         val sb = StringBuilder()
         sb.append("Summary of ${events.size} events\n")
@@ -97,7 +77,6 @@ class MemoryCore(private val clock: () -> Long = { 0L }) {
         "episodes" to episodes.map { mapOf("goal" to it.goal, "outcome" to it.outcome, "steps" to it.steps, "cost" to it.costMicros, "at" to it.at) },
     ))
 
-    /** Transactional restore, same rule as the event log: corrupt input changes nothing. */
     fun restore(json: String): Boolean {
         val m = try { MiniJson.parseObject(json) } catch (_: Exception) { null } ?: return false
         val newBlocks = LinkedHashMap<String, String>()
@@ -118,7 +97,6 @@ class MemoryCore(private val clock: () -> Long = { 0L }) {
     }
 }
 
-// ---------------------------------------------------------------- MCP / A2A
 
 object McpContract {
 
@@ -126,18 +104,17 @@ object McpContract {
         val id: String,
         val url: String,
         val displayName: String,
-        val authAlias: String? = null,      // Keystore alias, never a raw token
+        val authAlias: String? = null,
         val debugAllowLoopbackHttp: Boolean = false,
         val timeoutMs: Long = 20_000L,
         val pinnedTools: Set<String> = emptySet(),
     )
 
-    /** Fail closed. Returns human-readable violations; empty means usable. */
     fun validate(cfg: ServerConfig): List<String> {
         val issues = ArrayList<String>()
         val lower = cfg.url.lowercase()
         when {
-            lower.startsWith("https://") -> { /* ok */ }
+            lower.startsWith("https://") -> {  }
             lower.startsWith("http://127.0.0.1") || lower.startsWith("http://localhost") -> {
                 if (!cfg.debugAllowLoopbackHttp) issues.add("loopback HTTP is debug-only")
             }
@@ -152,7 +129,6 @@ object McpContract {
         "jsonrpc" to "2.0", "id" to id, "method" to "tools/list", "params" to emptyMap<String, Any?>(),
     )
 
-    /** Map remote tools into the SAME ToolDescriptor used by local device tools. */
     fun parseToolsList(json: String, defaultRisk: Risk = Risk.R2): List<ToolDescriptor> {
         val root = MiniJson.parseObject(json) ?: return emptyList()
         @Suppress("UNCHECKED_CAST")
@@ -199,7 +175,6 @@ object McpContract {
         return ToolResult(content, isError, isError, if (isError) "MCP_TOOL_ERROR" else null)
     }
 
-    /** Cancellation is best-effort: the UI MUST say the server may have executed. */
     fun cancellationNotice(id: Long, reason: String): String = MiniJson.obj(
         "jsonrpc" to "2.0", "method" to "notifications/cancelled",
         "params" to mapOf(
@@ -210,7 +185,6 @@ object McpContract {
 
     const val AGENT_CARD_PATH = "/.well-known/agent-card.json"
 
-    /** A2A client minimum: capability discovery before any SendMessage. */
     fun agentCardRequest(baseUrl: String): String? =
         if (!baseUrl.lowercase().startsWith("https://")) null
         else baseUrl.trimEnd('/') + AGENT_CARD_PATH

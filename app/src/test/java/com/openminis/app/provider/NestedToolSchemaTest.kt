@@ -22,12 +22,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-port-nested-schema] A tool parameter can declare a nested array/object
- * schema (port of iOS 5bbab0250), and every provider puts it on the wire:
- * Anthropic, OpenAI Chat Completions and Responses as standard JSON Schema,
- * Gemini in its dialect. Flat tools are unchanged byte for byte.
- */
 class NestedToolSchemaTest {
 
     private lateinit var server: MockWebServer
@@ -37,7 +31,6 @@ class NestedToolSchemaTest {
 
     private val base get() = server.url("/").toString().trimEnd('/')
 
-    /** The user_ask shape: questions[] -> {question, options[] -> {label, description}, kind}. */
     private val questions = AgentSchemaNode.Arr(
         description = "1-4 questions",
         items = AgentSchemaNode.Obj(
@@ -74,7 +67,6 @@ class NestedToolSchemaTest {
         required = listOf("questions"),
     )
 
-    /** Standard JSON Schema rendering of [questions], as every non-Gemini provider must send it. */
     private fun assertStandard(prop: JSONObject) {
         assertEquals("array", prop.getString("type"))
         assertEquals("the param's own description wins", "The questions to ask", prop.getString("description"))
@@ -159,12 +151,8 @@ class NestedToolSchemaTest {
 
     private fun openAiModel() = LLMModel(id = "gpt-5.6-terra", displayName = "Test", provider = "OpenAI", inputModalities = listOf("text"))
 
-    // ── Flat tools are byte-identical ───────────────────────────────────────
 
     @Test fun `a flat param renders exactly as before`() {
-        // Structural equality: the JVM's org.json does not keep key order
-        // (Android's does), so key order is covered by the golden test below,
-        // which builds the old and new objects with the same put sequence.
         fun same(expected: String, actual: JSONObject) =
             assertTrue("$actual", JSONObject(expected).similar(actual))
         val flat = AgentToolParam("string", "Scroll direction", enumValues = listOf("up", "down"))
@@ -177,8 +165,6 @@ class NestedToolSchemaTest {
     }
 
     @Test fun `every shipped tool renders without a schema exactly as the flat path would`() {
-        // Golden equivalence: for every built-in tool, the new toJson equals the
-        // old flat expression, so nothing on the wire moves for them.
         for (def in com.openminis.app.tools.AgentTools.makeAgentTools()) {
             for ((name, p) in def.parameters) {
                 if (p.schema != null) continue

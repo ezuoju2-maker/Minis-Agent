@@ -6,15 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [ISS-017] Headers that expand or collapse a card in the chat list have no
- * Material ripple: they go through `expandToggleClickable` (indication = null
- * plus a flat pressed tint). Buttons and rows that navigate keep `clickable`.
- *
- * Source guards, in the style of ToolGroupRowAlignTest: the regression this
- * prevents is someone writing a plain `.clickable { expanded = !expanded }`
- * again, which compiles and looks fine in review.
- */
 class ExpandHeaderNoRippleTest {
 
     private fun src(path: String) = ProductionSources.read(path)
@@ -37,15 +28,11 @@ class ExpandHeaderNoRippleTest {
         val ui = src("ui/chat/ChatAssistantMessageUI.kt")
         val block = ui.substringAfter("internal fun ThinkingBlock(")
             .substringBefore("AnimatedVisibility(visible = expanded && !overHardCap)")
-        // [T-thinking-autoexpand-toggle-longpress] The header also takes a
-        // long-press (settings menu) through the same ripple-free helper.
         assertTrue(block.contains(".expandToggleClickable(onLongClick = { showThinkingMenu = true }) {"))
         assertFalse(block.contains(".clickable"))
         assertFalse(block.contains("combinedClickable"))
         val tap = block.substringAfter(".expandToggleClickable(onLongClick = { showThinkingMenu = true }) {")
         assertTrue(tap.contains("if (!overHardCap) userIntent = !expanded"))
-        // [#467] Over the hard cap the header opens the full-thinking viewer,
-        // and only once the block has stopped streaming.
         assertTrue(tap.contains(
             "if (overHardCap) {\n                        if (canOpenFull) showFullContent = true\n" +
                 "                    } else {\n                        expanded = !expanded\n                    }",
@@ -74,18 +61,10 @@ class ExpandHeaderNoRippleTest {
         val ask = src("ui/chat/UserAskCard.kt")
         assertTrue("resolved question card toggles in place",
             ask.contains("onClick = { resize.toggle(scope, anchor) { expanded = !expanded } },\n        expandsInPlace = true,"))
-        // Scheduled and sub agent cards open a detail sheet: navigation.
         assertFalse(src("ui/chat/ScheduledTaskCard.kt").contains("expandsInPlace"))
         assertFalse(src("ui/chat/HelperUi.kt").contains("expandsInPlace"))
     }
 
-    /**
-     * Sweep of the files that render chat-list cards: a ripple-bearing
-     * `clickable` whose handler flips an expansion is a regression. There is
-     * no exception left: the active question's "Show more / Show less" used to
-     * be a plain text link, and since T-user-ask-fold-by-layout it is a
-     * full-size toggle that goes through `expandToggleClickable` too.
-     */
     @Test
     fun `no plain clickable in a chat card flips an expansion`() {
         val files = listOf(
@@ -107,7 +86,6 @@ class ExpandHeaderNoRippleTest {
             }
         }
         assertEquals("$offenders", 0, offenders.size)
-        // The question's fold toggle and its tap-to-open box: both without ripple.
         val ask = src("ui/chat/UserAskCard.kt")
         assertEquals(2, Regex("""expandToggleClickable\(pressedShape = RectangleShape, onClick = toggleFold\)""").findAll(ask).count())
         assertFalse(ask.contains("clickable(onClick = toggleFold)"))

@@ -4,10 +4,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * Previewed text and JSON can be long-pressed and copied. Composables need a
- * UI host this JVM test does not have, so pin it as a source fact.
- */
 class FilePreviewSelectableTextTest {
 
     private val src = File("src/main/java/com/openminis/app/ui/sandbox/FilePreviewScreen.kt").readText()
@@ -21,7 +17,6 @@ class FilePreviewSelectableTextTest {
 
     @Test
     fun `the text preview is selectable`() {
-        // [FIX-261025-13] Through SafeCopySelection (a SelectionContainer with a safe clipboard).
         assertTrue(body("TextPreview").contains("SafeCopySelection {"))
     }
 

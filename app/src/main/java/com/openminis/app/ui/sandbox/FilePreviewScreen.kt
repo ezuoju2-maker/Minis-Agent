@@ -95,7 +95,7 @@ import java.io.OutputStream
 import com.openminis.app.ui.components.MinisTextButton
 import com.openminis.app.ui.components.safeLaunchPicker
 
-private const val MAX_TEXT_PREVIEW_BYTES = 512_000 // 500 KB
+private const val MAX_TEXT_PREVIEW_BYTES = 512_000
 
 @Composable
 fun FilePreviewScreen(
@@ -103,13 +103,9 @@ fun FilePreviewScreen(
     onBack: () -> Unit,
     sessionId: String? = null,
 ) {
-    // [T-md-preview-links] Files opened from links inside a previewed
-    // markdown document replace the page; Back walks this history before it
-    // leaves the screen.
     val context = LocalContext.current
     var current by remember(item.file.absolutePath) { mutableStateOf(item) }
     val history = remember(item.file.absolutePath) { mutableStateListOf<FileItem>() }
-    // A web link opens in the in-app browser sheet, as it does from the chat.
     var webUrl by remember { mutableStateOf<String?>(null) }
     val back: () -> Unit = {
         if (history.isNotEmpty()) current = history.removeAt(history.lastIndex) else onBack()
@@ -131,8 +127,6 @@ fun FilePreviewScreen(
             MarkdownPreviewLinkTarget.Ignore -> Unit
             is MarkdownPreviewLinkTarget.Relative -> open(target.file)
             is MarkdownPreviewLinkTarget.Chat -> when (
-                // The chat this file was opened from (null from the file
-                // browser): minis:// resolves in that session, as in the chat.
                 val action = com.openminis.app.ui.chat.ChatLinkResolver.resolve(target.url, sessionId, context)
             ) {
                 is com.openminis.app.ui.chat.ChatLinkAction.DeepLink ->
@@ -148,7 +142,6 @@ fun FilePreviewScreen(
                     )
                 is com.openminis.app.ui.chat.ChatLinkAction.Web ->
                     if (action.url.startsWith("minis:") || action.url.startsWith("/")) {
-                        // A sandbox link whose file does not exist.
                         AppLogger.warning("FilePreview", "md link target missing: ${action.url.take(200)}")
                     } else {
                         webUrl = action.url
@@ -174,14 +167,8 @@ private fun FilePreviewContent(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // T-android-preview-title-toggle-path: tap the title to swap between
-    // file name and absolute path. Mirrors the iOS preview's tap-to-toggle
-    // behavior so the user can read the source location without leaving
-    // the preview. Long paths use TextOverflow.Ellipsis (the TopAppBar
-    // title slot is single-line by spec).
     var showFullPath by remember(item.file) { mutableStateOf(false) }
 
-    // T144: SAF Save-As for non-image files (image keeps T142 MediaStore).
     val mimeType = remember(item.file) {
         MimeTypeMap.getSingleton().getMimeTypeFromExtension(
             item.file.extension.lowercase(),
@@ -211,10 +198,6 @@ private fun FilePreviewContent(
         }
     }
 
-    // T-imgswipe-4f446d83: image files take the swipe-able gallery route
-    // (siblings from the same directory) instead of the in-place
-    // ImagePreview column. Gallery owns its own close / save / share /
-    // copy chrome, so we skip the Scaffold + TopAppBar entirely.
     if (item.isImageFile) {
         val galleryState = remember(item.file.absolutePath) {
             collectImageGallery(item.file)
@@ -227,25 +210,6 @@ private fun FilePreviewContent(
         return
     }
 
-    // T279: mirror FileBrowserScreen — vanilla Scaffold + vanilla TopAppBar.
-    // Earlier attempts (custom containerColor, contentWindowInsets=0,
-    // windowInsets=statusBars on TopAppBar, body windowInsetsPadding +
-    // background, DisposableEffect setting statusBarColor / isAppearanceLight)
-    // all left visible gray bands above the bar / below the gesture bar
-    // because they fought the Activity's edge-to-edge transparent-scrim
-    // setup instead of cooperating with it. The "Browse Chat Files" screen
-    // (FileBrowserScreen) renders correctly with zero overrides; do the same.
-    //
-    // [T-android-file-preview-statusbar] ...with one exception, which that
-    // note predates. Since 988bd6491 this screen is a NavHost `dialog`
-    // destination (so the chat keeps its scroll position), i.e. it runs in
-    // its OWN window, on top. The status bar takes its icon colour from that
-    // top window, and nothing set it: a Dialog window defaults to light
-    // (white) icons. In light mode that is white on the white top bar — the
-    // status bar looked blank. Set the dialog window's icon appearance from
-    // the app theme; bar colours are left alone (they are what the note
-    // above warns about). Same fix the other own-window viewers carry
-    // (WebPreviewBottomSheet, FullscreenImageViewer, InlineMediaPlayer).
     val previewDark = com.openminis.app.ui.theme.ChatColors.isDark
     val hostView = androidx.compose.ui.platform.LocalView.current
     androidx.compose.runtime.DisposableEffect(hostView, previewDark) {
@@ -275,16 +239,9 @@ private fun FilePreviewContent(
                     }
                 },
                 actions = {
-                    // T142: Share works for any file — FileProvider URI +
-                    // ACTION_SEND + FLAG_GRANT_READ_URI_PERMISSION. iOS parity.
                     IconButton(onClick = { shareFile(context, item) }) {
                         Icon(Icons.Default.Share, contentDescription = stringResource(R.string.filepreview_share))
                     }
-                    // Print: HTML renders via WebView; markdown / plain text /
-                    // json / csv print their raw text wrapped in a WebView so we
-                    // reuse the single createPrintDocumentAdapter path (Android
-                    // has no UISimpleTextPrintFormatter equivalent). Image files
-                    // take the gallery route above and never reach this bar.
                     if (item.isHtmlFile || item.isMarkdownFile || item.isTextFile ||
                         item.isJsonFile || item.isCsvFile
                     ) {
@@ -293,7 +250,6 @@ private fun FilePreviewContent(
                         }
                     }
                     if (item.isImageFile) {
-                        // T142 image → MediaStore Save to Gallery.
                         IconButton(onClick = {
                             scope.launch {
                                 val ok = saveImageToGallery(context, item.file)
@@ -307,7 +263,6 @@ private fun FilePreviewContent(
                             Icon(Icons.Default.Download, contentDescription = stringResource(R.string.filepreview_save_to_gallery))
                         }
                     } else {
-                        // T144 non-image → SAF Save-As (user picks location).
                         IconButton(onClick = { saveAsLauncher.safeLaunchPicker(item.name, context, "FilePreview") }) {
                             Icon(Icons.Default.Download, contentDescription = stringResource(R.string.filepreview_save_as))
                         }
@@ -321,8 +276,6 @@ private fun FilePreviewContent(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            // Order matters: markdown / html before generic text — both are
-            // technically text but warrant richer renderers.
             when {
                 item.isMarkdownFile -> MarkdownPreview(item, onMarkdownLink)
                 item.isHtmlFile -> HtmlPreview(item)
@@ -332,9 +285,6 @@ private fun FilePreviewContent(
                 item.isPdfFile -> PdfPreview(item)
                 item.isCsvFile -> CsvPreview(item)
                 item.isJsonFile -> JsonPreview(item)
-                // [T-android-apk-preview] BEFORE isArchiveFile — an APK is a
-                // ZIP, and the generic archive branch would win and dump its
-                // entry list.
                 item.isApkFile -> ApkPreview(item)
                 item.isArchiveFile -> ArchivePreview(item)
                 item.isOfficeFile -> OfficeOpenExternal(item)
@@ -345,9 +295,7 @@ private fun FilePreviewContent(
     }
 }
 
-// ==================== Image Preview ====================
 
-// Also the file preview of the in-chat Skills sheet (SessionSkillsSheet).
 @Composable
 internal fun ImagePreview(item: FileItem) {
     var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
@@ -405,7 +353,6 @@ internal fun ImagePreview(item: FileItem) {
                     contentScale = ContentScale.FillWidth,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                // Image info
                 Text(
                     text = "${bitmap!!.width} x ${bitmap!!.height} px  |  ${item.formattedSize}",
                     style = MaterialTheme.typography.bodySmall,
@@ -426,9 +373,7 @@ internal fun ImagePreview(item: FileItem) {
     }
 }
 
-// ==================== Text/Code Preview ====================
 
-// Also the file preview of the in-chat Skills sheet (SessionSkillsSheet).
 @Composable
 internal fun TextPreview(item: FileItem) {
     var content by remember { mutableStateOf<String?>(null) }
@@ -484,8 +429,6 @@ internal fun TextPreview(item: FileItem) {
                     Box(
                         modifier = Modifier.horizontalScroll(rememberScrollState()),
                     ) {
-                        // Long-press selects; the toolbar copies (kilolonion, 10-19:
-                        // previewed text could only be copied by sharing it elsewhere).
                         SafeCopySelection {
                             Text(
                                 text = content!!,
@@ -514,7 +457,6 @@ internal fun TextPreview(item: FileItem) {
     }
 }
 
-// ==================== Markdown Preview ====================
 
 @Composable
 private fun MarkdownPreview(item: FileItem, onLink: (String) -> Unit) {
@@ -539,17 +481,8 @@ private fun MarkdownPreview(item: FileItem, onLink: (String) -> Unit) {
             Text(error!!, color = MaterialTheme.colorScheme.error)
         }
         content != null -> androidx.compose.runtime.CompositionLocalProvider(
-            // [T-md-preview-links] Without this the chat's handler is absent
-            // here and every link in the document is a dead tap.
             com.openminis.app.ui.chat.LocalMarkdownUrlClickHandler provides onLink,
         ) { com.openminis.app.ui.chat.MarkdownDocument(
-            // T285-md: was StreamingMarkdownText inside verticalScroll{}, which
-            // composed the full document up-front and stalled the chat-tap →
-            // preview transition with main-thread parseInline scans across
-            // all blocks (~150-300ms for a multi-KB markdown). MarkdownDocument
-            // uses LazyColumn so only viewport-visible blocks compose on the
-            // first frame — transition completes before the off-screen blocks
-            // are touched.
             content = content!!,
             modifier = Modifier.fillMaxSize(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -562,7 +495,6 @@ private fun MarkdownPreview(item: FileItem, onLink: (String) -> Unit) {
     }
 }
 
-// ==================== HTML Preview (WebView) ====================
 
 @Composable
 private fun HtmlPreview(item: FileItem) {
@@ -572,23 +504,9 @@ private fun HtmlPreview(item: FileItem) {
             WebView(ctx).apply {
                 settings.javaScriptEnabled = false
                 settings.allowFileAccess = true
-                // T-webview-popup-d3c6e10f: mirror ffc85ad's WebPreviewBottomSheet
-                // fix. Pages using `height: 100vh` + `overflow: hidden` were
-                // collapsing to a 0-height clipped box (white screen) on first
-                // compose because Blink resolved CSS viewport units against a
-                // 0×0 measured container. useWideViewPort + loadWithOverviewMode
-                // decouple the CSS viewport from initial measured size, and
-                // deferring loadUrl via `post {}` guarantees the WebView has
-                // been laid out (positive width/height) before Blink resolves
-                // viewport units.
                 settings.useWideViewPort = true
                 settings.loadWithOverviewMode = true
-                // [T-android-webview-render-process-gone] (GH#341) Was a bare
-                // `WebViewClient()`; it has to be a subclass to override the
-                // callback at all.
                 webViewClient = object : WebViewClient() {
-                    // [T-net-android-phase3] Settings > Network: answer the local entry's
-                    // proxy challenge (WebViewNetworkProxy); any other auth request as before.
                     override fun onReceivedHttpAuthRequest(view: android.webkit.WebView?, handler: android.webkit.HttpAuthHandler?, host: String?, realm: String?) {
                         if (handler != null && com.openminis.app.network.WebViewNetworkProxy.answerAuth(handler, host, realm, view?.url)) return
                         super.onReceivedHttpAuthRequest(view, handler, host, realm)
@@ -607,7 +525,6 @@ private fun HtmlPreview(item: FileItem) {
     )
 }
 
-// ==================== Audio Preview ====================
 
 @Composable
 private fun AudioPreview(item: FileItem) {
@@ -627,7 +544,6 @@ private fun AudioPreview(item: FileItem) {
     }
 }
 
-// ==================== Video Preview ====================
 
 @Composable
 private fun VideoPreview(item: FileItem) {
@@ -646,14 +562,7 @@ private fun VideoPreview(item: FileItem) {
     }
 }
 
-// ==================== PDF (native PdfRenderer) ====================
 
-/**
- * T144: in-app PDF viewer via Android's stock [PdfRenderer]. Each page is
- * rendered to a Bitmap once, scaled to the page's natural aspect at the
- * card width, and shown in a LazyColumn so 100-page PDFs don't OOM.
- * Capped at 50 pages — full doc available via Save-As / external open.
- */
 @Composable
 private fun PdfPreview(item: FileItem) {
     var pages by remember(item.file) { mutableStateOf<List<Bitmap>?>(null) }
@@ -714,9 +623,6 @@ private fun PdfPreview(item: FileItem) {
 @Composable
 private fun PdfOpenExternalFallback(item: FileItem, reason: String) {
     val context = LocalContext.current
-    // T149: same regression as Office — fallback page now reuses the shared
-    // metadata block under the placeholder so an unrenderable PDF still shows
-    // file basics rather than just a button.
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -749,7 +655,6 @@ private fun PdfOpenExternalFallback(item: FileItem, reason: String) {
     }
 }
 
-// ==================== CSV / TSV ====================
 
 @Composable
 private fun CsvPreview(item: FileItem) {
@@ -843,7 +748,6 @@ private fun parseCsvLine(line: String, sep: Char): List<String> {
     return out
 }
 
-// ==================== JSON pretty-print ====================
 
 @Composable
 private fun JsonPreview(item: FileItem) {
@@ -897,8 +801,6 @@ private fun JsonPreview(item: FileItem) {
                 Box(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                 ) {
-                    // Long-press selects; the toolbar copies (kilolonion, 10-19:
-                    // previewed text could only be copied by sharing it elsewhere).
                     SafeCopySelection {
                         Text(
                             text = pretty!!,
@@ -917,29 +819,7 @@ private fun JsonPreview(item: FileItem) {
     }
 }
 
-// ==================== APK ====================
 
-/**
- * [T-android-apk-preview] Package card for an .apk, instead of the ZIP entry
- * list the generic archive renderer used to show.
- *
- * An APK *is* a ZIP, so it fell into [ArchivePreview] and rendered 282 rows of
- * `META-INF/androidx.*.version` — accurate and useless. Someone who taps an APK
- * in a chat wants to know what app it is and then install it, so this shows the
- * package identity (icon, label, version, package name, min/target SDK) and
- * puts "Install" front and centre.
- *
- * Metadata is read with [PackageManager.getPackageArchiveInfo], which parses the
- * manifest WITHOUT installing anything. Its `applicationInfo` comes back with
- * `sourceDir`/`publicSourceDir` unset — they must be pointed at the file by hand
- * or `loadIcon`/`loadLabel` resolve against the wrong package and return this
- * app's own icon.
- *
- * Parsing can fail (a corrupt download, or an .xapk which is a ZIP OF apks and
- * has no manifest of its own). That is not an error state worth blocking on:
- * the file still exists and can still be opened or shared, so the card falls
- * back to filename + size and keeps the actions live.
- */
 @Composable
 private fun ApkPreview(item: FileItem) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -964,8 +844,6 @@ private fun ApkPreview(item: FileItem) {
                 if (pkg == null) {
                     null
                 } else {
-                    // Without these the icon/label lookups resolve against the
-                    // HOST package and silently return Minis' own assets.
                     pkg.applicationInfo?.let { app ->
                         app.sourceDir = item.file.absolutePath
                         app.publicSourceDir = item.file.absolutePath
@@ -1023,8 +901,6 @@ private fun ApkPreview(item: FileItem) {
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                // Falls back to the filename when the manifest could not be
-                // read — still the most useful thing we can name it.
                 text = info?.label ?: item.name,
                 style = MaterialTheme.typography.titleMedium,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -1055,8 +931,6 @@ private fun ApkPreview(item: FileItem) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (parsed && info == null) {
-                // Say so rather than showing a bare filename and letting the
-                // user wonder whether the file is broken.
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.filepreview_apk_unreadable),
@@ -1066,10 +940,6 @@ private fun ApkPreview(item: FileItem) {
                 )
             }
             Spacer(Modifier.height(24.dp))
-            // ACTION_VIEW on an application/vnd.android.package-archive URI is
-            // what reaches the system installer. It is offered even when the
-            // manifest failed to parse: the installer does its own, stricter
-            // validation and will report a bad package better than we can.
             MinisTextButton(onClick = {
                 openExternally(context, item, "application/vnd.android.package-archive")
             }) {
@@ -1080,7 +950,6 @@ private fun ApkPreview(item: FileItem) {
     }
 }
 
-// ==================== Archive (ZIP/JAR/APK) ====================
 
 @Composable
 private fun ArchivePreview(item: FileItem) {
@@ -1150,24 +1019,10 @@ private fun ArchivePreview(item: FileItem) {
     }
 }
 
-// ==================== Office (xlsx/docx/pptx → external) ====================
 
 @Composable
 private fun OfficeOpenExternal(item: FileItem) {
     val context = LocalContext.current
-    // T149: was full-screen-centered placeholder + button only — restored
-    // metadata block beneath. Top half = preview hint + Open externally,
-    // bottom = Name/Size/Type/Modified/Path so the user always sees the
-    // basic file info that existed pre-T144.
-    // T164: outer scrollable wrapper pumps overscroll deltas into our
-    // IosBounceOverscrollEffect — `Modifier.verticalScroll` doesn't
-    // expose an overscrollEffect slot, so we mirror the
-    // AlwaysStretchOverscrollBox trick (wrap with a noop scrollable
-    // that consumes 0 deltas, pipe the same effect through both
-    // Modifier.scrollable's overscrollEffect param and Modifier.overscroll
-    // for the visual rubber-band). The inner verticalScroll still owns
-    // the actual scroll position; only the over-edge component gets
-    // routed through the spring bounce.
     val bounce = rememberIosBounceOverscrollEffect()
     val noopState = rememberScrollableState { 0f }
     Column(
@@ -1228,10 +1083,6 @@ private fun openExternally(context: Context, item: FileItem, mime: String) {
         AppLogger.warning("FilePreview", "openExternally failed: ${e.message}")
         Toast.makeText(context, "No app available to open this file.", Toast.LENGTH_SHORT).show()
     } catch (e: Exception) {
-        // [T-android-mount-fileprovider-root] Everything else is OUR failure —
-        // typically getUriForFile rejecting a path no provider root covers.
-        // Reporting it as "No app available" sent users looking for a missing
-        // viewer app when the file itself was never handed over.
         AppLogger.warning("FilePreview", "openExternally failed: ${e.message}")
         Toast.makeText(
             context,
@@ -1241,7 +1092,6 @@ private fun openExternally(context: Context, item: FileItem, mime: String) {
     }
 }
 
-// ==================== File Info (fallback for unsupported types) ====================
 
 @Composable
 private fun FileInfoView(item: FileItem) {
@@ -1250,7 +1100,6 @@ private fun FileInfoView(item: FileItem) {
             .fillMaxSize()
             .verticalScroll(rememberScrollState()),
     ) {
-        // Icon header
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1277,13 +1126,6 @@ private fun FileInfoView(item: FileItem) {
     }
 }
 
-/**
- * T149: shared metadata list — Name / Size / Type / Modified / Path (+ symlink
- * target). Pre-T142 this lived inline in FileInfoView; T144 only wired it for
- * the unknown-type fallback, so Office/PDF-fallback regressed to "just a
- * button". Extracted so any preview path that doesn't render bytes inline can
- * still surface the basics.
- */
 @Composable
 private fun FileMetadataBlock(item: FileItem) {
     HorizontalDivider()
@@ -1323,15 +1165,7 @@ private fun buildFileAttributes(item: FileItem): List<Pair<String, String>> {
     return attrs
 }
 
-// ==================== Share / Save helpers (T142) ====================
 
-/**
- * Share any file via the system share sheet. Mirrors iOS UIActivityViewController.
- * Uses our FileProvider authority so the receiving app can read the bytes,
- * with FLAG_GRANT_READ_URI_PERMISSION attached so the grant follows the chooser
- * pick (the chooser itself launches a separate activity that wouldn't otherwise
- * be in the granted set).
- */
 internal fun shareFile(context: Context, item: FileItem) {
     try {
         val authority = "${context.packageName}.fileprovider"
@@ -1351,37 +1185,19 @@ internal fun shareFile(context: Context, item: FileItem) {
     }
 }
 
-/**
- * Print a previewable file via the Android print framework. HTML loads
- * directly; text-based files (markdown / plain text / json / csv) are wrapped
- * in an HTML `<pre>` block so a single `WebView.createPrintDocumentAdapter`
- * path covers every case. Mirrors iOS where every preview surface funnels
- * through one print controller.
- *
- * The off-screen WebView must outlive this function: print is async (we kick it
- * off only after `onPageFinished`), so we hold the instance in a captured var
- * and clear it once the adapter is handed to PrintManager.
- */
 private fun printFile(context: Context, item: FileItem) {
     try {
         val webView = WebView(context).apply {
             settings.javaScriptEnabled = false
             settings.allowFileAccess = true
         }
-        // Keep a reference alive until the print job is dispatched.
         var holder: WebView? = webView
         webView.webViewClient = object : WebViewClient() {
-            // [T-net-android-phase3] Settings > Network: answer the local entry's
-            // proxy challenge (WebViewNetworkProxy); any other auth request as before.
             override fun onReceivedHttpAuthRequest(view: android.webkit.WebView?, handler: android.webkit.HttpAuthHandler?, host: String?, realm: String?) {
                 if (handler != null && com.openminis.app.network.WebViewNetworkProxy.answerAuth(handler, host, realm, view?.url)) return
                 super.onReceivedHttpAuthRequest(view, handler, host, realm)
             }
 
-            // [T-android-webview-render-process-gone] (GH#341) Throwaway
-            // WebView built just to drive the print adapter; if its renderer
-            // dies the print simply does not happen, which beats killing the
-            // app. Nothing holds a reference afterwards.
             override fun onRenderProcessGone(
                 view: WebView?,
                 detail: android.webkit.RenderProcessGoneDetail?,
@@ -1417,8 +1233,6 @@ private fun printFile(context: Context, item: FileItem) {
             }
             webView.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
         }
-        // Silence the unused-assignment warning while documenting intent: the
-        // holder keeps `webView` reachable across the async page load.
         @Suppress("UNUSED_VALUE")
         holder = webView
     } catch (e: Exception) {
@@ -1432,13 +1246,6 @@ private fun escapeHtml(s: String): String =
         .replace("<", "&lt;")
         .replace(">", "&gt;")
 
-/**
- * Save an image file from the rootfs to the user's gallery. Q+ uses
- * MediaStore (scoped storage); pre-Q falls back to public Pictures dir.
- * Mirrors FullscreenImageViewer.saveToGallery so the two save paths stay
- * consistent — read bytes off the source file (which may be a multi-MB
- * PNG/JPEG) on Dispatchers.IO.
- */
 private suspend fun saveImageToGallery(context: Context, src: File): Boolean =
     withContext(Dispatchers.IO) {
         try {
@@ -1482,16 +1289,6 @@ private suspend fun saveImageToGallery(context: Context, src: File): Boolean =
         }
     }
 
-/**
- * Build the swipe-able gallery's (items, startIndex) for a tapped image
- * file: enumerate all image siblings in its parent directory (sorted by
- * name, case-insensitive), find the tapped one's index, and wrap them as
- * [com.openminis.app.ui.components.ImageGalleryItem]. Non-image files are
- * filtered by extension here — matches [FileItem.isImageFile].
- *
- * Falls back to a 1-item list (just the tapped file) when the parent dir
- * can't be listed.
- */
 private val IMAGE_GALLERY_EXTENSIONS =
     setOf("png", "jpg", "jpeg", "gif", "bmp", "webp", "ico")
 
@@ -1517,11 +1314,6 @@ private fun collectImageGallery(
     return items to startIdx
 }
 
-/**
- * [T-android-file-preview-statusbar] The Dialog window this preview runs in
- * (as a NavHost `dialog` destination), or null when it is hosted directly in
- * an Activity window.
- */
 private fun filePreviewDialogWindow(view: android.view.View): android.view.Window? {
     var p: android.view.ViewParent? = view.parent
     while (p != null) {
@@ -1531,13 +1323,6 @@ private fun filePreviewDialogWindow(view: android.view.View): android.view.Windo
     return null
 }
 
-/**
- * [FIX-261025-13] Copying a whole large preview (up to 500 KB of text) went
- * through the system clipboard's binder call, which throws
- * TransactionTooLargeException around 1 MB and crashed the app. This
- * selection copies through a clipboard that refuses an oversize copy with a
- * hint to use Share, and catches a clipboard failure instead of crashing.
- */
 @Composable
 private fun SafeCopySelection(content: @Composable () -> Unit) {
     val context = LocalContext.current
@@ -1577,7 +1362,6 @@ internal class SafeCopyClipboard(
     }
 
     companion object {
-        /** ~800 KB as UTF-16 in the parcel: under the ~1 MB binder transaction limit. */
         const val MAX_COPY_CHARS = 400_000
     }
 }

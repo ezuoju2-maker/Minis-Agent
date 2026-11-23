@@ -23,20 +23,6 @@ import com.openminis.app.data.model.SubAgentRoster
 import com.openminis.app.data.model.ThinkingLevel
 import com.openminis.app.data.repository.ProviderRepository
 
-/**
- * [T-minis-config-coverage] Exposes the Sub Agents roster under
- * `subagents.<id>.…` - what Settings > Sub Agents can do: add, edit, delete,
- * reorder. Port of iOS `SubAgentsCollection` (same paths, payload keys, limits
- * and refusals), so one script works on both platforms.
- *
- * The built-in agent is addressed as `subagents.general` ([BUILT_IN_ALIAS]);
- * its stored id `builtin.general` resolves too. It is only partly writable:
- * its name and description are canonical English that
- * [SubAgentRoster.normalize] restores on every load, so a write would seem to
- * succeed and then revert. Those two fields are read-only for it, `remove`
- * refuses it, and its model, reasoning override and instructions are writable
- * like any other agent's.
- */
 class SubAgentsCollection(
     private val repo: ProviderRepository,
 ) : ConfigCollection {
@@ -47,20 +33,8 @@ class SubAgentsCollection(
     override val addable: Boolean get() = true
     override val removable: Boolean get() = true
 
-    /** Sensitive: a definition changes what work is handed off and which model runs it. */
     override val risk: ConfigRisk get() = ConfigRisk.SENSITIVE
 
-    /**
-     * Add payload:
-     * {
-     *   "name": "Translator",                     // required, <= 40, unique
-     *   "description": "Translate zh/en docs.",   // required, <= 200
-     *   "instructions": "Always keep tone.",      // optional, <= 4000
-     *   "model_group": "<group id or name>",      // optional; omit = Auto
-     *   "thinking": "high",                       // optional; omit = follow the group
-     *   "position": 1                             // optional insert index among custom agents
-     * }
-     */
     override val addPayloadSchema: ConfigSchema get() = ConfigSchema.Json
 
     private fun realId(segment: String): String =
@@ -68,7 +42,6 @@ class SubAgentsCollection(
 
     private fun def(id: String): SubAgentDefinition? = repo.subAgent(id)
 
-    // -- Children --
 
     override fun childIds(): List<String> = repo.subAgents.map { pathSegment(it.id) }
 
@@ -86,7 +59,6 @@ class SubAgentsCollection(
         )
     }
 
-    // -- Add / remove --
 
     override fun add(payload: ConfigValue): String {
         val obj = (payload as? ConfigValue.Obj)?.value
@@ -101,8 +73,6 @@ class SubAgentsCollection(
         val groupId = (obj["model_group"] as? ConfigValue.Str)?.value?.trim()
             ?.takeIf { it.isNotEmpty() }?.let(::resolveGroupId)
         val thinking = (obj["thinking"] as? ConfigValue.Str)?.value?.let(::parseThinking)
-        // Checked before writing, so the caller is told the limit instead of
-        // normalize() silently dropping the new row.
         if (repo.subAgents.size >= SubAgentLimits.MAX_COUNT) {
             throw ConfigError.InvalidValue(
                 "You can define at most ${SubAgentLimits.MAX_COUNT} sub agents (including the built-in one). Remove one first.",
@@ -115,13 +85,10 @@ class SubAgentsCollection(
             modelGroupId = groupId,
             thinkingLevelOverride = thinking,
             isBuiltIn = false,
-            // Past every existing row: normalize() renumbers densely.
             sortOrder = Int.MAX_VALUE,
         )
         repo.upsertSubAgent(created)
 
-        // `position` is applied as a reorder afterwards: upsert appends, and
-        // the order is what the model sees.
         val pos = (obj["position"] as? ConfigValue.Int)?.value
         if (pos != null && pos >= 0) {
             val ids = customIds(repo).toMutableList()
@@ -144,7 +111,6 @@ class SubAgentsCollection(
         repo.deleteSubAgent(real)
     }
 
-    // -- [T-config-readable] Readable descriptions (keys as on iOS) --
 
     override val readableSubjectFormat: String get() = "Sub agent “%1\$@” – %2\$@"
 
@@ -165,14 +131,12 @@ class SubAgentsCollection(
         return listOf(ReadableLine("Delete sub agent “%@”", listOf(ReadableArg.Text(d.name))))
     }
 
-    /** `model_group` reads back as a group NAME and is written as a name or an id; "" = Auto. */
     private fun groupPhrase(v: ConfigValue): ReadableArg {
         val s = (v as? ConfigValue.Str)?.value?.trim() ?: return ConfigReadableRenderer.genericPhrase(v)
         if (s.isEmpty()) return ReadableArg.Key("Auto")
         return ReadableArg.Text(repo.config.value.modelGroups.firstOrNull { it.id == s }?.name ?: s)
     }
 
-    // -- Validation shared by add and the field writers --
 
     private fun checkedName(raw: String, excluding: String?): String {
         val name = raw.trim()
@@ -210,7 +174,6 @@ class SubAgentsCollection(
         return text
     }
 
-    /** "" = not set (null). OFF is not offered, as in the editor and on iOS. */
     private fun parseThinking(raw: String): ThinkingLevel? {
         val token = raw.trim().lowercase()
         if (token.isEmpty()) return null
@@ -220,7 +183,6 @@ class SubAgentsCollection(
             )
     }
 
-    /** A group id, or a group name, so a caller can write what `get groups` shows. */
     private fun resolveGroupId(raw: String): String {
         val trimmed = raw.trim()
         val groups = repo.config.value.modelGroups
@@ -240,12 +202,10 @@ class SubAgentsCollection(
         repo.upsertSubAgent(apply(current))
     }
 
-    /** Says WHY and what to do instead: the value is load-bearing for the model. */
     private fun builtInFieldDenied(field: String) = ConfigError.PermissionDenied(
         "The built-in sub agent's $field is fixed: the assistant matches on the name and reads the description to decide what to delegate, and both are restored on every load. Change its model or instructions instead, or add your own sub agent.",
     )
 
-    // -- Field factories --
 
     private fun nameField(id: String, seg: String, isBuiltIn: Boolean): ConfigField =
         ClosureField(
@@ -257,8 +217,6 @@ class SubAgentsCollection(
                 "How the assistant addresses this sub agent. Must be unique; at most ${SubAgentLimits.NAME_MAX_LENGTH} characters."
             },
             valueSchema = ConfigSchema.Str(maxLength = SubAgentLimits.NAME_MAX_LENGTH),
-            // Advertised read-only for the built-in, so topic-help agrees with
-            // the refusal in the writer.
             access = if (isBuiltIn) ConfigAccess.READONLY else ConfigAccess.READWRITE,
             risk = ConfigRisk.SENSITIVE,
             revertable = true,
@@ -295,7 +253,6 @@ class SubAgentsCollection(
             },
         )
 
-    /** Writable for every agent: the built-in's are the standing instructions of unnamed delegations. */
     private fun instructionsField(id: String, seg: String, isBuiltIn: Boolean): ConfigField =
         ClosureField(
             path = "subagents.$seg.instructions",
@@ -329,7 +286,6 @@ class SubAgentsCollection(
             reader = {
                 val d = def(id) ?: return@ClosureField ConfigValue.Null
                 val gid = d.modelGroupId ?: return@ClosureField ConfigValue.Str("")
-                // The name when it resolves; a dangling id is shown as it is.
                 ConfigValue.Str(repo.config.value.modelGroups.firstOrNull { it.id == gid }?.name ?: gid)
             },
             writer = { v ->
@@ -359,7 +315,6 @@ class SubAgentsCollection(
             },
         )
 
-    /** Read-only, so `get` output explains on its own why some writes are refused. */
     private fun builtInField(id: String, seg: String): ConfigField =
         ReadOnlyField(
             path = "subagents.$seg.built_in",
@@ -370,10 +325,8 @@ class SubAgentsCollection(
         )
 
     companion object {
-        /** Path segment of the built-in (`subagents.general.…`), as on iOS. */
         const val BUILT_IN_ALIAS = "general"
 
-        /** Wire tokens as on iOS (lowercase); OFF is not a valid override. */
         private val THINKING_TOKENS: Map<ThinkingLevel, String> = linkedMapOf(
             ThinkingLevel.LOW to "low",
             ThinkingLevel.MEDIUM to "medium",
@@ -389,11 +342,6 @@ class SubAgentsCollection(
         private fun customIds(repo: ProviderRepository): List<String> =
             repo.subAgents.filter { !it.isBuiltIn }.map { it.id }
 
-        /**
-         * `subagents.order` — the custom agents in the order the assistant
-         * sees them. A flat field, so writing the array reorders in one
-         * audited step. The built-in is always first and is not in the list.
-         */
         fun orderField(repo: ProviderRepository): ConfigField =
             ClosureField(
                 path = "subagents.order",
@@ -408,8 +356,6 @@ class SubAgentsCollection(
                     val arr = (v as? ConfigValue.Arr)?.value ?: throw ConfigError.TypeMismatch("array")
                     val ids = arr.mapNotNull { (it as? ConfigValue.Str)?.value }
                     val current = customIds(repo)
-                    // Only a permutation: a short list would move the omitted
-                    // agents to the end, an unknown id would do nothing.
                     if (ids.size != current.size || ids.toSet() != current.toSet()) {
                         throw ConfigError.InvalidValue(
                             "Must be a permutation of the ${current.size} custom sub agent id(s). The built-in one is always first and must not appear.",
@@ -419,7 +365,6 @@ class SubAgentsCollection(
                 },
             )
 
-        /** `get subagents`: what exists, which is writable, and each one's model. */
         fun summaryField(repo: ProviderRepository): ConfigField =
             ReadOnlyField(
                 path = "subagents",
@@ -442,7 +387,6 @@ class SubAgentsCollection(
                         if (gid != null) {
                             obj["model_group"] = ConfigValue.Str(groups.firstOrNull { it.id == gid }?.name ?: gid)
                         } else {
-                            // "Auto" is a setting, not an absence.
                             obj["model_group"] = ConfigValue.Str("")
                             obj["model"] = ConfigValue.Str("auto — chosen per task")
                         }

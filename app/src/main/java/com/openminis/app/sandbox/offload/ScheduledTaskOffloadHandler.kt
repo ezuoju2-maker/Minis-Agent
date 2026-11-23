@@ -17,46 +17,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Calendar
 
-/**
- * [T-android-scheduled-tasks-full] minis-scheduled — CLI surface for the
- * Scheduled Tasks feature, exposing the same option set as the editor UI and
- * the iOS Shortcuts intents so the agent can create / inspect / fire timed
- * AI actions from a prompt.
- *
- *   minis-scheduled list
- *   minis-scheduled create --prompt "..." [--label L]
- *                          [--after 30m] | [--interval 10m [--count N]]
- *                          | [--time HH:MM [--repeat once|daily|weekdays|custom --days mon,tue,...]]
- *                          | [--trigger on-completion --of <taskId|jobId>]
- *                          [--target new|follow-up|rerun]
- *                          [--session <id>] [--message <id>]
- *                          [--model entry:<id>|group:<id>|<modelId>] [--thinking off|low|medium|high|xhigh|max|ultra]
- *                          [--command "<cmd>" [--command-timeout 2m]]   (alias --shell)
- *                          [--tool <name> --tool-args '<json>']
- *                          [--start YYYY-MM-DD] [--end YYYY-MM-DD]
- *                          [--disabled]
- *   minis-scheduled delete --id <taskId>
- *   minis-scheduled enable  --id <taskId>
- *   minis-scheduled disable --id <taskId>
- *   minis-scheduled run     --id <taskId>     (fire immediately, off-schedule)
- *
- * Target modes mirror iOS App Intents:
- *   new        ≈ SendPrompt(no session)   — run prompt in a fresh chat
- *   follow-up  ≈ FollowUpSession           — append prompt to --session
- *   rerun      ≈ RetryRun                  — re-run --session from --message
- *
- * [T-android-scheduled-triggers] Triggers follow iOS ScheduledOffload
- * (8b315deba): --after (once, relative), --interval/--count (loop),
- * --time (calendar), --trigger on-completion --of (after another task or agent
- * job), inferred when --trigger is omitted. One Android difference is kept on
- * purpose: `--time` without --trigger/--repeat still means ONCE, as it always
- * has here; an explicit `--trigger cron` defaults to daily, as on iOS.
- *
- * [T-scheduled-tool-prefill] `--command` / `--tool` prefill a tool call: it is
- * executed when the task fires, before the model is asked anything, and the
- * model receives it already answered — one model request instead of two.
- * `--prompt` then says what to do with the result.
- */
 class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadHandler {
 
     private val manager get() = ScheduledTaskManager(context)
@@ -66,8 +26,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
             request.argv.drop(1),
             booleanFlags = setOf("disabled", "h", "help"),
         )
-        // [T-offload-defaults-batch-android] Help only on explicit
-        // --help/-h; no subcommand defaults to `list`.
         if (args.hasFlag("h", "help")) {
             return NativeOffloadResult(0, HELP)
         }
@@ -75,14 +33,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
             when (val sub = args.positional.firstOrNull() ?: "list") {
                 "list" -> handleList()
                 "create", "add" -> {
-                    // [T-offload-caller-session] The chat a default (follow-up)
-                    // job belongs to and fires into: the session whose files
-                    // this shell sees, i.e. the PARENT chat for a sub agent.
-                    // The raw MINIS_CHAT_SESSION_ID is the helper's own hidden
-                    // session, so a task created from a sub agent fired into a
-                    // chat the user never sees while `create` still reported
-                    // "IN THIS CHAT". iOS resolves the caller the same way
-                    // (7effb6f2f; a helper runs under its parent's fs_context).
                     val caller = OffloadCallerSession.resolve(request.sessionId)
                     AppLogger.info(TAG, "create caller=${caller.sid?.take(8) ?: "nil"} via=${caller.source}")
                     handleCreate(args, caller.sid)
@@ -108,11 +58,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
         return NativeOffloadResult(0, out.toString(2))
     }
 
-    /**
-     * [T-android-scheduled-triggers] The parsed trigger, ready to go into a
-     * [ScheduledTask]. Calendar fields keep their defaults for the relative
-     * kinds (the row still stores an hour/minute; nothing reads it).
-     */
     internal data class Trigger(
         val kind: ScheduledTriggerKind,
         val hour: Int = 9,
@@ -129,8 +74,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
         val label = args.get("label", "l") ?: ""
         val trigger = parseTrigger(args) { ofRaw -> resolveUpstream(ofRaw) }
         val thinking = parseThinking(args.get("thinking"))
-        // [T-android-scheduled-default-follow-up] Without --target, a task
-        // created inside a chat fires back into that chat (iOS c32dda5a7).
         val (target, defaulted) = resolveTarget(args, callerSessionId)
         val prompt = args.get("prompt", "p") ?: ""
         if (target !is ScheduledTargetMode.RerunMessage && prompt.isBlank()) {
@@ -140,9 +83,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
         if (prefill != null && target is ScheduledTargetMode.RerunMessage) {
             throw IllegalArgumentException("--command/--tool cannot be used with the rerun target (it replays an existing message)")
         }
-        // [OpenMinis#445] Resolved and checked now, stored as the binding the
-        // task editor writes; the raw string used to be kept as a model id and
-        // silently fell back to the default model when it matched nothing.
         val model = args.get("model", "m")?.let { raw ->
             if (target !is ScheduledTargetMode.NewSession) {
                 throw IllegalArgumentException(
@@ -172,8 +112,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
                 intervalSec = trigger.intervalSec,
                 maxFires = trigger.maxFires,
                 onCompletionOf = trigger.onCompletionOf,
-                // [T-scheduled-active-session-android] The chat running the CLI,
-                // so a follow-up aimed back at it keeps it processing.
                 creatorSessionId = callerSessionId,
             ),
         )
@@ -193,12 +131,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
         return NativeOffloadResult(0, out.toString(2))
     }
 
-    /**
-     * [T-android-scheduled-triggers] `--of`: a scheduled task (by id, or by
-     * label as iOS accepts for --id) or a live agent job (a background sub
-     * agent's job_id). Anything else is refused at create time: a typo would
-     * otherwise leave a task that silently never fires.
-     */
     private fun resolveUpstream(raw: String): String {
         val tasks = manager.list()
         tasks.firstOrNull { it.id == raw }?.let { return it.id }
@@ -227,8 +159,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
     private fun handleRun(args: OffloadArgs): NativeOffloadResult {
         val id = args.get("id") ?: throw IllegalArgumentException("--id required")
         val task = manager.get(id) ?: return NativeOffloadResult(1, "minis-scheduled: no task with id=$id")
-        // Fire immediately, off-schedule. Blocks until the agent loop finishes
-        // (ScheduledAgentRunner waits internally). Mirrors the editor "Run now".
         val sessionId = runBlocking {
             com.openminis.app.scheduled.ScheduledAgentRunner.run(context, task)
         }
@@ -239,13 +169,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
         return NativeOffloadResult(if (sessionId != null) 0 else 1, out.toString(2))
     }
 
-    /**
-     * [T-android-scheduled-default-follow-up] The target mode and whether it was
-     * defaulted. Where fires land is settled here, at create time: an explicit
-     * follow-up to a session that does not exist is an error (instead of a
-     * failure on every fire), and a DEFAULTED follow-up whose caller session is
-     * gone falls back to `new`.
-     */
     private fun resolveTarget(args: OffloadArgs, callerSessionId: String?): Pair<ScheduledTargetMode, Boolean> {
         val session = args.get("session", "s")
         val (target, defaulted) = ScheduledTargetDelivery.resolveTarget(args.get("target"), session, callerSessionId)
@@ -286,7 +209,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
             runBlocking { repo.getSession(id) }
         }
 
-    /** Unknown (repository not ready) counts as existing: never refuse on a guess. */
     private fun sessionExists(id: String): Boolean {
         val repo = (context.applicationContext as? com.openminis.app.MinisApp)?.chatRepositoryOrNull ?: return true
         return runBlocking { repo.getSession(id) } != null
@@ -294,7 +216,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
 
     private fun sessionTitle(id: String): String? = sessionEntity(id)?.title?.takeIf { it.isNotBlank() }
 
-    /** YYYY-MM-DD → local start-of-day epoch ms. */
     private fun parseDate(s: String): Long {
         val parts = s.split("-")
         require(parts.size == 3) { "--start/--end must be YYYY-MM-DD" }
@@ -312,7 +233,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
         if (t.customDays.isNotEmpty()) put("days", JSONArray(t.customDays.toList()))
         put("prompt", t.prompt)
         put("target", t.targetMode.encode())
-        // [T-android-scheduled-triggers] The trigger in the CLI's own words.
         put(
             "trigger",
             when (t.triggerKind) {
@@ -343,15 +263,8 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
     companion object {
         private const val TAG = "ScheduledTaskOffload"
 
-        /** Loop floor, as iOS: a tighter loop is a runaway, not a schedule. */
         internal const val MIN_INTERVAL_SEC = 60L
 
-        /**
-         * [T-android-scheduled-triggers] Trigger from the CLI flags, following
-         * iOS ScheduledOffloadBridge.create: an explicit --trigger wins,
-         * otherwise --after -> once, --interval -> loop, --time -> calendar,
-         * --of -> on-completion. [resolveOf] maps --of to a known id.
-         */
         internal fun parseTrigger(args: OffloadArgs, resolveOf: (String) -> String): Trigger {
             for (name in listOf("after", "interval", "count", "of", "trigger")) {
                 if (args.hasFlag(name)) throw IllegalArgumentException("--$name needs a value")
@@ -390,9 +303,7 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
                     }
                     Trigger(ScheduledTriggerKind.INTERVAL, intervalSec = secs.toLong(), maxFires = count)
                 }
-                // Android's own spelling: --time alone keeps meaning once.
                 "calendar" -> calendar(args, defaultRepeat = ScheduledRepeatMode.ONCE)
-                // iOS's: an explicit cron repeats, daily unless told otherwise.
                 "cron" -> calendar(args, defaultRepeat = ScheduledRepeatMode.DAILY)
                 "on-completion", "oncompletion", "on_completion" -> {
                     val of = args.get("of")
@@ -414,11 +325,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
             return Trigger(ScheduledTriggerKind.CALENDAR, hour, minute, repeat, customDays)
         }
 
-        /**
-         * [T-android-scheduled-triggers] `--thinking`, validated rather than
-         * coerced (iOS 993b0a5e0): a typo must not quietly run every fire at
-         * the wrong level. null = leave it to the session, as before.
-         */
         internal fun parseThinking(raw: String?): com.openminis.app.data.model.ThinkingLevel? {
             if (raw == null) return null
             return com.openminis.app.data.model.ThinkingLevel.parseOrNull(raw)
@@ -455,25 +361,8 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
             return s.split(",").mapNotNull { map[it.trim().lowercase().take(3)] }.toSet()
         }
 
-        /**
-         * [T-scheduled-tool-prefill] Prefilled-command flags, named as on iOS
-         * (ScheduledOffload.m / ScheduledPresetToolCall.fromCLI) so one
-         * instruction works on both platforms:
-         *
-         *   --shell "<cmd>"            alias --command
-         *   --shell-timeout <dur>      alias --command-timeout; 90 / 90s / 2m / 1h,
-         *                              1s..1h (the shell tool's own ceiling)
-         *   --tool <name> --tool-args '<json>'   the general form; only
-         *                              shell_execute (alias shell/sh/bash) today,
-         *                              args limited to command / timeout / tool_title
-         *
-         * The general form exists so another tool can be enabled later by adding
-         * it to [PrefilledToolCall.SUPPORTED_TOOLS] without a new flag.
-         */
         internal fun parsePrefill(args: OffloadArgs, label: String): PrefilledToolCall? {
             val names = listOf("shell", "command", "shell-timeout", "command-timeout", "tool", "tool-args")
-            // A value-less flag (or one whose value starts with '-') parses as
-            // a bare flag, which would silently create a task with no prefill.
             for (name in names) {
                 if (args.hasFlag(name)) {
                     throw IllegalArgumentException("--$name needs a value (write --$name=<value> if it starts with '-')")
@@ -515,10 +404,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
                 if (obj.has("timeout")) {
                     val t = obj.opt("timeout") as? Number
                         ?: throw IllegalArgumentException("--tool-args \"timeout\" must be a number of seconds")
-                    // [T-android-scheduled-duration-finite] Through a Double
-                    // and saturated: Number.toInt() on a Long wraps, so
-                    // {"timeout": 4294967356} (2^32 + 60) came out as 60 and
-                    // passed the 1..3600 check below.
                     if (timeoutSec == null) timeoutSec = saturatingSeconds(t.toDouble())
                 }
                 title = obj.optString("tool_title", "").ifBlank { null }
@@ -533,7 +418,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
             return call
         }
 
-        /** `90`, `90s`, `2m`, `1h` → seconds; null when unparseable. */
         internal fun parseDurationSec(raw: String): Int? {
             val m = Regex("""^\s*(\d+(?:\.\d+)?)\s*([smh]?)\s*$""").find(raw.lowercase()) ?: return null
             val n = m.groupValues[1].toDoubleOrNull() ?: return null
@@ -541,15 +425,6 @@ class ScheduledTaskOffloadHandler(private val context: Context) : NativeOffloadH
             return saturatingSeconds(n * mult)
         }
 
-        /**
-         * [T-android-scheduled-duration-finite] Seconds as an Int that never
-         * wraps: rounded, then clamped to the Int range, with NaN / ±Inf mapped
-         * outside any valid range. Port of iOS 40d74b5df's rule (reject
-         * inf / nan / 1e20 before any Int conversion). `Math.round(x).toInt()`
-         * truncated the Long, so `--shell-timeout 4294967356` (2^32 + 60)
-         * became 60 and was accepted; now it saturates and the 1s..1h range
-         * check rejects it.
-         */
         internal fun saturatingSeconds(value: Double): Int = when {
             value.isNaN() -> Int.MIN_VALUE
             value >= Int.MAX_VALUE.toDouble() -> Int.MAX_VALUE

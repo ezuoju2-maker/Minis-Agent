@@ -66,36 +66,6 @@ import java.util.Calendar
 import java.util.Date
 import java.util.concurrent.TimeUnit
 
-/**
- * Bottom sheet listing all chat sessions except the current one. Tapping
- * a row hands the chosen session id back to the caller. Mirrors iOS
- * MoveToSessionSheet (Views/Chat/AIChatView.swift:3413) — same flow
- * (current input + attachments stash via ChatViewModelStore.pendingTransfer
- * → navigate → target session drains the cache).
- *
- * T167: rows now show a category icon + relative timestamp matching
- * SessionListScreen's main list, and the LazyColumn is wrapped in a
- * 16dp rounded surface card so the picker reads as a discrete control
- * inside the sheet rather than naked list items.
- *
- * [T-android-moveto-new-chat] A "New Chat" row sits above the list, as on
- * iOS (AIChatView.swift:5500). Without it the picker could only ever hand
- * content to a session that already existed, so content arriving by share
- * — which lands in whatever session happened to be open — had no route
- * into a fresh conversation; the user had to create one first and share
- * again. The row emits a `__new__<uuid>` draft id through the SAME
- * [onSelect] callback as a real row, which is the id shape the chat route
- * already understands (AppNavigation's own New Chat action builds one the
- * same way), so nothing downstream needs to special-case it.
- */
-/**
- * [T-android-moveto-perf] How many recent sessions the "Move to" picker offers.
- *
- * The sheet is a "move this chat somewhere recent" affordance, not a session
- * browser: past the first screenful the user scrolls rather than reads, and the
- * unbounded query behind it was the thing making the sheet pause. 50 is well
- * past what fits on screen while staying a trivial indexed read.
- */
 private const val MOVE_TO_SESSION_LIMIT = 50
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -109,26 +79,6 @@ fun MoveToSessionSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    // [T-android-moveto-perf] Paint something on the FIRST frame.
-    //
-    // The sheet used to start from an empty list and show its "no sessions"
-    // state until a cold `SELECT * FROM sessions` returned — off the main
-    // thread, so never a jank, but a visible blank pause the user reads as the
-    // sheet being slow.
-    //
-    // Two seeds, in order of preference:
-    //   1. `initialSessions`, if the caller already has a collected list. No
-    //      caller does today (ChatScreen is a single-chat screen and holds no
-    //      session list), but the parameter costs nothing and is the cheapest
-    //      path the moment one does.
-    //   2. otherwise the same Room Flow the home list subscribes to. Room keeps
-    //      that query's result warm for the observers that already exist, so
-    //      the first emission is typically immediate rather than a fresh disk
-    //      read.
-    //
-    // Either way the LaunchedEffect below still runs and replaces this with the
-    // authoritative bounded query, so a stale or over-long seed is corrected
-    // within a frame or two rather than being what the user acts on.
     val seeded by remember(currentSessionId) {
         chatRepository.dao.observeSessions()
             .map { all ->
@@ -144,11 +94,6 @@ fun MoveToSessionSheet(
 
     LaunchedEffect(currentSessionId) {
         refreshed = withContext(Dispatchers.IO) {
-            // [T-child-session-leak] Hidden agent child sessions are reachable
-            // only through their parent's tool block — never a move target.
-            // [T-android-moveto-perf] Both that exclusion and the cap now live
-            // in SQL; see ChatDao.listRecentMovableSessions for why the filter
-            // has to precede the LIMIT.
             chatRepository.dao.listRecentMovableSessions(
                 excludeId = currentSessionId,
                 limit = MOVE_TO_SESSION_LIMIT,
@@ -163,10 +108,6 @@ fun MoveToSessionSheet(
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
-            // [T-android-moveto-new-chat] Deliberately OUTSIDE the
-            // `sessions.isEmpty()` branch below: "no other sessions" is
-            // precisely when the user most needs a new one, and the old
-            // layout showed only a dead-end message there.
             NewChatRow(
                 onClick = { onSelect("__new__${java.util.UUID.randomUUID()}") },
             )
@@ -182,21 +123,6 @@ fun MoveToSessionSheet(
                     modifier = Modifier
                         .padding(horizontal = 16.dp)
                         .fillMaxWidth()
-                        // [T-android-moveto-hover-clip] `clip` BEFORE the
-                        // background, so the rounded shape bounds the rows too.
-                        //
-                        // A `background(shape = …)` only paints a rounded rect;
-                        // it does not constrain what children draw. Each row's
-                        // `clickable` indication is a full-width square
-                        // rectangle, so hovering the first or last row painted
-                        // over the container's corners and the highlight looked
-                        // detached from the card (reported from a GEM-W09
-                        // screenshot with a mouse attached — hover makes it
-                        // obvious, but a touch ripple has the same overhang).
-                        //
-                        // Clipping at the container rather than rounding each
-                        // row is what keeps the MIDDLE rows square-edged: per-row
-                        // rounding would carve notches between adjacent rows.
                         .clip(RoundedCornerShape(16.dp))
                         .background(color = MaterialTheme.colorScheme.surface),
                 ) {
@@ -212,19 +138,6 @@ fun MoveToSessionSheet(
     }
 }
 
-/**
- * [T-android-moveto-new-chat] The "New Chat" entry, above the session list.
- *
- * Geometry is copied from [MoveToPickerRow] — same 40dp tinted circle, same
- * 16/12dp padding, same 15sp semibold title — so the two read as one list
- * rather than a button bolted on top. It carries no second line because
- * there is no timestamp to show; the row is correspondingly shorter, which
- * also helps it read as the distinct action it is.
- *
- * Wrapped in its own 16dp rounded card, matching the card the session list
- * below sits in (iOS separates them as a plain row above a Section; the
- * card is the Android equivalent of that visual break).
- */
 @Composable
 private fun NewChatRow(onClick: () -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
@@ -232,9 +145,6 @@ private fun NewChatRow(onClick: () -> Unit) {
         modifier = Modifier
             .padding(horizontal = 16.dp)
             .fillMaxWidth()
-            // [T-android-moveto-hover-clip] Same ordering as the session list:
-            // clip first, so this row's own click indication stays inside its
-            // rounded shape instead of squaring off the corners.
             .clip(RoundedCornerShape(16.dp))
             .background(color = MaterialTheme.colorScheme.surface)
             .clickable(onClick = onClick)
@@ -267,13 +177,6 @@ private fun NewChatRow(onClick: () -> Unit) {
     androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
 }
 
-/**
- * Single row in the Move-to picker. Visual parity with SessionRow in
- * SessionListScreen.kt (44dp tinted-circle category icon + title +
- * relative timestamp), trimmed of the active-session spinning ring and
- * the second "last message" line so the row stays compact inside a
- * bottom sheet.
- */
 @Composable
 private fun MoveToPickerRow(
     session: ChatSessionEntity,
@@ -326,12 +229,6 @@ private fun MoveToPickerRow(
     }
 }
 
-// ─── Local copies of SessionListScreen helpers ──────────────────────────────
-//
-// `categoryStyle` and `relativeDate` are file-private inside
-// SessionListScreen.kt (and small enough that extracting a shared module
-// would be more disruption than it's worth here). Mirror the same colour
-// + icon table so the picker visually matches the main list.
 
 private data class CategoryStyle(val icon: ImageVector, val color: Color)
 
@@ -373,7 +270,6 @@ private fun relativeDate(context: Context, timestamp: Long): String {
     ) return context.getString(R.string.time_yesterday)
     val days = TimeUnit.MILLISECONDS.toDays(diff)
     if (days < 7) {
-        // T172: device-locale weekday name via java.text.DateFormatSymbols.
         val dayNames = java.text.DateFormatSymbols(java.util.Locale.getDefault()).weekdays
         return dayNames[dateCal.get(Calendar.DAY_OF_WEEK) - 1]
     }

@@ -97,18 +97,8 @@ fun FileBrowserScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     var deleteTarget by remember { mutableStateOf<FileItem?>(null) }
-    // T-pwa-3: long-press → "Add to Home Screen" sheet, hosted at screen
-    // scope so the dropdown can dismiss before the bottom-sheet appears.
     var webAppSheetSource by remember { mutableStateOf<com.openminis.app.webapp.WebAppSource.HostFile?>(null) }
 
-    // When navigated into a subdirectory, the top-bar back button and the
-    // system back gesture both pop one directory level first. The
-    // ViewModel's `goBack()` returns `false` when we're already at the
-    // initial entry directory (T145) — at that point we exit the screen
-    // entirely rather than crawling further up toward the rootfs root,
-    // mirroring iOS FileBrowserView. The state.canGoBack pre-check is
-    // kept for the same shortcut and to flip the back button into a
-    // pure "close" affordance once the user is back at the entry dir.
     val handleBack = {
         if (!state.canGoBack || !viewModel.goBack()) onBack()
     }
@@ -125,9 +115,6 @@ fun FileBrowserScreen(
                     }
                 },
                 actions = {
-                    // T-hidden-files a3e7f1d0: trailing toolbar collapsed
-                    // to a single ⋯ menu (was a Sort-only IconButton). All
-                    // functional actions now live under one entry point.
                     MoreMenu(
                         sortKey = state.sortKey,
                         ascending = state.sortAscending,
@@ -147,7 +134,6 @@ fun FileBrowserScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            // Breadcrumb bar
             BreadcrumbBar(
                 pathComponents = state.pathComponents,
                 onNavigate = { index -> viewModel.navigateToPathComponent(index) },
@@ -155,7 +141,6 @@ fun FileBrowserScreen(
 
             HorizontalDivider()
 
-            // Content
             when {
                 state.isLoading -> {
                     Box(
@@ -206,7 +191,6 @@ fun FileBrowserScreen(
                                 onDelete = { deleteTarget = item },
                                 onAddToHome = { source -> webAppSheetSource = source },
                             )
-                            // [T-file-row-polish] The separator starts under the name.
                             HorizontalDivider(modifier = Modifier.padding(start = ROW_TEXT_START))
                         }
                     }
@@ -215,7 +199,6 @@ fun FileBrowserScreen(
         }
     }
 
-    // Delete confirmation
     deleteTarget?.let { item ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
@@ -237,9 +220,6 @@ fun FileBrowserScreen(
         )
     }
 
-    // T-pwa-3: Add-to-Home-Screen sheet, hosted at screen scope so it
-    // outlives the row that triggered it (rows scroll out of composition
-    // and the menu dismisses before the sheet animates in).
     webAppSheetSource?.let { src ->
         com.openminis.app.webapp.AddToHomeSheet(
             source = src,
@@ -247,7 +227,6 @@ fun FileBrowserScreen(
         )
     }
 
-    // Error dialog
     (state.errorMessage ?: state.refusedMountPointName?.let {
         stringResource(R.string.filebrowser_delete_mount_point_refused, it)
     })?.let { msg ->
@@ -257,19 +236,13 @@ fun FileBrowserScreen(
             text = { Text(msg) },
             confirmButton = {
                 MinisTextButton(onClick = { viewModel.dismissError() }) {
-                    Text("OK")  // OK is locale-neutral
+                    Text("OK")
                 }
             },
         )
     }
 }
 
-/**
- * [#451] The path as a row of capsules, each at least 48 × 48 dp to tap (the
- * bare 12 sp labels were about 16 dp tall). The current folder is the last
- * capsule, highlighted and not clickable; the row scrolls to it whenever the
- * path changes, so a deep path shows where you are rather than its root.
- */
 @Composable
 private fun BreadcrumbBar(
     pathComponents: List<String>,
@@ -277,8 +250,6 @@ private fun BreadcrumbBar(
 ) {
     val scrollState = rememberScrollState()
     LaunchedEffect(pathComponents) {
-        // maxValue belongs to the new path only once it has been laid out:
-        // wait for that frame, then scroll to the end.
         withFrameNanos { }
         scrollState.animateScrollTo(scrollState.maxValue)
     }
@@ -315,24 +286,14 @@ private fun BreadcrumbBar(
     }
 }
 
-/** What one place in the path bar shows. */
 internal sealed interface BreadcrumbSlot {
-    /** A path component, by its index in the path. */
     data class Component(val index: Int) : BreadcrumbSlot
 
-    /** The middle components, folded into one `···` capsule. */
     data class Collapsed(val indices: IntRange) : BreadcrumbSlot
 }
 
-/** Paths up to this deep show every component. */
 internal const val BREADCRUMB_FULL_MAX = 4
 
-/**
- * [path-ellipsis] A path deeper than [BREADCRUMB_FULL_MAX] keeps its root
- * (one tap back to the start), its parent and the current folder, and
- * folds everything between into a `···` capsule whose menu lists those
- * folders in order. Shallower paths show in full.
- */
 internal fun breadcrumbSlots(count: Int): List<BreadcrumbSlot> {
     if (count <= BREADCRUMB_FULL_MAX) return List(count) { BreadcrumbSlot.Component(it) }
     return listOf(
@@ -343,11 +304,6 @@ internal fun breadcrumbSlots(count: Int): List<BreadcrumbSlot> {
     )
 }
 
-/**
- * [path-ellipsis] The folded middle of a deep path: a `···` capsule with the
- * same 48 dp touch target as the others; its menu lists the hidden folders
- * root-side first, and picking one goes there.
- */
 @Composable
 private fun CollapsedBreadcrumbCapsule(
     hidden: List<Pair<Int, String>>,
@@ -377,13 +333,11 @@ private fun CollapsedBreadcrumbCapsule(
     }
 }
 
-/** One path component: a 48 dp touch target around a rounded capsule. */
 @Composable
 private fun BreadcrumbCapsule(
     label: String,
     isCurrent: Boolean,
     onClick: () -> Unit,
-    /** Spoken instead of [label] (the `···` capsule). */
     contentDescription: String? = null,
 ) {
     val shape = RoundedCornerShape(50)
@@ -431,7 +385,6 @@ private fun BreadcrumbCapsule(
     }
 }
 
-/** [T-file-row-polish] Row geometry: padding + icon tile + gap = where the name starts. */
 private val ROW_PADDING_H = 16.dp
 private val ROW_TILE = 36.dp
 private val ROW_TILE_GAP = 12.dp
@@ -446,20 +399,11 @@ private fun FileItemRow(
     onDelete: () -> Unit,
     onAddToHome: (com.openminis.app.webapp.WebAppSource.HostFile) -> Unit,
 ) {
-    // T-pwa-3: long-press menu for .html / .htm files whose host path
-    // sits under a recognised PRoot bind mount (`/var/minis/shared` or
-    // `/var/minis/mounts/<n>`). Computed lazily because the bindMounts
-    // map can change while the screen is open (mount add/remove).
     val ext = item.file.extension.lowercase()
     val isHtml = !item.isDirectory && (ext == "html" || ext == "htm")
-    // [T-file-row-polish] One menu state for the long-press and the row's
-    // "More" button (iOS feeds .contextMenu and the More menu from one list).
     var menuExpanded by remember(item.file.absolutePath) { mutableStateOf(false) }
     val context = LocalContext.current
 
-    // [T-android-file-context-copy-abs-path] The file's Linux (PRoot) absolute
-    // path = current dir's linux path + name. Falls back to the host absolute
-    // path when this browser isn't rooted under a bind mount (raw host view).
     val absolutePath = currentLinuxPath?.let { "${it.trimEnd('/')}/${item.name}" }
         ?: item.file.absolutePath
 
@@ -469,8 +413,6 @@ private fun FileItemRow(
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,
-                // [T-android-file-context-copy-abs-path] Long-press opens the
-                // file context menu, the same one as the "More" button.
                 onLongClick = { menuExpanded = true },
             )
             .padding(start = ROW_PADDING_H, end = 8.dp, top = 10.dp, bottom = 10.dp),
@@ -480,7 +422,6 @@ private fun FileItemRow(
 
         Spacer(modifier = Modifier.width(ROW_TILE_GAP))
 
-        // Name, then "size · date" (size omitted for folders, date when stat = 0).
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = item.name,
@@ -505,7 +446,6 @@ private fun FileItemRow(
         }
 
         if (item.isDirectory) {
-            // A softer chevron than the name's color (iOS: tertiary, semibold).
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
@@ -513,8 +453,6 @@ private fun FileItemRow(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
             )
         } else {
-            // [T-file-row-polish] "More" (the long-press actions) and Export:
-            // 32 dp circles in 44 dp touch targets.
             Box {
                 RowActionButton(
                     icon = Icons.Filled.MoreVert,
@@ -539,7 +477,6 @@ private fun FileItemRow(
         }
     }
     if (item.isDirectory) {
-        // Folders have no More button; their long-press menu anchors on the row.
         FileRowMenu(
             expanded = menuExpanded,
             onDismiss = { menuExpanded = false },
@@ -550,14 +487,9 @@ private fun FileItemRow(
             onAddToHome = onAddToHome,
         )
     }
-    } // anchoring Box
+    }
 }
 
-/**
- * [T-file-row-polish] The type's glyph on a rounded tile of its color at 15 %
- * (the sidebar's group-icon look, iOS `FileItemRow`). A symlink gets a small
- * orange badge on the tile's corner.
- */
 @Composable
 private fun FileIconTile(kind: FileIconKind, isSymlink: Boolean) {
     val tint = kind.tint()
@@ -588,7 +520,6 @@ private fun FileIconTile(kind: FileIconKind, isSymlink: Boolean) {
     }
 }
 
-/** A 32 dp round button on a light fill, in a 44 dp touch target. */
 @Composable
 private fun RowActionButton(icon: ImageVector, contentDescription: String, onClick: () -> Unit) {
     Box(
@@ -611,11 +542,6 @@ private fun RowActionButton(icon: ImageVector, contentDescription: String, onCli
     }
 }
 
-/**
- * The file's actions - the long-press menu and the More button show this one
- * list (iOS `FileBrowserRow.actions`): Copy Absolute Path, Add to Home Screen
- * (HTML, still hidden), Delete (files only, in the error color).
- */
 @Composable
 private fun FileRowMenu(
     expanded: Boolean,
@@ -636,8 +562,6 @@ private fun FileRowMenu(
                 val clip = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                     as android.content.ClipboardManager
                 clip.setPrimaryClip(android.content.ClipData.newPlainText("path", absolutePath))
-                // Android 13+ shows its own clipboard confirmation chip;
-                // add a Toast for < 13 and as explicit feedback.
                 android.widget.Toast.makeText(
                     context,
                     context.getString(R.string.filebrowser_copy_abs_path_toast),
@@ -645,9 +569,6 @@ private fun FileRowMenu(
                 ).show()
             },
         )
-        // TODO(webapp-hidden): WebApp / "Add to Home Screen" item temporarily
-        // hidden — feature not yet validated/complete. Re-enable by removing
-        // `false &&` from the guard below.
         if (false && isHtml) {
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.webapp_add_to_home)) },
@@ -684,14 +605,8 @@ private fun FileRowMenu(
     }
 }
 
-/** iOS's symlink badge: a small orange circle on the tile. */
 private val SYMLINK_BADGE = Color(0xFFFF9800)
 
-/**
- * [T-file-row-polish] What a row's icon tile shows, by extension (any case);
- * folders win. The extension lists are iOS `FileIconKind` (0340fd920), plus
- * doc / docx with the text documents.
- */
 internal enum class FileIconKind {
     FOLDER, CODE, SHELL, IMAGE, AUDIO, VIDEO, TEXT, PDF, ARCHIVE, OTHER;
 
@@ -728,7 +643,6 @@ private fun FileIconKind.icon(): ImageVector = when (this) {
     FileIconKind.OTHER -> Icons.AutoMirrored.Filled.InsertDriveFile
 }
 
-/** Folders take the app accent; files a fixed color per type (iOS tints). */
 @Composable
 private fun FileIconKind.tint(): Color = when (this) {
     FileIconKind.FOLDER -> MaterialTheme.colorScheme.primary
@@ -759,8 +673,6 @@ private fun MoreMenu(
             Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.filebrowser_more_action))
         }
         com.openminis.app.ui.components.MinisMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            // Display options — sort key choices first so the most
-            // frequent toggle (sort) is the closest tap.
             for (key in FileSortKey.entries) {
                 DropdownMenuItem(
                     text = { Text(stringResource(when (key) {
@@ -831,4 +743,3 @@ private fun MoreMenu(
         }
     }
 }
-

@@ -5,29 +5,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-update-channels] Betas are published on OpenMinis/OpenMinis as
- * prereleases tagged `0-beta-build<N>`. Every client already in users' hands
- * reads that repo, ignores the prerelease flag, and must NOT be offered a
- * beta - otherwise every old user is pushed onto the beta channel.
- *
- * The fixture below is the update decision of the shipped clients, copied
- * verbatim from git history. UpdateChecker.kt is byte-identical in all four
- * (md5 ee5c06eaf8d6ed5bd3ef133b132df3d3; last changed in 1cea75e93 on
- * 2026-06-05, before 1.12):
- *   1.12  83c8038c6  "align version with iOS at 1.12, drop preview suffix"
- *   1.13  4bdd7d817  "bump version to 1.13 (versionCode 25)"
- *   1.14  d7f1335e7  "set version to 1.14 (versionCode stays 28)"
- *   1.15  9e4fe13ba  "bump version to 1.15 (versionCode 29)"
- * so one copy covers every distinct historical logic.
- */
 class LegacyUpdateCompatTest {
 
-    // ── Verbatim from UpdateChecker.kt @ 1.12-1.15 ──────────────────────────
 
     private fun normalizeTag(tag: String): String {
         val trimmed = tag.trim().removePrefix("v").removePrefix("V")
-        // "0.1-preview" → "0.1"; "0.1.0" → "0.1.0"; "1.2.3-rc1" → "1.2.3"
         val dashIdx = trimmed.indexOf('-')
         return if (dashIdx > 0) trimmed.substring(0, dashIdx) else trimmed
     }
@@ -47,9 +29,6 @@ class LegacyUpdateCompatTest {
         return 0
     }
 
-    // The decision part of the old check(): same filters, same `highest`,
-    // same upgrade pick, same NoApkAsset rule, over the first 30 releases
-    // (`?per_page=30`) in GitHub's order (newest first).
     private data class Rel(val tag: String, val prerelease: Boolean, val hasApk: Boolean, val draft: Boolean = false)
 
     private sealed class Old {
@@ -77,9 +56,7 @@ class LegacyUpdateCompatTest {
         return Old.UpToDate
     }
 
-    // ── The repo as it is, and as it will be ────────────────────────────────
 
-    /** OpenMinis/OpenMinis today, newest first: 1.14, 1.13, 1.12, then the previews. */
     private val existing: List<Rel> = listOf(Rel("1.14", false, true), Rel("1.13", false, true), Rel("1.12", false, true)) +
         listOf(22, 20, 19, 18, 17, 15, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 16, 14, 13, 12).map { Rel("0.$it-preview", true, true) }
 
@@ -89,11 +66,11 @@ class LegacyUpdateCompatTest {
 
     @Test
     fun `an old client is never offered a beta and never told a beta has no APK`() {
-        val betas = (31..40).map { beta(it) } // the 10 the release command keeps
+        val betas = (31..40).map { beta(it) }
         val layouts = listOf(
             betas + existing,
             betas.take(5) + existing,
-            listOf(beta(41, apk = false)) + betas + existing, // a beta without an APK on top
+            listOf(beta(41, apk = false)) + betas + existing,
             existing.take(1) + betas + existing.drop(1),
         )
         for (local in olds + "1.16") {
@@ -115,7 +92,6 @@ class LegacyUpdateCompatTest {
             for (local in olds) assertEquals(local, Old.Update("1.16"), oldCheck(layout, local))
             assertEquals(Old.UpToDate, oldCheck(layout, "1.16"))
         }
-        // The pruned window (10 betas) keeps the stables inside the old client's 30.
         assertTrue((betas + stable16 + existing).take(30).any { it.tag == "1.16" })
     }
 
@@ -124,7 +100,6 @@ class LegacyUpdateCompatTest {
         assertEquals(Old.UpToDate, oldCheck(existing, "1.15"))
         assertEquals(Old.UpToDate, oldCheck(existing, "1.14"))
         assertEquals(Old.Update("1.14"), oldCheck(existing, "1.13"))
-        // Patch tags work: 1.16.1 over 1.16.
         assertEquals(Old.Update("1.16.1"), oldCheck(listOf(Rel("1.16.1", false, true), Rel("1.16", false, true)) + existing, "1.16"))
     }
 
@@ -132,7 +107,6 @@ class LegacyUpdateCompatTest {
     fun `why stable tags stay X_Y - old logic takes 1_16_0 as newer than 1_16`() {
         assertTrue(compareVersions(normalizeTag("1.16.0"), normalizeTag("1.16")) > 0)
         assertEquals(0, compareVersions(normalizeTag("1.16"), normalizeTag("1.16")))
-        // And why a beta tag must not start with a letter: "beta" > "1" as a string.
         assertTrue(compareVersions(normalizeTag("beta-build31"), normalizeTag("1.15")) > 0)
         assertTrue(compareVersions(normalizeTag("0-beta-build31"), normalizeTag("1.12")) < 0)
     }

@@ -10,43 +10,6 @@ import javax.crypto.Cipher
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/**
- * T-android-keystore-aead-fail: self-healing wrapper around
- * [EncryptedSharedPreferences.create].
- *
- * The default flow throws `AEADBadTagException` on open when the Tink keyset
- * stored inside the prefs file was wrapped by a different AndroidKeystore key
- * than the one now under the alias - e.g. the XML came back from a system
- * backup / device transfer, which never carries Keystore keys. Uncaught, that
- * killed the app in a relaunch loop (Samsung One UI / Android 16 reports).
- *
- * [T-android-keystore-no-cascade] The first version of this wrapper turned one
- * unreadable store into the loss of EVERY credential, repeatedly (user report:
- * API keys gone after an update, then env var values and the WebDAV password,
- * reproduced on a Pixel 4a by corrupting one keyset byte):
- *  - it deleted the master-key alias, which all seven stores share, so every
- *    other store became unreadable at its next open and did the same in turn;
- *  - it deleted the XML with File.delete(), which leaves the process-wide
- *    SharedPreferences cache holding the old keyset, so the rebuild re-read it
- *    and always failed, dropping to the empty plain-text fallback;
- *  - callers that construct a store per call (backup page, OAuth routing
- *    checks) re-ran the whole wipe on every call, and concurrent opens on
- *    startup threads deleted the key out from under each other.
- *
- * Strategy now:
- *  1. One open per file per process, under a lock ([cache]).
- *  2. Try the normal create, then once more (a Keystore hiccup must not cost
- *     data).
- *  3. Still failing: probe the master key with an encrypt/decrypt round trip.
- *     If it works, only THIS file's keyset is orphaned - drop just this file
- *     via deleteSharedPreferences (clears the in-memory cache too). Only a
- *     master key that cannot encrypt at all is recreated; every store under
- *     it is unreadable already, so that costs nothing extra.
- *  4. Rebuild failing even then: an empty plain-text store named
- *     "<file>_plain_fallback", so the app keeps running. Whatever the user
- *     enters there is moved into the encrypted store at the next successful
- *     open, so it is neither lost again nor left in plain text.
- */
 object EncryptedPrefsFactory {
     private const val TAG = "EncryptedPrefsFactory"
     internal const val FALLBACK_SUFFIX = "_plain_fallback"
@@ -57,23 +20,17 @@ object EncryptedPrefsFactory {
     fun safeCreate(context: Context, fileName: String): SharedPreferences =
         cached(fileName) { open(AndroidOps(context.applicationContext), fileName) }
 
-    /** One instance per file per process; the lock also serialises every create. */
     internal fun cached(fileName: String, create: () -> SharedPreferences): SharedPreferences =
         synchronized(lock) { cache.getOrPut(fileName, create) }
 
-    /** Test hook: forget opened stores. */
     internal fun resetCacheForTest() = synchronized(lock) { cache.clear() }
 
-    /** Everything [open] needs from the platform; a fake drives it in unit tests. */
     internal interface Ops {
         fun build(fileName: String): SharedPreferences
-        /** True when the shared master key can still encrypt and decrypt. */
         fun masterKeyWorks(): Boolean
-        /** Delete this one store, on disk and in the process-wide prefs cache. */
         fun discardStore(fileName: String)
         fun deleteMasterKey()
         fun plainFallback(fileName: String): SharedPreferences
-        /** Move entries left in this file's plain fallback into [into]. */
         fun adoptFallback(fileName: String, into: SharedPreferences)
         fun log(priority: Int, msg: String, t: Throwable? = null)
     }
@@ -105,11 +62,6 @@ object EncryptedPrefsFactory {
         return ops.plainFallback(fileName)
     }
 
-    /**
-     * Copy every entry of [plain] into [into], then clear [plain]. Returns how
-     * many entries moved. Clears only after the copy is committed, so a failed
-     * write keeps the values where they were.
-     */
     internal fun moveEntries(plain: SharedPreferences, into: SharedPreferences): Int {
         val all = plain.all
         if (all.isEmpty()) return 0
@@ -148,7 +100,6 @@ object EncryptedPrefsFactory {
 
         private fun roundTrip(): Boolean = runCatching {
             val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            // No key at all: nothing to recreate, and nothing to blame on it.
             val key = ks.getKey(MasterKey.DEFAULT_MASTER_KEY_ALIAS, null) as? SecretKey
                 ?: return@runCatching true
             val probe = "minis-keystore-probe".toByteArray()
@@ -184,7 +135,6 @@ object EncryptedPrefsFactory {
                 if (!java.io.File(dir, "$name.xml").exists()) return
                 val plain = context.getSharedPreferences(name, Context.MODE_PRIVATE)
                 val moved = moveEntries(plain, into)
-                // Delete only once nothing is left in it: a failed copy keeps the values.
                 if (plain.all.isEmpty()) context.deleteSharedPreferences(name)
                 log(Log.INFO, "moved $moved entr(ies) from $name back into encrypted $fileName")
             }.onFailure { log(Log.WARN, "adopt fallback for $fileName failed: ${it.message}") }

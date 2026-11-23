@@ -4,27 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.math.BigDecimal
 
-/**
- * [T-quota-subscription-crossreview] The Claude / ChatGPT (Codex) subscription
- * path pinned to iOS, byte for byte. Neither subscription can be signed in on
- * the test device, so these fixtures stand in for real replies:
- * - Claude reply headers as sent on a 200 and on a 429 (the unified set plus
- *   the neighbours the parser must ignore: representative-claim,
- *   fallback-percentage, the overall reset, overage-*), a family window in
- *   both spellings (7d_opus, 7d-sonnet) and a percent-form value;
- * - the /api/oauth/usage body with null windows, a zero window, a
- *   seven_day_sonnet window, an unknown key and extra_usage;
- * - Codex x-codex-* headers on a 200 (with the credits / over-limit headers
- *   iOS ignores) and a 429, and wham/usage bodies: limit reached with a null
- *   secondary, credits only, nothing usable, a window without a length and an
- *   additional limit;
- * - an active result followed by fresher headers (the merge).
- *
- * EXPECTED is the output of the SAME fixtures run through the shipping iOS
- * sources (QuotaModels / QuotaRules / QuotaAdapters / QuotaPersistence
- * compiled with swiftc) and the same dump, captured on 2026-09-30. A
- * difference means the platforms read a real reply differently.
- */
 class QuotaSubscriptionParityTest {
 
     private val now = 1_800_000_000_000L
@@ -126,7 +105,6 @@ class QuotaSubscriptionParityTest {
         out += usage("C9", """{"plan_type":"free","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":null,"secondary_window":null}}""", claude = false)
         out += usage("C10", """{"plan_type":"plus","rate_limit":{"allowed":true,"primary_window":{"used_percent":"55.5","reset_after_seconds":600},"secondary_window":{"used_percent":20,"limit_window_seconds":86400}},"additional_rate_limits":[{"limit_name":"GPT-5.3-Codex-Spark","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":{"used_percent":90,"limit_window_seconds":18000,"reset_at":1800005000}}},{"limit_name":"","rate_limit":{"primary_window":{"used_percent":1}}}]}""", claude = false)
 
-        // M1: an active result, then fresher headers 60 s later.
         val api = ClaudeSubscriptionQuotaAdapter.parseUsage(
             """{"five_hour":{"utilization":7.0,"resets_at":"2027-01-15T11:00:00Z"},"seven_day":{"utilization":35,"resets_at":"2027-01-19T08:00:00Z"},"seven_day_opus":{"utilization":20,"resets_at":null}}""".toByteArray(),
             csub, now = now,
@@ -148,7 +126,6 @@ class QuotaSubscriptionParityTest {
     fun `every fixture reads exactly as it does on iOS`() {
         val actual = run().lines()
         val expected = EXPECTED.lines()
-        // Line by line, so a failure names the fixture and field that differ.
         for (i in 0 until maxOf(actual.size, expected.size)) {
             assertEquals("line ${i + 1}", expected.getOrNull(i), actual.getOrNull(i))
         }
@@ -158,7 +135,6 @@ class QuotaSubscriptionParityTest {
     fun `quota bookkeeping can never fail the chat request that carried the headers`() {
         val store = com.openminis.app.ProductionSources.read("quota/QuotaStore.kt")
         val sink = store.substringAfter("object QuotaObservationSink")
-        // Both entry points go through the guarded helper, never the store directly.
         assertEquals(2, Regex("""\bobserve\(instanceId, QuotaVendor\.""").findAll(sink).count())
         assertEquals(1, Regex("""QuotaStore\.observeSubscriptionHeaders\(""").findAll(sink).count())
         val helper = sink.substringAfter("private fun observe(")
@@ -167,7 +143,6 @@ class QuotaSubscriptionParityTest {
     }
 
     private companion object {
-        /** iOS output for the fixtures above (see the class doc). */
         val EXPECTED = """
 C1:
   plan=- source=officialHeaders

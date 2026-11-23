@@ -14,30 +14,10 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * Behaviour-invariance evidence for the request-context extraction
- * (refactor+test, no behaviour change, no bug fixes).
- *
- * Every case drives ChatViewModel's OWN private entry points on an instance
- * allocated without its constructor, with only the fields those functions read
- * set:
- *  - effectiveAgentHistory()  (compaction summary injection v2 / v1, warm-up
- *    walk-back, cached / decided / undecided warm-up trim, orphan repair),
- *  - offloadWarmUpScanPlan()  (shares the walk-back),
- *  - dropOrphanedToolParts(), auditOutgoingPayload(),
- *  - persistBrowserArtifact(), linuxPathToMinisURL(),
- * plus the public BPETokenizer.countImageTokens. [GOLDEN] holds the sha256 of
- * every output captured on the code BEFORE the extraction (HEAD 0def96471, two
- * identical runs); after it those entry
- * points delegate to the extracted functions and must reproduce every value.
- * The per-marker warm-up cache is part of each output, so a changed caching
- * decision shows up as well as a changed message list.
- */
 class CtxInvarianceTest {
 
     private val F = ImageRealFixtures
 
-    /** sha256 of each case's canonical output, captured before the extraction. */
     private val GOLDEN: Map<String, String> = mapOf(
         "eah.noCompaction" to "07edc9f6a250f4c465ef70d98516d5e94f0baa70b7bd43a485e4915debefc398",
         "eah.v2.cached0" to "798d527ee82b322b28a7ead52692620eefd41000b2b637cec6817be25f73f6f7",
@@ -47,9 +27,6 @@ class CtxInvarianceTest {
         "eah.v2.decidedTrims" to "bec0ea6af5c7561e8445678f82b7be2f1e6ec198fdfa16bc3139fb20d4fab93e",
         "eah.v2.undecidedNoFixed" to "8ab3c8117226257250e7210c3e70f03856d83ebc4e55b498af786f543898774f",
         "eah.v2.undecidedNoWindow" to "798d527ee82b322b28a7ead52692620eefd41000b2b637cec6817be25f73f6f7",
-        // [T-404-summary-after-tool-results] Changed on purpose by the #404 fix: the
-        // anchor is a tool call, so the summary now follows the carrier's tool result
-        // (was 426653b8fb6b40348bedb9e28c69bccf8dab15c554ac5c7cf4c314a8ef9cbfb0, summary first).
         "eah.v2.anchorToolCall.404" to "852c13ac5cb486fa68a1c7e68ffe74bf16582f7f63ddab43aa27204b044dab42",
         "eah.v2.anchorLast" to "a91d3a40e3e7dca70538f95578b45d7b19f1f27854f89d8d1132c78d34e87e8c",
         "eah.v2.anchorUnknown" to "07edc9f6a250f4c465ef70d98516d5e94f0baa70b7bd43a485e4915debefc398",
@@ -121,7 +98,6 @@ class CtxInvarianceTest {
             AgentContentPart.ToolResult(id, name, body, imageData = image, imageMimeType = image?.let { "image/jpeg" }, imageLinuxPath = image?.let { "/var/minis/browser/s.jpg" }),
         ), dbMessageId = db)
 
-    /** 11 messages; anchor candidates a3 (idx 7) and a4 (idx 9, a tool call). */
     private fun base(): List<LLMMessage> = listOf(
         u("q1 " + "lorem ipsum ".repeat(300), "u0"),
         a("a1", "a0"),
@@ -170,18 +146,13 @@ class CtxInvarianceTest {
         out["eah.v2.anchorUnknown"] = eah(vm(files, base(), summary, v2("nope")))
         out["eah.v2.blankSummary"] = eah(vm(files, base(), "  ", v2("a3")))
         out["eah.v2.firstUser"] = eah(vm(files, base(), summary, v2("u0"), window = 100_000, fixedTokens = 2_000))
-        // An image-only user turn right after the anchor: no Text part to prepend onto.
         val imgTurn = base().toMutableList().apply {
             set(8, LLMMessage(LLMMessage.Role.USER, "", imageParts = listOf(LLMMessage.ImagePart(F.png(4, 4), "image/png")),
                 contentParts = listOf(AgentContentPart.ImageData(F.png(4, 4), "image/png")), dbMessageId = "u3"))
         }
         out["eah.v2.imageOnlyAfterAnchor"] = eah(vm(files, imgTurn, summary, v2("a3"), cache = mapOf("mk-a3" to 0)))
-        // A plain (parts-less) user turn after the anchor.
         val bare = base().toMutableList().apply { set(8, LLMMessage(LLMMessage.Role.USER, "q4 bare", dbMessageId = "u3")) }
         out["eah.v2.partlessAfterAnchor"] = eah(vm(files, bare, summary, v2("a3"), cache = mapOf("mk-a3" to 0)))
-        // Walk-back cap: one user-text turn, then 60 tool rounds (results are USER
-        // messages but not round starts), then base(); anchored at a1 the walk
-        // back would need 123 messages to reach the next user-text turn.
         val long = buildList {
             add(u("w0", "wu0"))
             for (i in 0 until 60) { add(call("c$i", "wc$i")); add(result("c$i", "wr$i")) }
@@ -195,7 +166,6 @@ class CtxInvarianceTest {
         out["eah.v1.lcmUnknown"] = eah(vm(files, base(), summary, v1(lcm = "zzz")))
         out["eah.v1.nothing"] = eah(vm(files, base(), summary, v1()))
 
-        // Orphans: a stranded result, a mid-history unanswered call, a trailing in-flight call.
         val orphans = listOf(
             u("start", "o0"),
             result("lost", "o1"),
@@ -210,19 +180,16 @@ class CtxInvarianceTest {
         @Suppress("UNCHECKED_CAST")
         out["dropOrphanedToolParts.clean"] = (F.callPrivate(vm(files, emptyList()), "dropOrphanedToolParts", base()) as List<LLMMessage>)
             .let { r -> dumpList(r) + "|same=" + (r.size == base().size) }
-        // Responses-style "call|fc" ids pair with the bare call id.
         val mixedIds = listOf(u("go", null),
             LLMMessage(LLMMessage.Role.ASSISTANT, "", contentParts = listOf(AgentContentPart.ToolUse("call_1|fc_1", "x", JSONObject()))),
             LLMMessage(LLMMessage.Role.USER, "", contentParts = listOf(AgentContentPart.ToolResult("call_1", "x", "r"))))
         @Suppress("UNCHECKED_CAST")
         out["dropOrphanedToolParts.pipeIds"] = dumpList(F.callPrivate(vm(files, emptyList()), "dropOrphanedToolParts", mixedIds) as List<LLMMessage>)
 
-        // offloadWarmUpScanPlan shares the walk-back.
         out["scanPlan.v2.cached0"] = F.callPrivate(vm(files, base(), summary, v2("a3"), cache = mapOf("mk-a3" to 0)), "offloadWarmUpScanPlan").toString()
         out["scanPlan.v2.cached1"] = F.callPrivate(vm(files, base(), summary, v2("a3"), cache = mapOf("mk-a3" to 1)), "offloadWarmUpScanPlan").toString()
         out["scanPlan.v2.undecided"] = F.callPrivate(vm(files, base(), summary, v2("a3")), "offloadWarmUpScanPlan").toString()
 
-        // auditOutgoingPayload: logs only, returns its input.
         val big = listOf(
             u("x".repeat(400_000), null),
             LLMMessage(LLMMessage.Role.USER, "", contentParts = listOf(AgentContentPart.ImageData(F.png(8, 8) + ByteArray(3_000_000), "image/png"))),
@@ -233,11 +200,9 @@ class CtxInvarianceTest {
         val audited = F.callPrivate(auditVm, "auditOutgoingPayload", big) as List<LLMMessage>
         out["auditOutgoingPayload"] = "same=" + (audited === big) + "\n" + dumpList(audited)
 
-        // BPETokenizer.countImageTokens (JVM: android.jar BitmapFactory is a stub).
         out["countImageTokens"] = listOf(ByteArray(0), F.png(10, 10), F.jpeg(4032, 3024), F.heicHeaderOnly(), byteArrayOf(1, 2, 3))
             .joinToString(",") { BPETokenizer.countImageTokens(it).toString() }
 
-        // Browser artifact helpers.
         val bvm = vm(files, emptyList())
         val persisted = F.callPrivate(bvm, "persistBrowserArtifact", "screenshot_1700000000.jpg", byteArrayOf(9, 8, 7)) as String?
         out["persistBrowserArtifact"] = persisted!!.removePrefix(files.absolutePath) + "|" + java.io.File(persisted).readBytes().toList()
@@ -255,19 +220,17 @@ class CtxInvarianceTest {
     @Test fun `extracted code reproduces the pre-extraction outputs byte for byte`() {
         val now = outputs().mapValues { F.sha256(it.value) }
         for ((k, v) in now) println("[GOLDEN] \"$k\" to \"$v\",")
-        if (GOLDEN.isEmpty()) return // bootstrap run on the pre-extraction code
+        if (GOLDEN.isEmpty()) return
         assertEquals(GOLDEN.keys, now.keys)
         for (k in GOLDEN.keys) assertEquals("output changed: $k", GOLDEN[k], now[k])
     }
 
-    /** The plain-text outputs, for reading what a GOLDEN row stands for. */
     @Test fun `print readable outputs`() {
         val dir = java.io.File("build/ctx-dump/invariance").apply { mkdirs() }
         for ((k, v) in outputs()) java.io.File(dir, "$k.txt").writeText(v)
     }
 }
 
-/** Reflection helpers this suite needs beyond ImageRealFixtures. */
 internal object CtxReflect {
     private val unsafe: Any by lazy {
         val c = Class.forName("sun.misc.Unsafe")

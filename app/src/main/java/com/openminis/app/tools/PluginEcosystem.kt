@@ -2,22 +2,6 @@ package com.openminis.app.tools
 
 import org.json.JSONObject
 
-/**
- * [plugin-ecosystem / unified] One plugin model across all three plugin kinds
- * the app supports:
- *
- *  - NATIVE  — a self-contained capability pack (instructions + workflow)
- *    that installs as a Skill and works immediately with the agent's built-in
- *    tools. No server, no token, no code execution. "Install = new capability".
- *  - SKILL   — user-created / imported skills (the self-improvement store).
- *  - MCP     — external MCP servers the agent calls via minis-mcp-cli.
- *
- * This is a pure aggregation/catalog layer: it does NOT run plugin code, does
- * NOT grant privileges, and does NOT touch the sandbox or security boundary.
- * It produces (a) a unified installable catalog and (b) a compact capability
- * manifest that can be injected into the agent prompt so it can SEE every
- * installed plugin regardless of kind.
- */
 object PluginEcosystem {
 
     enum class Kind { NATIVE, SKILL, MCP }
@@ -27,11 +11,8 @@ object PluginEcosystem {
         val name: String,
         val description: String,
         val kind: Kind,
-        /** For NATIVE plugins: the SKILL.md body installed on "add". */
         val skillBody: String = "",
-        /** For MCP plugins: the mcpServers config JSON. */
         val configJson: String = "",
-        /** Env var names the user must supply (MCP), empty for native. */
         val requiredEnv: List<String> = emptyList(),
     ) {
         val kindLabel: String get() = when (kind) {
@@ -42,12 +23,6 @@ object PluginEcosystem {
         val needsConfig: Boolean get() = requiredEnv.isNotEmpty()
     }
 
-    /**
-     * Native capability packs. Each is a compact SKILL.md that teaches the
-     * agent a reusable workflow; installing one immediately changes what the
-     * agent can do, using only its existing tools (shell, file_*, browser_use,
-     * etc.). No external dependency, no credentials, no code execution.
-     */
     fun nativePlugins(): List<Plugin> = listOf(
         Plugin(
             id = "code-reviewer",
@@ -120,7 +95,6 @@ Never claim success on a failed test or a crash — diagnose and fix first.
         ),
     )
 
-    /** All installable plugins across kinds (native packs + MCP servers). */
     fun catalog(): List<Plugin> = nativePlugins() + McpPluginCatalog.all().map { p ->
         Plugin(
             id = "mcp:" + p.id,
@@ -134,11 +108,6 @@ Never claim success on a failed test or a crash — diagnose and fix first.
 
     fun byId(id: String): Plugin? = catalog().firstOrNull { it.id.equals(id, true) }
 
-    /**
-     * Build a SKILL.md document for a native plugin, ready for SkillRepository
-     * import (front matter + body). This is how "install" turns into a real,
-     * loadable capability with zero new infrastructure.
-     */
     fun toSkillMarkdown(plugin: Plugin): String? {
         if (plugin.kind != Kind.NATIVE) return null
         return buildString {
@@ -151,10 +120,6 @@ Never claim success on a failed test or a crash — diagnose and fix first.
         }
     }
 
-    /**
-     * Compact manifest of AVAILABLE plugins for injection into the agent
-     * prompt. Bounded in count and chars; lists what can be installed and how.
-     */
     fun manifest(maxChars: Int = 3_000): String {
         val sb = StringBuilder()
         sb.append("Plugin ecosystem: native capability packs install as skills (no setup); MCP plugins connect external tools (may need env vars).\n")

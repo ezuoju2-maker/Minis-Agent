@@ -12,13 +12,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-port-sched-notif-single] A scheduled background run posts ONE
- * notification, from BackgroundTaskNotifier, and a task's repeated runs
- * replace it in place (iOS b0c0c87ea). ScheduledAgentRunner's second,
- * hard-coded English notification - which ignored the Task Notifications
- * toggle and the foreground state and was never cleared - is gone.
- */
 class ScheduledRunNotificationTest {
 
     private fun text(value: String) = JSONObject().put("type", "text").put("value", value)
@@ -77,7 +70,6 @@ class ScheduledRunNotificationTest {
     fun `empty transcript, unparseable parts and the scan cap give null`() {
         assertNull(scan(emptyList()))
         assertNull(ScheduledRunNotification.taskIdIn("not json"))
-        // Only tool-result rows within the cap: no turn start found.
         val endless = List(ScheduledRunNotification.MAX_SCAN_ROWS + 5) { row("user", toolResult("t$it")) } +
             row("user", text(envelope("far")))
         assertNull(scan(endless))
@@ -87,12 +79,10 @@ class ScheduledRunNotificationTest {
     fun `the tag is one per task and absent for ordinary completions`() {
         assertEquals("job-task-A", ScheduledRunNotification.tag("task-A"))
         assertNull(ScheduledRunNotification.tag(null))
-        // Same task -> same tag on every run (in place); other task -> its own.
         assertEquals(ScheduledRunNotification.tag("x"), ScheduledRunNotification.tag("x"))
         assertTrue(ScheduledRunNotification.tag("x") != ScheduledRunNotification.tag("y"))
     }
 
-    // --- Wiring ---------------------------------------------------------------
 
     @Test
     fun `the runner posts no notification of its own`() {
@@ -114,7 +104,6 @@ class ScheduledRunNotificationTest {
         assertTrue(gates in 0 until lookup && fg in 0 until lookup)
         assertTrue(n.contains("postNotification(sessionId, title, body, ScheduledRunNotification.tag(taskId))"))
         assertTrue(n.contains("nm.notify(tag, sessionId.hashCode(), notification)"))
-        // Cleared on foreground by (tag, id), so tagged entries go too.
         assertTrue(n.contains("nm.cancel(sb.tag, sb.id)"))
     }
 

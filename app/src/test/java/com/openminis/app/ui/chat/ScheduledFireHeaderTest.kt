@@ -9,12 +9,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-sched-fire-header] One avatar + name header per run of assistant
- * messages, as on iOS: only a REAL user turn restarts it. A scheduled-task
- * fire (a system-written user message rendered as a card) must not, and
- * neither may the sub-agent / tool cards inside assistant messages.
- */
 class ScheduledFireHeaderTest {
 
     private fun user(id: String, text: String) = ChatMessage(id = id, role = "user", content = text)
@@ -81,7 +75,6 @@ class ScheduledFireHeaderTest {
         assertTrue(AssistantHeaderRule.isSystemWrittenTurn(fire("f")))
         assertTrue(AssistantHeaderRule.isSystemWrittenTurn(user("c", AgentCallback(AgentCallback.Kind.PROGRESS, "J", "C", "t", "running", body = "w").xml)))
         assertFalse(AssistantHeaderRule.isSystemWrittenTurn(user("u", "hello")))
-        // Text a user typed that merely LOOKS like the tag is not a fire (no id).
         assertFalse(AssistantHeaderRule.isSystemWrittenTurn(user("u", "<scheduled_task> hi")))
     }
 }

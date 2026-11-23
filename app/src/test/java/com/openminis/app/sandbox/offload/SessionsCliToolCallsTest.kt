@@ -10,16 +10,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-sessions-cli-tool-calls] `minis-sessions-cli messages --tools`
- * (iOS 7af22b59f): tool calls come back with name, full input and output,
- * including the ones on messages that also carry text.
- */
 class SessionsCliToolCallsTest {
 
     private val command = """{"command":"sleep 12; echo STEP2","tool_title":"Wait then print"}"""
 
-    /** Text + a tool call in one message — the shape the text extractor drops calls from. */
     private val assistantParts = JSONArray()
         .put(JSONObject().put("type", "text").put("value", "I'll check it."))
         .put(JSONObject().put("type", "toolUse").put("value", JSONObject()

@@ -3,42 +3,6 @@ package com.openminis.app.provider.openai
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * [T-android-responses-orphan-tool-output] Last gate before a Responses
- * request goes out: every `function_call_output` must answer a
- * `function_call` with the same `call_id` in the array, at most once, and every
- * `function_call` except the trailing run must be answered. Port of iOS
- * `sanitizeResponsesToolPairing` (bc142f750, first-output-wins from ffbed35ca).
- *
- * Why it is needed: the Responses builder emitted `function_call_output`
- * unconditionally. An upstream answers a stranded one with
- *     No tool call found for function call output with call_id call_… .
- * and, because the request is rebuilt from the same history every time, the
- * 400 repeated on every retry and every fallback model until the chat was
- * cleared (the iOS field report). ChatViewModel's history repair catches most
- * orphans one layer up, but it works on stored ids while this sees exactly the
- * ids the request carries (split on "|" and capped), and it cannot see every
- * source of a stranded or duplicated result (a retry, resume or restore that
- * left an extra result row).
- *
- * Repair, same rules as iOS:
- *  - an output whose call is not in the request is DROPPED - nothing can
- *    reconstruct the call;
- *  - a second output for the same call_id is DROPPED - the first one wins, as
- *    in the Chat Completions path;
- *  - an unanswered call gets a placeholder output instead of being deleted,
- *    which would silently discard the assistant's own turn. The TRAILING run of
- *    calls is exempt: a request ending on function_call is what the API expects
- *    mid-round, and a placeholder there would tell the model a tool it is about
- *    to run has already failed.
- *
- * Placeholders are buffered until the run of function_call items closes and
- * land before the first following item, so parallel calls stay
- * `function_call ×N, function_call_output ×N` - an output in the middle of the
- * call run, or a tool-image carrier between outputs, is itself a 400
- * ([T-android-responses-toolresult-image-split]). Order is otherwise kept as
- * built; no items are moved.
- */
 internal object ResponsesToolPairing {
 
     const val PLACEHOLDER_OUTPUT =
@@ -69,7 +33,6 @@ internal object ResponsesToolPairing {
             }
         }
 
-        // Calls at the very end are waiting for their results, not orphaned.
         val trailing = HashSet<String>()
         for (i in items.length() - 1 downTo 0) {
             val item = items.optJSONObject(i) ?: break
@@ -109,8 +72,6 @@ internal object ResponsesToolPairing {
                 if (id in orphanOutputs) { droppedOrphans += id; continue }
                 if (!seenOutputs.add(id)) { droppedDuplicates += id; continue }
             }
-            // A real output closes the call run just as a placeholder does, so
-            // pending placeholders go BEFORE it: one contiguous output block.
             if (type != "function_call") flush()
             out.put(item)
             if (type == "function_call") {

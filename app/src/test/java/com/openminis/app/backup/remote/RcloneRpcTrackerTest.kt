@@ -11,14 +11,6 @@ import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/**
- * [T-rclone-rpc-concurrency-diag] The concurrency diagnostic around rclone's
- * native RPC: it counts and logs, and it never makes one call wait for another
- * — above all, a `job/stop` must get through while some other RPC is stuck.
- *
- * The native call is replaced by a block the test controls; nothing here
- * touches libgojni.
- */
 class RcloneRpcTrackerTest {
 
     private val lines: MutableList<String> = Collections.synchronizedList(mutableListOf())
@@ -57,7 +49,7 @@ class RcloneRpcTrackerTest {
         val stuck = Thread {
             RcloneRpcTracker.track("operations/list") {
                 stuckEntered.countDown()
-                release.await(30, TimeUnit.SECONDS) // stands in for a 300 s stalled server
+                release.await(30, TimeUnit.SECONDS)
             }
         }.apply { start() }
         assertTrue(stuckEntered.await(5, TimeUnit.SECONDS))
@@ -95,7 +87,6 @@ class RcloneRpcTrackerTest {
         assertTrue(enter, enter.contains("operations/copyfile"))
         assertTrue(enter, Regex("""operations/copyfile \d+ms""").containsMatchIn(enter))
         assertTrue(lines.any { it.startsWith("[Rclone] concurrent RPC exit: core/obscure after ") })
-        // The FIRST call saw nobody else when it entered, so it stays quiet.
         assertFalse(lines.any { it.contains("exit: operations/copyfile") })
         assertEquals(0, RcloneRpcTracker.inFlightCount)
     }
@@ -109,7 +100,6 @@ class RcloneRpcTrackerTest {
         assertEquals(0, RcloneRpcTracker.inFlightCount)
     }
 
-    // ── Source guards on RcloneBridge ──────────────────────────────────────
 
     private val bridge = ProductionSources.read("backup/remote/RcloneBridge.kt")
 

@@ -7,19 +7,6 @@ import org.junit.Assert.assertTrue
 import com.openminis.app.ProductionSources
 import org.junit.Test
 
-/**
- * [T-android-group-accordion] At most one session group is open at a time, and
- * [T-android-groups-collapsed-on-launch] only a group the user opened.
- *
- * The user's rule: every group is folded after a cold start, and opening one
- * folds whichever was open. The old model opened a group on its own at every
- * launch (the first one not in a persisted "collapsed" set, or a restored
- * "last expanded" id), which is what this pins against.
- *
- * The one-open invariant also matters to the floating mini-bar: it resolves
- * its header with `firstOrNull { !isCollapsed }`, which names the right group
- * only while there is at most one.
- */
 class SessionGroupAccordionTest {
 
     private fun folder(id: String, at: Long) =
@@ -30,7 +17,6 @@ class SessionGroupAccordionTest {
             id = id, modelId = "m", createdAt = at, updatedAt = at, folderId = folderId,
         )
 
-    /** Ids of the blocks that came back expanded. */
     private fun openIds(blocks: List<FolderGroupBlock>) =
         blocks.filter { !it.isCollapsed }.map { it.folder.id }
 
@@ -43,7 +29,6 @@ class SessionGroupAccordionTest {
 
     @Test
     fun `a cold start opens no group`() {
-        // Nothing expanded yet: the state on every launch.
         val (blocks, _) = partitionByFolder(threeSessions, threeFolders, expandedFolderId = null)
 
         assertEquals("every group must be folded", emptyList<String>(), openIds(blocks))
@@ -52,7 +37,6 @@ class SessionGroupAccordionTest {
 
     @Test
     fun `the most recently active group is not opened on the user's behalf`() {
-        // The old fallback opened the first group in activity order.
         val (blocks, _) = partitionByFolder(threeSessions, threeFolders, expandedFolderId = null)
 
         assertTrue(blocks.first { it.folder.id == "a" }.isCollapsed)
@@ -71,7 +55,6 @@ class SessionGroupAccordionTest {
 
     @Test
     fun `an open id naming a group that is gone opens nothing`() {
-        // A deleted or dissolved group: nothing else is opened in its place.
         val (blocks, _) = partitionByFolder(threeSessions, threeFolders, expandedFolderId = "gone")
 
         assertEquals(emptyList<String>(), openIds(blocks))
@@ -85,14 +68,12 @@ class SessionGroupAccordionTest {
         assertEquals(2, closed.size)
         closed.forEach {
             assertTrue("a collapsed group must not render rows", it.ids.isEmpty())
-            // The count survives so the header can still say how many are inside.
             assertEquals(1, it.totalCount)
         }
     }
 
     @Test
     fun `the open group is kept in memory only`() {
-        // Persisting it is what made a cold start reopen a group.
         val vm = ProductionSources.read("ui/sessions/SessionListViewModel.kt")
         assertTrue(vm.contains("val expandedFolderId = MutableStateFlow<String?>(null)"))
         assertTrue(!vm.contains("putString(\"lastExpandedFolderId\""))
@@ -105,8 +86,6 @@ class SessionGroupAccordionTest {
 
     @Test
     fun `a long-standing group that drained to empty is a ghost and is hidden`() {
-        // [T-android-empty-group-visibility] The reported symptom: clearing the
-        // last chat out of a group left a row nothing could remove.
         val now = 10_000_000_000L
         val old = now - EMPTY_GROUP_GRACE_MS * 10
         val pinnedEmpty = FolderEntity(
@@ -124,15 +103,11 @@ class SessionGroupAccordionTest {
             sessions, folders, expandedFolderId = null, nowMs = now,
         )
 
-        // Pinning is an explicit "keep this in front of me" and still wins.
         assertEquals(setOf("a", "pinned_empty"), blocks.map { it.folder.id }.toSet())
     }
 
     @Test
     fun `a just-created empty group stays visible so it can be filed into`() {
-        // The regression the pinned-only rule introduced: a group the user
-        // created seconds ago vanished before anything could be put in it,
-        // which also reads as "my group was deleted".
         val now = 10_000_000_000L
         val fresh = FolderEntity(
             id = "fresh", name = "Fresh",
@@ -174,7 +149,6 @@ class SessionGroupAccordionTest {
 
     @Test
     fun `an open id naming a drained group opens nothing`() {
-        // The group was emptied and is dropped by the empty-group rule.
         val now = 10_000_000_000L
         val drained = FolderEntity(
             id = "drained", name = "Drained",

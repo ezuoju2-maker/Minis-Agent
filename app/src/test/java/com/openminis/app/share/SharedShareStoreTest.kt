@@ -14,19 +14,8 @@ import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 
-/**
- * [T33] SharedShareStore: consecutive shares merge, TTL cleanup spares the live
- * buffer's files, and the merge is bounded.
- *
- * Pins cb5bdfdc8 (merge instead of replace, at BOTH the prefs layer and the
- * in-memory ShareCoordinator buffer), 3908e1f65 (`cleanSharedFiles(keep)` and
- * MERGE_MAX_ITEMS = 50), 5d83384cc / 3a0b0a821 (a persisted share is picked up
- * on any launch). These were only ever verified on a device; this is the JVM
- * counterpart with an in-memory SharedPreferences fake and a temp filesDir.
- */
 class SharedShareStoreTest {
 
-    // ── minimal fakes: only what SharedShareStore / ShareCoordinator touch ──
 
     private class FakePrefs : SharedPreferences {
         val map = LinkedHashMap<String, Any?>()
@@ -81,7 +70,6 @@ class SharedShareStoreTest {
         prefs = FakePrefs()
         context = FakeContext(filesDir, prefs)
         SharedShareStore.clearPendingShare(context)
-        // Drain any buffer a previous test left in the process-global coordinator.
         drain()
     }
 
@@ -91,7 +79,6 @@ class SharedShareStoreTest {
         filesDir.deleteRecursively()
     }
 
-    /** [T-android-share-routing] A share is only consumable once addressed; address it, then take it. */
     private fun drain(): PendingShare? {
         ShareCoordinator.addressTo("test-session")
         return ShareCoordinator.consumeBuffer(context, "test-session")
@@ -105,9 +92,7 @@ class SharedShareStoreTest {
     private fun stagedFile(name: String): File =
         File(SharedShareStore.sharedFileDirectory(context), name).apply { writeText("bytes of $name") }
 
-    // ============================================================ prefs-layer merge
 
-    /** A arrives, then B, before the app consumed A: both survive, in order. */
     @Test
     fun `a second share merges into the unconsumed first, in arrival order`() {
         SharedShareStore.savePendingShare(context, share(text("A")))
@@ -117,7 +102,6 @@ class SharedShareStoreTest {
         assertEquals(listOf(text("A"), attachment("b.png")), loaded!!.items)
     }
 
-    /** The same content delivered twice (a double-delivered intent) is stored once. */
     @Test
     fun `identical content shared twice is de-duplicated`() {
         SharedShareStore.savePendingShare(context, share(text("same"), attachment("x.png")))
@@ -126,7 +110,6 @@ class SharedShareStoreTest {
         assertEquals(listOf(text("same"), attachment("x.png"), text("new")), items)
     }
 
-    /** Kind is part of the identity: the same string as text and as a filename are two items. */
     @Test
     fun `dedupe is keyed by kind and value`() {
         SharedShareStore.savePendingShare(context, share(text("note.txt")))
@@ -134,7 +117,6 @@ class SharedShareStoreTest {
         assertEquals(2, SharedShareStore.loadPendingShare(context)!!.items.size)
     }
 
-    /** The merged record gets a fresh timestamp so the combined share has a full window. */
     @Test
     fun `merging renews the timestamp`() {
         SharedShareStore.savePendingShare(context, share(text("A"), ageMs = 200_000))
@@ -143,7 +125,6 @@ class SharedShareStoreTest {
         assertTrue(SharedShareStore.loadPendingShare(context)!!.timestampMs >= before)
     }
 
-    /** An abandoned record (older than 300s) is replaced, not merged. */
     @Test
     fun `a stale record is replaced instead of merged`() {
         SharedShareStore.savePendingShare(context, share(text("old"), ageMs = 301_000))
@@ -151,7 +132,6 @@ class SharedShareStoreTest {
         assertEquals(listOf(text("fresh")), SharedShareStore.loadPendingShare(context)!!.items)
     }
 
-    /** Merging is bounded at 50 items and keeps the NEWEST — the share the user just acted on. */
     @Test
     fun `merging past the cap drops the oldest items`() {
         SharedShareStore.savePendingShare(context, share(*(1..45).map { text("t$it") }.toTypedArray()))
@@ -170,9 +150,7 @@ class SharedShareStoreTest {
         assertNull(SharedShareStore.loadPendingShare(context))
     }
 
-    // ============================================================ TTL cleanup spares the live buffer
 
-    /** `keep` names the files a still-live buffer references; everything else goes. */
     @Test
     fun `cleanup exempts the files named in keep`() {
         val live = stagedFile("live-1.png")
@@ -186,21 +164,16 @@ class SharedShareStoreTest {
         assertFalse("an unconditional clean removes the rest", live.exists())
     }
 
-    /**
-     * The coordinator path: share A is buffered in memory (holding file refs);
-     * a STALE prefs record then takes the discard path. A's attachments must
-     * survive that cleanup — this is the real bug 3908e1f65 fixed.
-     */
     @Test
     fun `a stale record's cleanup does not delete the live buffer's attachments`() {
         val a = stagedFile("a-live.png")
         SharedShareStore.savePendingShare(context, share(attachment("a-live.png")))
-        ShareCoordinator.processPendingShare(context)   // A is now the live buffer
+        ShareCoordinator.processPendingShare(context)
         assertNull("the record was consumed into memory", SharedShareStore.loadPendingShare(context))
 
         val stale = stagedFile("stale.png")
         prefs.edit().putString("pending_share", share(attachment("stale.png"), ageMs = 400_000).toJson().toString()).apply()
-        ShareCoordinator.processPendingShare(context)   // stale → discard path
+        ShareCoordinator.processPendingShare(context)
         assertTrue("live buffer's file must survive", a.exists())
         assertFalse("the stale share's own file is cleaned", stale.exists())
 
@@ -208,9 +181,7 @@ class SharedShareStoreTest {
         assertEquals(listOf(attachment("a-live.png")), consumed!!.items)
     }
 
-    // ============================================================ in-memory buffer merge
 
-    /** Two launches before the chat consumed the buffer: the coordinator appends, it does not replace. */
     @Test
     fun `the in-memory buffer merges consecutive launches`() {
         SharedShareStore.savePendingShare(context, share(text("A")))
@@ -224,7 +195,6 @@ class SharedShareStoreTest {
         assertNull("consume is one-shot", drain())
     }
 
-    /** A stale record on launch is discarded and never buffered. */
     @Test
     fun `a stale persisted share is dropped on launch`() {
         SharedShareStore.savePendingShare(context, share(text("old"), ageMs = 400_000))
@@ -233,9 +203,7 @@ class SharedShareStoreTest {
         assertNull(drain())
     }
 
-    // ============================================================ routing ([T-android-share-routing])
 
-    /** The reported bug's mechanism: an unaddressed share was drained by whichever chat composed next. */
     @Test
     fun `an unaddressed share is consumable by nobody`() {
         SharedShareStore.savePendingShare(context, share(text("A")))

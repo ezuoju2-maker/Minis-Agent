@@ -17,18 +17,10 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-chat-tool-adjacency] #382 / #352: a Chat Completions request whose
- * tool results all had a matching call id, but were not right after their call
- * or were duplicated, went out as built; the provider answered 400 and the chat
- * was stuck on it. Reproduced on a Pixel 4a with two shapes cloned from real
- * (synced / imported) sessions, shapes 7a and 7b.
- */
 class ChatCompletionsToolPairingTest {
 
     private val interrupted = ChatCompletionsToolPairing.HISTORY_REPAIR_REPLY
 
-    // ── Wire-level helpers ─────────────────────────────────────────────────
 
     private fun user(text: String) = JSONObject().put("role", "user").put("content", text)
     private fun asst(text: String, vararg callIds: String) = JSONObject().put("role", "assistant").put("content", text).apply {
@@ -39,7 +31,6 @@ class ChatCompletionsToolPairingTest {
     private fun tool(id: String, content: String) = JSONObject().put("role", "tool").put("tool_call_id", id).put("content", content)
     private fun arr(vararg m: JSONObject) = JSONArray(m.toList())
 
-    /** `U A*(c0,c1) T:c0=a …`, for reading a whole array at a glance. */
     private fun shape(a: JSONArray) = (0 until a.length()).joinToString(" ") { i ->
         val m = a.getJSONObject(i)
         when (m.getString("role")) {
@@ -50,11 +41,6 @@ class ChatCompletionsToolPairingTest {
         }
     }
 
-    /**
-     * The provider's rule, as the strict mock in the repro enforced it: each
-     * tool_calls block is followed at once by exactly one reply per call, and
-     * no other tool message exists. Returns the first violation, or null.
-     */
     private fun violation(a: JSONArray): String? {
         var i = 0
         while (i < a.length()) {
@@ -77,12 +63,8 @@ class ChatCompletionsToolPairingTest {
 
     private fun sanitize(a: JSONArray) = ChatCompletionsToolPairing.sanitize(a)
 
-    // ── The two reproduced shapes ──────────────────────────────────────────
 
     @Test fun `7a - a user message stored between the calls and their results`() {
-        // What went on the wire (request 0028): the history repair had put
-        // "interrupted" results after the calls, and the real ones stayed below
-        // the interjected user message.
         val wire = arr(
             user("please run two commands"), asst("Running.", "c0", "c1"),
             tool("c0", interrupted), tool("c1", interrupted),
@@ -110,7 +92,6 @@ class ChatCompletionsToolPairingTest {
     }
 
     @Test fun `7b - two consecutive tool-call turns, the first one's result after the second`() {
-        // Request 0029: A*(a) [INT a] A*(b) [a] [INT b].
         val wire = arr(
             user("go"), asst("", "a"), tool("a", interrupted), asst("", "b"),
             tool("a", "a"), tool("b", interrupted), asst("Done."), user("next"),
@@ -124,7 +105,6 @@ class ChatCompletionsToolPairingTest {
         assertEquals(listOf("a"), r.droppedDuplicateReplies)
     }
 
-    // ── The repair rules, one at a time (iOS sanitizeToolCallAdjacency) ────
 
     @Test fun `a reply no call claims is dropped`() {
         val r = sanitize(arr(user("hi"), tool("ghost", "x"), asst("ok")))
@@ -151,7 +131,6 @@ class ChatCompletionsToolPairingTest {
             val r = sanitize(arr(user("go"), asst("", "c0"), tool("c0", ph), tool("c0", "real"), asst("Done.")))
             assertEquals("U A*(c0) T:c0=real A", shape(r.messages))
         }
-        // Two placeholders and nothing real: one stays.
         val r = sanitize(arr(user("go"), asst("", "c0"), tool("c0", interrupted), tool("c0", interrupted)))
         assertEquals("U A*(c0) T:c0=INT", shape(r.messages))
     }
@@ -174,19 +153,14 @@ class ChatCompletionsToolPairingTest {
         assertEquals(null, violation(r.messages))
     }
 
-    // ── Well-formed input is not touched ───────────────────────────────────
 
     @Test fun `healthy sequences come back as the same array`() {
         val cases = listOf(
             arr(user("hi"), asst("hello")),
             arr(user("go"), asst("", "c0"), tool("c0", "ok"), asst("Done.")),
-            // Parallel calls, all answered, replies in another order than the calls.
             arr(user("go"), asst("", "c0", "c1", "c2"), tool("c2", "z"), tool("c0", "x"), tool("c1", "y"), asst("Done."), user("next")),
-            // Several rounds.
             arr(user("go"), asst("", "a"), tool("a", "1"), asst("", "b"), tool("b", "2"), asst("Done.")),
-            // A trailing orphan the history repair already answered.
             arr(user("go"), asst("", "c0"), tool("c0", interrupted)),
-            // Mid-round: the request ends on the tool results.
             arr(user("go"), asst("", "c0", "c1"), tool("c0", "x"), tool("c1", "y")),
         )
         for (c in cases) {
@@ -206,11 +180,9 @@ class ChatCompletionsToolPairingTest {
         val twice = sanitize(once.messages)
         assertSame(once.messages, twice.messages)
         assertFalse(twice.changed)
-        // The same broken history builds the same bytes every time (prompt cache).
         assertEquals(once.messages.toString(), sanitize(JSONArray(wire.toString())).messages.toString())
     }
 
-    // ── Through the real request builder ───────────────────────────────────
 
     private val model = LLMModel(id = "deepseek-test", displayName = "Test", provider = "test", inputModalities = listOf("text"))
     private fun provider() = OpenAIProvider(apiKey = "test-key", model = model, basePath = "https://example.invalid/v1", useResponsesAPI = false)
@@ -230,7 +202,6 @@ class ChatCompletionsToolPairingTest {
     )
 
     @Test fun `7a through buildRequestBody - the request is well formed and carries the real results`() {
-        // agentHistory as ChatViewModel.sanitizeAgentHistory leaves it.
         val wire = body(listOf(
             u("please run two commands"), a("Running.", "call_clA_0", "call_clA_1"),
             results("call_clA_0" to interrupted, "call_clA_1" to interrupted),
@@ -257,8 +228,6 @@ class ChatCompletionsToolPairingTest {
     }
 
     @Test fun `ids repeated across turns are renamed first, then paired by position`() {
-        // Kimi-style ids repeat between turns; the dedupe renames the second pair.
-        // [B02] They go out as wire ids: '.' and ':' become '-'.
         val wire = body(listOf(
             u("go"), a("", "functions.run:0"), results("functions.run:0" to "first"),
             a("", "functions.run:0"), results("functions.run:0" to "second"), a("Done."),
@@ -267,8 +236,6 @@ class ChatCompletionsToolPairingTest {
         assertEquals("system U A*(functions-run-0) T:functions-run-0=first A*(functions-run-0-2) T:functions-run-0-2=second A", shape(wire))
     }
 
-    // [T-kimi-native-tool-id] A request to Kimi keeps Kimi's own ids; the
-    // cross-turn dedupe still renames a repeated pair, as before.
     @Test fun `a request to Kimi keeps its native tool ids`() {
         val kimi = LLMModel(id = "kimi-k2-0905-preview", displayName = "K2", provider = "moonshot", inputModalities = listOf("text"))
         val history = listOf(
@@ -299,7 +266,6 @@ class ChatCompletionsToolPairingTest {
         assertFalse(com.openminis.app.data.model.isKimiNativeToolId("call_abc"))
     }
 
-    // ── Constants and wiring ───────────────────────────────────────────────
 
     @Test fun `one placeholder wording, shared with the Responses path and iOS`() {
         assertEquals(ResponsesToolPairing.PLACEHOLDER_OUTPUT, ChatCompletionsToolPairing.PLACEHOLDER_REPLY)
@@ -307,7 +273,6 @@ class ChatCompletionsToolPairingTest {
             val ios = IosSources.declaring("private static func sanitizeToolCallAdjacency(")
             assertTrue(ios.contains("\"content\": \"${ChatCompletionsToolPairing.PLACEHOLDER_REPLY}\""))
         }
-        // The history repair's own text: the provider must know it to let a real result win.
         val vm = ProductionSources.read("ui/chat/ChatViewModel.kt")
         val repair = vm.substringAfter("private fun sanitizeAgentHistory() {").substringBefore("\n    }\n")
         assertTrue(repair.contains("content = \"${ChatCompletionsToolPairing.HISTORY_REPAIR_REPLY}\","))
@@ -320,7 +285,6 @@ class ChatCompletionsToolPairingTest {
         assertTrue(tail.contains("body.put(\"messages\", paired.messages)"))
         assertTrue(tail.contains("[sanitize-chat] repaired outgoing tool pairing"))
         assertFalse("the unrepaired array is not what is sent", src.contains("body.put(\"messages\", messagesArray)"))
-        // The Responses path keeps its own gate.
         assertTrue(src.contains("val paired = ResponsesToolPairing.sanitize(input)"))
     }
 }

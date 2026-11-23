@@ -6,28 +6,10 @@ import com.openminis.app.imagerepro.ImageRealFixtures
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * A8: one parsed shape for every provider's request body, the seven
- * invariant checkers, and the golden snapshot JSON.
- *
- * RequestView = [{role, parts:[{kind: text|image|toolUse|toolResult, text,
- * image:{w,h,mime,bytes,sha256,base64Len}, id}]}], in wire order. Mapping:
- *  - anthropic: messages[].content blocks; a tool_result's text is the part's
- *    text and its images follow it as image parts with `inResultOf` = its id;
- *  - openai.chat: assistant tool_calls → toolUse; role "tool" → toolResult;
- *    user content array / string → text / image;
- *  - openai.responses: input[] items, one RequestView message per item —
- *    function_call → assistant toolUse, function_call_output → role "tool"
- *    toolResult, message → its role;
- *  - gemini: contents[].parts; functionCall / functionResponse carry no id,
- *    so they pair by name (id = "fn:<name>"); an inline image right after a
- *    functionResponse is marked `inResultOf` it.
- */
 object CtxRequestView {
 
     data class Image(
         val w: Int?, val h: Int?, val mime: String, val magic: String, val bytes: Int, val sha256: String, val base64Len: Int,
-        /** Whether the JDK's ImageIO can decode the bytes (a stand-in for "a provider can decode it"). */
         val decodable: Boolean,
     ) {
         val longEdge: Int? get() = if (w == null || h == null) null else maxOf(w, h)
@@ -37,7 +19,6 @@ object CtxRequestView {
 
     data class Message(val role: String, val parts: List<Part>)
 
-    // ── parsing ─────────────────────────────────────────────────────────────
 
     fun parse(provider: CtxProvider, body: JSONObject): List<Message> = when (provider) {
         CtxProvider.ANTHROPIC -> anthropic(body)
@@ -158,8 +139,6 @@ object CtxRequestView {
         return (0 until contents.length()).map { i ->
             val c = contents.getJSONObject(i)
             val ps = c.optJSONArray("parts") ?: JSONArray()
-            // An inline image right after a functionResponse is that result's image
-            // (GeminiProvider emits functionResponse then inlinePart), like Anthropic's nested one.
             var lastResult: String? = null
             val parts = (0 until ps.length()).map { j ->
                 val p = ps.getJSONObject(j)
@@ -185,7 +164,6 @@ object CtxRequestView {
 
     private val decodeCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
-    /** ImageIO can read the whole image (cached by content). */
     fun jdkDecodes(b: ByteArray): Boolean = decodeCache.getOrPut(ImageRealFixtures.sha256(b)) {
         if (b.isEmpty()) return@getOrPut false
         System.setProperty("java.awt.headless", "true")
@@ -194,7 +172,6 @@ object CtxRequestView {
         }.getOrDefault(false)
     }
 
-    // ── invariants ──────────────────────────────────────────────────────────
 
     fun magic(b: ByteArray): String {
         fun s(i: Int, n: Int) = if (b.size >= i + n) String(b, i, n, Charsets.ISO_8859_1) else ""
@@ -210,7 +187,6 @@ object CtxRequestView {
         }
     }
 
-    /** ① Every toolUse group is followed IMMEDIATELY by results for all its ids (a trailing, unanswered group is mid-round and allowed). */
     fun adjacency(view: List<Message>): List<String> {
         val items = view.flatMap { m -> m.parts.filter { it.inResultOf == null }.map { m.role to it } }
         val problems = mutableListOf<String>()
@@ -223,7 +199,7 @@ object CtxRequestView {
             val group = mutableListOf<String>()
             while (i < items.size && items[i].second.kind == "toolUse") { group += items[i].second.id!!; i++ }
             seenUses += group
-            if (i >= items.size) break // trailing group: mid-round
+            if (i >= items.size) break
             val results = mutableListOf<String>()
             var k = i
             while (k < items.size && items[k].second.kind == "toolResult") { results += items[k].second.id!!; k++ }
@@ -240,7 +216,6 @@ object CtxRequestView {
         val totalOver25MB: Boolean get() = totalB64 > 25L * 1024 * 1024
     }
 
-    /** ② Images over each catalog tier (8192 / 2000 px, 3.5 MB raw, 5 MB base64, 25 MB total). */
     fun thresholds(view: List<Message>): Thresholds {
         val imgs = images(view)
         return Thresholds(
@@ -252,11 +227,9 @@ object CtxRequestView {
         )
     }
 
-    /** ③ Images whose declared MIME disagrees with their magic bytes. */
     fun mimeMismatches(view: List<Message>): List<String> =
         images(view).filter { it.mime != it.magic }.map { "${it.mime} on ${it.magic} bytes" }
 
-    /** ⑤ The same bytes attached more than once in one request. */
     fun duplicates(view: List<Message>): Int {
         val shas = images(view).map { it.sha256 }
         return shas.size - shas.toSet().size
@@ -270,12 +243,10 @@ object CtxRequestView {
         "[Image attached but this model does not support vision input]",
     )
 
-    /** ⑦ Every placeholder text in the request, in order. */
     fun placeholders(view: List<Message>): List<String> =
         view.flatMap { m -> m.parts.mapNotNull { it.text } }
             .flatMap { t -> PLACEHOLDERS.flatMap { p -> Regex(Regex.escape(p) + "[^\\]]*\\]").findAll(t).map { it.value }.toList() } }
 
-    /** Images in a history (each image once: contentParts if present, else imageParts). */
     fun historyImages(history: List<LLMMessage>): Int = history.sumOf { m ->
         if (m.contentParts.isNotEmpty()) {
             m.contentParts.count { it is AgentContentPart.ImageData } +
@@ -285,11 +256,9 @@ object CtxRequestView {
         }
     }
 
-    // ── golden snapshot ─────────────────────────────────────────────────────
 
     private val UUID = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
-    /** Text as it goes in a snapshot: UUIDs / temp roots masked, long texts cut with their length and hash. */
     fun stableText(t: String, root: String?): String {
         var s = t
         if (root != null) s = s.replace(root, "<root>")
@@ -297,7 +266,6 @@ object CtxRequestView {
         return if (s.length <= 240) s else s.take(200) + "…[" + s.length + " chars sha256:" + ImageRealFixtures.sha256(s).take(12) + "]"
     }
 
-    /** Keys sorted, timestamps / UUIDs out. [withBytes] = false is the cross-platform view (no sizes / hashes). */
     fun snapshot(view: List<Message>, root: String?, withBytes: Boolean = true): String {
         val arr = JSONArray()
         for (m in view) {
@@ -319,7 +287,6 @@ object CtxRequestView {
         return canonical(arr)
     }
 
-    /** Pretty JSON with keys sorted at every level (org.json does not keep insertion order). */
     fun canonical(v: Any?, indent: String = ""): String = when (v) {
         is JSONObject -> if (v.length() == 0) "{}" else v.keys().asSequence().sorted().joinToString(",\n", "{\n", "\n$indent}") { k ->
             "$indent  ${JSONObject.quote(k)}: ${canonical(v.get(k), "$indent  ")}"

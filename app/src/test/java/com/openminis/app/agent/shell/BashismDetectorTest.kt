@@ -8,20 +8,11 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 
-/**
- * Runs the SHARED bashism test vectors (src/shared/bashism, the same files iOS
- * loads) through the Android BashismDetector. The compat group is the F1
- * regression guard: python/awk heredoc bodies with `+=`/`{1..3}`, plus the
- * on-device-verified compatible syntax ([[ ]], &>, getopts, …), must all yield
- * ZERO hits. [T-bash-on-demand]
- */
 class BashismDetectorTest {
 
-    // Gradle runs unit tests with the module dir (src/android/app) as CWD.
-    // Walk up to the repo's src/ and into shared/bashism, tolerating either CWD.
     private val sharedDir: File = sequenceOf(
-        File("../shared/bashism"),         // CWD = src/android
-        File("../../shared/bashism"),      // CWD = src/android/app
+        File("../shared/bashism"),
+        File("../../shared/bashism"),
     ).firstOrNull { it.isDirectory } ?: File("../../shared/bashism")
 
     @Before
@@ -54,7 +45,6 @@ class BashismDetectorTest {
     @Test fun silentHits() = checkGroup("sHits")
     @Test fun errorHits() = checkGroup("eHits")
 
-    /** F1: the money test — no false positives on compatible / heredoc-body syntax. */
     @Test fun compatNoFalsePositives() = checkGroup("compat")
 
     @Test

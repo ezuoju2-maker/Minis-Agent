@@ -4,20 +4,12 @@ import com.openminis.app.browser.BrowserAction
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Tool schema definition for browser_use, mirroring the iOS agent tool registration.
- * Used when sending tool definitions to the LLM API.
- */
 object BrowserUseTool {
 
     const val NAME = "browser_use"
 
     val description = """Control web browser with up to 3 tabs. Actions: navigate to URL, take screenshot, click elements, type text, get page text, scroll, get page info, execute JavaScript, find elements by selector, hover, get readable content, set user agent, get page backbone (DOM structure), fetch resource, manage tabs (new_tab, close_tab, list_tabs).""".trimIndent()
 
-    /**
-     * Build the JSON tool definition for the Anthropic / OpenAI / Gemini API.
-     * Returns a JSONObject suitable for the "tools" array in the API request.
-     */
     fun toolDefinition(): JSONObject {
         val tool = JSONObject()
         tool.put("name", NAME)
@@ -108,14 +100,8 @@ object BrowserUseTool {
         return tool
     }
 
-    /**
-     * Build tool definition for Anthropic API format.
-     */
     fun anthropicToolDefinition(): JSONObject = toolDefinition()
 
-    /**
-     * Build tool definition for OpenAI API function calling format.
-     */
     fun openAIFunctionDefinition(): JSONObject {
         val def = toolDefinition()
         val fn = JSONObject()

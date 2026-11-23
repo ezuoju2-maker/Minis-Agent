@@ -10,24 +10,6 @@ import com.openminis.app.config.readable.ConfigValueFormatter
 import com.openminis.app.sandbox.ContainerDns
 import com.openminis.app.sandbox.ContainerDns.DnsMode
 
-/**
- * [T-container-network-dns] (OpenMinis#396) minis-config fields for the
- * sandbox DNS, bound to the same storage as Settings > Rootfs > Container
- * Network:
- *
- *   minis-config get network.dnsMode                      → "auto" | "custom"
- *   minis-config set network.dnsMode custom
- *   minis-config get network.dnsCustomServers             → one address per line
- *   minis-config set network.dnsCustomServers '"223.5.5.5, 2400:3200::1"'
- *   minis-config set network.dnsCustomServers '["223.5.5.5","2400:3200::1"]'
- *
- * The server list takes a string (newline / comma / space separated) or an
- * array of strings, and every entry must be an IPv4 or IPv6 literal; one bad
- * entry rejects the whole write with the offending entries named, so a typo
- * never reaches resolv.conf. An empty list is allowed (custom mode then
- * follows the system until servers are added — see ContainerDns.plan).
- * [onChanged] re-applies resolv.conf after every successful write.
- */
 internal object ContainerDnsFields {
 
     const val MODE_PATH = "network.dnsMode"
@@ -44,7 +26,6 @@ internal object ContainerDnsFields {
             valueSchema = ConfigSchema.StrEnum(DnsMode.values().map { it.wire }),
             risk = ConfigRisk.NORMAL,
             revertable = true,
-            // [T-config-readable] Labels = the iOS keys for the same setting.
             readable = ConfigReadable(
                 ConfigValueFormatter.EnumLabels(mapOf("auto" to "Automatic (system)", "custom" to "Custom")),
                 label = "Container DNS mode",
@@ -65,9 +46,6 @@ internal object ContainerDnsFields {
             valueSchema = ConfigSchema.Json,
             risk = ConfigRisk.NORMAL,
             revertable = true,
-            // [T-config-readable] Stored as one string (newline / comma /
-            // space separated) but read as a server list: added / removed /
-            // first-server clauses, like iOS's array-typed field.
             readable = ConfigReadable(
                 ConfigValueFormatter.StringList(ordered = true, splitText = ::splitServers),
                 label = "Container custom DNS servers",
@@ -87,11 +65,9 @@ internal object ContainerDnsFields {
         ),
     )
 
-    /** The entries of a stored / written server string, in order. */
     internal fun splitServers(raw: String): List<String> =
         raw.split('\n', ',', ' ', '\t').map { it.trim() }.filter { it.isNotEmpty() }
 
-    /** A string, or an array of strings joined one per line. */
     private fun serversText(v: ConfigValue): String = when (v) {
         is ConfigValue.Str -> v.value
         is ConfigValue.Arr -> v.value.joinToString("\n") { item ->

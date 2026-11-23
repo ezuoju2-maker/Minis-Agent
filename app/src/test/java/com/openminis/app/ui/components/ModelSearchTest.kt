@@ -8,18 +8,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-picker-search-relevance] [T-picker-search-debounce] [T-picker-search-cap]
- * Model-picker search, iOS parity with ModelSearchScorerTests (30fb01839):
- * tiers, bonuses never crossing a tier, token boundaries, multi-field best
- * score — plus the Android section search (provider-name hits, cap across
- * sections) and the wiring that keeps it off the per-keystroke path.
- */
 class ModelSearchTest {
 
     private fun score(t: String, q: String) = ModelSearch.score(t, q)
 
-    // ---- tiers --------------------------------------------------------------
 
     @Test
     fun `tiers rank exact over prefix over token prefix over substring over subsequence`() {
@@ -72,7 +64,6 @@ class ModelSearchTest {
         assertEquals(ModelSearch.EXACT, ModelSearch.bestScore(listOf("Sonnet (latest)", "claude"), "claude"))
     }
 
-    // ---- ranking and sections ----------------------------------------------
 
     private fun entry(id: String, name: String = id) =
         ModelEntry(providerInstanceId = "p", baseModel = LLMModel(id = id, displayName = name, provider = "p"), uuid = id)
@@ -120,7 +111,6 @@ class ModelSearchTest {
         assertEquals(150, ModelSearch.MAX_RESULTS)
     }
 
-    // ---- wiring ---------------------------------------------------------------
 
     @Test
     fun `the chat picker searches the debounced query off the main thread, row by row`() {

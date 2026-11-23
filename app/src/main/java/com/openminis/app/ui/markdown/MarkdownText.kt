@@ -79,11 +79,6 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/**
- * Renders markdown text with full formatting support.
- * Supports: headings, bold, italic, strikethrough, inline code, code blocks (with copy),
- * bullet/numbered/task lists, blockquotes, tables, thematic breaks, and links.
- */
 @Composable
 fun MarkdownText(
     markdown: String,
@@ -127,7 +122,6 @@ private fun BlockContent(
     }
 }
 
-// -- Heading --
 
 @Composable
 private fun HeadingBlock(heading: MarkdownParser.Block.Heading, color: Color) {
@@ -146,7 +140,6 @@ private fun HeadingBlock(heading: MarkdownParser.Block.Heading, color: Color) {
     )
 }
 
-// -- Paragraph --
 
 @Composable
 private fun ParagraphBlock(
@@ -155,23 +148,11 @@ private fun ParagraphBlock(
     style: TextStyle,
     mathSpans: List<MarkdownParser.MathSpan> = emptyList(),
 ) {
-    // Fast path: no math placeholders → original single-Text rendering.
     if (mathSpans.isEmpty() || !content.contains('￼')) {
         InlineContent(text = content, color = color, style = style)
         return
     }
 
-    // T208 Layer B: split the paragraph at each placeholder and render
-    // inline math as a *non-display-mode*, *non-fillMaxWidth* tile so the
-    // formula visually flows after the preceding text segment instead of
-    // becoming a centered full-width block. Inline math should be roughly
-    // the size of surrounding text and aligned to the start of its row.
-    // Display math (`$$ … $$`) goes through Block.MathBlock above and
-    // still renders centered via MathBlockView — that path is correct.
-    // True inline-flow (math glyph on the same baseline as text within
-    // a single Text composable via InlineTextContent) is a follow-up;
-    // for now we stay with the row-split shape but keep the math visually
-    // small.
     val byPlaceholder = remember(mathSpans) { mathSpans.associateBy { it.placeholder } }
     val regex = remember { Regex("\\uFFFC" + "MATH(\\d+)" + "\\uFFFC") }
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -184,7 +165,6 @@ private fun ParagraphBlock(
                     InlineContent(text = segment, color = color, style = style)
                 }
             }
-            // Inline math: non-display KaTeX, no fillMaxWidth, start-aligned.
             KaTeXRenderView(latex = span.latex, displayMode = false)
             cursor = match.range.last + 1
         }
@@ -197,12 +177,11 @@ private fun ParagraphBlock(
     }
 }
 
-// -- Code Block --
 
 @Composable
 private fun CodeBlockView(block: MarkdownParser.Block.CodeBlock) {
     val context = LocalContext.current
-    val codeColor = Color(0xFF4EC9B0) // Green code text
+    val codeColor = Color(0xFF4EC9B0)
     val bgColor = MaterialTheme.colorScheme.surfaceContainerHighest
 
     Column(
@@ -211,7 +190,6 @@ private fun CodeBlockView(block: MarkdownParser.Block.CodeBlock) {
             .clip(RoundedCornerShape(8.dp))
             .background(bgColor),
     ) {
-        // Header with language label + copy button
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -240,7 +218,6 @@ private fun CodeBlockView(block: MarkdownParser.Block.CodeBlock) {
             }
         }
 
-        // Scrollable code content
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -261,7 +238,6 @@ private fun CodeBlockView(block: MarkdownParser.Block.CodeBlock) {
     }
 }
 
-// -- Blockquote --
 
 @Composable
 private fun BlockquoteView(
@@ -270,10 +246,6 @@ private fun BlockquoteView(
     baseStyle: TextStyle,
     mathSpans: List<MarkdownParser.MathSpan> = emptyList(),
 ) {
-    // Orange accent rule on the leading edge — matches iOS, where the
-    // blockquote uses the app systemOrange (0xFFFF9500) at full opacity.
-    // The previous primary @ 0.5 alpha disappeared into theme purple on the
-    // dark palette and didn't read as a quote at all in some compositions.
     val barColor = Color(0xFFFF9500)
     Box(
         modifier = Modifier
@@ -288,8 +260,6 @@ private fun BlockquoteView(
             .padding(start = 12.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            // Inner content uses onSurfaceVariant so quoted text reads as
-            // secondary, matching the iOS quote treatment.
             val quotedColor = MaterialTheme.colorScheme.onSurfaceVariant
             for (inner in block.blocks) {
                 BlockContent(inner, quotedColor, baseStyle, mathSpans)
@@ -298,7 +268,6 @@ private fun BlockquoteView(
     }
 }
 
-// -- Bullet List --
 
 @Composable
 private fun BulletListView(
@@ -310,7 +279,6 @@ private fun BulletListView(
         for (item in block.items) {
             Row(modifier = Modifier.fillMaxWidth()) {
                 if (item.checked != null) {
-                    // Task list item
                     Icon(
                         imageVector = if (item.checked) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
                         contentDescription = null,
@@ -339,7 +307,6 @@ private fun BulletListView(
     }
 }
 
-// -- Numbered List --
 
 @Composable
 private fun NumberedListView(
@@ -367,7 +334,6 @@ private fun NumberedListView(
     }
 }
 
-// -- Table --
 
 @Composable
 private fun TableView(
@@ -386,7 +352,6 @@ private fun TableView(
             .clip(RoundedCornerShape(4.dp)),
     ) {
         Column {
-            // Header row
             Row(
                 modifier = Modifier
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
@@ -416,7 +381,6 @@ private fun TableView(
 
             HorizontalDivider(color = borderColor)
 
-            // Data rows
             for (row in table.rows) {
                 Row(modifier = Modifier.height(IntrinsicSize.Min)) {
                     for ((colIdx, cell) in row.withIndex()) {
@@ -446,16 +410,6 @@ private fun TableView(
     }
 }
 
-/**
- * T208 Layer D: a table cell that resolves inline-math placeholders the
- * same way [ParagraphBlock] does. Without this, `$x^2$` inside a cell
- * would have its placeholder stripped by [InlineContent]'s cleanup pass
- * and the math would silently disappear.
- *
- * Cells that don't carry any math placeholder fall through to a plain
- * [InlineContent] call so existing inline markdown (bold/italic/code,
- * links) keeps working in cells without paying for an extra Column.
- */
 @Composable
 private fun TableCellContent(
     text: String,
@@ -491,7 +445,6 @@ private fun TableCellContent(
     }
 }
 
-// -- Inline Content --
 
 @Composable
 private fun InlineContent(
@@ -504,11 +457,6 @@ private fun InlineContent(
     val inlineCodeColor = MaterialTheme.colorScheme.primary
     val linkColor = MaterialTheme.colorScheme.primary
 
-    // Strip any leftover math placeholders (U+FFFC MATH<n> U+FFFC). The
-    // ParagraphBlock split path resolves them when math spans are
-    // threaded through, but lists/headings/table cells don't carry the
-    // span list — collapsing the placeholder here keeps the U+FFFC
-    // sentinel from leaking into the rendered glyph stream.
     val cleaned = remember(text) {
         if (text.contains('￼')) {
             text.replace(Regex("\\uFFFCMATH\\d+\\uFFFC"), "")
@@ -517,17 +465,10 @@ private fun InlineContent(
         }
     }
 
-    // T136: route non-http(s) link taps (intent://, mailto:, tel:, …) through
-    // BrowserExternalSchemeHandler instead of Compose's default UriHandler,
-    // which fires a plain ACTION_VIEW and breaks for `intent://...#Intent;…`
-    // URIs. For http(s)/about/file the handler is a no-op and we fall back to
-    // a plain ACTION_VIEW to the system browser.
     val context = LocalContext.current
     val linkListener = remember(context) {
         LinkInteractionListener { link ->
             val url = (link as? LinkAnnotation.Url)?.url ?: return@LinkInteractionListener
-            // [T-android-user-initiated-scheme-dispatch] User tapped a link
-            // in rendered markdown — dispatch any scheme.
             val handled = com.openminis.app.ui.browser.BrowserExternalSchemeHandler
                 .handle(
                     context,
@@ -556,9 +497,6 @@ private fun InlineContent(
     )
 }
 
-/**
- * Parse inline markdown: **bold**, *italic*, ~~strikethrough~~, `code`, [links](url)
- */
 private fun parseInline(
     text: String,
     color: Color,
@@ -570,18 +508,15 @@ private fun parseInline(
 ): AnnotatedString = buildAnnotatedString {
     var i = 0
     val len = text.length
-    // [T-md-inline-html] Built on the first whitelisted open tag only.
     var htmlPairs: InlineHtmlTags.LazyPairs? = null
 
     while (i < len) {
-        // Escaped character
         if (text[i] == '\\' && i + 1 < len) {
             append(text[i + 1])
             i += 2
             continue
         }
 
-        // Inline code
         if (text[i] == '`') {
             val end = text.indexOf('`', i + 1)
             if (end > i) {
@@ -598,7 +533,6 @@ private fun parseInline(
             }
         }
 
-        // Link [text](url)
         if (text[i] == '[') {
             val closeBracket = text.indexOf(']', i + 1)
             if (closeBracket > i && closeBracket + 1 < len && text[closeBracket + 1] == '(') {
@@ -620,7 +554,6 @@ private fun parseInline(
             }
         }
 
-        // Bold + Italic ***text***
         if (i + 2 < len && text.substring(i, i + 3) == "***") {
             val end = text.indexOf("***", i + 3)
             if (end > i) {
@@ -632,7 +565,6 @@ private fun parseInline(
             }
         }
 
-        // Bold **text** or __text__
         if (i + 1 < len && (text.substring(i, i + 2) == "**" || text.substring(i, i + 2) == "__")) {
             val marker = text.substring(i, i + 2)
             val end = text.indexOf(marker, i + 2)
@@ -645,7 +577,6 @@ private fun parseInline(
             }
         }
 
-        // Strikethrough ~~text~~
         if (i + 1 < len && text.substring(i, i + 2) == "~~") {
             val end = text.indexOf("~~", i + 2)
             if (end > i) {
@@ -657,9 +588,8 @@ private fun parseInline(
             }
         }
 
-        // Italic *text* or _text_ (single delimiter, not followed by another)
         if ((text[i] == '*' || text[i] == '_') &&
-            (i + 1 >= len || text[i + 1] != text[i]) // not ** or __
+            (i + 1 >= len || text[i + 1] != text[i])
         ) {
             val delim = text[i]
             val end = text.indexOf(delim, i + 1)
@@ -672,8 +602,6 @@ private fun parseInline(
             }
         }
 
-        // [T-md-inline-html] An entity is its decoded text (`&lt;br&gt;` shows
-        // `<br>`), appended as is and never scanned as a tag.
         if (text[i] == '&') {
             val entity = InlineHtmlTags.entityAt(text, i)
             if (entity != null) {
@@ -683,8 +611,6 @@ private fun parseInline(
             }
         }
 
-        // [T-md-inline-html] <br> and the whitelisted inline tags; anything
-        // else (and an open tag whose close is not on this line) stays literal.
         if (text[i] == '<' && InlineHtmlTags.mayStartTag(text, i)) {
             val br = InlineHtmlTags.brLength(text, i)
             if (br > 0) {
@@ -717,13 +643,11 @@ private fun parseInline(
             }
         }
 
-        // Regular character
         append(text[i])
         i++
     }
 }
 
-/** [T-md-inline-html] The span for a whitelisted inline tag (not `<code>`). */
 private fun inlineHtmlStyle(kind: InlineHtmlTags.Kind): SpanStyle = when (kind) {
     InlineHtmlTags.Kind.BOLD -> SpanStyle(fontWeight = FontWeight.Bold)
     InlineHtmlTags.Kind.ITALIC -> SpanStyle(fontStyle = FontStyle.Italic)
@@ -740,20 +664,9 @@ private fun inlineHtmlStyle(kind: InlineHtmlTags.Kind): SpanStyle = when (kind) 
     InlineHtmlTags.Kind.CODE -> SpanStyle(fontFamily = FontFamily.Monospace)
 }
 
-// ─── Media blocks (inline image / video / audio) ────────────────────────────
 
-/**
- * Resolve a URL used in Markdown (`minis://...` or a plain path) to a host
- * File, suitable for MediaPlayer, MediaMetadataRetriever, or file share
- * intents. Returns null when the path can't be resolved or the file is
- * missing. Mirrors MinisImageFetcher's resolution logic so inline media
- * tracks the same rules as inline images.
- */
 private fun resolveMediaFile(url: String): File? {
     if (url.isBlank()) return null
-    // Strip a real query string, but NOT `#`: attachment filenames can
-    // contain '#' (e.g. `foo #China.mp4`). `minis://` URLs don't use
-    // fragments, so truncating at '#' would lose part of the filename.
     val stripped = url.substringBefore('?')
     val hostFile: File? = when {
         stripped.startsWith("minis://") -> {
@@ -777,11 +690,6 @@ private fun filenameFromUrl(url: String): String {
     } catch (_: Throwable) { last }
 }
 
-/**
- * Share a resolved media file via the system chooser (system player, file
- * manager, etc.). Used when tapping an inline video card — simpler than
- * bundling ExoPlayer for a fullscreen experience.
- */
 private fun openMediaExternally(context: Context, file: File, mime: String) {
     android.util.Log.d("MdMedia", "openMediaExternally file=${file.absolutePath} mime=$mime")
     val authority = context.packageName + ".fileprovider"
@@ -798,18 +706,14 @@ private fun openMediaExternally(context: Context, file: File, mime: String) {
     val chooser = Intent.createChooser(intent, file.name).apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
-    try { context.startActivity(chooser) } catch (_: Throwable) { /* no handler */ }
+    try { context.startActivity(chooser) } catch (_: Throwable) {  }
 }
 
-// -- Image block --
 
 @Composable
 private fun MinisImageBlock(block: MarkdownParser.Block.Image) {
     val surfaceBg = MaterialTheme.colorScheme.surfaceVariant
     val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-    // [T-android-image-session-direct] Carry the owning chat session (when
-    // this markdown is rendered inside one) so a minis:// image resolves in
-    // that session's directory rather than through global state.
     val sessionId = com.openminis.app.ui.chat.LocalMarkdownSessionId.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val model = androidx.compose.runtime.remember(block.url, sessionId) {
@@ -833,7 +737,6 @@ private fun MinisImageBlock(block: MarkdownParser.Block.Image) {
     )
 }
 
-// -- Video block (thumbnail card + tap to open system player) --
 
 @Composable
 private fun MinisVideoBlock(block: MarkdownParser.Block.Video) {
@@ -845,7 +748,6 @@ private fun MinisVideoBlock(block: MarkdownParser.Block.Video) {
     val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
     val captionColor = MaterialTheme.colorScheme.onSurfaceVariant
 
-    // Generate a thumbnail frame off the main thread via MediaMetadataRetriever.
     val thumbnail by produceState<Bitmap?>(initialValue = null, key1 = file?.absolutePath) {
         val f = file ?: run {
             android.util.Log.d("MdMedia", "video thumbnail skipped (no file)")
@@ -924,14 +826,12 @@ private fun MinisVideoBlock(block: MarkdownParser.Block.Video) {
     }
 }
 
-// -- Audio block (inline play/pause + progress) --
 
 @Composable
 private fun MinisAudioBlock(block: MarkdownParser.Block.Audio) {
     val file = remember(block.url) { resolveMediaFile(block.url) }
     val filename = remember(block.url) { filenameFromUrl(block.url) }
 
-    // Dedicated MediaPlayer per card. Released on DisposableEffect dispose.
     val player = remember(file?.absolutePath) {
         if (file == null) null else try {
             MediaPlayer().apply { setDataSource(file.absolutePath); prepare() }
@@ -945,7 +845,6 @@ private fun MinisAudioBlock(block: MarkdownParser.Block.Audio) {
     var positionMs by remember { mutableStateOf(0) }
     val durationMs = player?.duration ?: 0
 
-    // Poll position while playing to drive the progress bar.
     LaunchedEffect(isPlaying) {
         while (isPlaying && player != null) {
             positionMs = try { player.currentPosition } catch (_: Throwable) { 0 }
@@ -987,7 +886,6 @@ private fun MinisAudioBlock(block: MarkdownParser.Block.Audio) {
             .padding(horizontal = 10.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Leading icon
         Icon(
             imageVector = Icons.Filled.Audiotrack,
             contentDescription = null,

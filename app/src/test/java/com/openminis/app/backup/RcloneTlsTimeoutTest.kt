@@ -9,26 +9,11 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-rclone-tls-timeout] The bounded-wait budget and the self-signed
- * certificate opt-in, ported from iOS a28f8721b.
- *
- * Two things here are easy to get wrong in ways no compiler catches and no
- * happy-path device test would notice, so they are pinned:
- *
- *  1. rclone's Duration options are int64 NANOSECONDS. Writing the seconds
- *     straight in yields a 45-billionths-of-a-second timeout, which fails
- *     every transfer instantly rather than obviously.
- *  2. `allowInsecureTLS` must decode to false when the key is ABSENT. Remotes
- *     were persisted before the field existed; a strict decode would make
- *     every previously-configured destination vanish from the user's list.
- */
 class RcloneTlsTimeoutTest {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val obscure: (String) -> String? = { "OBSCURED(${it.length})" }
 
-    // -- 1. Timeout budget ------------------------------------------------
 
     @Test
     fun `durations are expressed in nanoseconds`() {
@@ -41,7 +26,6 @@ class RcloneTlsTimeoutTest {
     fun `global options carry the timeouts rclone expects`() {
         val opts = RcloneBridge.globalTimeoutOptions()
 
-        // Nanoseconds, not seconds — the whole point of the conversion.
         assertEquals(
             RcloneBridge.IO_TIMEOUT_SECONDS * 1_000_000_000L,
             opts["Timeout"],
@@ -56,12 +40,6 @@ class RcloneTlsTimeoutTest {
 
     @Test
     fun `an unreachable server still fails while the user is watching`() {
-        // [T-android-backup-webdav-deadline] What bounds a server that is DOWN
-        // is the connect timeout, not IO_TIMEOUT_SECONDS: the latter is Go's
-        // ResponseHeaderTimeout, which starts only after the request body was
-        // written, so it never runs against a host that cannot be reached.
-        // The old version of this test multiplied the IO timeout instead,
-        // which is what pinned it at a value that failed every slow server.
         val attempts = RcloneBridge.LOW_LEVEL_RETRIES * RcloneBridge.RETRIES
         val worstCaseConnectSeconds = RcloneBridge.CONNECT_TIMEOUT_SECONDS * attempts
         assertTrue(
@@ -73,18 +51,13 @@ class RcloneTlsTimeoutTest {
 
     @Test
     fun `a slow but healthy server gets rclone's full response deadline`() {
-        // [T-android-backup-webdav-deadline] A cloud-relay WebDAV server answers
-        // only after re-uploading the file (measured: a 60 s answer failed at 46 s
-        // with 45 s). 300 s is rclone's default and iOS's value (ceac9df0b).
         assertTrue(RcloneBridge.IO_TIMEOUT_SECONDS >= 300)
         assertEquals(300_000_000_000L, RcloneBridge.globalTimeoutOptions()["Timeout"])
     }
 
-    // -- 2. Certificate-failure detection ---------------------------------
 
     @Test
     fun `real TLS trust errors are recognised`() {
-        // The exact strings Go's crypto/tls and x509 surface through rclone.
         listOf(
             "x509: certificate signed by unknown authority",
             "x509: certificate is valid for foo, not bar",
@@ -98,9 +71,6 @@ class RcloneTlsTimeoutTest {
 
     @Test
     fun `ordinary failures do not offer to disable verification`() {
-        // Matching too eagerly would put a "don't verify certificates" control
-        // in front of a user whose real problem is a wrong password — the exact
-        // outcome the gated toggle exists to avoid.
         listOf(
             null,
             "",
@@ -114,11 +84,9 @@ class RcloneTlsTimeoutTest {
         }
     }
 
-    // -- 3. Persistence is backward compatible ----------------------------
 
     @Test
     fun `a remote stored before the field existed decodes with verification ON`() {
-        // Exactly the JSON an older build wrote: no allowInsecureTLS key.
         val legacy = """
             {"name":"nas","backend":"webdav","params":{"url":"https://nas.local/dav"},
              "path":"/backups","createdAt":1,"enabled":true}
@@ -147,7 +115,6 @@ class RcloneTlsTimeoutTest {
         assertTrue(round.allowInsecureTLS)
     }
 
-    // -- 4. FTP gets the per-remote option --------------------------------
 
     @Test
     fun `ftp carries no_check_certificate when the user opted in`() {
@@ -158,8 +125,6 @@ class RcloneTlsTimeoutTest {
             obscure = obscure,
             allowInsecureTLS = true,
         )
-        // FTP is the one backend with a real per-remote switch, so it is set
-        // explicitly rather than left to the global InsecureSkipVerify.
         assertEquals("true", params["no_check_certificate"])
     }
 
@@ -177,8 +142,6 @@ class RcloneTlsTimeoutTest {
 
     @Test
     fun `webdav does not get a per-remote certificate key`() {
-        // WebDAV exposes no such option; writing one would be a silent no-op
-        // that reads like protection. It relies on the global flag instead.
         val params = RcloneRemoteStore.buildConfigParams(
             backend = "webdav",
             params = mapOf("url" to "https://nas.local/dav"),
@@ -191,8 +154,6 @@ class RcloneTlsTimeoutTest {
 
     @Test
     fun `opting in does not disturb the existing credential rules`() {
-        // The S3-verbatim and obscured-empty-password rules are load-bearing
-        // (RcloneRemoteConfigTest); adding the TLS flag must not perturb them.
         val s3 = RcloneRemoteStore.buildConfigParams(
             backend = "s3",
             params = mapOf("region" to "us-east-1"),

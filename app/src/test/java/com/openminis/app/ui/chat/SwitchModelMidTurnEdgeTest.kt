@@ -6,31 +6,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Edge cases of a model switch that lands while a turn is running.
- *
- * Guards: a43ad4134 (T-android-switch-model-ghost-retry), 8aa6b373b
- * (T-android-switch-model-hang), aa3aab6bb (T-android-switch-model-seam-cleanup)
- * and ef4a06e4d (T-android-switch-model-let-stream-finish). Extends
- * [SwitchModelGhostRetryTest], which pins the seam's teardown scope and the
- * selector wiring; this file covers what that one does not:
- *
- *  1. The "bound to the abandoned model" predicate reads the retry-ladder
- *     counters, but `_autoRetryAttempt` stays non-zero for the WHOLE retried
- *     attempt — it is only cleared when that stream completes. A turn that
- *     needed one retry and is now streaming normally therefore still reads as
- *     a ghost retry, and a model switch cancels it into "tap Resume": the
- *     ef4a06e4d regression, on every turn that retried once. iOS clears the
- *     counter the moment the stream opens (streamWithAutoRetry).   (BUG today)
- *  2. `selectEntry` swaps the class-level `currentModel` immediately, while the
- *     running turn keeps its turn-local provider. The turn's thinking gate
- *     reads the class-level model, so the rest of the turn sends the NEW
- *     model's reasoning decision to the OLD model.                 (BUG today)
- *  3. Documented parity decision: Android applies a mid-turn switch at the
- *     next SEND (the turn-local provider is declared outside the turn loop);
- *     iOS (86a045284) applies it at the next REQUEST. Pinned so a port of the
- *     iOS behaviour updates this test deliberately.
- */
 class SwitchModelMidTurnEdgeTest {
 
     private fun src(path: String): String {
@@ -42,8 +17,6 @@ class SwitchModelMidTurnEdgeTest {
     private val vmSrc by lazy { src("src/main/java/com/openminis/app/ui/chat/ChatViewModel.kt") }
 
     private val agentLoop by lazy {
-        // [T-android-stop-late-write] runAgentLoop is a thin wrapper that holds
-        // the turn token; the loop itself is runAgentLoopBody.
         vmSrc.substringAfter("private suspend fun runAgentLoopBody(")
             .substringBefore("\n    private suspend fun ")
             .substringBefore("\n    private fun ")
@@ -54,15 +27,12 @@ class SwitchModelMidTurnEdgeTest {
         s.lines().filterNot { it.trimStart().startsWith("//") || it.trimStart().startsWith("*") }
             .joinToString("\n")
 
-    // ---- 1. ladder counter vs. a healthy retried stream --------------------
 
-    /** Timeline model of the ladder counter. `resetOnFirstChunk` = the fix. */
     private fun counterWhileRetriedStreamIsHealthy(resetOnFirstChunk: Boolean): Int {
         var attempt = 0
-        attempt = 1                     // transient error → ladder step 1
-        /* countdown ... then the retried stream opens and a chunk arrives */
+        attempt = 1
         if (resetOnFirstChunk) attempt = 0
-        return attempt                  // the value the seam sees mid-stream
+        return attempt
     }
 
     @Test
@@ -90,11 +60,9 @@ class SwitchModelMidTurnEdgeTest {
         )
     }
 
-    // ---- 2. thinking gate follows the provider serving the turn ------------
 
     @Test
     fun `the in-flight turn gates thinking on its own provider, not the freshly picked model`() {
-        // The argument line right after the tools argument of the turn's stream call.
         val call = agentLoop
             .substringAfter("tools = if (helperWrapUpInjected) emptyList() else agentTools,", "")
             .substringBefore(".collect { chunk ->")
@@ -107,7 +75,6 @@ class SwitchModelMidTurnEdgeTest {
         )
     }
 
-    // ---- 3. documented parity decision -------------------------------------
 
     @Test
     fun `a mid-turn switch applies at the next send (turn-local provider outlives every round)`() {

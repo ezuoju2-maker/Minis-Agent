@@ -32,21 +32,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.openminis.app.data.repository.SkillRepository
 
-/**
- * Shared list row for a single skill — used by both [SkillsManagementScreen]
- * (Settings → Skills) and the in-chat Skills-in-Session sheet so the visual
- * rhythm stays identical across both surfaces.
- *
- * Layout:
- *   ┌──────────────────────────────────────────────────────────┐
- *   │ name [src-icon]                       [switch] [chevron] │
- *   │ description (up to 2 lines, tertiary text)               │
- *   └──────────────────────────────────────────────────────────┘
- *
- * Pass [onClick] to make the row navigate (a chevron is then shown). Pass
- * [onLongClick] only alongside [onClick]; when it is null the row keeps its
- * plain clickable.
- */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SkillRowItem(
@@ -134,11 +119,6 @@ fun SkillRowItem(
     }
 }
 
-/**
- * Source-of-truth mapping for the small badge icon next to a skill's name.
- * Kept here (rather than duplicated in each screen) so badge colors and icons
- * stay consistent between Settings and the in-chat sheet.
- */
 fun sourceIconAndColor(source: SkillRepository.ImportSource): Pair<ImageVector, Color> = when (source) {
     SkillRepository.ImportSource.URL -> Icons.Default.Link to Color(0xFF007AFF)
     SkillRepository.ImportSource.FILE -> Icons.Outlined.Description to Color(0xFFFF9500)

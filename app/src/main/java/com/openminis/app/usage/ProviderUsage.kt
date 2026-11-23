@@ -3,31 +3,15 @@ package com.openminis.app.usage
 import com.openminis.app.data.model.LLMUsage
 import org.json.JSONObject
 
-/**
- * [T-usage-step1] One provider usage block normalized to the five internal
- * fields of src/shared/usage/USAGE_METRICS_SPEC.md (spec 1.1). A null field
- * means the block did not carry it, which is what lets [UsageChunkMerger]
- * leave it alone instead of zeroing it.
- */
 data class UsageChunk(
-    /** Fresh input, cache excluded. */
     val input: Long? = null,
     val cacheRead: Long? = null,
     val cacheWrite: Long? = null,
-    /** Output, reasoning included. */
     val output: Long? = null,
-    /** Subset of [output]; never added to a total. */
     val reasoning: Long? = null,
-    /** Any cache key was present in this block, even with the value 0. */
     val cacheKeyPresent: Boolean = false,
-    /** Context size of the request as the provider reports it (not summed). */
     val contextTokens: Long? = null,
 ) {
-    /**
-     * The legacy [LLMUsage] shape. Cache counts of 0 stay null there, as every
-     * existing consumer expects; [LLMUsage.cacheReported] carries the
-     * difference between "reported 0" and "not reported".
-     */
     fun toLLMUsage(): LLMUsage = LLMUsage(
         inputTokens = (input ?: 0).toIntSaturated(),
         outputTokens = (output ?: 0).toIntSaturated(),
@@ -42,15 +26,8 @@ data class UsageChunk(
 
 private fun Long.toIntSaturated(): Int = coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
 
-/**
- * [T-usage-step1] Provider usage JSON -> [UsageChunk], one function per wire
- * protocol (spec 2.1). Every relay that speaks a protocol goes through the
- * same function; provider-specific keys (DeepSeek, Kimi, OpenRouter) are read
- * by the OpenAI Chat parser whenever they appear.
- */
 object ProviderUsageParser {
 
-    /** Anthropic Messages: input_tokens already excludes the cache. */
     fun anthropic(u: JSONObject): UsageChunk {
         val cacheWrite = UsageNumbers.provider(u, "cache_creation_input_tokens")
         val cacheRead = UsageNumbers.provider(u, "cache_read_input_tokens")
@@ -66,17 +43,6 @@ object ProviderUsageParser {
         )
     }
 
-    /**
-     * OpenAI Chat Completions and every compatible relay. prompt_tokens is the
-     * FULL input. The cache read is the largest of the keys present (OpenAI
-     * prompt_tokens_details.cached_tokens, DeepSeek prompt_cache_hit_tokens,
-     * Moonshot top-level cached_tokens): taking the first present key let a
-     * reported 0 hide a real DeepSeek hit. The cache write (OpenRouter
-     * cache_write_tokens, relays' cache_creation_input_tokens) is treated as
-     * part of prompt_tokens; when subtracting it would go negative it is
-     * assumed to be reported separately, and when even the read would go
-     * negative nothing is subtracted (the pre-existing guard).
-     */
     fun openAIChat(u: JSONObject): UsageChunk {
         val details = u.optJSONObject("prompt_tokens_details")
         val cacheRead = maxPresent(
@@ -109,7 +75,6 @@ object ProviderUsageParser {
         )
     }
 
-    /** OpenAI Responses API / Codex: input_tokens includes the cached part. */
     fun openAIResponses(u: JSONObject): UsageChunk {
         val total = UsageNumbers.provider(u, "input_tokens")
         val cacheRead = u.optJSONObject("input_tokens_details")?.let { UsageNumbers.provider(it, "cached_tokens") }
@@ -125,11 +90,6 @@ object ProviderUsageParser {
         )
     }
 
-    /**
-     * Gemini usageMetadata: promptTokenCount includes cachedContentTokenCount
-     * (clamped so a relay's over-large cache never yields a negative input);
-     * thinking is billed separately in thoughtsTokenCount and counted as output.
-     */
     fun gemini(u: JSONObject): UsageChunk {
         val prompt = UsageNumbers.provider(u, "promptTokenCount")
         val cached = UsageNumbers.provider(u, "cachedContentTokenCount")
@@ -149,15 +109,6 @@ object ProviderUsageParser {
     private fun maxPresent(vararg values: Long?): Long? = values.filterNotNull().maxOrNull()
 }
 
-/**
- * [T-usage-step1] Folds the usage blocks of ONE request (spec 3.1). A field
- * changes only when a block carries it, and then takes the max: Anthropic's
- * message_delta counts are cumulative and may omit input and cache entirely,
- * relays may send 0 placeholders, and many OpenAI-compatible servers repeat
- * cumulative usage on every chunk. The GH#384 exception: when a block newly
- * reports (or raises) the cache read, its input describes the same prompt
- * split differently and replaces the earlier one instead of competing.
- */
 object UsageChunkMerger {
 
     fun merge(state: UsageChunk?, c: UsageChunk): UsageChunk {
@@ -174,20 +125,10 @@ object UsageChunkMerger {
             output = maxField(state.output, c.output),
             reasoning = maxField(state.reasoning, c.reasoning),
             cacheKeyPresent = state.cacheKeyPresent || c.cacheKeyPresent,
-            // Deliberately the LATEST block's value, as before the merge existed:
-            // Anthropic's context is input_tokens alone (cache excluded), and
-            // carrying message_start's value past a delta-only block would start
-            // persisting it, where ContextPolicy.calibrationSample reads it as a
-            // context-size sample. That convention is a separate fix (design D7).
             contextTokens = c.contextTokens,
         )
     }
 
-    /**
-     * Merge for stream consumers that hold [LLMUsage]. A usage without a
-     * [LLMUsage.chunk] (built by hand, e.g. a test or a non-streaming path)
-     * replaces the previous value, which is the behaviour before this merge.
-     */
     fun merge(state: LLMUsage?, next: LLMUsage): LLMUsage {
         val nextChunk = next.chunk ?: return next
         val stateChunk = state?.chunk ?: return next

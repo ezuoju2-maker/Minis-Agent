@@ -7,14 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
-/**
- * [T-android-llmlog-redact] debug.llmRequests must never hand out a credential.
- *
- * Found while testing the OpenCode Go provider on a Pixel 4a: the captured
- * entry carried `Authorization: Bearer oc_sk_…` verbatim, while iOS records
- * `Bearer ***`. A LAN client reaches debug.llmRequests with only the debug
- * server token, so every provider key was one RPC away.
- */
 class LLMRequestLogRedactionTest {
 
     private val secret = "oc_sk_TEST_0123456789abcdef"

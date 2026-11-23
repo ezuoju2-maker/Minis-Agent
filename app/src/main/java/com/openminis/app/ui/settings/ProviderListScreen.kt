@@ -76,9 +76,6 @@ fun ProviderListScreen(
     val context = LocalContext.current
 
     var showMenu by remember { mutableStateOf(false) }
-    // [T-android-swipe-row-actions] Pending swipe-delete target. Held here
-    // rather than per-row so the confirmation survives the row being
-    // recomposed/reordered underneath it.
     var instanceToDelete by remember {
         mutableStateOf<com.openminis.app.data.model.ProviderInstance?>(null)
     }
@@ -164,21 +161,6 @@ fun ProviderListScreen(
         } else {
             groupedInstances.forEach { (providerType, typeInstances) ->
                 SettingsSection(header = providerType.displayName) {
-                    // [T-android-provider-reorder] Long-press a row to drag it
-                    // within its provider-type section (mirrors iOS
-                    // ProviderInstancesView's .onMove).
-                    //
-                    // ReorderableColumn — not the LazyColumn variant used by
-                    // ModelGroupsScreen — because this screen renders inside
-                    // SettingsScaffold's verticalScroll Column, and the lazy
-                    // variant needs a LazyListState. Converting the whole screen
-                    // to a LazyColumn would churn the empty state and the Voice
-                    // Services section for no user-visible gain.
-                    //
-                    // `localOrder` holds the live order during the drag so the
-                    // rows follow the finger; it re-syncs whenever the repository
-                    // emits (keyed on the ids) so an external change — an import,
-                    // a delete — is not overwritten by a stale local copy.
                     var localOrder by remember(typeInstances.map { it.id }) {
                         mutableStateOf(typeInstances)
                     }
@@ -188,53 +170,26 @@ fun ProviderListScreen(
                             localOrder = localOrder.toMutableList().apply {
                                 add(toIndex, removeAt(fromIndex))
                             }
-                            // Commit only THIS section's ids: reorderInstances
-                            // keeps every unmentioned instance in its existing
-                            // relative position, so other provider-type sections
-                            // are untouched. This is the Android answer to the
-                            // iOS index-mapping bug (246a8a8e) — there is no
-                            // section-local→global index arithmetic to get wrong.
                             providerRepository.reorderInstances(localOrder.map { it.id })
                         },
                     ) { index, instance, isDragging ->
                         key(instance.id) {
                             val modelCount = providerRepository.visibleEntries(instance.id).size
                             val apiKey = providerRepository.loadApiKey(instance.id)
-                            // Mirrors iOS `isConfigured` on ProviderInstancesView:
-                            // for OAuth providers, having a manual bearer token OR
-                            // a stored OAuth credential counts as "configured" — not
-                            // just the presence of an API key. Without this, OAuth
-                            // instances always show the gray dot even after a
-                            // successful sign-in or manual token paste.
                             val isConfigured = if (instance.credentialType ==
                                 com.openminis.app.data.model.ProviderCredential.oauth) {
                                 val mgr = com.openminis.app.auth.OAuthManager.forInstance(context, instance)
                                 mgr?.isAuthenticated() == true
                             } else {
-                                // [T-empty-key-compat-endpoints] A keyless
-                                // third-party compatible endpoint is
-                                // configured-by-definition (mirrors iOS).
                                 !apiKey.isNullOrBlank() || instance.allowsEmptyAPIKey
                             }
-                            // [T-oauth-keep-credentials] Refresh rejected: the
-                            // credential is kept but the row renders red.
                             val needsReauth = instance.credentialType ==
                                 com.openminis.app.data.model.ProviderCredential.oauth &&
                                 com.openminis.app.auth.OAuthManager.needsReauth(context, instance.id)
-                            // Lift the dragged row above its neighbours so it
-                            // reads as "picked up" (matches ModelGroupsScreen).
                             val elevation by animateDpAsState(
                                 targetValue = if (isDragging) 4.dp else 0.dp,
                                 label = "provider_drag_elevation",
                             )
-                            // [ISS-040b] One Column per row: ReorderableColumn wraps each
-                            // item in Box(contentAlignment = TopStart) (reorderable 2.4.0,
-                            // checked in its bytecode), so a divider emitted next to the
-                            // Surface was stacked ON TOP of the row's first pixel line
-                            // instead of below it - a line over the card's top edge, and
-                            // none before the last row. The divider now sits above every
-                            // row but the first (as in ModelGroupsScreen), giving exactly
-                            // N-1 lines between N rows.
                             Column {
                                 if (providerRowHasDividerAbove(index)) {
                                     val divider = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
@@ -251,17 +206,6 @@ fun ProviderListScreen(
                                     color = Color.Transparent,
                                     modifier = Modifier.longPressDraggableHandle(),
                                 ) {
-                                    // [T-android-swipe-row-actions] Swipe left for
-                                    // Edit / Delete. Edit reuses the same
-                                    // onProviderClick the tap already uses, and
-                                    // Delete routes through the SAME confirmation +
-                                    // removeInstance() the detail screen's "Delete
-                                    // Provider" button uses — no second delete path.
-                                    //
-                                    // Sits INSIDE longPressDraggableHandle, not
-                                    // around it: the handle needs to stay attached
-                                    // to the row the user presses, and the two
-                                    // gestures separate by axis (see SwipeRowActions).
                                     SwipeRowActions(
                                         actions = listOf(
                                             SwipeRowAction(
@@ -297,10 +241,6 @@ fun ProviderListScreen(
             }
         }
 
-        // [T-android-provider-voice] Voice Services: runtime shadow mirror of
-        // every enabled instance that owns audio-modality models (mirrors iOS
-        // ProviderInstancesView's Voice Services section). Rows are read-only
-        // views onto the underlying instance — no stored entity.
         val shadows = remember(config) { providerRepository.shadowVoiceProviders() }
         if (shadows.isNotEmpty()) {
             SettingsSection(
@@ -379,9 +319,6 @@ fun ProviderListScreen(
         }
     }
 
-    // [T-android-swipe-row-actions] Same dialog copy and same repository call as
-    // ProviderDetailScreen's "Delete Provider" button, so swipe-delete and
-    // detail-delete cannot drift apart.
     instanceToDelete?.let { target ->
         MinisAlertDialog(
             onDismissRequest = { instanceToDelete = null },
@@ -460,8 +397,6 @@ private fun ProviderInstanceRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                 )
                 Text(
-                    // [T-empty-key-compat-endpoints] Keyless compatible endpoint:
-                    // say so instead of the alarming "No API key".
                     text = if (needsReauth) stringResource(R.string.provider_oauth_sign_in_expired)
                         else if (!apiKey.isNullOrBlank()) maskKey(apiKey)
                         else if (instance.allowsEmptyAPIKey) stringResource(R.string.provider_no_key_required)
@@ -510,7 +445,6 @@ private fun maskKey(key: String): String {
     return key.take(6) + "..." + key.takeLast(4)
 }
 
-/** One shadow Voice Service row: name + ASR/TTS model counts. */
 @Composable
 private fun ShadowVoiceRow(
     shadow: ProviderRepository.ShadowVoiceProvider,
@@ -565,8 +499,4 @@ private fun ShadowVoiceRow(
     }
 }
 
-/**
- * [ISS-040b] Whether a provider row draws the separator above itself: every
- * row but the first, so N rows get exactly N-1 lines, all between rows.
- */
 internal fun providerRowHasDividerAbove(index: Int): Boolean = index > 0

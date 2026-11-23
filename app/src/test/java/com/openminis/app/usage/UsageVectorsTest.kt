@@ -14,13 +14,6 @@ import java.time.ZoneId
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
-/**
- * [T-usage-step1] Runs the SHARED usage vectors (src/shared/usage, the file iOS
- * loads too) through the Android usage layer: provider parsing and stream
- * merging, the lenient stored-JSON parser, model-name normalization, and the
- * report builder. Every field present in a case's `expected` is compared; the
- * expected values are hand-computed in the file, not produced by either app.
- */
 @Ignore(
     "The shared fixture src/shared/usage/usage_test_vectors.json (44 hand-computed " +
         "cases used by both apps) is not present in this source snapshot. " +
@@ -29,10 +22,9 @@ import kotlin.math.roundToLong
 )
 class UsageVectorsTest {
 
-    // Gradle runs unit tests with the module dir (src/android/app) as CWD.
     private val vectorsFile: File = sequenceOf(
-        File("../shared/usage/usage_test_vectors.json"),     // CWD = src/android
-        File("../../shared/usage/usage_test_vectors.json"),  // CWD = src/android/app
+        File("../shared/usage/usage_test_vectors.json"),
+        File("../../shared/usage/usage_test_vectors.json"),
     ).firstOrNull { it.isFile } ?: File("../../shared/usage/usage_test_vectors.json")
 
     private val cases: JSONArray by lazy { JSONObject(vectorsFile.readText()).getJSONArray("cases") }
@@ -62,7 +54,6 @@ class UsageVectorsTest {
         assertEquals(44, cases.length())
     }
 
-    // ---- parse_provider -------------------------------------------------
 
     private fun checkProvider(c: JSONObject, errs: MutableList<String>) {
         val protocol = c.getJSONObject("options").getString("protocol")
@@ -89,7 +80,6 @@ class UsageVectorsTest {
         eq(errs, "output", e.getLong("output"), m.output ?: 0)
         eq(errs, "reasoning", optLong(e, "reasoning"), m.reasoning)
         eq(errs, "cacheReported", e.getBoolean("cacheReported"), m.cacheKeyPresent)
-        // The same fold through the LLMUsage path the stream consumer uses.
         val u = llm!!
         eq(errs, "llm.input", e.getLong("input"), u.inputTokens.toLong())
         eq(errs, "llm.output", e.getLong("output"), u.outputTokens.toLong())
@@ -99,7 +89,6 @@ class UsageVectorsTest {
         eq(errs, "llm.cacheReported", e.getBoolean("cacheReported"), u.cacheReported)
     }
 
-    // ---- parse_stored ---------------------------------------------------
 
     private fun checkStored(c: JSONObject, errs: MutableList<String>) {
         val records = c.getJSONArray("records")
@@ -123,7 +112,6 @@ class UsageVectorsTest {
         }
     }
 
-    // ---- model_key ------------------------------------------------------
 
     private fun checkModelKey(c: JSONObject, errs: MutableList<String>) {
         val keys = c.getJSONObject("expected").getJSONArray("keys")
@@ -135,7 +123,6 @@ class UsageVectorsTest {
         }
     }
 
-    // ---- report ---------------------------------------------------------
 
     private fun checkReport(c: JSONObject, errs: MutableList<String>) {
         val o = c.getJSONObject("options")
@@ -229,9 +216,7 @@ class UsageVectorsTest {
         }
     }
 
-    // ---- helpers --------------------------------------------------------
 
-    /** A record's `usage`: an object is serialized, a string is the raw column text, null is NULL. */
     private fun usageText(v: Any?): String? = when (v) {
         null, JSONObject.NULL -> null
         is JSONObject -> v.toString()
@@ -256,7 +241,6 @@ class UsageVectorsTest {
         if (expected != actual) errs += "$what: expected $expected, got $actual"
     }
 
-    /** Vectors round ratios to 6 decimals; compare the actual value rounded the same way. */
     private fun dbl(errs: MutableList<String>, what: String, expected: Double?, actual: Double?) {
         val ok = if (expected == null || actual == null) expected == actual
         else abs((actual * 1e6).roundToLong() / 1e6 - expected) < 1e-9

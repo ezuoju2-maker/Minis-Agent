@@ -10,17 +10,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-sub-agents-v1] The roster's invariants.
- *
- * These are not incidental behaviours: the roster is decoded from a blob that
- * can arrive from a newer build, from another platform, or from a device set to
- * a different language, and `normalize` is the only thing standing between that
- * data and both the tool schema and the system prompt. Each test below pins one
- * way the roster could otherwise go wrong at runtime.
- *
- * Mirrors iOS MinisTests/SubAgentDefinitionTests.swift.
- */
 class SubAgentDefinitionTest {
 
     private fun custom(
@@ -37,7 +26,6 @@ class SubAgentDefinitionTest {
         isBuiltIn = isBuiltIn,
     )
 
-    // ── The built-in always exists and always leads ─────────────────────────
 
     @Test
     fun `an empty roster normalizes to the built-in alone`() {
@@ -59,8 +47,6 @@ class SubAgentDefinitionTest {
 
     @Test
     fun `the built-in is pinned to the front even when its stored order says otherwise`() {
-        // A synced roster that reordered the built-in must not bury it — it
-        // would also cost it its slot in the count bound.
         val input = listOf(
             custom("a", "Alpha", sortOrder = 0),
             SubAgentDefinition.makeBuiltIn(sortOrder = 99),
@@ -70,13 +56,9 @@ class SubAgentDefinitionTest {
         assertEquals(0, out[0].sortOrder)
     }
 
-    // ── The built-in's model-facing text is canonical ───────────────────────
 
     @Test
     fun `a renamed built-in has its canonical name and description restored`() {
-        // This is the cross-language sync case: the stored name IS the tool
-        // schema's enum value, so a copy written on a device in another
-        // language would change what the model has to emit.
         val stored = SubAgentDefinition.makeBuiltIn().copy(
             name = "通用子代理",
             description = "翻译过的描述",
@@ -99,12 +81,9 @@ class SubAgentDefinitionTest {
         assertEquals("always cite sources", out[0].instructions)
     }
 
-    // ── Impostor protection ─────────────────────────────────────────────────
 
     @Test
     fun `a custom row claiming to be the built-in is dropped`() {
-        // isBuiltIn drives "cannot delete" in the UI, so a synced row must not
-        // be able to assert it.
         val input = listOf(
             SubAgentDefinition.makeBuiltIn(),
             custom("impostor", "Fake", isBuiltIn = true),
@@ -125,7 +104,6 @@ class SubAgentDefinitionTest {
         assertEquals(SubAgentDefinition.BUILT_IN_NAME, out[0].name)
     }
 
-    // ── Bounds ──────────────────────────────────────────────────────────────
 
     @Test
     fun `the roster is capped at the maximum count including the built-in`() {
@@ -159,7 +137,6 @@ class SubAgentDefinitionTest {
         )
         val out = SubAgentRoster.normalize(input)
         assertEquals(listOf(0, 1, 2, 3), out.map { it.sortOrder })
-        // Ordering follows the stored sortOrder, not input order.
         assertEquals(listOf("Beta", "Gamma", "Alpha"), out.drop(1).map { it.name })
     }
 
@@ -187,7 +164,6 @@ class SubAgentDefinitionTest {
         assertTrue(out.size >= 1)
     }
 
-    // ── resolve ─────────────────────────────────────────────────────────────
 
     @Test
     fun `a null or blank name resolves to the built-in`() {
@@ -199,8 +175,6 @@ class SubAgentDefinitionTest {
 
     @Test
     fun `a name from a model is matched case-insensitively and trimmed`() {
-        // The name comes back from a model, so exact matching would reject
-        // perfectly reasonable output.
         val roster = SubAgentRoster.normalize(listOf(custom("a", "Researcher")))
         for (probe in listOf("Researcher", "researcher", "RESEARCHER", "  Researcher  ")) {
             assertNotNull("should resolve: '$probe'", SubAgentRoster.resolve(probe, roster))
@@ -223,20 +197,13 @@ class SubAgentDefinitionTest {
         )
     }
 
-    // ── The wire name ───────────────────────────────────────────────────────
 
     @Test
     fun `the tool wire name is subagent_task`() {
-        // Renamed from delegate_task; agent_status folded in as an action.
         assertEquals("subagent_task", SubAgentDefinition.TOOL_NAME)
     }
 }
 
-/**
- * [T-sub-agents-v1] The roster rides the existing provider-config blob, so a
- * build that predates it must still load, and a build that has it must not lose
- * a user's definitions on the next write.
- */
 class SubAgentPersistenceTest {
 
     private val json = kotlinx.serialization.json.Json {
@@ -246,11 +213,9 @@ class SubAgentPersistenceTest {
 
     @Test
     fun `config JSON written before sub agents existed still decodes`() {
-        // The downgrade/upgrade path: the key is simply absent.
         val legacy = """{"instances":[],"modelEntries":[],"modelGroups":[]}"""
         val cfg = json.decodeFromString<com.openminis.app.data.model.ProviderConfig>(legacy)
         assertTrue(cfg.subAgents.isEmpty())
-        // …and normalizing that empty list is what materializes the built-in.
         assertEquals(1, SubAgentRoster.normalize(cfg.subAgents).size)
     }
 
@@ -283,7 +248,6 @@ class SubAgentPersistenceTest {
 
     @Test
     fun `an unknown future field does not break decoding`() {
-        // Forward compatibility: a newer build may add fields we do not know.
         val future = """{"id":"a","name":"X","description":"d","futureField":42}"""
         val got = json.decodeFromString<SubAgentDefinition>(future)
         assertEquals("X", got.name)

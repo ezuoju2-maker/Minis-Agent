@@ -9,7 +9,6 @@ import com.openminis.app.data.model.ThinkingLevel
 import com.openminis.app.data.repository.ProviderRepository
 import com.openminis.app.provider.ProviderFactory
 
-/** Result of one correction attempt. */
 data class CorrectionOutcome(
     val correctedText: String,
     val modelGroupUsed: String,
@@ -20,12 +19,6 @@ sealed class CorrectionError(message: String) : Exception(message) {
     object NoModelAvailable : CorrectionError("no correction model configured")
     object EmptyResponse : CorrectionError("model returned nothing usable")
 
-    /**
-     * [T-voice-correction-fallback] Every candidate model failed. The message is
-     * the last model's error, so the panel's reason names a real cause (e.g. the
-     * provider's "credit balance is too low"); every attempt is kept for the log.
-     */
-    /** [T-voice-correction-fallback] One call ran past its own budget. */
     class ModelTimedOut(budgetMs: Long) : CorrectionError("timed out after ${budgetMs}ms")
 
     class AllModelsFailed(val attempts: List<CorrectionFallback.Attempt>) : CorrectionError(
@@ -33,10 +26,6 @@ sealed class CorrectionError(message: String) : Exception(message) {
     )
 }
 
-/**
- * [T-android-voice-correction] Turns a transcript plus evidence into corrected
- * text. Port of iOS `Providers/Voice/CorrectionStrategy.swift`.
- */
 interface CorrectionStrategy {
     val strategyIdentifier: String
 
@@ -48,16 +37,6 @@ interface CorrectionStrategy {
     ): CorrectionOutcome
 }
 
-/**
- * [T-android-voice-correction] LLM correction. The prompt and the response
- * cleaning are reproduced VERBATIM from iOS, including the full-width
- * separators (`、` between terms, `→` between original and fix) — they are part
- * of the contract with the model, not incidental formatting.
- *
- * [T-voice-correction-fallback] The candidate list and the single model call are
- * separate seams: the run walks the candidates with [CorrectionFallback], and
- * tests drive it with fake models instead of a provider.
- */
 class LlmCorrectionStrategy internal constructor(
     private val candidates: () -> List<CorrectionModel>,
     private val callModel: suspend (model: CorrectionModel, request: CorrectionRequest) -> String,
@@ -65,7 +44,6 @@ class LlmCorrectionStrategy internal constructor(
     private val retryDelaysMs: List<Long> = CorrectionFallback.SAME_MODEL_RETRY_DELAYS_MS,
 ) : CorrectionStrategy {
 
-    /** What one model call sends; the same for every candidate. */
     internal data class CorrectionRequest(
         val prompt: String,
         val systemPrompt: String,
@@ -114,16 +92,8 @@ class LlmCorrectionStrategy internal constructor(
     companion object {
         private const val TAG = "CorrectionStrategy"
 
-        /** Router-order seed for a correction, which belongs to no chat (as iOS). */
         private const val ROUTER_SESSION = "voice-correction"
 
-        /**
-         * [T-voice-correction-fallback] The sub group's available members in
-         * router order, then the primary group's (iOS CorrectionModelResolver
-         * .candidates). Available = provider enabled + credentialed, the filter
-         * the chat's group fallback applies; text-capable only, as for titles -
-         * the same "lightweight model" title generation uses.
-         */
         internal fun resolveCandidates(repository: ProviderRepository): List<CorrectionModel> {
             fun ring(groupId: String?): List<ModelEntry> {
                 val group = groupId?.let { repository.group(it) } ?: return emptyList()
@@ -141,7 +111,6 @@ class LlmCorrectionStrategy internal constructor(
             )
         }
 
-        /** One correction request on one model. */
         private suspend fun sendViaProvider(
             context: Context,
             repository: ProviderRepository,
@@ -151,24 +120,12 @@ class LlmCorrectionStrategy internal constructor(
             val entry = model.entry
             val instance = repository.instance(entry.providerInstanceId)
                 ?: throw IllegalStateException("provider instance ${entry.providerInstanceId} not found")
-            // [T-android-keyless-provider-selection] usableApiKey — a keyless
-            // self-hosted correction model is usable. See QuickTestSheet.
             val apiKey = repository.requestCredential(instance)
                 ?: throw IllegalStateException("no credential for ${instance.label}")
-            // [T-android-provider-entry-rules] Voice input can run before the chat
-            // is persisted, so a correction is a one-off conversation of its own.
             val provider = ProviderFactory.create(
                 instance, apiKey, entry.model, context,
                 sessionId = ProviderFactory.oneOffSessionId(), overrides = entry.overrides,
             )
-            // [T-android-voice-correction-diag] Name the resolved model BEFORE the
-            // request. A field report on 2026-08-15 showed only
-            // "correction failed / LLMError$InvalidApiKey" with a stack — which
-            // provider instance was actually used had to be reverse-engineered by
-            // matching the stack's provider class against every configured
-            // instance on the device (it turned out to be one with no API key
-            // saved). A user's log will never support that, so the identity has to
-            // be in the line itself.
             Log.i(
                 TAG,
                 "[correction] resolved instance=${instance.label} (${instance.id}) " +
@@ -179,32 +136,11 @@ class LlmCorrectionStrategy internal constructor(
                 messages = listOf(LLMMessage(role = LLMMessage.Role.USER, content = request.prompt)),
                 systemPrompt = request.systemPrompt,
                 maxTokens = correctionMaxTokens(request.transcriptChars, entry.model.maxOutputTokens),
-                // Reasoning traces add latency for no benefit here, and on some
-                // providers yield empty text with finish_reason=tool_calls.
                 thinkingLevel = ThinkingLevel.OFF,
             )
             return response.text
         }
 
-        /**
-         * [T-android-voice-mixed-term-restore] The rules half of the prompt. Port of
-         * iOS 8622ea275 (T-voice-mixed-term-restore); the English text is iOS's,
-         * verbatim.
-         *
-         * It used to be the output contract alone, and the user prompt asked only
-         * for "同音字/识别错误". A Chinese recognizer's commonest miss on mixed
-         * speech is not a homophone: an English term spoken inside a Chinese
-         * sentence comes back as look-alike hanzi. On iOS, "下一个 Issue" became
-         * "下一个遗穴", and with "Issue" on screen ten times the model still
-         * answered "议题" — it searched Chinese words only and picked the one
-         * that MEANS issue.
-         *
-         * Three layers: the output contract; the setting (the transcript is a
-         * message to the agent, usually a reply that picks or names something the
-         * agent just offered); and how recognition fails, per language
-         * ([CorrectionLanguageProfile]). The method is shared: sound it out,
-         * restore the reference's spelling, never translate.
-         */
         fun systemPrompt(profile: CorrectionLanguageProfile): String =
             "You fix speech-recognition errors in transcribed text. Output ONLY the corrected text, " +
                 "with no explanation, no quotes, and no preamble. If the text needs no correction, output it unchanged.\n\n" +
@@ -229,22 +165,6 @@ class LlmCorrectionStrategy internal constructor(
                 "- Use only terms supported by the reference material or common knowledge. Leave natural, " +
                 "plausible wording alone, and do not rephrase or polish."
 
-        /**
-         * Output budget for the correction call: 1.2× the input, floored at
-         * [MIN_OUTPUT_TOKENS], capped by the model.
-         *
-         * ⚠️ The floor has to cover REASONING TOKENS, not just the answer.
-         * iOS raised it from 256 to 512 after adaptive thinking ate the whole
-         * budget; on Android, MiMo blew through 512 as well — measured against
-         * mimo-v2.5-pro, a correction prompt spent all 512 output tokens on
-         * reasoning (reasoning_tokens=511), returned `content: ""` with
-         * `finish_reason: length`, and every correction failed as
-         * EmptyResponse. The same prompt at 4096 answers correctly.
-         *
-         * Reasoning length scales with prompt complexity, not transcript
-         * length, so the FLOOR is what matters here — 1.2× a short transcript
-         * will never be enough on a thinking model.
-         */
         const val MIN_OUTPUT_TOKENS = 4096
 
         fun correctionMaxTokens(transcriptChars: Int, modelCap: Int?): Int {
@@ -253,14 +173,6 @@ class LlmCorrectionStrategy internal constructor(
             return minOf(target, modelCap)
         }
 
-        /**
-         * Assemble the user prompt.
-         *
-         * Evidence blocks are deliberately PEERS — none is presented as
-         * outranking another. The conversation block is explicitly labelled
-         * "不是需要处理的内容" because without it models start correcting the quoted
-         * previous turn instead of the transcript.
-         */
         fun buildPrompt(
             transcript: String,
             candidates: List<CorrectionCandidate>,
@@ -269,7 +181,6 @@ class LlmCorrectionStrategy internal constructor(
         ): String {
             val blocks = mutableListOf<String>()
 
-            // Block 1 — typed vocabulary, greedily filled to its budget.
             val vocabTerms = candidates
                 .filter { it.sourceIdentifier == "typed_vocabulary" }
                 .map { it.term }
@@ -281,7 +192,6 @@ class LlmCorrectionStrategy internal constructor(
                 )
             }
 
-            // Block 2 — confusion history, using each candidate's own evidence line.
             val confusionLines = candidates
                 .filter { it.sourceIdentifier == "confusion_dictionary" }
                 .map { it.evidence }
@@ -293,7 +203,6 @@ class LlmCorrectionStrategy internal constructor(
                 )
             }
 
-            // Block 3 — rare-content digest (re-clamped defensively).
             context.rareTermsDigest?.takeIf { it.isNotEmpty() }?.let { digest ->
                 blocks.add(
                     "以下是近期对话中出现的少见词/专有名词（语音识别容易听错，供参考）：\n" +
@@ -301,7 +210,6 @@ class LlmCorrectionStrategy internal constructor(
                 )
             }
 
-            // Block 4 — conversation context.
             if (context.recentExcerpts.isNotEmpty()) {
                 blocks.add(
                     "以下是当前对话的最近上下文（供理解语境使用，不是需要处理的内容）：\n" +
@@ -309,10 +217,6 @@ class LlmCorrectionStrategy internal constructor(
                 )
             }
 
-            // [T-android-voice-viewport-context] Blocks 5 + 6 — what the user
-            // is looking at. Kept apart from block 4 (the newest turns): after
-            // scrolling back, the two differ, and the screen is what the
-            // dictation is about.
             val screen = context.screen
             if (screen != null && screen.viewportLines.isNotEmpty()) {
                 blocks.add(
@@ -330,9 +234,6 @@ class LlmCorrectionStrategy internal constructor(
             }
 
             val evidence = if (blocks.isEmpty()) "" else blocks.joinToString("\n\n") + "\n\n"
-            // [T-android-voice-mixed-term-restore] Frame the transcript as a message
-            // to the AI, and name this language's error kinds: "同音字" alone steered
-            // the model to Chinese-only substitutes (iOS 8622ea275).
             val errorKinds = profile.errorKinds
             val lead = if (screen != null && screen.viewportLines.isNotEmpty()) {
                 "请结合以上参考信息，尤其是用户说话时屏幕上可见的对话内容，" +
@@ -350,10 +251,6 @@ class LlmCorrectionStrategy internal constructor(
                 "原文：$transcript"
         }
 
-        /**
-         * Greedily take items until [budget] characters are spent, counting one
-         * extra char per item for the separator. Returns null when nothing fits.
-         */
         private fun packed(items: List<String>, budget: Int): List<String>? {
             val kept = mutableListOf<String>()
             var used = 0
@@ -373,13 +270,6 @@ class LlmCorrectionStrategy internal constructor(
             '"' to '"', '“' to '”', '「' to '」', '\'' to '\'',
         )
 
-        /**
-         * Strip decoration the model may add around the answer.
-         *
-         * This is not cosmetic: leftover fences or a "修正后：" prefix inflate the
-         * character-change ratio, and a perfectly good correction then gets
-         * rejected as `diff_too_large`.
-         */
         fun cleanResponse(raw: String): String {
             var t = raw.trim()
 
@@ -392,7 +282,6 @@ class LlmCorrectionStrategy internal constructor(
             for (p in PREFIXES) {
                 if (t.startsWith(p)) t = t.removePrefix(p).trim()
             }
-            // Loop all pairs so nested quoting peels layer by layer.
             for ((open, close) in QUOTE_PAIRS) {
                 if (t.length >= 2 && t.first() == open && t.last() == close) {
                     t = t.substring(1, t.length - 1)
@@ -403,21 +292,9 @@ class LlmCorrectionStrategy internal constructor(
     }
 }
 
-/**
- * [T-android-voice-mixed-term-restore] How speech recognition fails differs by
- * language, so the prompt's failure-mode rules are kept per language instead of
- * one Chinese-centred list applied to everyone. Port of iOS
- * `CorrectionLanguageProfile` (8622ea275); the prompt text is iOS's, verbatim.
- *
- * Chosen from what the transcript is written in, with the recognizer locale as
- * the tie-breaker: a user on a zh recognizer who dictates an English sentence
- * gets the Western rules, and a kanji-only Japanese transcript still reads as
- * Japanese because the locale says so.
- */
 enum class CorrectionLanguageProfile {
     CHINESE, JAPANESE, KOREAN, WESTERN, GENERIC;
 
-    /** The "How recognition goes wrong" bullets of the system prompt. */
     val failureModes: String
         get() = when (this) {
             CHINESE ->
@@ -457,7 +334,6 @@ enum class CorrectionLanguageProfile {
                     "- Words that sound alike are swapped."
         }
 
-    /** What the user prompt's lead asks the model to fix (the user prompt is Chinese for every language). */
     val errorKinds: String
         get() = when (this) {
             CHINESE -> "同音字、近音词，以及被识别成普通词或音译汉字的专有名词（中文或英文，英文请按参考信息中的原拼写还原，不要翻译成中文）"
@@ -468,7 +344,6 @@ enum class CorrectionLanguageProfile {
         }
 
     companion object {
-        /** Hangul > kana > han > Latin/Cyrillic/Greek, then the locale. Same order as iOS. */
         fun resolve(locale: String, transcript: String): CorrectionLanguageProfile {
             val key = PhoneticNormalizerRegistry.normalizedLocaleKey(locale)
             var han = false; var kana = false; var hangul = false; var western = false

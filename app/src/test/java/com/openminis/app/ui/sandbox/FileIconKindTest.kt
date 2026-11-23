@@ -3,10 +3,6 @@ package com.openminis.app.ui.sandbox
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * [T-file-row-polish] The row tile's kind by extension, as iOS `FileIconKind`
- * (0340fd920): any case, folders win, unknown is OTHER.
- */
 class FileIconKindTest {
 
     @Test

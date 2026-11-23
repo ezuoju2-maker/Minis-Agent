@@ -3,17 +3,6 @@ package com.openminis.app.config.readable
 import android.content.Context
 import com.openminis.app.R
 
-/**
- * [T-config-readable] Readable-description key (the English source string, as
- * in iOS Localizable.xcstrings) → its Android string resource. The sentences
- * are persisted as keys, so lookup goes by the English text, not by a
- * resource name.
- *
- * Adding a key: add it here and to strings_config_readable.xml in values,
- * values-zh and values-zh-rTW (plus any locale iOS translates it into).
- * ConfigReadableKeysTest fails on a key used in the config sources that is
- * missing here, or on one without a Chinese translation.
- */
 object ConfigReadableStrings {
     val ids: Map<String, Int> = mapOf(
         "%1\$@ and %2\$@ more" to R.string.cfgr_x_and_x_more,
@@ -179,7 +168,6 @@ object ConfigReadableStrings {
         "unknown model %@" to R.string.cfgr_unknown_model_x,
         "unknown provider %@" to R.string.cfgr_unknown_provider_x,
         "unknown rule %@" to R.string.cfgr_unknown_rule_x,
-        // [T-minis-config-coverage]
         "User interaction tool (user_ask)" to R.string.cfgr_user_interaction_tool_user_ask,
         "Question timeout (minutes)" to R.string.cfgr_question_timeout_minutes,
         "Wait indefinitely" to R.string.cfgr_wait_indefinitely,
@@ -216,7 +204,6 @@ object ConfigReadableStrings {
         "Fast" to R.string.cfgr_fast,
         "Ultrafast" to R.string.cfgr_ultrafast,
         "Show Hidden Files" to R.string.cfgr_show_hidden_files,
-        // [FEAT-261021-03] Settings > Network (minis-config network.* / proxies.*).
         "Network Routing" to R.string.cfgr_network_routing,
         "Default Route" to R.string.cfgr_default_route,
         "Route for Shell" to R.string.cfgr_route_for_shell,
@@ -256,7 +243,6 @@ object ConfigReadableStrings {
         "Proxy “%1\$@” – %2\$@" to R.string.cfgr_proxy_x_x,
     )
 
-    /** The format for [key] in [context]'s language, or null for an unknown key. */
     fun lookup(context: Context, key: String): String? =
         ids[key]?.let { id -> runCatching { context.getString(id) }.getOrNull() }
 }

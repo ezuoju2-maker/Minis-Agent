@@ -3,12 +3,6 @@ package com.openminis.app.ui.terminal.emulator
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.State
 
-/**
- * Core terminal emulator — connects AnsiParser → TerminalBuffer, handles every CSI/ESC/OSC
- * sequence. Port of iOS TerminalEmulator.swift.
- *
- * Bump [version] for Compose redraws; each [feed] batches a single bump.
- */
 class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
     private val _version = mutableStateOf(0L)
     val version: State<Long> = _version
@@ -41,7 +35,6 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
     var title: String = ""
         private set
 
-    /** Callback for terminal responses (DSR, DA). */
     var onResponse: ((ByteArray) -> Unit)? = null
 
     private val cursorStyle = CursorStyle()
@@ -60,13 +53,11 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
     var rows: Int = rows
         private set
 
-    /** Feed raw bytes from the PTY. */
     fun feed(bytes: ByteArray, len: Int = bytes.size) {
         parser.feed(bytes, len) { handleAction(it) }
         _version.value = _version.value + 1
     }
 
-    /** Return exactly [rows] lines to display, applying scrollOffset. */
     fun visibleLines(): List<Array<TerminalCell>> {
         val buf = activeBuffer
         if (scrollOffset == 0) return buf.grid.toList()
@@ -106,24 +97,11 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         _version.value = _version.value + 1
     }
 
-    /** Current cursor position (in active buffer). */
     fun cursorPos(): Pair<Int, Int> = activeBuffer.cursorCol to activeBuffer.cursorRow
 
     fun currentCursorStyle(): CursorStyle = cursorStyle.copy()
 
-    // ── Text selection (T194 groundwork) ───────────────────────────────────
-    // Coordinates are viewport-relative (0..cols-1 / 0..rows-1) — i.e. they
-    // index into [visibleLines]. The TerminalView gesture handler converts
-    // pixel positions to (col,row) and feeds them straight in. Mirrors the
-    // Termux terminal-view selection model, but reads from our own buffer
-    // instead of bringing in com.termux.terminal.TerminalBuffer.
-    //
-    // We deliberately keep this state inside the emulator (rather than the
-    // view) so renderer + selection-text-extract see a consistent snapshot
-    // and a redraw triggered by [setSelectionRect] flows through the
-    // existing `version` State the Compose canvas already observes.
 
-    /** Active selection rect, or null. (col1,row1) is start, (col2,row2) is end. */
     private val _selectionRect = mutableStateOf<IntArray?>(null)
     val selectionRect: State<IntArray?> = _selectionRect
 
@@ -139,18 +117,10 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         }
     }
 
-    /**
-     * Extract text from the viewport for the given selection rect, in the
-     * order start → end. Coordinates are clamped to [0,cols) × [0,rows). If
-     * start is after end (in reading order), they are swapped automatically.
-     * Trailing spaces on each line are trimmed (what users expect
-     * when they grab a URL by long-pressing).
-     */
     fun getSelectedText(col1: Int, row1: Int, col2: Int, row2: Int): String {
         val lines = visibleLines()
         if (lines.isEmpty()) return ""
 
-        // Normalize: ensure (sx,sy) ≤ (ex,ey) in reading order.
         val (sx, sy, ex, ey) = if (row1 < row2 || (row1 == row2 && col1 <= col2)) {
             intArrayOf(col1, row1, col2, row2)
         } else {
@@ -167,22 +137,14 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
             val w = row.size
             val cStart = if (r == ry1) sx.coerceIn(0, w) else 0
             val cEnd = if (r == ry2) (ex + 1).coerceIn(0, w) else w
-            // Trailing spaces trimmed; wide-character trailers skipped (they
-            // used to add a space after every CJK character).
             TerminalBuffer.appendRowText(sb, row, cStart, cEnd)
             if (r < ry2) sb.append('\n')
         }
         return sb.toString()
     }
 
-    /**
-     * [#451 Copy All] Everything the terminal holds as plain text: the active
-     * buffer's scrollback and screen (in vim / less, the alternate screen,
-     * which has no scrollback — same as iOS).
-     */
     fun copyableText(): String = activeBuffer.plainText()
 
-    // ────────────────────────────────────────────────────────────────────────
     private fun handleAction(action: ParsedAction) {
         when (action) {
             is ParsedAction.Printable -> activeBuffer.writeChar(action.codePoint, cursorStyle, autoWrap)
@@ -196,12 +158,12 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
     private fun handleControlChar(byte: Int) {
         val buf = activeBuffer
         when (byte) {
-            0x07 -> { /* BEL */ }
+            0x07 -> {  }
             0x08 -> buf.moveCursorBackward(1)
             0x09 -> buf.tabForward()
             0x0A, 0x0B, 0x0C -> buf.lineFeed()
             0x0D -> buf.carriageReturn()
-            0x0E, 0x0F -> { /* charset shifts ignored */ }
+            0x0E, 0x0F -> {  }
         }
     }
 
@@ -415,10 +377,6 @@ class TerminalEmulator(cols: Int = 80, rows: Int = 24) {
         cursorShape = CursorShape.BLOCK
         primaryBuffer.resize(cols, rows)
         primaryBuffer.eraseInDisplay(3)
-        // T310: eraseInDisplay only blanks the grid; without an explicit
-        // cursor-home the cursor stays wherever it was before the clear,
-        // so the next PTY byte (shell echo / re-prompt) writes mid-screen
-        // instead of at the top-left.
         primaryBuffer.moveCursorTo(0, 0)
         alternateBuffer.resize(cols, rows)
         alternateBuffer.eraseInDisplay(3)

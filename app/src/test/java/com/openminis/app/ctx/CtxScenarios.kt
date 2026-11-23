@@ -7,11 +7,6 @@ import com.openminis.app.data.model.LLMMessage
 import com.openminis.app.ui.chat.RequestContextBuilder
 import org.json.JSONObject
 
-/**
- * One request phase of a scenario: the builder's output and every provider's
- * parsed body. "live" is the request right after the turn; "restart" is the
- * same conversation after persist → clear memory → rebuild from storage.
- */
 class CtxPhase(
     val name: String,
     val ctx: RequestContextBuilder.RequestContext,
@@ -26,7 +21,6 @@ class CtxPhase(
     fun texts(p: CtxProvider): List<String> = view(p).flatMap { m -> m.parts.mapNotNull { it.text } }
     fun allText(p: CtxProvider) = texts(p).joinToString("\n")
     val historyImages: Int get() = CtxRequestView.historyImages(history)
-    /** ContextSizeMeter's estimate of the outbound history (what the meter and compaction read). */
     val tokenEstimate: Int get() = ContextSizeMeter.estimateTokens(ctx.outbound)
     fun dims(p: CtxProvider): List<String> = images(p).map { "${it.w}x${it.h}" }
 }
@@ -36,14 +30,6 @@ class CtxRun(val scenario: CtxScenario, val session: CtxSession, val live: CtxPh
     val facts = linkedMapOf<String, Any?>()
 }
 
-/**
- * A desired-behaviour check. [kind]:
- *  - GAP: a known product gap — today it must NOT hold (the test fails when it
- *    starts holding, so the table gets flipped);
- *  - JVM: cannot be judged on the JVM (decoder is not Android's); reported only;
- *  - CONFIRM: no agreed expectation yet (catalog: "待与用户确认预期"); reported only;
- *  - HOLDS: expected and true today.
- */
 class CtxDesired(val text: String, val kind: Kind, val ref: String? = null, val holds: (CtxRun) -> Boolean) {
     enum class Kind { GAP, JVM, CONFIRM, HOLDS }
 }
@@ -51,23 +37,17 @@ class CtxDesired(val text: String, val kind: Kind, val ref: String? = null, val 
 class CtxScenario(
     val id: String,
     val title: String,
-    /** The catalog's "预期（当前）" column, as written there (reference only; the assertions below are measured). */
     val catalogCurrent: String,
-    /** The catalog's "期望" column. */
     val catalogDesired: String,
     val build: (CtxSession) -> Unit,
-    /** Today's behaviour, measured on this code (characterization). */
     val current: (CtxRun) -> Unit,
     val desired: List<CtxDesired> = emptyList(),
-    /** Between the live request and the restart; default nothing. */
     val beforeRestart: (CtxSession, CtxRun) -> Unit = { _, _ -> },
-    /** How the restart phase rebuilds; default [CtxSession.restart]. */
     val restart: ((CtxSession) -> Unit)? = { it.restart() },
     val window: Int? = 200_000,
     val note: String = "",
 )
 
-/** Small assertion helpers so each scenario reads like its table row. */
 internal object Expect {
     fun eq(what: String, expected: Any?, actual: Any?) {
         if (expected != actual) throw AssertionError("$what: expected <$expected> but was <$actual>")
@@ -77,7 +57,6 @@ internal object Expect {
         if (!cond) throw AssertionError(what)
     }
 
-    /** Every provider of [phase] sends exactly these image sizes (in order). */
     fun dims(phase: CtxPhase, vararg wh: String) {
         for (p in CtxProvider.entries) eq("${phase.name}/${p.id} image dims", wh.toList(), phase.dims(p))
     }
@@ -109,13 +88,6 @@ internal object Expect {
     }
 }
 
-/**
- * B: scenarios C01–C32 (ids shared with iOS). Each runs live and after a
- * restart, against all four serializers. "current" asserts what this code
- * does today (measured; it is noted where a value differs
- * from the catalog's column); "desired" holds the catalog's expected
- * behaviour, as KNOWN GAP where it does not hold.
- */
 object CtxScenarios {
     private val A = CtxProvider.ANTHROPIC
     private val CHAT = CtxProvider.OPENAI_CHAT
@@ -130,7 +102,6 @@ object CtxScenarios {
 
     private val SUMMARY = "Earlier: the user asked for a screenshot of example.com; it was taken and described."
 
-    /** user → assistant(browser_use call) → tool result with [shot]. */
     private fun browserTurn(s: CtxSession, shot: com.openminis.app.browser.BrowserActionResult, id: String = "call_shot1") {
         s.user("Open example.com and take a screenshot")
         val call = CtxSession.Call(id, "browser_use", JSONObject().put("action", "screenshot"))
@@ -138,7 +109,6 @@ object CtxScenarios {
         s.toolResults(call to s.browser(shot))
     }
 
-    /** A file the agent can read at /var/minis/workspace/<name>. */
     private fun workspaceFile(s: CtxSession, name: String, bytes: ByteArray): Pair<java.io.File, String> {
         val f = java.io.File(s.filesDir, "minis-sessions/${s.sid}/workspace/$name").apply { parentFile.mkdirs(); writeBytes(bytes) }
         return f to "/var/minis/workspace/$name"
@@ -164,7 +134,6 @@ object CtxScenarios {
                 for (ph in r.phases) {
                     Expect.noImages(ph); Expect.adjacencyOk(ph)
                     Expect.textContains(ph, CtxKit.Text.SHORT); Expect.textContains(ph, "What is 2+2?")
-                    // Emoji / ZWJ, code fences, tables and a user-typed summary tag go out verbatim.
                     Expect.textContains(ph, CtxKit.Text.EMOJI_ZWJ); Expect.textContains(ph, CtxKit.Text.CODE_AND_TABLE)
                     Expect.textContains(ph, CtxKit.Text.SUMMARY_LOOKALIKE)
                     Expect.eq("${ph.name} no compaction in play", RequestContextBuilder.CompactionMode.NONE, ph.ctx.diagnostics.compaction.mode)
@@ -182,8 +151,6 @@ object CtxScenarios {
             build = { s ->
                 s.user(CtxKit.Text.long(200_000))
                 s.assistant("Got it.")
-                // The composer turns a paste over PASTE_AS_FILE_THRESHOLD (15,000) into a
-                // text/plain DOCUMENT named Pasted_<yyyyMMdd-HHmmss>-<uuid8>.txt (stashPastedTextAsFile).
                 s.user("Summarise the attached text", listOf(CtxKit.text("Pasted_20251009-120000-abcd1234.txt", CtxKit.Text.cjk(200_000))))
             },
             current = { r ->
@@ -191,7 +158,6 @@ object CtxScenarios {
                     Expect.noImages(ph)
                     for (p in ALL) {
                         val texts = ph.texts(p)
-                        // sendMessage trims surrounding whitespace (the generated text ends in a space): 199,999 chars, nothing cut.
                         Expect.ok("${ph.name}/${p.id}: the typed 200k text goes out whole", texts.any { it == CtxKit.Text.long(200_000).trim() })
                         Expect.ok("${ph.name}/${p.id}: the pasted file is not inlined", texts.none { it.contains(CtxKit.Text.cjk(2_000)) })
                     }
@@ -218,7 +184,6 @@ object CtxScenarios {
                 s.assistant("Reviewed.")
                 s.user("And this one:", pastes = listOf("second paste body " + CtxKit.Text.long(3_000)))
             },
-            // The second paste's file disappears before the restart.
             beforeRestart = { s, r ->
                 val last = s.rows.last { it.role == "user" }
                 val (file, name, _) = s.mediaRefs(last).single()
@@ -245,7 +210,6 @@ object CtxScenarios {
             current = { r ->
                 for (ph in r.phases) { Expect.dims(ph, "2000x1500"); Expect.mimes(ph, "image/jpeg"); Expect.placeholders(ph, 0) }
                 Expect.sameImageBytes(r.live, r.restarted!!)
-                // P-a1: the live turn holds the image twice (imageParts + ImageData); the meter counts both.
                 val turn = r.live.history.last()
                 Expect.ok("live turn holds the same array twice", turn.imageParts.single().data === (turn.contentParts.first { it is AgentContentPart.ImageData } as AgentContentPart.ImageData).data)
                 val withTwin = ContextSizeMeter.estimateTokens(turn)
@@ -279,8 +243,6 @@ object CtxScenarios {
             catalogCurrent = "re-encoded to JPEG 2000×1500 (iOS verified; Android JVM header only, to test)", catalogDesired = "same",
             build = { s -> s.user("Photo", listOf(CtxKit.image("IMG_0002.HEIC", CtxKit.heicHeaderOnly(), "image/heic"))) },
             current = { r ->
-                // JVM: the header cannot be decoded, so nothing is resized; the provider
-                // gate cannot convert it either and sends its placeholder instead.
                 for (ph in r.phases) { Expect.noImages(ph); Expect.placeholders(ph, 1) }
                 Expect.textContains(r.live, "[Image omitted: its file format could not be converted")
                 r.facts["liveHistoryMime"] = r.live.history.last().imageParts.map { it.mimeType }
@@ -311,9 +273,7 @@ object CtxScenarios {
                 for (ph in r.phases) for (p in ALL) {
                     val imgs = ph.images(p)
                     Expect.eq("${ph.name}/${p.id} count", 9, imgs.size)
-                    // Small: original bytes pass through, EXIF orientation preserved.
                     Expect.eq("${ph.name}/${p.id} small sizes", List(8) { "1600x1200" }, imgs.take(8).map { "${it.w}x${it.h}" })
-                    // Big: re-encoded to 2000×1500 (stored orientation), EXIF dropped.
                     Expect.eq("${ph.name}/${p.id} big size", "2000x1500", imgs[8].let { "${it.w}x${it.h}" })
                 }
                 val bytes = r.live.bodies.getValue(A).let { com.openminis.app.imagerepro.ImageRealFixtures.wireImages(it) }
@@ -337,8 +297,6 @@ object CtxScenarios {
                     CtxKit.image("logo3000.png", CtxKit.png(3000, 3000, alpha = true), "image/png"),
                 ))
                 s.assistant("Two logos.")
-                // A detailed transparent image: after the 2000 px downscale (kept PNG) it is still
-                // over the 3.75 MB per-image cap, so the compose-time budget re-encodes it — as JPEG.
                 s.user("A detailed one", listOf(CtxKit.image("art3000.png", CtxKit.png(3000, 3000, alpha = true, content = CtxKit.Content.NOISE), "image/png")))
             },
             current = { r ->
@@ -498,7 +456,7 @@ object CtxScenarios {
                 val c2 = CtxSession.Call("call_b", "browser_use", JSONObject().put("action", "screenshot"))
                 s.assistant("", c1, c2)
                 val r1 = s.browser(CtxKit.browserScreenshot(1080, 2400, false, CtxKit.Content.TEXT))
-                s.advance(400) // same second
+                s.advance(400)
                 val r2 = s.browser(CtxKit.browserScreenshot(1080, 2400, false, CtxKit.Content.NOISE))
                 s.toolResults(c1 to r1, c2 to r2)
             },
@@ -585,10 +543,6 @@ object CtxScenarios {
             catalogCurrent = "iOS-C: plan drops 1, rewrite drops all, placeholders all point at one file; Android drops 1 (verified)",
             catalogDesired = "only the planned drops, each placeholder pointing at its own file",
             build = { s ->
-                // Six turns, one noise PNG each: 1100×1100 RGB noise does not deflate, so each
-                // is ~3.6 MB raw — just under the 3.75 MB per-image cap the compose-time
-                // budget enforces (MAX_PER_IMAGE_RAW_BYTES), so it is attached as is. Six of
-                // them are ~29 MB base64, over the 25 MB request budget.
                 for (i in 1..6) {
                     s.user("Image $i", listOf(CtxKit.image("noise$i.png", CtxKit.png(1100, 1100, content = CtxKit.Content.NOISE), "image/png")))
                     s.assistant("Seen $i")
@@ -650,20 +604,16 @@ object CtxScenarios {
             },
             current = { r ->
                 for (ph in r.phases) {
-                    // [T-404-summary-after-tool-results] The summary is appended after the
-                    // carrier's tool results; Anthropic / Gemini also put results first.
                     Expect.eq("${ph.name} mode", RequestContextBuilder.CompactionMode.V2_APPENDED_AFTER_TOOL_RESULTS, ph.ctx.diagnostics.compaction.mode)
                     Expect.adjacencyOk(ph)
                     Expect.textContains(ph, "<context-summary>")
                     Expect.textContains(ph, SUMMARY)
                     for (p in ALL) {
-                        // The summary sits after the tool result in the wire order.
                         val kinds = ph.view(p).flatMap { m -> m.parts.filter { it.inResultOf == null }.map { it.kind to (it.text ?: "") } }
                         val resultAt = kinds.indexOfFirst { it.first == "toolResult" }
                         val summaryAt = kinds.indexOfFirst { it.second.contains("<context-summary>") }
                         Expect.ok("${ph.name}/${p.id} summary after the tool result", resultAt >= 0 && summaryAt > resultAt)
                     }
-                    // The wire order per provider, kind by kind.
                     for (p in ALL) r.facts["${ph.name}.${p.id}.order"] = ph.view(p).takeLast(3).joinToString(" | ") { m -> m.role + ":" + m.parts.joinToString(",") { it.kind } }
                 }
             },
@@ -774,16 +724,13 @@ object CtxScenarios {
             catalogCurrent = "to test", catalogDesired = "no image lost",
             build = { s -> s.user("Keep this photo", listOf(CtxKit.image("keep.jpg", CtxKit.jpeg(1200, 900), "image/jpeg"))) },
             beforeRestart = { s, r ->
-                // Fork on the same device: rows copied, media shared by relative path.
                 s.duplicate("fork").use { fork ->
                     r.facts["fork.images"] = CtxRequestView.historyImages(fork.history)
-                    // Deleting the SOURCE session wipes its media dirs (MediaStore.deleteSessionMedia).
                     s.mediaStore.deleteSessionMedia(s.sid)
                     fork.restartOn(s.filesDir)
                     r.facts["fork.imagesAfterSourceDeleted"] = CtxRequestView.historyImages(fork.history)
                 }
             },
-            // Backup → restore on another device: the rows travel, filesDir/media does not.
             restart = { s -> s.restartOn(java.io.File(s.root, "other-device").apply { mkdirs() }) },
             current = { r ->
                 Expect.dims(r.live, "1200x900")

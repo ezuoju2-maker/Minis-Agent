@@ -10,10 +10,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-mcp-oauth-signin-android] The browser sign-in's decisions, the cases of
- * iOS MCPOAuthSignInTests (Standalone) and Windows mcp_oauth.rs.
- */
 class McpOAuthSignInLogicTest {
 
     private val redirect = MCPOAuthController.DEFAULT_REDIRECT_URI
@@ -27,7 +23,6 @@ class McpOAuthSignInLogicTest {
             Reuse.RegisterAgain("registered for another redirect URI"),
             MCPOAuthSignInLogic.reuse(rec, "http://localhost:1/cb", 200.0),
         )
-        // An expired secret registers again; 0 / null never expires.
         assertEquals(
             Reuse.RegisterAgain("client secret expired"),
             MCPOAuthSignInLogic.reuse(rec.copy(secretExpiresAt = 150.0), redirect, 200.0),
@@ -43,7 +38,6 @@ class McpOAuthSignInLogicTest {
         assertEquals(ClientRecord("new", "http://x/cb", 5.0, 9.0), MCPOAuthSignInLogic.record("https://as", v2, v1, redirect))
         assertEquals(ClientRecord("v1only", redirect, 0.0), MCPOAuthSignInLogic.record("https://other", v2, v1, redirect))
         assertNull(MCPOAuthSignInLogic.record("https://none", v2, v1, redirect))
-        // A malformed v2 entry falls back to v1.
         val bad = JSONObject().put("https://as", JSONObject().put("clientId", ""))
         assertEquals("old", MCPOAuthSignInLogic.record("https://as", bad, v1, redirect)?.clientId)
     }
@@ -87,7 +81,6 @@ class McpOAuthSignInLogicTest {
         assertEquals(MCPOAuthSignInLogic.AuthKind.NONE, MCPOAuthSignInLogic.authKind(null))
         assertEquals(MCPOAuthSignInLogic.AuthKind.BROWSER, MCPOAuthSignInLogic.authKind(MCPOAuthConfig(mode = "dynamic")))
         assertEquals(MCPOAuthSignInLogic.AuthKind.MANUAL, MCPOAuthSignInLogic.authKind(MCPOAuthConfig(mode = "static")))
-        // A value a newer build invented opens as the manual form.
         assertEquals(MCPOAuthSignInLogic.AuthKind.MANUAL, MCPOAuthSignInLogic.authKind(MCPOAuthConfig(mode = "future")))
     }
 
@@ -109,19 +102,15 @@ class McpOAuthSignInLogicTest {
             tokenEndpoint = "https://as/token", scopes = "a b", redirectUri = redirect,
         )
         val json = cfg.toJson()
-        // iOS MCPStore / minis-mcp-cli keys.
         assertEquals("cid", json.getString("clientId"))
         assertEquals("https://as/authorize", json.getString("authorizationEndpoint"))
         assertEquals("https://as/token", json.getString("tokenEndpoint"))
         assertEquals(redirect, json.getString("redirectURI"))
         assertEquals(cfg, MCPOAuthConfig.fromJson(json))
-        // What an iOS (or `minis-mcp-cli add --oauth-*`) entry looks like.
         val ios = JSONObject("""{"mode":"static","clientId":"i","authorizationEndpoint":"https://a","tokenEndpoint":"https://t","redirectURI":"http://localhost:9/cb"}""")
         assertEquals(MCPOAuthConfig("static", "i", "https://a", "https://t", null, "http://localhost:9/cb"), MCPOAuthConfig.fromJson(ios))
-        // What an earlier Android build wrote.
         val old = JSONObject("""{"mode":"static","client_id":"o","authorization_endpoint":"https://a","token_endpoint":"https://t"}""")
         assertEquals(MCPOAuthConfig("static", "o", "https://a", "https://t"), MCPOAuthConfig.fromJson(old))
-        // A bare browser block survives; a bare manual one is noise.
         assertEquals(MCPOAuthConfig(mode = "dynamic"), MCPOAuthConfig.fromJson(JSONObject().put("mode", "dynamic")))
         assertNull(MCPOAuthConfig.fromJson(JSONObject().put("mode", "static")))
     }

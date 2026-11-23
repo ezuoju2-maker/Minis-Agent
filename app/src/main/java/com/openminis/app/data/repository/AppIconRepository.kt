@@ -6,25 +6,6 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.util.Log
 
-/**
- * T-android-dynamic-app-icon: Manage the launcher-icon alias the system
- * resolves for MAIN/LAUNCHER. Mirrors iOS
- * `UIApplication.setAlternateIconName` — the user picks an icon variant
- * in Settings → Appearance → App Icon, and we toggle the corresponding
- * `<activity-alias>` enabled/disabled via PackageManager.
- *
- * Wire:
- *   - All three aliases target MainActivity (declared in AndroidManifest).
- *   - At any time exactly ONE alias is enabled. Selecting a new variant
- *     enables that alias and disables the others.
- *   - DONT_KILL_APP keeps the current Activity alive across the toggle;
- *     the launcher may still take a few seconds to refresh its icon
- *     cache (this is a launcher-side caching detail we don't control).
- *
- * The current selection is also persisted to SharedPreferences so the
- * Appearance screen can render the correct checkmark before reading
- * back the PackageManager state (which can lag right after a toggle).
- */
 object AppIconRepository {
     private const val TAG = "AppIconRepository"
     private const val PREFS = "app_icon_prefs"
@@ -48,13 +29,6 @@ object AppIconRepository {
     fun current(context: Context): Variant =
         Variant.fromId(prefs(context).getString(KEY_SELECTED_ID, Variant.Auto.id))
 
-    /**
-     * Apply [target] as the active launcher icon. Disables every other
-     * alias in one PackageManager pass + persists the selection.
-     * No-op when [target] is already current — the PackageManager call
-     * is mildly expensive (writes to package state) and the launcher
-     * doesn't appreciate repeated unchanged toggles.
-     */
     fun apply(context: Context, target: Variant): Boolean {
         val ctx = context.applicationContext
         val current = current(ctx)

@@ -40,36 +40,13 @@ import androidx.compose.ui.unit.dp
 import com.openminis.app.R
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * [T-kimi-oauth] Device-code login dialog for Kimi Code (RFC 8628): shows the
- * short user code (tap to copy), an "Open verification page" button (Chrome
- * Custom Tab — same in-app browser experience as the other OAuth providers;
- * NO FLAG_ACTIVITY_NEW_TASK, MainActivity is singleTask), and a waiting
- * spinner while the manager polls the token endpoint behind the dialog.
- *
- * The dialog is intentionally driven by REAL state handed up from
- * KimiOAuthManager.login's onDeviceCode callback — the iOS lesson was a
- * write-only state nobody rendered, making the login button look dead.
- * Dismissing cancels the login coroutine (the caller wires [onCancel]).
- */
 @Composable
 fun KimiDeviceLoginDialog(
     userCode: String,
     verificationUrl: String,
     onCancel: () -> Unit,
-    /**
-     * [T-copilot-provider] Title / instructions are parameterised so the same
-     * dialog serves every RFC 8628 provider — the mechanics (show a code,
-     * open a URL, poll behind the dialog) are identical, and forking it would
-     * mean two copies of the copy-to-clipboard and Custom Tab handling.
-     */
     title: String = stringResource(R.string.kimi_login_title),
     instructions: String = stringResource(R.string.kimi_login_instructions),
-    /**
-     * Optional warning shown above the code, in the error colour. Used by the
-     * unofficial Copilot integration so the risk is on screen at the moment
-     * of sign-in — not only on the settings row that led here.
-     */
     riskNotice: String? = null,
 ) {
     val context = LocalContext.current
@@ -94,7 +71,6 @@ fun KimiDeviceLoginDialog(
                     )
                 }
                 Spacer(Modifier.height(16.dp))
-                // The user code — monospace, tap to copy.
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -136,7 +112,6 @@ fun KimiDeviceLoginDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            // In-app browser, consistent with Claude/Codex/xAI.
                             val customTabsIntent = CustomTabsIntent.Builder()
                                 .setShowTitle(true)
                                 .build()

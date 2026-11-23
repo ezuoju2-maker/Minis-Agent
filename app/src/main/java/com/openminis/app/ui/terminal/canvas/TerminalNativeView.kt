@@ -1,19 +1,3 @@
-/*
- * T194 part-2 — native Android terminal View with long-press selection +
- * floating ActionMode, ClipboardManager copy. Architecture inspired by
- * Termux terminal-view (Apache-2.0) — long-press → setInitialTextSelection
- * → startActionMode(TYPE_FLOATING) → onActionItemClicked.copy →
- * ClipboardManager.setPrimaryClip — but reimplemented from architecture
- * description against our existing TerminalEmulator/TerminalBuffer; no
- * source copied.
- *
- * Renderer is a port of TerminalCanvasView.kt (Compose Canvas → onDraw)
- * preserving cell paint, ANSI styling, cursor blink, and the new T194
- * selection-rect overlay. Vertical scroll → emulator.scrollOffset matches
- * the existing fling-aware drag logic minus the Compose decay animator
- * (Android's OverScroller would re-introduce that — out of scope for
- * part-2; users still get manual drag scrollback).
- */
 package com.openminis.app.ui.terminal.canvas
 
 import android.content.ClipData
@@ -40,12 +24,6 @@ import com.openminis.app.ui.terminal.emulator.TerminalPalette
 import com.openminis.app.ui.terminal.emulator.TextAttributes
 import com.openminis.app.ui.terminal.rememberJetBrainsMonoTypeface
 
-/**
- * Compose wrapper around [TerminalNativeView]. Drop-in replacement for
- * [TerminalCanvasView] — same parameter shape so [TerminalScreen] can
- * swap the call site by one identifier. Uses our bundled JetBrains Mono
- * typeface so glyph metrics match the old canvas-based renderer.
- */
 @Composable
 fun TerminalNativeViewCompose(
     emulator: TerminalEmulator,
@@ -91,7 +69,6 @@ class TerminalNativeView @JvmOverloads constructor(
     private var cols: Int = 80
     private var rows: Int = 24
 
-    // Cursor blink — flips every 500 ms.
     private var cursorVisible: Boolean = true
     private val blinkRunnable = object : Runnable {
         override fun run() {
@@ -101,9 +78,8 @@ class TerminalNativeView @JvmOverloads constructor(
         }
     }
 
-    // ── Selection state ────────────────────────────────────────────────────
     private var actionMode: ActionMode? = null
-    private var lastSelEndX: Int = 0   // pixels — for ActionMode anchor rect
+    private var lastSelEndX: Int = 0
     private var lastSelEndY: Int = 0
 
     init {
@@ -140,10 +116,6 @@ class TerminalNativeView @JvmOverloads constructor(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         post(blinkRunnable)
-        // Subscribe to emulator version state — invalidate() each tick.
-        // Compose-version callback is awkward here; cheap polling on the
-        // animator pulse covers it. Render diffs are cheap (whole-view
-        // invalidate, GPU just re-rasters cells).
         post(emulatorTick)
     }
 
@@ -162,11 +134,10 @@ class TerminalNativeView @JvmOverloads constructor(
                 lastEmulatorVersion = v
                 invalidate()
             }
-            postDelayed(this, 16)  // ~60 fps redraw poll
+            postDelayed(this, 16)
         }
     }
 
-    // ── Sizing ─────────────────────────────────────────────────────────────
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -179,11 +150,9 @@ class TerminalNativeView @JvmOverloads constructor(
         }
     }
 
-    // ── Touch handling ─────────────────────────────────────────────────────
 
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onSingleTapUp(e: MotionEvent): Boolean {
-            // Tapping outside an active selection cancels it; otherwise pass focus.
             if (emulator?.selectionRect?.value != null) {
                 emulator?.clearSelectionRect()
                 actionMode?.finish()
@@ -203,12 +172,7 @@ class TerminalNativeView @JvmOverloads constructor(
             distanceX: Float,
             distanceY: Float,
         ): Boolean {
-            // distanceY is e1.y - e2.y in Android's GestureDetector — i.e.
-            // positive when the finger moves up. Scroll back through history
-            // means moving content down on screen, which from the user's
-            // POV is dragging the finger down, distanceY < 0.
             val em = emulator ?: return false
-            // Reverse sign: dragging down (distanceY < 0) increases scrollOffset.
             val rowDelta = (-distanceY / cellHeight).toInt()
             if (rowDelta != 0) {
                 em.scrollOffset = (em.scrollOffset + rowDelta).coerceAtLeast(0)
@@ -221,7 +185,6 @@ class TerminalNativeView @JvmOverloads constructor(
         return gestureDetector.onTouchEvent(event) || super.onTouchEvent(event)
     }
 
-    // ── Selection lifecycle ───────────────────────────────────────────────
 
     private fun startSelectionAt(px: Float, py: Float) {
         val em = emulator ?: return
@@ -229,7 +192,6 @@ class TerminalNativeView @JvmOverloads constructor(
         val col = (px / cellWidth).toInt().coerceIn(0, cols - 1)
         val row = (py / cellHeight).toInt().coerceIn(0, rows - 1)
 
-        // Word-expand on whitespace boundaries.
         val (sx, ex) = wordExpand(col, row)
         em.setSelectionRect(sx, row, ex, row)
         lastSelEndX = ((ex + 1) * cellWidth).toInt()
@@ -247,7 +209,6 @@ class TerminalNativeView @JvmOverloads constructor(
         if (col !in line.indices) return col to col
 
         fun isWordChar(c: Int): Boolean {
-            // Letters, digits, and common URL punctuation.
             val ch = c.toChar()
             return ch.isLetterOrDigit() || ch == '_' || ch == '-' || ch == '.' ||
                 ch == '/' || ch == ':' || ch == '?' || ch == '&' || ch == '=' ||
@@ -308,7 +269,6 @@ class TerminalNativeView @JvmOverloads constructor(
                     super.onGetContentRect(mode, view, outRect)
                     return
                 }
-                // Anchor toolbar above the bottom-right corner of the selection.
                 val (sx, sy, ex, ey) = if (sel[1] < sel[3] || (sel[1] == sel[3] && sel[0] <= sel[2])) {
                     intArrayOf(sel[0], sel[1], sel[2], sel[3])
                 } else {
@@ -325,13 +285,11 @@ class TerminalNativeView @JvmOverloads constructor(
         actionMode = startActionMode(callback, ActionMode.TYPE_FLOATING)
     }
 
-    // ── Render ────────────────────────────────────────────────────────────
 
     override fun onDraw(canvas: Canvas) {
         val em = emulator ?: return
         val lines = em.visibleLines()
 
-        // Clear background — matches default palette.
         canvas.drawColor(TerminalPalette.defaultBackground.toArgbInt())
 
         for (r in lines.indices) {
@@ -344,7 +302,6 @@ class TerminalNativeView @JvmOverloads constructor(
             }
         }
 
-        // Selection highlight.
         val sel = em.selectionRect.value
         if (sel != null) {
             val (sx, sy, ex, ey) = if (sel[1] < sel[3] || (sel[1] == sel[3] && sel[0] <= sel[2])) {
@@ -369,7 +326,6 @@ class TerminalNativeView @JvmOverloads constructor(
             }
         }
 
-        // Cursor (only when viewing live tail).
         if (em.cursorVisible && cursorVisible && em.scrollOffset == 0) {
             val (cc, cr) = em.cursorPos()
             if (cr in 0 until rows && cc in 0 until cols) {
@@ -411,8 +367,6 @@ class TerminalNativeView @JvmOverloads constructor(
     }
 }
 
-// `androidx.compose.ui.graphics.Color → toArgb()` would pull a Compose
-// dependency we don't need here; do the conversion inline.
 private fun androidx.compose.ui.graphics.Color.toArgbInt(): Int =
     android.graphics.Color.argb(
         (alpha * 255f).toInt(),

@@ -19,19 +19,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-gpt6-sol-luna] [T-anthropic-opus55-catalog] The three models added
- * alongside the iOS change: `gpt-6-sol`, `gpt-6-luna` (Codex OAuth) and
- * `claude-opus-5-5` (Anthropic).
- *
- * Modelled on `GPT6AstraReasoningTest`, which exists because a brand-new model
- * id is a DATA gap, not a logic bug: the id is too new for the bundled
- * models.dev catalog, so nothing enriches `supportsReasoning`, and the
- * Responses builder's "Codex OAuth requires a reasoning object" fallback
- * hard-codes effort "low". The user's thinking level is then silently ignored.
- * Every guard below is one literal in a list of model declarations, and
- * deleting any of them would look entirely unremarkable in review.
- */
 class GPT6SolLunaOpus55Test {
 
     private lateinit var server: MockWebServer
@@ -44,7 +31,6 @@ class GPT6SolLunaOpus55Test {
 
     private val opus55: LLMModel get() = LLMModel.claudeOpus55
 
-    // ── Static catalog ───────────────────────────────────────────────────
 
     @Test
     fun `the new codex entries are shipped in the oauth list`() {
@@ -55,8 +41,6 @@ class GPT6SolLunaOpus55Test {
 
     @Test
     fun `the new codex entries declare supportsReasoning`() {
-        // THE load-bearing flag. Without it the Responses builder falls back to
-        // effort "low" and the user's thinking level never reaches the wire.
         for (id in listOf("gpt-6-sol", "gpt-6-luna")) {
             assertEquals(
                 "$id must declare supportsReasoning=true in the static Codex OAuth list — " +
@@ -79,7 +63,6 @@ class GPT6SolLunaOpus55Test {
         assertEquals(128_000, opus55.maxOutputTokens)
     }
 
-    // ── Thinking ceilings ────────────────────────────────────────────────
 
     @Test
     fun `catalog ceiling is max for all three`() {
@@ -90,20 +73,13 @@ class GPT6SolLunaOpus55Test {
 
     @Test
     fun `opus 5 5 is not left on the conservative default`() {
-        // The pre-existing Anthropic rule is anchored on "claude-opus-4", so
-        // Opus 5.5 matched NOTHING and fell through to the XHIGH default —
-        // quietly denying the user the `max` tier the model accepts. This is
-        // the assertion that catches a revert of the 5-series rule.
         assertEquals(ThinkingLevel.MAX, ThinkingLevelCatalog.declaredMaxLevel("claude-opus-5-5"))
         assertNotEquals(ThinkingLevel.XHIGH, opus55.catalogMaxThinkingLevel)
-        // And it must keep matching the rest of the 5 line without another edit.
         assertEquals(ThinkingLevel.MAX, ThinkingLevelCatalog.declaredMaxLevel("claude-opus-5-6"))
     }
 
     @Test
     fun `an undeclared flag still reaches max rather than collapsing to off`() {
-        // Mirrors GPT6AstraReasoningTest: the ceiling bails only on an explicit
-        // `false`, so a null flag must still reach MAX via the id rule.
         for (id in listOf("gpt-6-sol", "gpt-6-luna")) {
             val m = codex(id)
             assertEquals(ThinkingLevel.MAX, m.copy(supportsReasoning = null).catalogMaxThinkingLevel)
@@ -111,18 +87,7 @@ class GPT6SolLunaOpus55Test {
         }
     }
 
-    // ── Codex wire: every level survives to `reasoning.effort` ───────────
 
-    /**
-     * Capture the Responses body the production builder emits.
-     *
-     * Uses `useResponsesAPI = true` on an API-key provider rather than the
-     * OAuth constructor: the Codex branch hard-codes
-     * chatgpt.com/backend-api/codex/responses and cannot be pointed at a mock,
-     * but both branches serialize the SAME body before the URL split — so the
-     * reasoning block under test is identical. (Same approach as
-     * GPT6AstraReasoningTest.)
-     */
     private fun responsesBody(model: LLMModel, level: ThinkingLevel): JSONObject {
         val ok = """{"type":"response.completed","response":{"output":[],"status":"completed"}}"""
         repeat(4) {
@@ -155,17 +120,11 @@ class GPT6SolLunaOpus55Test {
 
     @Test
     fun `every thinking level reaches the codex wire as itself`() {
-        // The assertion that would have caught the reported Astra bug: under
-        // it, every level produced "low".
         val expected = mapOf(
             ThinkingLevel.LOW to "low",
             ThinkingLevel.MEDIUM to "medium",
             ThinkingLevel.HIGH to "high",
             ThinkingLevel.XHIGH to "xhigh",
-            // MAX and ULTRA both serialize to "max" — ULTRA is a client-side
-            // "max + orchestration" concept, never a wire effort. This is also
-            // why Sol dropping "ultra" from its declared levels needs no
-            // special case here.
             ThinkingLevel.MAX to "max",
             ThinkingLevel.ULTRA to "max",
         )
@@ -181,7 +140,6 @@ class GPT6SolLunaOpus55Test {
         }
     }
 
-    // ── Anthropic wire: Opus 5.5 must never be sent thinking.type=disabled ──
 
     private fun anthropicBody(model: LLMModel, level: ThinkingLevel): JSONObject {
         server.enqueue(
@@ -214,12 +172,7 @@ class GPT6SolLunaOpus55Test {
 
     @Test
     fun `opus 5 5 off is adaptive at low effort - never the literal thinking disabled`() {
-        // Opus 5.5 answers `thinking.type="disabled"` with a 400
-        // ("not supported for this model") — thinking is always on — and an
-        // ABSENT field thinks at its default (medium) effort. [T-claude5-thinking-off]
-        // OFF is therefore adaptive + output_config.effort "low" (iOS ef86ed890).
         assertEquals(AnthropicProvider.OffThinking.LOW_EFFORT, AnthropicProvider.offThinking("claude-opus-5-5"))
-        // The 4.6-4.x generation still gets the explicit disabled literal.
         assertEquals(AnthropicProvider.OffThinking.DISABLED, AnthropicProvider.offThinking("claude-opus-4-8"))
 
         val body = anthropicBody(opus55, ThinkingLevel.OFF)
@@ -251,7 +204,6 @@ class GPT6SolLunaOpus55Test {
 
     @Test
     fun `opus 5 5 does not send temperature`() {
-        // 4.6+ reject it; parseClaudeVersion already covers major=5.
         assertTrue(AnthropicProvider.modelRejectsTemperature("claude-opus-5-5"))
     }
 }

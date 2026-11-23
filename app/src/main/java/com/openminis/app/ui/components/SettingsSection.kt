@@ -16,16 +16,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.openminis.app.i18n.uppercaseForDisplay
 
-/**
- * iOS Settings-style "inset grouped" section. Renders an uppercase
- * teal header above a 16dp rounded surface card containing the
- * caller's [content] rows. Pair with [SettingsRowDivider] between
- * rows so the dividers stop short of the card's curved edges.
- *
- * Apply this to any settings detail screen that wants the
- * SF-Symbols Settings.app look — initially adopted by
- * RootfsManagementScreen (T168).
- */
 @Composable
 fun SettingsSection(
     title: String,
@@ -51,11 +41,6 @@ fun SettingsSection(
     }
 }
 
-/**
- * Thin divider for rows inside a [SettingsSection]. Pads in 16dp on
- * either side so the line stops short of the rounded card edge,
- * matching iOS Settings' inset divider style.
- */
 @Composable
 fun SettingsRowDivider(modifier: Modifier = Modifier) {
     HorizontalDivider(

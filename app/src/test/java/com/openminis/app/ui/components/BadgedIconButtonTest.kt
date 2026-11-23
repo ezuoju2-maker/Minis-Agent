@@ -5,12 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-badge-clip] Material3's IconButton clips its content to its 40dp
- * circle, so a BadgedBox inside one loses the badge's outer corner (the home
- * toolbar's scheduled-tasks count, user report). Badges go through
- * BadgedIconButton, which wraps the button instead.
- */
 class BadgedIconButtonTest {
 
     @Test

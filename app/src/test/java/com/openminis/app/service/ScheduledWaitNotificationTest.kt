@@ -13,16 +13,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-port-sched-wait-notification] Between the fires of a scheduled task that
- * keeps its chat active, the ongoing notification is in a WAITING phase: it
- * counts down to the next run with the system chronometer, shows "Next run ·
- * 2/30", and keeps Stop (stopAllByUser), instead of resting on "Task
- * completed" with no Stop. Port of iOS fa7adaf9e's waiting card.
- */
 class ScheduledWaitNotificationTest {
 
-    // --- Phase ------------------------------------------------------------------
 
     @Test
     fun `waiting wins over the previous run's completed state`() {
@@ -62,7 +54,6 @@ class ScheduledWaitNotificationTest {
         assertEquals(R.drawable.ic_notification_hourglass, notificationSmallIconFor(AgentPhase.WAITING, null, waitHasClock = false))
     }
 
-    // --- Content ----------------------------------------------------------------
 
     @Test
     fun `status line is iOS's Next run with the counter`() {
@@ -121,12 +112,10 @@ class ScheduledWaitNotificationTest {
         assertEquals(5_250L, waitRefreshDelayMs(125_000, promotedChip = true))
         assertEquals(60_250L, waitRefreshDelayMs(120_000, promotedChip = true))
         assertEquals(125_250L, waitRefreshDelayMs(125_000, promotedChip = false))
-        // The chip text really changes at that moment.
         assertEquals("3m", waitChipText(125_000))
         assertEquals("2m", waitChipText(125_000 - 5_250))
     }
 
-    // --- Which wait, and its counter ----------------------------------------------
 
     private val chat = "chat-1"
 
@@ -196,23 +185,19 @@ class ScheduledWaitNotificationTest {
         assertNull(w.nextRunMs)
         val timed = task("t", anchorMs = now, intervalSec = 120)
         assertEquals("t", ScheduledWaitModel.pick(listOf(onDone, timed), now) { it == "up" }!!.taskId)
-        // Its upstream is gone: it waits for nothing and holds nothing.
         assertNull(ScheduledWaitModel.pick(listOf(onDone), now) { false })
     }
 
-    // --- Wiring -------------------------------------------------------------------
 
     @Test
     fun `the service keeps Stop while waiting and counts down without per-second posts`() {
         val svc = ProductionSources.read("service/AgentForegroundService.kt")
-        // Waiting is never "completed", and Stop is only dropped when completed.
         assertTrue(svc.contains("val isCompleted = scheduledWait == null &&"))
         assertEquals(2, Regex("""if \(!isCompleted\) \{\s+builder\.addAction""").findAll(svc).count())
         assertEquals(2, Regex("""\.setChronometerCountDown\(clock\.countDown\)""").findAll(svc).count())
         assertTrue(svc.contains("isScheduledWaiting = scheduledWait != null"))
         assertTrue(svc.contains("waitStatusText(getString(R.string.scheduled_detail_next_run), scheduledWait?.runCounter)"))
         assertTrue(svc.contains("waitRefreshDelayMs("))
-        // The Stop action still turns the schedules off.
         assertTrue(svc.contains("SessionActivityTracker.stopAllByUser()"))
     }
 
@@ -225,7 +210,6 @@ class ScheduledWaitNotificationTest {
         val setter = tracker.substringAfter("fun setScheduledWait(").substringBefore("\n    }\n")
         assertFalse(setter.contains("_activeSessions"))
         assertFalse(setter.contains("publishProcessing"))
-        // Refreshes a running service, never starts one from the background.
         assertTrue(setter.contains("if (AgentForegroundService.isAlive && shouldRunService()) updateService()"))
     }
 }

@@ -8,12 +8,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [FIX-261025-11] With the local entry down, a proxy / Tailscale route used to
- * go direct - out from the device's own address, around the proxy the user
- * chose - until the entry was back (up to ~30 s, or for good if it could not
- * be configured). It now fails closed; direct routes stay direct.
- */
 class NetworkEntryDownFailClosedTest {
 
     @Before fun reset() = NetworkRuntime.resetForTest()

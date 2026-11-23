@@ -8,34 +8,13 @@ import org.w3c.dom.Element
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
 
-/**
- * Review 2026-09-23 — guards 76e46907f (OpenMinis#258).
- *
- * That change opened the base config to user-installed CAs and pinned "official
- * model provider and auth domains" to system CAs so a user CA cannot intercept
- * API keys. The existing NetworkSecurityConfigTest checks the seven domains it
- * listed. This test checks the stated POLICY against the hosts the app actually
- * sends bearer credentials to, found by grepping provider/auth code:
- *
- *   chatgpt.com            Codex OAuth access token (OpenAIProvider, Responses)
- *   github.com             Copilot device flow (CopilotDeviceFlow.DEVICE_CODE_URL)
- *   api.githubcopilot.com  Copilot session token on every chat request
- *   auth.kimi.com          Kimi device flow (KimiDeviceFlow.AUTH_HOST)
- *
- * It also checks that a pinned domain does not inherit the base config's
- * cleartext permission: `http://api.anthropic.com` (a typo in a base URL)
- * would otherwise send the key in plaintext, which defeats the pin.
- *
- * Android resolves a host to the MOST SPECIFIC matching <domain-config>, with
- * unset attributes inherited from <base-config>; the matcher below follows that.
- */
 class Review0923TokenHostPinningTest {
 
     private data class DomainRule(
         val domain: String,
         val includeSubdomains: Boolean,
-        val anchors: Set<String>?,       // null = inherited from base-config
-        val cleartext: Boolean?,         // null = inherited from base-config
+        val anchors: Set<String>?,
+        val cleartext: Boolean?,
     )
 
     private fun load(): Element {
@@ -69,7 +48,6 @@ class Review0923TokenHostPinningTest {
         return out
     }
 
-    /** Most specific matching rule for [host], or null (base-config applies). */
     private fun match(rules: List<DomainRule>, host: String): DomainRule? =
         rules.filter { r -> host == r.domain || (r.includeSubdomains && host.endsWith("." + r.domain)) }
             .maxByOrNull { it.domain.length }
@@ -93,7 +71,6 @@ class Review0923TokenHostPinningTest {
             "api.deepseek.com", "api.x.ai", "auth.x.ai")) {
             assertEquals("$h", setOf("system"), effectiveAnchors(root, h))
         }
-        // And a self-hosted endpoint keeps user CAs (the point of #258).
         assertTrue(effectiveAnchors(root, "llm.lan.example").contains("user"))
     }
 

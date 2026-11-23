@@ -12,10 +12,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
-/**
- * [FIX-261025-19] The in-app timer and the alarm race for the same run:
- * whichever comes first runs it, the other finds it taken.
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class ScheduledInAppTimerTest {
@@ -39,7 +35,6 @@ class ScheduledInAppTimerTest {
         repeatMode = ScheduledRepeatMode.DAILY, prompt = "p",
     )
 
-    /** What the timer does at the due moment: claim the run it waited for, just before its slot. */
     private fun timerClaim(due: ScheduledInAppTimer.Due) =
         manager.claimRunNow(due.task.id, due.at - 1, expectedRunKey = due.runKey)
 
@@ -89,7 +84,6 @@ class ScheduledInAppTimerTest {
         assertEquals(due.at, taken.runNowSlotMs)
         assertTrue(taken.enabled)
         assertTrue(ScheduledTaskManager.calendarSlotTakenByRunNow(taken, due.at + 120_000))
-        // The schedule carries on at the next day's slot.
         assertTrue(taken.nextTriggerMs(due.at - 1)!! > due.at)
     }
 

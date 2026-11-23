@@ -29,85 +29,26 @@ import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-/**
- * T-android-crash-freq-share: local fallback for Crashlytics (#458).
- *
- * Scans `filesDir/logs/` at app launch for `crash-*.log` (ACRA) and
- * `native-crash-*.log` (NDK signal handler) files modified within the
- * last hour. When the count crosses [THRESHOLD], stash the list and the
- * next foreground Activity gets a one-shot AlertDialog offering to share
- * the logs via ACTION_SEND_MULTIPLE.
- *
- * Self-contained on purpose: zero Minis-internal dependencies (no
- * AppLogger / ChatViewModel / ProviderRepository etc), uses
- * `android.util.Log` directly, every entry point wrapped in try/catch.
- * Runs early enough that a partial-init / pre-DI launch can't break it.
- */
 object CrashFrequencyDetector {
     private const val TAG = "CrashFreqDetector"
-    private const val WINDOW_MS: Long = 60L * 60L * 1000L  // 1 hour
+    private const val WINDOW_MS: Long = 60L * 60L * 1000L
     private const val THRESHOLD = 2
 
-    // [T-safe-mode-suppressed-threshold] Threshold while the 24 h "Not now"
-    // suppress window is active (see KEY_SUPPRESS_UNTIL). Only there.
-    //
-    // The window used to switch detection off completely, so after one
-    // "Not now" a crash-on-launch loop ran unprotected: measured 23 crashes
-    // in ~70 s with no safe mode and no exit. The user did ask not to be
-    // prompted, so an occasional crash (1-4 in an hour) still stays silent;
-    // 5 in one hour is no longer "occasional", it is the app failing to
-    // start, and that warrants safe mode and the dialog (its only exit).
-    // 5 = well above the normal 2 so a user who opted out is not nagged by a
-    // couple of unrelated crashes, yet low enough that a loop (one crash
-    // every few seconds) is caught within seconds. Outside the window the
-    // threshold stays [THRESHOLD].
     private const val SUPPRESSED_THRESHOLD = 5
 
-    // T-android-crash-safe-mode-v2: persisted "user dismissed at" timestamp.
-    // Only crash files whose mtime is GREATER than this timestamp count
-    // toward the safe-mode threshold on subsequent cold starts. Without
-    // this, the same pre-existing crash files keep tripping safe-mode on
-    // every launch until they age out of the 1-hour window.
     private const val PREFS = "crash_freq_prefs"
     private const val KEY_DISMISSED_AT = "dismissed_at"
-    // Force-home grace period: once a crash burst trips, every cold start
-    // for the next FORCE_HOME_GRACE_MS lands on Home regardless of the
-    // user's "Launch Session" preference. Same idea as HangDetector's
-    // shouldForceHomeOnLaunch, but driven by crash files rather than
-    // hang heartbeats. Survives an explicit Dismiss — user dismissing the
-    // share dialog only silences the *prompt*; we still want to avoid
-    // re-entering the chat that may have been the crash trigger.
     private const val KEY_FORCE_HOME_UNTIL = "force_home_until"
-    private const val FORCE_HOME_GRACE_MS: Long = 60L * 60L * 1000L  // 1 hour
-    // "Not now" suppress window. When the user explicitly opts out of
-    // sharing we don't want to nag them again every cold start — they saw
-    // the prompt and said no. For 24 hours the burst threshold is raised
-    // to [SUPPRESSED_THRESHOLD] instead of [THRESHOLD]: occasional crashes
-    // stay silent, a crash loop still gets safe mode and the dialog.
-    // After 24h we resume the normal 1-hour rolling burst detection.
+    private const val FORCE_HOME_GRACE_MS: Long = 60L * 60L * 1000L
     private const val KEY_SUPPRESS_UNTIL = "suppress_until"
-    private const val SUPPRESS_AFTER_DISMISS_MS: Long = 24L * 60L * 60L * 1000L  // 24 hours
+    private const val SUPPRESS_AFTER_DISMISS_MS: Long = 24L * 60L * 60L * 1000L
 
     @Volatile
     var pendingShareFiles: List<File>? = null
         private set
 
-    /**
-     * T-android-crash-safe-mode-v2: listeners notified when safe-mode
-     * transitions ON → OFF (i.e. user dismissed the share dialog). Lets
-     * subscribers (ChatViewModel etc.) retry the init work they skipped
-     * while safe-mode was active. CopyOnWriteArrayList keeps add/iterate
-     * thread-safe with zero locking on the hot read path.
-     */
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
 
-    /**
-     * Register a callback fired once when safe-mode flips OFF. Returns
-     * an unsubscribe lambda. Listeners are invoked on the calling thread
-     * of [setSafeMode] (currently the main thread via dialog buttons /
-     * Handler), wrapped in runCatching so a misbehaving listener can't
-     * stall the others.
-     */
     @JvmStatic
     fun registerSafeModeClearedListener(listener: () -> Unit): () -> Unit {
         listeners.add(listener)
@@ -118,7 +59,6 @@ object CrashFrequencyDetector {
         listeners.toList().forEach { runCatching { it() } }
     }
 
-    /** Centralized setter so the ON → OFF edge can fire listeners exactly once. */
     private fun setSafeMode(value: Boolean) {
         val was = _safeMode.getAndSet(value)
         if (was && !value) {
@@ -170,18 +110,6 @@ object CrashFrequencyDetector {
         }
     }
 
-    /**
-     * AppNavigation.LaunchedEffect calls this on cold start. Returns true
-     * while a recent crash burst is still inside the
-     * [FORCE_HOME_GRACE_MS] grace window — even if the user has already
-     * dismissed the share dialog. Pairs with [HangDetector.shouldForceHomeOnLaunch]
-     * so the launch resolver has a single combined "land on Home this
-     * time, the previous run wasn't healthy" signal.
-     *
-     * Self-expiring: returns false once the grace timestamp has passed,
-     * so the user's "Launch Session" preference reasserts itself
-     * automatically.
-     */
     @JvmStatic
     fun shouldForceHomeOnLaunch(context: Context): Boolean {
         val until = try {
@@ -193,48 +121,19 @@ object CrashFrequencyDetector {
         return until > 0 && System.currentTimeMillis() < until
     }
 
-    /**
-     * T-android-crash-detected-halt: when [checkAtLaunch] finds the
-     * crash burst, flip this flag so heavy session-restore code paths
-     * (e.g. ChatViewModel.loadSession) can short-circuit and avoid
-     * re-tripping the same crash before the user sees the share dialog.
-     *
-     * Lenient policy: cleared as soon as the dialog is dismissed
-     * (either share or dismiss button) so the app resumes normal
-     * operation. The next launch starts from a fresh flag value.
-     *
-     * Kept as a static getter to preserve the "zero Minis internal
-     * dependencies" contract — callers from anywhere in the app can
-     * check the flag without introducing a reverse import on this file.
-     */
     private val _safeMode = java.util.concurrent.atomic.AtomicBoolean(false)
 
     @JvmStatic
     fun isSafeMode(): Boolean = _safeMode.get()
 
-    /**
-     * [T-safe-mode-suppressed-threshold] Crashes in the last hour needed to
-     * enter safe mode: [SUPPRESSED_THRESHOLD] while the "Not now" suppress
-     * window is active, [THRESHOLD] otherwise (including after it expires).
-     */
     internal fun thresholdFor(now: Long, suppressUntil: Long): Int =
         if (suppressUntil > 0 && now < suppressUntil) SUPPRESSED_THRESHOLD else THRESHOLD
 
-    /** Whether [recent] crash files in the window trip safe mode at [now]. */
     internal fun tripsSafeMode(recent: Int, now: Long, suppressUntil: Long): Boolean =
         recent >= thresholdFor(now, suppressUntil)
 
-    /**
-     * Inspect `filesDir/logs/` and remember recent crash files for the
-     * next [maybeShowOnActivity] call. Safe to call from
-     * Application.onCreate; never throws.
-     */
     fun checkAtLaunch(app: Application) {
         try {
-            // [T-safe-mode-suppressed-threshold] The "Not now" window no
-            // longer skips detection; it raises the threshold (see
-            // [thresholdFor]). Previously this returned here, leaving a
-            // crash loop with no safe mode for 24 h.
             val now0 = System.currentTimeMillis()
             val suppressUntil = getSuppressUntil(app)
             val threshold = thresholdFor(now0, suppressUntil)
@@ -248,15 +147,6 @@ object CrashFrequencyDetector {
                 (n.startsWith("crash-") || n.startsWith("native-crash-")) && n.endsWith(".log")
             } ?: return
             val now = System.currentTimeMillis()
-            // Dismiss is now window-scoped, not permanent. While the
-            // dismiss timestamp is still inside the 1-hour window we keep
-            // filtering files older than it (so "I just clicked Dismiss"
-            // doesn't immediately re-prompt on the same burst). Once the
-            // dismiss itself ages out of WINDOW_MS, we ignore it — any
-            // crash files that survive in the live window are by
-            // definition newer than what the user saw last time, and we
-            // shouldn't miss a fresh burst just because an old Dismiss
-            // marker is still on disk.
             val rawDismissedAt = getDismissedAt(app)
             val dismissedAt = if (rawDismissedAt > 0 && now - rawDismissedAt <= WINDOW_MS) {
                 rawDismissedAt
@@ -280,17 +170,7 @@ object CrashFrequencyDetector {
                 return
             }
             pendingShareFiles = recent.sortedByDescending { it.lastModified() }
-            // T-android-crash-detected-halt: enter safe-mode BEFORE the
-            // rest of MinisApp.onCreate finishes and any Activity / VM
-            // starts restoring sessions. Cleared once the user dismisses
-            // the share dialog in [maybeShowOnActivity].
             setSafeMode(true)
-            // Persist a "force Home on launch" grace window. After the
-            // user resolves the dialog and the app boots normally, the
-            // launch resolver in AppNavigation honours this flag and
-            // bypasses the user's Launch Session preference — so even a
-            // Dismiss doesn't drop the user back into the session that
-            // may have been the crash trigger.
             setForceHomeUntil(app, now + FORCE_HOME_GRACE_MS)
             android.util.Log.w(
                 TAG,
@@ -302,50 +182,17 @@ object CrashFrequencyDetector {
         }
     }
 
-    /**
-     * Called from the first foreground Activity onResume. One-shot —
-     * clears [pendingShareFiles] before showing the dialog so a config
-     * change / second resume doesn't re-prompt.
-     *
-     * [onClosed] fires after any of the three exit paths (Share /
-     * Dismiss / Cancel). When MinisApp.onCreate has early-returned (safe
-     * mode), MainActivity passes `finish()` here so the half-init app
-     * doesn't linger on screen.
-     */
-    /**
-     * Show the crash-share dialog tree.
-     *
-     * [saveLauncher] is the bridge into the host Activity's
-     * `registerForActivityResult(ACTION_CREATE_DOCUMENT)` flow used by
-     * the "Save to..." button. The detector lives outside any Activity
-     * so it can't call `registerForActivityResult` itself; instead the
-     * caller hands in a launcher that takes (zip file, onSaveDone)
-     * and is responsible for writing the zip into the URI the user
-     * picks plus opening it via ACTION_VIEW. When null, "Save to..."
-     * falls back to writing into the public Downloads directory and
-     * showing a path toast (legacy behaviour).
-     */
     fun maybeShowOnActivity(
         activity: Activity,
         onClosed: (() -> Unit)? = null,
         saveLauncher: ((zip: File, onSaveDone: () -> Unit) -> Unit)? = null,
     ) {
         val triggerFiles = pendingShareFiles ?: run {
-            // No pending burst — still invoke onClosed so safe-mode
-            // callers that pass `finish()` aren't stranded. With no
-            // dialog to show there's nothing to wait for.
             onClosed?.invoke()
             return
         }
         pendingShareFiles = null
         try {
-            // Always reset the dismiss / burst clock the moment the user
-            // sees the picker — regardless of which exit path they take
-            // (Continue → method picker, Not now, or back-cancel). After
-            // this point new crashes only count toward the next prompt if
-            // they're newer than `now`. Without this, the same files that
-            // triggered THIS dialog stayed in the 1-hour window and tripped
-            // the next cold start again.
             val dismissAtCheckpoint = System.currentTimeMillis()
             setDismissedAt(activity, dismissAtCheckpoint)
 
@@ -355,8 +202,6 @@ object CrashFrequencyDetector {
                 entries = pickable,
                 onContinue = { selected ->
                     if (selected.isEmpty()) {
-                        // "Continue" with nothing checked is effectively
-                        // the same as Dismiss — treat as opt-out.
                         finishClose(onClosed, dismissContext = activity)
                         return@showFilePickerDialog
                     }
@@ -374,13 +219,6 @@ object CrashFrequencyDetector {
         }
     }
 
-    /**
-     * Single entry shown in the multi-select picker.
-     *
-     * [section] = 0 → crash log (last 24h, max 10); defaults to checked.
-     * [section] = 1 → daily AppLogger run-log (last 3 days); defaults to
-     * unchecked — the user opts in if they want to share runtime context.
-     */
     private data class PickableEntry(
         val file: File,
         val label: String,
@@ -388,9 +226,9 @@ object CrashFrequencyDetector {
         val defaultChecked: Boolean,
     )
 
-    private const val PICK_CRASH_WINDOW_MS: Long = 24L * 60L * 60L * 1000L  // 24 hours
+    private const val PICK_CRASH_WINDOW_MS: Long = 24L * 60L * 60L * 1000L
     private const val PICK_CRASH_LIMIT: Int = 10
-    private const val PICK_RUN_LOG_WINDOW_MS: Long = 3L * 24L * 60L * 60L * 1000L  // 3 days
+    private const val PICK_RUN_LOG_WINDOW_MS: Long = 3L * 24L * 60L * 60L * 1000L
 
     private fun buildPickableEntries(
         ctx: Context,
@@ -400,10 +238,6 @@ object CrashFrequencyDetector {
         val now = System.currentTimeMillis()
         val triggerSet = triggerFiles.map { it.absolutePath }.toHashSet()
 
-        // Last-24h crashes capped to 10 most recent. We deliberately drop
-        // the "older crashes" bucket — if the user wants those they can
-        // dig into Settings → Logs; this dialog is for the immediate
-        // "you just crashed, here's what to send" workflow.
         val crashes = (logsDir.listFiles { f ->
             val n = f.name
             (n.startsWith("crash-") || n.startsWith("native-crash-")) && n.endsWith(".log")
@@ -415,10 +249,6 @@ object CrashFrequencyDetector {
             .sortedByDescending { it.lastModified() }
             .take(PICK_CRASH_LIMIT)
 
-        // Daily AppLogger logs (minis-YYYY-MM-DD.log) for the last 3
-        // days. Default unchecked — they're large and only useful for
-        // tracking down what the agent was doing right before the
-        // crash; the user opts in when they care about that context.
         val dailyLogs = (logsDir.listFiles { f ->
             f.name.startsWith("minis-") && f.name.endsWith(".log")
         } ?: emptyArray<File>())
@@ -511,20 +341,9 @@ object CrashFrequencyDetector {
         dialog.show()
     }
 
-    /**
-     * Replace the system AlertDialog's default rectangular window
-     * background with a rounded-corner rectangle so the share prompt
-     * looks like a modern Material sheet instead of a 1990s system
-     * alert. We do this manually rather than pulling in
-     * com.google.android.material:material (one new dependency for one
-     * dialog).
-     */
     private fun applyRoundedBackground(activity: Activity, dialog: AlertDialog) {
         try {
             val density = activity.resources.displayMetrics.density
-            // Light / dark adaptive: pull the colorBackground attribute
-            // from the activity theme so we don't have to hard-code
-            // colors for night mode.
             val bgColor = run {
                 val tv = android.util.TypedValue()
                 if (activity.theme.resolveAttribute(android.R.attr.colorBackground, tv, true)) {
@@ -546,10 +365,6 @@ object CrashFrequencyDetector {
         }
     }
 
-    /**
-     * Second step: vertical 3-option menu — Email / Share to… / Save
-     * to… (Downloads). Each path zips the selected files first.
-     */
     private fun showMethodPicker(
         activity: Activity,
         files: List<File>,
@@ -610,15 +425,6 @@ object CrashFrequencyDetector {
         dlg.show()
     }
 
-    /**
-     * Common close path — clears safe-mode and invokes onClosed.
-     *
-     * [dismissContext] = the activity, when the close was triggered by
-     * an explicit "Not now" / back / cancel exit. Triggers the 24-hour
-     * hard-suppress window so the user isn't nagged at every cold start
-     * for a day. Share / Save paths pass null because the user already
-     * engaged with the prompt — fresh future bursts should still alert.
-     */
     private fun finishClose(onClosed: (() -> Unit)?, dismissContext: Context? = null) {
         if (dismissContext != null) {
             val until = System.currentTimeMillis() + SUPPRESS_AFTER_DISMISS_MS
@@ -634,13 +440,6 @@ object CrashFrequencyDetector {
         onClosed?.invoke()
     }
 
-    /**
-     * Zip the [files] into cacheDir/share/ and fire ACTION_SEND with
-     * application/zip. When [emailOnly] is true we hint at an email
-     * client (EMAIL extra + setType message/rfc822 fallback) so the
-     * chooser surfaces Gmail / Outlook first; otherwise we use the
-     * generic share sheet so the user gets every share target.
-     */
     private fun dispatchZippedShare(
         ctx: Context,
         files: List<File>,
@@ -661,8 +460,6 @@ object CrashFrequencyDetector {
             val uri = FileProvider.getUriForFile(ctx, authority, zip)
             val date = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
             val subject = ctx.getString(R.string.crash_freq_email_subject, date)
-            // Project crash-report inbox — a public alias, safe to ship in
-            // open-source builds (replaced the maintainer's personal email).
             val recipient = "dev@openminis.app"
 
             val launched: Boolean = if (emailOnly) {
@@ -671,14 +468,8 @@ object CrashFrequencyDetector {
                 tryLaunchShare(ctx, uri, subject)
             }
             if (!launched) {
-                // Fallback path: generic ACTION_SEND chooser. Works
-                // everywhere even if no email app is installed (file
-                // managers / messengers will appear in the chooser).
                 tryLaunchShare(ctx, uri, subject)
             }
-            // 500ms lets the chooser surface before MainActivity (which
-            // passed `finish()` as onClosed) tears itself down. Matches
-            // the prior share path's behaviour.
             android.os.Handler(android.os.Looper.getMainLooper())
                 .postDelayed({ finishClose(onClosed) }, 500L)
         } catch (t: Throwable) {
@@ -692,27 +483,6 @@ object CrashFrequencyDetector {
         }
     }
 
-    /**
-     * Launch a mail-only intent that carries the crash zip as a real
-     * attachment. Previously this used `ACTION_SENDTO mailto:` with
-     * EXTRA_STREAM, but most major mail clients (Gmail in particular,
-     * reproduced on 0.10-preview) silently drop
-     * EXTRA_STREAM when the action is ACTION_SENDTO — the user lands
-     * in a compose window with To/Subject filled but no attachment,
-     * and the developer never gets the log.
-     *
-     * Correct shape per the Android docs:
-     *   - Primary intent = ACTION_SEND with the attachment + recipient
-     *     + subject + body. ACTION_SEND is the one mail clients actually
-     *     honour for EXTRA_STREAM.
-     *   - Use `selector` = ACTION_SENDTO mailto: so the chooser is
-     *     filtered to email apps only (no messengers / file managers
-     *     leaking into the list).
-     *
-     * Returns false when no email app is installed — caller falls back
-     * to the generic share path so the user still has some way to ship
-     * the zip out.
-     */
     private fun tryLaunchMailto(
         ctx: Context,
         recipient: String,
@@ -720,40 +490,20 @@ object CrashFrequencyDetector {
         attachment: Uri,
     ): Boolean {
         return try {
-            // Body that names the attachment by hand. Most mail clients
-            // still render the attachment chip themselves, but if a
-            // client somehow drops the attachment again this paragraph
-            // tells the recipient what was supposed to be there.
             val body = ctx.getString(R.string.crash_freq_email_body)
-            // Selector restricts the chooser to apps that can handle a
-            // bare mailto:. Without a body the selector intent doesn't
-            // need data beyond the scheme — Gmail / Outlook / Inbox all
-            // match `mailto:` with no recipient.
             val selector = Intent(Intent.ACTION_SENDTO).apply {
                 data = Uri.parse("mailto:")
             }
             val intent = Intent(Intent.ACTION_SEND).apply {
-                // application/zip matches the packaged attachment; mail
-                // clients route MIME → "attach as file" regardless of
-                // the extension hint, so this is what gets the chip to
-                // appear in Gmail.
                 type = "application/zip"
                 putExtra(Intent.EXTRA_EMAIL, arrayOf(recipient))
                 putExtra(Intent.EXTRA_SUBJECT, subject)
                 putExtra(Intent.EXTRA_TEXT, body)
                 putExtra(Intent.EXTRA_STREAM, attachment)
-                // FLAG_GRANT_READ_URI_PERMISSION on the OUTER intent
-                // covers both the chooser shim and the eventual mail
-                // app receiving the EXTRA_STREAM URI.
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 this.selector = selector
             }
-            // resolveActivity on a selector-bearing ACTION_SEND returns
-            // null on some OEM builds even when mail apps are present
-            // (the resolver doesn't fold selectors when probing). Probe
-            // the selector directly — if any mail app matches mailto:,
-            // the launch will succeed.
             if (selector.resolveActivity(ctx.packageManager) == null) {
                 android.util.Log.w(TAG, "mailto selector: no email app resolved")
                 return false
@@ -766,7 +516,6 @@ object CrashFrequencyDetector {
         }
     }
 
-    /** Generic share-sheet path used by the "Share to…" button and as the mailto fallback. */
     private fun tryLaunchShare(
         ctx: Context,
         attachment: Uri,
@@ -794,14 +543,6 @@ object CrashFrequencyDetector {
         }
     }
 
-    /**
-     * "Save to…" preferred path — lets the user pick the destination via
-     * the system file picker (ACTION_CREATE_DOCUMENT). The host
-     * Activity passed in a [saveLauncher] that owns the
-     * `registerForActivityResult` registration; here we just zip and
-     * hand off. The launcher copies the zip into the chosen URI and
-     * fires ACTION_VIEW so the user jumps straight to the saved file.
-     */
     private fun dispatchZippedSaveViaPicker(
         ctx: Context,
         files: List<File>,
@@ -818,10 +559,6 @@ object CrashFrequencyDetector {
                 finishClose(onClosed)
                 return
             }
-            // Defer safe-mode clear / Activity finish until the picker
-            // result lands. Without this, MainActivity would finish() the
-            // moment the method picker dismissed and the system file
-            // picker would have no foreground Activity to return to.
             saveLauncher(zip) { finishClose(onClosed) }
         } catch (t: Throwable) {
             android.util.Log.w(TAG, "save (picker) failed: ${t.message}")
@@ -834,14 +571,6 @@ object CrashFrequencyDetector {
         }
     }
 
-    /**
-     * "Save to…" legacy fallback — write the zipped bundle into the
-     * public Downloads directory when no save launcher is wired up
-     * (e.g. callers outside the safe-mode MainActivity path). On Q+ we
-     * use MediaStore.Downloads (no permission required, scoped storage
-     * friendly); on older API levels we fall back to the public
-     * Downloads directory directly.
-     */
     private fun dispatchZippedSave(
         ctx: Context,
         files: List<File>,
@@ -900,13 +629,6 @@ object CrashFrequencyDetector {
         }
     }
 
-    /**
-     * Bundle [files] into a single zip under cacheDir/share/. Returns the
-     * zip File on success or null if the input list is effectively empty.
-     * Uses the cache dir so the OS cleans up stale archives if the user
-     * shares but never re-opens Minis; FileProvider already grants the
-     * receiving app read access via FLAG_GRANT_READ_URI_PERMISSION.
-     */
     private fun packageZip(ctx: Context, files: List<File>): File? {
         val readable = files.filter { it.exists() && it.length() > 0 }
         if (readable.isEmpty()) return null

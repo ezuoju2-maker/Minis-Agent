@@ -9,11 +9,6 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/**
- * [T-android-child-session-delete-storage] Parent + child each own a
- * minis-sessions dir and dated media under two dates; sizes aggregate to the
- * parent and a tree delete leaves nothing on disk.
- */
 class SessionStorageTest {
     @get:Rule val tmp = TemporaryFolder()
 
@@ -60,13 +55,9 @@ class SessionStorageTest {
         assertEquals(0L, s.deleteFiles("P"))
     }
 
-    // ---- [T-android-storage-delete-feedback] openminis/openminis#375 --------
 
     @Test
     fun `a read-only directory is made writable and still deleted`() {
-        // The #375 shape: Git leaves .git/objects/pack at 0555, so entries
-        // inside it cannot be unlinked until the dir regains +w. Before the
-        // fix this silently left the files and reported success.
         val filesDir = tmp.newFolder("files")
         val pack = File(filesDir, "minis-sessions/P/workspace/repo/.git/objects/pack")
         write(File(pack, "pack-abc.pack"), 64)
@@ -84,8 +75,6 @@ class SessionStorageTest {
 
     @Test
     fun `deleteFiles keeps its Long contract for existing callers`() {
-        // SessionDeleter and the storage screen both sum this value; the
-        // detailed variant must not change what the simple one returns.
         val filesDir = tmp.newFolder("files"); seed(filesDir)
         val s = SessionStorage(filesDir)
         assertEquals(s.minisSize("C") + s.mediaSize("C"), s.deleteFiles("C"))
@@ -103,18 +92,10 @@ class SessionStorageTest {
 
     @Test
     fun `an undeletable file is REPORTED rather than silently swallowed`() {
-        // The whole point of #375's UI half: when the delete genuinely cannot
-        // finish, the caller must learn about it. Here the read-only bit is on
-        // the session dir's GRANDPARENT (filesDir/minis-sessions), which
-        // restoreWritable() never walks because it starts at the session dir —
-        // so the unlink really fails and must surface in failedPaths.
         val filesDir = tmp.newFolder("files")
         write(File(filesDir, "minis-sessions/P/workspace/a.txt"), 100)
         val sessionsRoot = File(filesDir, "minis-sessions")
         assertTrue(sessionsRoot.setWritable(false, false))
-        // [test-env] root bypasses mode bits (CAP_DAC_OVERRIDE): it can still
-        // unlink inside a 0555 dir, so no delete failure occurs to report and
-        // this assertion is vacuous here. Non-root devices still check it.
         assumeFalse("root/FUSE ignores directory mode bits", sessionsRoot.canWrite())
         try {
             val s = SessionStorage(filesDir)
@@ -124,14 +105,9 @@ class SessionStorageTest {
                 "the surviving path must be named, got ${r.failedPaths}",
                 r.failedPaths.any { it.contains("minis-sessions") && it.endsWith("P") },
             )
-            // `freed` counts what really left: the inner file IS removable
-            // (its own parent is writable), only the top session dir survives.
-            // The contract that matters is that the caller is TOLD, not that
-            // the byte count is zero.
             assertEquals("only the emptied file's bytes count", 100L, r.freed)
             assertTrue("the session dir itself survives", File(filesDir, "minis-sessions/P").exists())
         } finally {
-            // Always restore, or TemporaryFolder cannot clean up.
             sessionsRoot.setWritable(true, true)
         }
     }

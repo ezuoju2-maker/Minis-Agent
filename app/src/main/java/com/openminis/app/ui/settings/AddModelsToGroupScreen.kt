@@ -47,15 +47,9 @@ fun AddModelsToGroupScreen(
     }
 
     val existingIds = group.memberEntryIds.toSet()
-    // [T-android-provider-voice] Voice-scoped picker: when the target group is
-    // bound as the Voice Input/Output group, scope the shared picker by
-    // modality (ASR = audio-in, TTS = audio-out). Modality filtering + System
-    // virtual entry injection live inside modelEntryPickerItems (mirrors iOS
-    // UnifiedModelPicker effectivePreferModality / candidateEntries).
     val modalityFilter = when (groupId) {
         config.voiceInputGroupId -> PickerModalityFilter.AUDIO_INPUT
         config.voiceOutputGroupId -> PickerModalityFilter.AUDIO_OUTPUT
-        // [T-android-vision-group] Vision Group picker: only image-capable models.
         config.visionGroupId -> PickerModalityFilter.IMAGE_INPUT
         else -> null
     }
@@ -67,12 +61,6 @@ fun AddModelsToGroupScreen(
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
     var quickTestEntry by remember { mutableStateOf<com.openminis.app.data.model.ModelEntry?>(null) }
     val collapsedInstanceIds = remember(config) {
-        // T185: default-collapsed mirrors pre-refactor behaviour. The
-        // shared picker auto-expands when search is non-empty so hits
-        // remain visible regardless of section state.
-        // [T-android-provider-voice] Voice scenario: DON'T collapse — a
-        // multi-voice provider (Azure ~39, MiMo 9) would fold all-but-one
-        // voice behind a disclosure (iOS d4e3198f seedCollapse fix).
         mutableStateOf(
             if (modalityFilter != null) emptySet()
             else config.instances.map { it.id }.toSet(),
@@ -111,11 +99,7 @@ fun AddModelsToGroupScreen(
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        // Resolved here (Composable context) — LazyListScope below can't call
-        // stringResource. Localizes the injected System provider section label.
         val systemProviderLabel = stringResource(R.string.voice_provider_system)
-        // [T-picker-search-debounce] Ranked, capped search, computed here (a
-        // composable scope) so typing re-ranks only once the query settles.
         val searchSections = com.openminis.app.ui.components.rememberModelEntryPickerSections(
             instances = config.instances,
             availableEntries = availableEntries,
@@ -142,7 +126,6 @@ fun AddModelsToGroupScreen(
                 emptySearchTextRes = R.string.add_models_to_group_no_match,
                 searchPlaceholderRes = R.string.add_models_to_group_search_models,
                 clearContentDescriptionRes = R.string.add_models_to_group_clear,
-                // System virtual entries have no cloud endpoint to smoke-test.
                 onQuickTest = { if (!SystemVoiceEntries.isSystemEntryId(it.id)) quickTestEntry = it },
                 modalityFilter = modalityFilter,
                 excludeIds = existingIds,

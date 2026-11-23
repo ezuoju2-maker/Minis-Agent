@@ -10,10 +10,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * [T-android-voice-asr-stall-skip] Port of iOS VoiceASRStallSkipTests' compiled
- * scenarios (9f6207b05 / 7d9a86e0b), with a 200 ms threshold.
- */
 class SkippableAsrAttemptsTest {
 
     private fun attempts() = SkippableAsrAttempts(stallThresholdMs = 200)
@@ -28,8 +24,6 @@ class SkippableAsrAttemptsTest {
     @Test fun `a slow attempt that ignores cancellation is marked stalled and a skip releases its caller at once`() = runBlocking {
         val a = attempts()
         val caller = async {
-            // Thread.sleep does not honour coroutine cancellation — like a
-            // blocking OkHttp call that never returns.
             runCatching { a.run("hung", "next-model", canSkip = true) { Thread.sleep(5_000); "late" } }
         }
         withTimeout(2_000) { while (!a.stalled.value) delay(20) }

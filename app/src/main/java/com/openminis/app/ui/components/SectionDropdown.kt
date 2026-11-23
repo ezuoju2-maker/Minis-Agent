@@ -27,21 +27,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 
-/**
- * Dropdown selector for use inside a [SectionCard]. Visual twin of
- * [SectionTextField] — same card color/shape, same row min-height
- * (44dp), same horizontal glyph inset (16dp). Trailing icon is
- * always Icons.Default.ArrowDropDown to signal the menu affordance.
- *
- * [items] is the list of selectable values; [itemLabel] maps each
- * value to its menu/textfield display string. The current selection
- * is shown read-only in the field; tapping anywhere on the field
- * toggles the menu.
- *
- * Callers must NOT add their own `Modifier.padding(horizontal=16.dp)` — the
- * dropdown draws itself with [SectionDesign.RowHorizontalPadding] inside
- * its own card surface (matches iOS form-cell behaviour).
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun <T> SectionDropdown(

@@ -11,19 +11,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/**
- * T283: Java/Kotlin crash → file. Writes a single text report into
- * `filesDir/logs/` using the same `.log` extension that
- * [com.openminis.app.logging.AppLogger.listLogFiles] already filters
- * for, so reports surface in LogManagementScreen without needing a
- * separate crash-files screen.
- *
- * Service-loader registered via
- * `META-INF/services/org.acra.sender.ReportSenderFactory`.
- *
- * No network. No HTTP sender. No external dependencies beyond
- * `acra-core`.
- */
 class CrashFileSender : ReportSender {
 
     override fun send(context: Context, errorContent: CrashReportData) {
@@ -54,17 +41,10 @@ class CrashFileSender : ReportSender {
     }
 
     companion object {
-        // Match LogManagementScreen's expected naming so the row sorts
-        // alongside the daily minis-YYYY-MM-DD.log files (which AppLogger
-        // sorts by `name` descending — newest first).
         private val STAMP_FMT = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US)
     }
 }
 
-/**
- * Service-loader factory. ACRA discovers and instantiates senders via
- * this factory at crash time on the dedicated `:acra` reporter process.
- */
 class CrashFileSenderFactory : ReportSenderFactory {
     override fun create(context: Context, config: CoreConfiguration): ReportSender =
         CrashFileSender()

@@ -7,12 +7,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-port-sched-completed-copy] After a repeating task's last run the ongoing
- * notification read "任务已完成 / 0 个会话 | 用时 0:01" (Pixel 4a, round 5):
- * nothing is active, present or scheduled any more, so the count is 0. With
- * no session to count, the completed line is the duration alone.
- */
 class CompletedNotificationCopyTest {
 
     @Test

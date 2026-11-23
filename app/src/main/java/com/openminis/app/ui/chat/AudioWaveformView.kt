@@ -14,14 +14,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-/**
- * Horizontal row of animated bars driven by a rolling RMS window.
- *
- * Mirrors iOS `AudioWaveformView.swift`: each bar animates between a small
- * resting height and the container height proportional to its normalized
- * level. The newest sample lands on the right so the waveform reads as a
- * "now" indicator instead of a scrolling history.
- */
 @Composable
 fun AudioWaveformView(
     levels: List<Float>,

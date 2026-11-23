@@ -17,14 +17,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.coroutines.coroutineContext
 
-/**
- * [T-android-restore-cancel-empty-sessions] importChats commits sessions and
- * messages in separate transactions; a Stop during the messages loop rolled
- * the messages back and left the freshly-inserted sessions behind, empty.
- */
 class RestoreCancelEmptySessionsTest {
 
-    /** In-memory stand-in for the sessions/messages tables. */
     private class FakeDb(sessions: Map<String, Int>) {
         val messages = sessions.toMutableMap()
         suspend fun count(id: String): Int = messages[id] ?: 0
@@ -39,7 +33,6 @@ class RestoreCancelEmptySessionsTest {
         )
         assertEquals(listOf("new-empty"), deleted)
         assertTrue("session with messages kept", "new-full" in db.messages)
-        // A pre-existing empty session is never in the id list, so never touched.
         assertTrue("pre-existing empty session kept", "old-empty" in db.messages)
     }
 
@@ -55,11 +48,6 @@ class RestoreCancelEmptySessionsTest {
         assertEquals(listOf("a", "b"), deleted)
     }
 
-    /**
-     * Control-flow port of importChats' cancel path: the cleanup must still run
-     * suspending DAO calls although the job is already cancelled, which only
-     * works under NonCancellable, and the cancellation must still propagate.
-     */
     @Test
     fun `cleanup runs under NonCancellable after Stop and cancellation propagates`() {
         val db = FakeDb(mapOf("s1" to 0, "s2" to 0))
@@ -68,13 +56,12 @@ class RestoreCancelEmptySessionsTest {
             val job = launch(Dispatchers.Default, start = CoroutineStart.LAZY) {
                 val newlyInserted = listOf("s1", "s2")
                 try {
-                    // Messages loop: the user presses Stop.
                     coroutineContext[Job]!!.cancel()
                     coroutineContext.ensureActive()
                 } catch (e: CancellationException) {
                     withContext(NonCancellable) {
                         BackupImporter.deleteEmptySessions(newlyInserted, {
-                            yield() // a real suspending DAO call
+                            yield()
                             db.count(it)
                         }, db::delete)
                     }
@@ -89,7 +76,6 @@ class RestoreCancelEmptySessionsTest {
         assertTrue("both empty new sessions removed", db.messages.isEmpty())
     }
 
-    // -- source guards: the wiring in importChats ------------------------------
 
     private val importer by lazy { ProductionSources.read("backup/BackupImporter.kt") }
     private val chats by lazy {
@@ -99,7 +85,6 @@ class RestoreCancelEmptySessionsTest {
     @Test
     fun `only newly inserted sessions are recorded for cleanup`() {
         assertTrue(chats.contains("if (d.isNew) newlyInsertedSessionIds.add(id)"))
-        // The Stale branch (pre-existing, locally newer) must not record it.
         val stale = chats.substringAfter("is BackupRecordMapper.Decoded.Stale -> {").substringBefore("}")
         assertFalse(stale.contains("newlyInsertedSessionIds"))
     }

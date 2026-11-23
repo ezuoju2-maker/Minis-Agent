@@ -4,10 +4,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * Holds pending deep-link side-effects that outlive a single navigation event.
- * Mirrors iOS DeepLinkCoordinator.
- */
 object DeepLinkCoordinator {
 
     data class EnvVarCreate(val key: String, val value: String, val note: String)
@@ -25,12 +21,6 @@ object DeepLinkCoordinator {
         return current
     }
 
-    /**
-     * Optional `?tab=…` hint from `minis://settings/logs?tab=config-audit`.
-     * The Logs screen reads this on appear to land on the right
-     * segmented-control tab. Cleared by the screen after consumption.
-     * Mirrors iOS DeepLinkCoordinator.pendingLogsTab.
-     */
     private val _pendingLogsTab = MutableStateFlow<String?>(null)
     val pendingLogsTab: StateFlow<String?> = _pendingLogsTab.asStateFlow()
 
@@ -41,11 +31,6 @@ object DeepLinkCoordinator {
         return current
     }
 
-    /**
-     * Pending pinned-shortcut HTML preview: filesystem path + cached title.
-     * MainActivity sets this on `minis://preview/html` deep link; ChatScreen
-     * reads it on first composition and routes into WebPreviewFullscreen.
-     */
     data class HtmlPreview(val sessionId: String, val resourcePath: String, val title: String)
 
     private val _pendingHtmlPreview = MutableStateFlow<HtmlPreview?>(null)
@@ -61,15 +46,6 @@ object DeepLinkCoordinator {
         return current
     }
 
-    /**
-     * App-icon quick-action that a freshly-opened ChatScreen should auto-
-     * trigger on first compose. Mirrors iOS `pendingChatAction` on
-     * AIChatViewModel. Set by [com.openminis.app.MainActivity] /
-     * [com.openminis.app.ui.navigation.AppNavigation] when the launch
-     * intent carries `minis://action/voice_chat` or
-     * `minis://action/camera_chat`; consumed exactly once by ChatScreen
-     * so re-entering the same chat later doesn't fire the action again.
-     */
     enum class ChatAction { START_VOICE, OPEN_CAMERA }
 
     private val _pendingChatAction = MutableStateFlow<ChatAction?>(null)

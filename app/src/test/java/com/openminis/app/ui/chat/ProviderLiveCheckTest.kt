@@ -6,11 +6,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [ISS-036, T-provider-live-check] A running task stops using a provider that
- * was removed or disabled - checked before every request (port of iOS
- * a45ef439b).
- */
 class ProviderLiveCheckTest {
 
     private val src = ProductionSources.read("ui/chat/ChatViewModel.kt")

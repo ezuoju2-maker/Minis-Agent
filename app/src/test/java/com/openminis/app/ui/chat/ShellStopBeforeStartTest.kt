@@ -11,20 +11,12 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [FIX-261025-05] A tester reported that a shell call waiting on a countdown
- * could not be stopped. "Stop Current Tool Only" and the tool pill's Stop do
- * not cancel a shell call - they kill its process group - so anything the
- * call did before its process existed (a `delay` countdown, the process
- * queue, a bash install) ignored the Stop and the command ran afterwards.
- */
 class ShellStopBeforeStartTest {
 
     @Test fun `a non-cancellable call can see its interrupt while it is still waiting`() = runBlocking {
         val tools = ForegroundToolInterrupts()
         var waitedTicks = 0
         suspend fun countdown(): String {
-            // The delay countdown: one check per tick.
             repeat(1_000) {
                 if (tools.isInterrupted("s1")) return "stopped during the countdown"
                 waitedTicks++

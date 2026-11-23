@@ -5,18 +5,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-android-trimmemory-vmstore] `trimToCapacity` is a soft, count-based LRU
- * that only runs when a NEW session is added, and only ever trims down to
- * MAX_CACHED_SESSIONS. Neither condition is met when memory pressure comes
- * from outside this cache: a user sitting on four legitimately-cached heavy
- * sessions could not give any of them back no matter how low the device got.
- *
- * `handleMemoryPressure()` is that missing path, driven by `onTrimMemory`.
- * These pin down the two things that make it safe, plus the level selection —
- * same source-fact approach as [ChatViewModelStoreEvictionTest], because the
- * store is an Android-runtime object this JVM test cannot instantiate.
- */
 class ChatViewModelStoreTrimMemoryTest {
 
     private fun source(path: String): String {
@@ -45,9 +33,6 @@ class ChatViewModelStoreTrimMemoryTest {
     fun `a running agent loop is never released`() {
         val body = storeSrc.substringAfter("fun handleMemoryPressure()")
             .substringBefore("\n    /**")
-        // [T-android-vm-evict-busy] The busy set is computed once, in
-        // busyKeys(), shared with trimToCapacity; it still consults the
-        // tracker and additionally asks each view model.
         assertTrue(
             "must take its busy set from busyKeys()",
             body.contains("val busy = busyKeys()"),
@@ -87,13 +72,6 @@ class ChatViewModelStoreTrimMemoryTest {
         )
     }
 
-    /**
-     * The trim constants are NOT a severity ladder: UI_HIDDEN (20) is
-     * numerically greater than RUNNING_CRITICAL (15) but only means "the UI
-     * went away", which happens on every home-button press. A `level >=`
-     * comparison would therefore drop every cached session on a routine app
-     * switch — slow to come back, for no memory reason.
-     */
     @Test
     fun `level selection does not use a greater-than comparison`() {
         val block = appSrc.substringAfter("val dropCachedSessions")

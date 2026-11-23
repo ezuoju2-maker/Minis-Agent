@@ -16,15 +16,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-global-shell-throttle] + [T-android-shell-process-budget]
- * Agent commands are admitted while the app's live child-process count stays
- * within PROCESS_BUDGET; the rest queue without losing their own timeout, a
- * start failure re-queues, and a queued command's result carries a note.
- */
 class GlobalShellThrottleTest {
 
-    /** Models /proc: running commands add to [live]; [baseline] is anything else. */
     private val live = AtomicInteger(0)
     private val baseline = AtomicInteger(0)
 
@@ -83,7 +76,6 @@ class GlobalShellThrottleTest {
                 }
             }
         }.awaitAll()
-        // 10 + 3 = 13; a second needs 13 + 4 <= 16, which it does not get.
         assertEquals(3, peak.get())
         baseline.set(0)
         assertIdle()
@@ -102,8 +94,6 @@ class GlobalShellThrottleTest {
     @Test
     fun `a command that has not spawned yet is still charged, so a burst cannot overshoot`() = runTest {
         useFakes(); assertIdle()
-        // Nothing ever shows up in /proc: without the reservation all ten
-        // would be admitted at once.
         val active = AtomicInteger(0)
         val peak = AtomicInteger(0)
         (1..10).map {
@@ -125,7 +115,6 @@ class GlobalShellThrottleTest {
         val holders = (1..4).map { launch { GlobalShellThrottle.run("hold$it") { live.addAndGet(4); release.await(); live.addAndGet(-4) } } }
         testScheduler.advanceTimeBy(100)
         assertEquals(4, GlobalShellThrottle.runningCount)
-        // The late command's own run is timed inside block; queueing is not.
         val late = async { GlobalShellThrottle.run("late") { testScheduler.currentTime } }
         testScheduler.advanceTimeBy(30_000)
         release.complete(Unit)
@@ -215,15 +204,15 @@ class GlobalShellThrottleTest {
         val proc = kotlin.io.path.createTempDirectory("proc").toFile()
         fun p(pid: Int, ppid: Int, comm: String = "x") =
             File(proc, "$pid").apply { mkdirs(); File(this, "stat").writeText("$pid ($comm) S $ppid 1 1 0 -1\n") }
-        p(100, 1)                       // the app
-        p(200, 100, "libproot.so")      // a command...
+        p(100, 1)
+        p(200, 100, "libproot.so")
         p(201, 200, "sh")
-        p(202, 201, "sleep (1) x")      // comm with spaces and parens
-        p(300, 100, "libproot.so")      // a leftover daemon
-        p(400, 1, "other app")          // not ours
+        p(202, 201, "sleep (1) x")
+        p(300, 100, "libproot.so")
+        p(400, 1, "other app")
         p(401, 400)
-        File(proc, "self").mkdirs()     // non-numeric entries are skipped
-        File(proc, "500").mkdirs()      // unreadable stat: skipped
+        File(proc, "self").mkdirs()
+        File(proc, "500").mkdirs()
         assertEquals(4, GlobalShellThrottle.countDescendants(proc, 100))
         proc.deleteRecursively()
     }

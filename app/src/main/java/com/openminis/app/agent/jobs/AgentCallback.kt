@@ -1,50 +1,18 @@
 package com.openminis.app.agent.jobs
 
-// [T-p2-agent-callback] Wire format for the messages an agent injects into
-// its parent conversation: the completion report and mid-run progress
-// reports. Byte-compatible with iOS AgentCallback.swift — both clients feed
-// the same models, so the envelope must read identically. They travel as
-// USER messages (every provider accepts those) wrapped in one fixed XML
-// element so that the model can tell a system-injected callback from a
-// human message, and the UI can render it as a callback card.
-//
-//   <agent_callback kind="finished" job="…" session="…" title="…"
-//                   status="done" model="primary" elapsed="1m02s">
-//   <summary>tools browser_use×2 · turns 4 · tokens in 12k / out 2k</summary>
-//   <result>
-//   …the agent's final answer…
-//   </result>
-//   </agent_callback>
-//
-// Progress reports use kind="progress", carry tool/activity/turn attributes
-// and a <last_message> element instead of <result>.
 data class AgentCallback(
     val kind: Kind,
     val jobId: String,
     val childSessionId: String?,
     val title: String,
-    /** running · done · cancelled · timeout · failed · rejected */
     val status: String,
     val tier: String? = null,
     val elapsed: String? = null,
     val tool: String? = null,
     val activity: String? = null,
     val turn: Int? = null,
-    /**
-     * [T-sub-agents-v1] Which named sub agent produced this. Omitted for the
-     * built-in — there is nothing to disambiguate.
-     */
     val agentName: String? = null,
     val summary: String? = null,
-    /**
-     * [T-sub-agents-sibling-status] One line about the OTHER sub agents of this
-     * conversation, on completion AND progress alike.
-     *
-     * The parent sees one result at a time and nothing else tells it whether
-     * the rest of a batch is still coming, already lost, or never started — so
-     * a model that fanned out three delegations and received one can quite
-     * reasonably summarise as if it had them all.
-     */
     val siblings: String? = null,
     val body: String,
 ) {
@@ -57,7 +25,6 @@ data class AgentCallback(
             attrs += "title" to title
             attrs += "status" to status
             if (!tier.isNullOrEmpty()) attrs += "model" to tier
-            // [T-sub-agents-v1] Position matches iOS: model, agent, elapsed…
             if (!agentName.isNullOrEmpty()) attrs += "agent" to agentName
             if (!elapsed.isNullOrEmpty()) attrs += "elapsed" to elapsed
             if (!tool.isNullOrEmpty()) attrs += "tool" to tool
@@ -75,7 +42,6 @@ data class AgentCallback(
             return lines.joinToString("\n")
         }
 
-    /** Elapsed "1m02s" / "45s" → seconds. */
     val elapsedSeconds: Int?
         get() {
             val e = elapsed ?: return null
@@ -90,18 +56,12 @@ data class AgentCallback(
     companion object {
         const val TAG = "agent_callback"
 
-        /** Cheap prefix test used on every render / preview pass. */
         fun isCallbackText(text: String): Boolean =
             text.startsWith("<$TAG ") || text.startsWith("<$TAG>")
 
         fun parse(text: String): AgentCallback? {
             if (!isCallbackText(text)) return null
             val openEnd = text.indexOf('>').takeIf { it >= 0 } ?: return null
-            // `<agent_callback>` with no attributes is accepted by
-            // isCallbackText, and for it the attribute span is EMPTY — start
-            // (TAG.length + 1) lands one past `openEnd`. Substring would throw
-            // on a message a user could simply type, taking the renderer with
-            // it, so the span is clamped instead.
             val attrStart = (TAG.length + 1).coerceAtMost(openEnd)
             val attrs = parseAttributes(text.substring(attrStart, openEnd))
             val kind = when (attrs["kind"]) {
@@ -166,15 +126,9 @@ data class AgentCallback(
     }
 }
 
-/**
- * Localized nouns for [AgentCallback] previews (session list, notifications).
- * Installed once by MinisApp from resources so the data layer never touches a
- * Context. Defaults are the English words.
- */
 object AgentCallbackLabels {
     @Volatile var result: String = "Agent result"
     @Volatile var progress: String = "Agent progress"
-    /** [T-preview-scheduled-tag-leak] Noun for a scheduled fire's preview line. */
     @Volatile var scheduled: String = "Scheduled task"
     @Volatile var status: Map<String, String> = emptyMap()
 
@@ -195,7 +149,6 @@ object AgentCallbackLabels {
 
     fun localizedStatus(s: String): String = status[s] ?: s
 
-    /** One-line stand-in for session previews, where the raw XML would be noise. */
     fun previewLine(cb: AgentCallback): String =
         "${if (cb.kind == AgentCallback.Kind.FINISHED) result else progress} · ${cb.title} · ${localizedStatus(cb.status)}"
 }

@@ -49,52 +49,23 @@ import com.openminis.app.ui.components.MinisTextButton
 import com.openminis.app.ui.settings.SettingsScaffold
 import com.openminis.app.ui.settings.SettingsSection
 
-/**
- * [T-android-backup-history-detail] One backup run, on its own screen.
- *
- * Mirrors iOS `BackupHistoryDetailView`: Summary (status / started / duration /
- * size / encrypted / file / files-excluded, with the included categories as the
- * section footer), then Destinations, then the timestamped log.
- *
- * This replaces an AlertDialog. A dialog was the wrong container: the log alone
- * runs to dozens of lines, the package name wraps to two, and a modal that
- * needs its own scroll region is a screen wearing a dialog's clothes. It also
- * had nowhere to put the delete action except a button competing with the
- * dismiss button.
- */
 @Composable
 fun BackupHistoryDetailScreen(
     record: BackupHistory.Record,
     onBack: () -> Unit,
     onRemove: () -> Unit,
-    /**
-     * [T-android-backup-delete-files-feedback] Deletes the package from every
-     * destination, then the record. SUSPENDS until that finishes and returns
-     * the outcome, so this screen can stay up, show progress and report what
-     * happened. A fire-and-forget callback could not: the caller popped the
-     * screen immediately, which cancelled the work.
-     */
     onRemoveWithFiles: (suspend () -> BackupViewModel.DeleteWithFilesResult)? = null,
-    /** Leave the screen once the record is actually gone. */
     onRemoved: () -> Unit = {},
     onOpenSkipped: () -> Unit = {},
     onOpenDestination: ((String) -> Unit)? = null,
 ) {
     var confirmRemove by remember { mutableStateOf(false) }
     var showAllLog by remember(record.id) { mutableStateOf(false) }
-    // [T-android-backup-delete-files-feedback] The destructive branch is a
-    // SECOND, explicit confirmation naming the package and the destination
-    // count — the first sheet only asks which KIND of delete, and agreeing to
-    // "record and files" there is not the same as agreeing to destroy a named
-    // package on N servers.
     var confirmDeleteFiles by remember { mutableStateOf(false) }
     var deletingFiles by remember { mutableStateOf(false) }
     var deleteFailure by remember { mutableStateOf<List<String>?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    // [T-backup-delete-files-too] Offering to delete the packages too only
-    // makes sense when we can name the file AND some destination actually
-    // received it.
     val canDeleteFiles = onRemoveWithFiles != null &&
         !record.packageName.isNullOrEmpty() &&
         record.destinations.any { it.succeeded }
@@ -112,17 +83,10 @@ fun BackupHistoryDetailScreen(
             }
         },
     ) {
-        // -- Summary --
         SettingsSection(
             header = stringResource(R.string.backup_history_summary),
-            // iOS puts the category list here rather than in a row: it is a
-            // sentence, not a value, and as a row it wrapped to three lines
-            // against a one-word label.
             footer = record.categories
                 .takeIf { it.isNotEmpty() }
-                // Records store the wire key ("chats"); show the localized
-                // label, falling back to the key for a category this build
-                // no longer knows about.
                 ?.mapNotNull { key ->
                     BackupCategory.fromKey(key)?.let { stringResource(categoryNameRes(it)) } ?: key
                 }
@@ -158,9 +122,6 @@ fun BackupHistoryDetailScreen(
                 DetailRow(label = stringResource(R.string.backup_history_file), value = it)
             }
             if (record.skippedFiles > 0) {
-                // Tappable when the list is available: a bare count answers
-                // "how many" but never "which ones", which is the real
-                // question. Records written before the list existed stay plain.
                 DetailRow(
                     label = stringResource(R.string.backup_history_excluded),
                     value = stringResource(R.string.backup_history_file_count, record.skippedFiles),
@@ -168,7 +129,6 @@ fun BackupHistoryDetailScreen(
                     showDivider = record.errorMessage != null,
                 )
             }
-            // Why it failed, in the summary rather than only buried in the log.
             record.errorMessage
                 ?.takeIf { it != BackupHistory.INTERRUPTED_MARKER }
                 ?.let {
@@ -181,23 +141,18 @@ fun BackupHistoryDetailScreen(
                 }
         }
 
-        // -- Destinations --
         if (record.destinations.isNotEmpty()) {
             SettingsSection(header = stringResource(R.string.backup_history_destinations)) {
                 record.destinations.forEachIndexed { i, d ->
                     DestinationOutcomeRow(
                         outcome = d,
                         showDivider = i < record.destinations.lastIndex,
-                        // Only when the saved destination still exists — a row
-                        // for a server the user has since removed has nowhere
-                        // to go.
                         onClick = onOpenDestination?.let { open -> { open(d.name) } },
                     )
                 }
             }
         }
 
-        // -- Log --
         SettingsSection(header = stringResource(R.string.backup_history_log)) {
             if (record.log.isEmpty()) {
                 Text(
@@ -207,13 +162,7 @@ fun BackupHistoryDetailScreen(
                     modifier = Modifier.fillMaxWidth().padding(14.dp),
                 )
             } else {
-                // Newest first: the last thing that happened is what the user
-                // opened this screen to read.
                 val entries = record.log.asReversed()
-                // [T-android-backup-log-fold] Only the newest lines are
-                // composed: this section is part of a non-lazy scrolling
-                // Column, and 16,827 lines froze the main thread for 32-70 s.
-                // The rest costs that once, when the user asks for it.
                 val shown = if (showAllLog) entries else entries.take(LOG_COLLAPSED_COUNT)
                 val folded = entries.size - shown.size
                 shown.forEachIndexed { i, e ->
@@ -240,9 +189,6 @@ fun BackupHistoryDetailScreen(
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
             title = { Text(stringResource(R.string.backup_history_remove_title)) },
-            // Spell out the difference. Removing a record looks like it could
-            // delete the backup it describes; when both options are on offer,
-            // which one destroys data has to be unambiguous.
             text = {
                 Text(
                     stringResource(
@@ -282,8 +228,6 @@ fun BackupHistoryDetailScreen(
         )
     }
 
-    // [T-android-backup-delete-files-feedback] Second confirmation, naming the
-    // package and how many destinations lose it.
     if (confirmDeleteFiles) {
         val destCount = record.destinations.count { it.succeeded }
         AlertDialog(
@@ -323,9 +267,6 @@ fun BackupHistoryDetailScreen(
                                     onRemoved()
                                 }
                                 is BackupViewModel.DeleteWithFilesResult.Failed -> {
-                                    // Stay on the screen: the record is still
-                                    // there, and it is the only thing naming
-                                    // the file left behind on the remote.
                                     deleteFailure = result.failures
                                 }
                             }
@@ -346,8 +287,6 @@ fun BackupHistoryDetailScreen(
         )
     }
 
-    // Progress. Non-dismissible on purpose — rclone is mid-delete, and a
-    // second tap must not start a second run.
     if (deletingFiles) {
         AlertDialog(
             onDismissRequest = { },
@@ -363,7 +302,6 @@ fun BackupHistoryDetailScreen(
         )
     }
 
-    // Failure, with the per-destination reason. Never silent.
     deleteFailure?.let { failures ->
         AlertDialog(
             onDismissRequest = { deleteFailure = null },
@@ -385,7 +323,6 @@ fun BackupHistoryDetailScreen(
     }
 }
 
-/** Label on the left, value on the right — the peer of iOS `LabeledContent`. */
 @Composable
 private fun DetailRow(
     label: String,
@@ -408,9 +345,6 @@ private fun DetailRow(
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                 when {
                     content != null -> content()
-                    // The package name is long enough to need two lines; every
-                    // other value is short. Right-aligned so both read as one
-                    // trailing column.
                     value != null -> Text(
                         value,
                         style = MaterialTheme.typography.bodyMedium,
@@ -433,7 +367,6 @@ private fun DetailRow(
     }
 }
 
-/** Status glyph + word, tinted by outcome. */
 @Composable
 private fun StatusValue(status: BackupHistory.Status) {
     val (icon, tint, textRes) = when (status) {
@@ -457,7 +390,6 @@ private fun StatusValue(status: BackupHistory.Status) {
     }
 }
 
-/** One destination's outcome: a tick or a cross, the name, and the reason. */
 @Composable
 private fun DestinationOutcomeRow(
     outcome: BackupHistory.DestinationOutcome,
@@ -482,9 +414,6 @@ private fun DestinationOutcomeRow(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(outcome.name, style = MaterialTheme.typography.bodyLarge)
-                // The saved name alone ("HomeLab") does not say WHERE the file
-                // went. Backend + folder underneath, so someone opening a
-                // months-old record can find the package by hand.
                 destinationSubtitle(outcome)?.let {
                     Text(
                         it,
@@ -516,10 +445,8 @@ private fun DestinationOutcomeRow(
     }
 }
 
-/** Log lines composed before "Show all" — like the history list's 10 records. */
 internal const val LOG_COLLAPSED_COUNT = 100
 
-/** One log line: time on the left, message on the right (iOS's log section). */
 @Composable
 private fun LogRow(entry: BackupHistory.LogEntry, showDivider: Boolean) {
     Column {
@@ -533,8 +460,6 @@ private fun LogRow(entry: BackupHistory.LogEntry, showDivider: Boolean) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                // [T-android-backup-log-sanitize] A cleaned record keeps one
-                // note for the lines it folded away; shown in the UI language.
                 com.openminis.app.backup.BackupLogRules.omittedCount(entry)
                     ?.let { stringResource(R.string.backup_history_log_omitted, it) }
                     ?: entry.message,
@@ -556,13 +481,6 @@ private fun RowDivider(inset: androidx.compose.ui.unit.Dp) {
     )
 }
 
-/**
- * "SMB · /backups" — backend tag and folder, uppercased because the stored
- * kind is a lower-case rclone type and reads as noise that way.
- *
- * Returns null when a record predates these fields, so old rows render exactly
- * as they did before rather than showing an empty caption.
- */
 private fun destinationSubtitle(d: BackupHistory.DestinationOutcome): String? {
     val kind = d.kind?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
     val path = d.path?.trim()?.takeIf { it.isNotEmpty() }
@@ -573,13 +491,11 @@ private fun destinationSubtitle(d: BackupHistory.DestinationOutcome): String? {
     }
 }
 
-/** "3m 53s" / "45s" — matches iOS's durationText. */
 internal fun durationText(millis: Long): String {
     val total = millis / 1000
     return if (total < 60) "${total}s" else "${total / 60}m ${total % 60}s"
 }
 
-/** Local time-of-day for a log line. */
 internal fun formatTimeOnly(millis: Long): String =
     java.text.DateFormat.getTimeInstance(java.text.DateFormat.MEDIUM)
         .format(java.util.Date(millis))

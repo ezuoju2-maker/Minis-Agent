@@ -61,25 +61,12 @@ import com.openminis.app.ui.components.MinisButton
 import com.openminis.app.ui.components.MinisTextButton
 import com.openminis.app.i18n.uppercaseForDisplay
 
-/**
- * Settings section that talks to [UpdateChecker] to surface a "Check for
- * Updates" affordance. Drop in anywhere — typically the bottom of an About
- * screen — and it owns its own state, dialogs, and download UI.
- *
- * The section is no-op visible: a button + transient status text. When an
- * update is found we open a modal AlertDialog showing the changelog and a
- * Download button; the dialog stays open through the download so the user
- * can watch progress.
- */
 @Composable
 fun CheckUpdateSection() {
-    // [T-update-channels] Both distributions ship self-update today; the flag
-    // exists so a store build can drop it without touching this code.
     if (!BuildConfig.SELF_UPDATE) return
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     remember { UpdateStateStore.init(context) }
-    // One shared badge state; the store computes it locally from the cache.
     val hasBadge by UpdateStateStore.hasUpdateBadge.collectAsState()
     val channel by UpdateStateStore.channel.collectAsState()
     val autoEnabled by UpdateStateStore.autoEnabled.collectAsState()
@@ -88,31 +75,12 @@ fun CheckUpdateSection() {
 
     var checking by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
-    // When the GitHub API returns 403 / 451 we surface a dedicated row with a
-    // tappable "Open GitHub Releases" link beneath the row, so users behind a
-    // geo-block know what to do without hunting for the URL themselves.
     var showReleasesLink by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<UpdateChecker.CheckResult.UpdateAvailable?>(null) }
     var downloadProgress by remember { mutableStateOf<Float?>(null) }
     var downloadError by remember { mutableStateOf<String?>(null) }
     var awaitingInstallPerm by remember { mutableStateOf(false) }
 
-    // Resume the install flow on every ON_RESUME. There are two cases:
-    //
-    //  1. Composable state survived — `update` and `awaitingInstallPerm` are
-    //     still set. We just need to flip awaitingInstallPerm off (so the
-    //     dialog stops showing the "permission required" message) and, if a
-    //     persisted APK is intact, fire the installer directly.
-    //
-    //  2. Activity recreate happened — every `remember{}` slot above is back
-    //     to its default. The only thing that knows we were mid-flow is
-    //     PendingUpdateStore. We rehydrate by calling resumablePendingFile()
-    //     and, when permission is granted, fire the installer. We do NOT
-    //     re-open the update dialog in this case because there's no
-    //     CheckResult to populate it; the install intent is enough.
-    //
-    // Either way: if permission is still denied we leave the pending record
-    // alone so the next resume can pick it up.
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -122,8 +90,6 @@ fun CheckUpdateSection() {
             val pendingFile = UpdateChecker.resumablePendingFile(context) ?: return@LifecycleEventObserver
             val launched = UpdateChecker.installApk(context, pendingFile)
             if (launched) {
-                // Dismiss any leftover dialog state; the system installer is
-                // now in charge.
                 update = null
                 downloadProgress = null
                 downloadError = null
@@ -147,7 +113,6 @@ fun CheckUpdateSection() {
                 else R.string.check_update_check_button
             ),
             subtitle = statusMessage,
-            // [T-update-channels] The About page's own badge layer.
             trailing = if (hasBadge && !checking) ({ UpdateBadgeDot() }) else null,
             onClick = if (checking) null else {
                 {
@@ -155,7 +120,6 @@ fun CheckUpdateSection() {
                     statusMessage = null
                     showReleasesLink = false
                     scope.launch {
-                        // Manual: bypasses the throttle, writes the same cache.
                         when (val r = UpdateChecker.check(context)) {
                             is UpdateChecker.CheckResult.UpdateAvailable -> {
                                 update = r
@@ -181,7 +145,6 @@ fun CheckUpdateSection() {
                 }
             },
         )
-        // [T-update-channels] Channel: stable (default) or beta (asks first).
         SettingsRow(
             icon = Icons.Outlined.Science,
             iconColor = Color(0xFFFF9500),
@@ -192,8 +155,6 @@ fun CheckUpdateSection() {
             showDivider = BuildConfig.AUTO_UPDATE_CHECK,
             onClick = { showChannelPicker = true },
         )
-        // Automatic checks: a github-build setting; a store build never checks
-        // on its own, so it has nothing to switch.
         if (BuildConfig.AUTO_UPDATE_CHECK) {
             SettingsSwitchRow(
                 icon = Icons.Outlined.Autorenew,
@@ -202,7 +163,6 @@ fun CheckUpdateSection() {
                 checked = autoEnabled,
                 onCheckedChange = { on ->
                     UpdateStateStore.setAutoEnabled(context, on)
-                    // Off -> on: check now if the cache has expired.
                     if (on) UpdateAutoChecker.maybeCheck(context, "switch-on")
                 },
                 showDivider = false,
@@ -271,7 +231,6 @@ fun CheckUpdateSection() {
             confirmButton = {
                 MinisButton(onClick = {
                     confirmBeta = false
-                    // Clears the cache; the check below then runs at once.
                     UpdateStateStore.setChannel(context, UpdatePolicy.Channel.BETA)
                     UpdateAutoChecker.maybeCheck(context, "channel")
                 }) { Text(stringResource(R.string.update_channel_beta_confirm)) }
@@ -289,7 +248,6 @@ fun CheckUpdateSection() {
             downloadError = downloadError,
             needsInstallPerm = awaitingInstallPerm,
             onSkip = {
-                // "Skip this version": no badge for this build again.
                 UpdateStateStore.skip(context, u.versionCode)
                 update = null
             },
@@ -305,7 +263,6 @@ fun CheckUpdateSection() {
             onDownload = {
                 downloadError = null
                 downloadProgress = 0f
-                // A download clears the badge for this build; "Later" does not.
                 UpdateStateStore.markDownloaded(context, u.versionCode)
                 scope.launch {
                     val result = UpdateChecker.download(
@@ -318,8 +275,6 @@ fun CheckUpdateSection() {
                     when (result) {
                         is UpdateChecker.DownloadResult.Success -> {
                             downloadProgress = null
-                            // [T-update-channels] The archive itself must be this
-                            // app and a newer build, whatever its name said.
                             if (UpdateChecker.archiveRefusal(context, result.file) != null) {
                                 downloadError = context.getString(R.string.check_update_package_invalid)
                                 result.file.delete()
@@ -372,7 +327,6 @@ private fun UpdateDialog(
             Column {
                 Text(stringResource(R.string.check_update_available_title))
                 Text(
-                    // [T-update-channels] "1.15 (build 29) → 1.16 (build 32)"
                     stringResource(
                         R.string.check_update_available_subtitle,
                         UpdatePolicy.displayVersion(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
@@ -432,12 +386,6 @@ private fun UpdateDialog(
                 }
             }
         },
-        // [T-dialog-buttons] All three actions in ONE row we lay out ourselves:
-        // M3's button area is a flow row that wrapped "Download & Install" onto
-        // its own line on a Pixel 4a (~276dp of buttons in ~274dp). Skip and
-        // Later on the left, the filled primary on the right; when a language
-        // is too long for one row it wraps with the primary last, bottom-right,
-        // never truncated (UpdateDialogButtonRow).
         confirmButton = {
             val compactText = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
             UpdateDialogButtonRow(
@@ -446,7 +394,6 @@ private fun UpdateDialog(
                         Text(stringResource(R.string.check_update_skip_version), textAlign = TextAlign.Center)
                     }
                 },
-                // "Later" keeps the badge.
                 later = {
                     MinisTextButton(onClick = onDismiss, enabled = downloadProgress == null, contentPadding = compactText) {
                         Text(stringResource(R.string.check_update_later), textAlign = TextAlign.Center)
@@ -459,8 +406,6 @@ private fun UpdateDialog(
                             Text(stringResource(R.string.check_update_open_install_settings), textAlign = TextAlign.Center)
                         }
                     } else if (!BuildConfig.IN_APP_INSTALL) {
-                        // [T-update-channels] A build that may not install APKs itself
-                        // (a future Play build) only points at the release.
                         MinisButton(onClick = onOpenRelease, contentPadding = compact) {
                             Text(stringResource(R.string.check_update_open_release), textAlign = TextAlign.Center)
                         }
@@ -493,7 +438,6 @@ private fun UpdateDialog(
     )
 }
 
-/** [T-update-channels] The small, numberless update badge every layer shows. */
 @Composable
 internal fun UpdateBadgeDot() {
     Badge()
@@ -546,15 +490,6 @@ private fun ChannelPickerDialog(
     )
 }
 
-/**
- * [T-dialog-buttons] The update dialog's action row: [skip] and [later] on the
- * left, [primary] on the right, all in one row when they fit the dialog's
- * width. Otherwise it wraps, end-aligned like M3's own button area: the two
- * text buttons on a line above (each on its own line if even they don't fit
- * side by side) and [primary] always last, bottom-right. Every child is
- * measured with the full width as its limit, so a long label wraps inside
- * its button instead of being cut off or pushed out of the dialog.
- */
 @Composable
 internal fun UpdateDialogButtonRow(
     skip: @Composable () -> Unit,
@@ -582,7 +517,6 @@ internal fun UpdateDialogButtonRow(
             lines.forEachIndexed { li, line ->
                 val h = lineHeights[li]
                 if (plan.singleRow) {
-                    // Secondaries from the start, primary at the end.
                     var x = 0
                     for (i in line.dropLast(1)) {
                         val p = placeables[i]
@@ -592,7 +526,6 @@ internal fun UpdateDialogButtonRow(
                     val p = placeables[line.last()]
                     p.placeRelative(width - p.width, y + (h - p.height) / 2)
                 } else {
-                    // End-aligned, in order.
                     val total = line.sumOf { placeables[it].width } + gap * (line.size - 1)
                     var x = width - total
                     for (i in line) {
@@ -607,11 +540,6 @@ internal fun UpdateDialogButtonRow(
     }
 }
 
-/**
- * [T-dialog-buttons] Pure line breaking of the update dialog's buttons, so the
- * rule is testable on the JVM. [natural] = intrinsic widths of skip, later,
- * primary; indices into it per line.
- */
 internal data class UpdateDialogButtonPlan(val singleRow: Boolean, val lines: List<List<Int>>) {
     companion object {
         fun of(natural: List<Int>, width: Int, gap: Int): UpdateDialogButtonPlan {

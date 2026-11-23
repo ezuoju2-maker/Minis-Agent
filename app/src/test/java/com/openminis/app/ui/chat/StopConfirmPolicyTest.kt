@@ -7,14 +7,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-stop-confirm] The composer's stop button asks "Stop this task?" first
- * (Settings > Appearance > Confirm Before Stopping, default ON); nothing else
- * that stops a task asks.
- */
 class StopConfirmPolicyTest {
 
-    // ── decision ──────────────────────────────────────────────────────
 
     @Test
     fun `with the setting on a tap asks first`() {
@@ -28,20 +22,17 @@ class StopConfirmPolicyTest {
 
     @Test
     fun `background work asks what to stop, setting on or off`() {
-        // [T-stop-choice] Sub agents or scheduled tasks: "Stop Current Tool Only / Stop All".
         assertEquals(TapAction.CHOOSE_SCOPE, StopConfirmPolicy.onTap(hasBackground = true, confirmEnabled = true))
         assertEquals(TapAction.CHOOSE_SCOPE, StopConfirmPolicy.onTap(hasBackground = true, confirmEnabled = false))
     }
 
     @Test
     fun `default is on, under the same key as iOS`() {
-        // [T-stop-mode-longpress] Default OFF: the stop button stops at once.
         assertFalse(StopConfirmPolicy.DEFAULT_ENABLED)
         assertEquals(TapAction.STOP_NOW, StopConfirmPolicy.onTap(hasBackground = false, confirmEnabled = StopConfirmPolicy.DEFAULT_ENABLED))
         assertEquals("chat.confirmBeforeStopping", StopConfirmPolicy.SETTINGS_KEY)
     }
 
-    // ── the dialog only stops the task it was opened for ──────────────
 
     @Test
     fun `stop applies while the same turn is still running`() {
@@ -66,7 +57,6 @@ class StopConfirmPolicyTest {
             StopConfirmPolicy.confirmStillApplies(turnAtOpen = null, turnNow = 3, isBusy = true))
     }
 
-    // ── wiring ────────────────────────────────────────────────────────
 
     private val screen = ProductionSources.read("ui/chat/ChatScreen.kt")
 
@@ -80,8 +70,6 @@ class StopConfirmPolicyTest {
         assertTrue(stopBlock.contains("StopConfirmPolicy.confirmStillApplies(confirmStopTurn, viewModel.liveTurnToken(), sessionBusy)"))
         assertTrue("Keep Running is the dismiss button", stopBlock.contains("dismissText = stringResource(R.string.chat_stop_confirm_keep_running)"))
         assertTrue(stopBlock.contains("isDestructive = true"))
-        // The dialog lives inside the stop button's block: when the task ends
-        // the button (and with it the dialog) leaves composition.
         assertTrue(stopBlock.contains("if (confirmStop) {"))
     }
 

@@ -11,10 +11,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-sub-agents-steer] / [T-sub-agents-resume] Course-correcting a running sub
- * agent, and restarting one the app lost.
- */
 class SubAgentSteerResumeTest {
 
     private fun newJob(parent: String = "p1") = AgentJobRegistry.register(
@@ -26,7 +22,6 @@ class SubAgentSteerResumeTest {
         agentName = "Researcher",
     )
 
-    // ── Steer ───────────────────────────────────────────────────────────────
 
     @Test
     fun `a steer reaches the child through its hook`() {
@@ -41,8 +36,6 @@ class SubAgentSteerResumeTest {
 
     @Test
     fun `steering a job with no hook fails rather than pretending`() {
-        // The parent must learn its correction did not land; silently
-        // succeeding would let it assume the sub agent changed course.
         val job = newJob()
         assertFalse(AgentJobRegistry.steer(job.id, "too late"))
         AgentJobRegistry.finish(job.id, AgentJobState.DONE, null)
@@ -63,8 +56,6 @@ class SubAgentSteerResumeTest {
 
     @Test
     fun `steers the child never read are recorded when the job closes`() {
-        // The parent believes the correction landed, so a steer that arrived
-        // after the last turn has to be reported rather than dropped.
         val job = newJob()
         AgentJobRegistry.registerSteerHook(job.id) { true }
         AgentJobRegistry.registerMissedSteerDrain(job.id) { listOf("unread one", "unread two") }
@@ -87,17 +78,12 @@ class SubAgentSteerResumeTest {
         val job = newJob()
         AgentJobRegistry.registerSteerHook(job.id) { true }
         AgentJobRegistry.finish(job.id, AgentJobState.DONE, "r")
-        // A finished job cannot be steered — the hook is gone with it.
         assertFalse(AgentJobRegistry.steer(job.id, "after the fact"))
     }
 
-    // ── Steer at loop end [T-subagent-steer-continues-loop] ────────────────
 
     @Test
     fun `a steer pending when the final answer ends buys one more turn`() {
-        // The reported case: the correction arrived while the child was
-        // writing its answer, the turn had no tool calls, and the loop broke —
-        // leaving the steer to be reported as "never seen".
         assertTrue(HelperRunner.shouldContinueForSteer(isHelper = true, isEmptyTurn = false, turn = 3, turnCap = 20, pendingSteers = 1))
     }
 
@@ -113,8 +99,6 @@ class SubAgentSteerResumeTest {
 
     @Test
     fun `the last permitted round does not continue into the turn-limit error`() {
-        // turn is 0-based: turn 19 of a 20-turn cap is the last one. Another
-        // iteration does not exist; the steer is reported as missed instead.
         assertFalse(HelperRunner.shouldContinueForSteer(isHelper = true, isEmptyTurn = false, turn = 19, turnCap = 20, pendingSteers = 1))
         assertTrue(HelperRunner.shouldContinueForSteer(isHelper = true, isEmptyTurn = false, turn = 18, turnCap = 20, pendingSteers = 1))
     }
@@ -126,8 +110,6 @@ class SubAgentSteerResumeTest {
 
     @Test
     fun `the loop consults the steer queue before its no-tool-call exit`() {
-        // Source guard: the decision above only matters if runAgentLoop asks
-        // it on the path that ends a turn with no tool calls, BEFORE breaking.
         val vm = com.openminis.app.ProductionSources.read("ui/chat/ChatViewModel.kt")
         val loop = vm.substring(vm.indexOf("for (turn in 0 until turnCap)"))
         val check = loop.indexOf("HelperRunner.shouldContinueForSteer(")
@@ -141,14 +123,9 @@ class SubAgentSteerResumeTest {
         )
     }
 
-    // ── Resume ──────────────────────────────────────────────────────────────
 
     @Test
     fun `the resume notice says what survived the restart and what did not`() {
-        // The child's transcript still shows tool results whose side effects
-        // are gone; without this it would keep referring to a closed tab.
-        // Wording is iOS's verbatim, so the child reads the same brief on both
-        // platforms.
         val n = HelperRunner.resumeNotice()
         assertTrue(n.contains("interrupted and has been resumed"))
         assertTrue("files survive", n.contains("Files in the workspace are still there"))

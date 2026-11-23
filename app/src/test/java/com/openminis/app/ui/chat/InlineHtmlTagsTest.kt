@@ -11,16 +11,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-md-inline-html] The chat renderer understands `<br>` and a few inline
- * style tags; every other tag, an unclosed tag, and anything inside code stays
- * literal. Copy as plain text / rich text follow the same rules.
- */
 class InlineHtmlTagsTest {
 
     private fun parse(s: String) = parseInlineForTest(s)
 
-    /** Whether some span with [match] covers exactly [part] of the rendered text. */
     private fun AnnotatedString.styled(part: String, match: (SpanStyle) -> Boolean): Boolean {
         val at = text.indexOf(part)
         return at >= 0 && spanStyles.any { r -> match(r.item) && r.start <= at && r.end >= at + part.length }
@@ -28,7 +22,6 @@ class InlineHtmlTagsTest {
 
     private val bold: (SpanStyle) -> Boolean = { it.fontWeight == FontWeight.Bold }
 
-    // ── <br> ───────────────────────────────────────────────────────────────
 
     @Test
     fun `every br spelling is a line break`() {
@@ -46,7 +39,6 @@ class InlineHtmlTagsTest {
         assertTrue(parse("<b>粗</b>").styled("粗", bold))
     }
 
-    // ── inline styles ────────────────────────────────────────────────────────
 
     @Test
     fun `style tags style their content and drop the tag text`() {
@@ -89,14 +81,12 @@ class InlineHtmlTagsTest {
         assertTrue(a.getStringAnnotations("inline_code", 0, a.length).isNotEmpty())
     }
 
-    // ── what stays literal ─────────────────────────────────────────────────
 
     @Test
     fun `br in code stays as written`() {
         assertTrue(parse("`a<br>b`").text.contains("a<br>b"))
         val fenced = chatSearchMarkdownPieces("```\na<br>b\n```").joinToString("\n") { it.text }
         assertTrue(fenced, fenced.contains("a<br>b"))
-        // A close tag inside a code span does not close the tag outside it.
         assertEquals("<b>x </b> y", parse("<b>x `</b>` y").text.replace("\u2006", ""))
     }
 
@@ -110,7 +100,6 @@ class InlineHtmlTagsTest {
         )) {
             assertEquals(s, s, parse(s).text)
         }
-        // An escaped tag is literal too.
         assertEquals("<b>x</b>", parse("\\<b>x</b>").text)
     }
 
@@ -121,47 +110,36 @@ class InlineHtmlTagsTest {
         assertTrue(a.styled("粗", bold))
     }
 
-    // ── the rest of src/shared/markdown/html-tags.md's table ────────────
 
     @Test
     fun `shared spec cases`() {
-        // 21: the newline after a <br> adds no second break.
         assertEquals("a\nb", parse("a<br>\nb").text)
-        // 22 + rule 1: any case, spaces before '>'.
         assertTrue(parse("<B>x</b>").styled("x", bold))
         assertTrue(parse("<b >x</b >").styled("x", bold))
         assertEquals("a\nb", parse("a<br >b").text)
-        // 9, 11
         val nine = parse("<strong>a</strong><em>b</em>")
         assertEquals("ab", nine.text)
         assertTrue(nine.styled("a", bold) && nine.styled("b") { it.fontStyle == FontStyle.Italic })
         assertTrue(parse("<code>let x</code>").text.contains("let x"))
-        // 27: crossing tags - the outer pair wins, the inner one is literal.
         val cross = parse("<b>a<i>b</b>c</i>")
         assertEquals("a<i>bc</i>", cross.text)
         assertTrue(cross.styled("a<i>b", bold))
         assertFalse(cross.styled("c</i>", bold))
-        // 28: same-name tags nest.
         val nested = parse("<b>a<b>b</b>c</b>")
         assertEquals("abc", nested.text)
         assertTrue(nested.styled("abc", bold))
-        // 29, 30, 31
         assertTrue(parse("**a<b>b</b>**").let { it.text == "ab" && it.styled("ab", bold) })
         assertTrue(parse("<b>a<br>b</b>").let { it.text == "a\nb" && it.styled("a\nb", bold) })
         assertTrue(parse("<code>a<br>b</code>").text.contains("a<br>b"))
-        // 32: a tag in a link label.
         val link = parse("[<b>x</b>](https://e.com)")
         assertEquals("x", link.text)
         assertTrue(link.styled("x", bold))
         assertTrue(link.getStringAnnotations("url", 0, link.length).single().item == "https://e.com")
-        // A markdown pair crossing an HTML pair does not match either way round.
         assertEquals("x<b>y</b>", parse("**x<b>y**</b>").text)
-        // 33, 34: list items and headings.
         assertTrue(chatSearchMarkdownPieces("- a<br>b").any { it.text == "a\nb" })
         assertTrue(chatSearchMarkdownPieces("# a<b>b</b>").any { it.text == "ab" })
     }
 
-    // ── streaming ───────────────────────────────────────────────────────────
 
     @Test
     fun `feeding a reply one character at a time never throws or loses text`() {
@@ -174,7 +152,6 @@ class InlineHtmlTagsTest {
         val done = parse(full).text.replace("\u2006", "")
         assertEquals("表头 粗嵌 与 斜\n下一行 <br> 下 删 1 < 2 > 0 <div>x</div> H2O x2 c 结尾", done)
 
-        // The shared spec's streaming reply, through the whole block parser.
         val reply = "开头<b>粗体</b>中间<br>换行<i>斜<u>下划</u>体</i>尾巴<b>未闭合\n\n" +
             "| 列 | 值 |\n|---|---|\n| 甲<br>乙 | <s>删</s> |"
         for (n in 1..reply.length) chatSearchMarkdownPieces(reply.substring(0, n))
@@ -196,7 +173,6 @@ class InlineHtmlTagsTest {
         assertEquals(whole.spanStyles, joined.spanStyles)
     }
 
-    // ── copy / export ───────────────────────────────────────────────────────
 
     @Test
     fun `plain text copy turns br into a newline and drops style tags`() {

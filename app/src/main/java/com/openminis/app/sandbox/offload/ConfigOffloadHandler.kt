@@ -10,32 +10,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/**
- * `minis-config` offload handler. Mirrors iOS `ConfigOffload.m`.
- *
- * Subcommands: list-topics, topic-help, get, set, set-batch,
- * audit-list, audit-get, audit-revert. The shell-friendly flags
- * `--filter`/`-f`, `--page`/`-p`, `--page-size`/`-s`, `--caption`,
- * `--actor`, `--session` follow exact iOS semantics.
- *
- * Collection-level writes:
- *   set models.append '{"provider_id":"…","model_id":"…", …}'
- *     → ModelsCollection.add(); creates a custom (is_custom=true) entry.
- *   set models.remove '"<entry-id>"'
- *     → ModelsCollection.remove(); rejected for non-custom entries.
- *
- * Future: per-entry hide via the existing
- *   set models.<entry_id>.isHidden true   (entry_id verbatim, dots included)
- * path. Already supported by ModelsCollection.isHiddenField; nothing
- * else needs to change in this handler when the agent picks it up.
- *
- * Exit codes:
- *   0    success
- *   1    invalid args / validation failed
- *   124  timeout
- *   125  user_rejected / all_rejected
- *   126  permission_denied
- */
 class ConfigOffloadHandler : NativeOffloadHandler {
     private companion object {
         const val TAG = "ConfigOffload"
@@ -132,7 +106,6 @@ class ConfigOffloadHandler : NativeOffloadHandler {
     }
 
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
-        // argv[0] is the program name; subcommand and options follow.
         val args = OffloadArgs(request.argv.drop(1))
         if (args.hasFlag("h", "help")) {
             return NativeOffloadResult(EXIT_OK, OffloadOutput.formatBody(HELP_TEXT, args) + "\n")
@@ -163,7 +136,6 @@ class ConfigOffloadHandler : NativeOffloadHandler {
         }
     }
 
-    // -- Subcommands --
 
     private fun cmdListTopics(args: OffloadArgs): NativeOffloadResult {
         if (!ConfigBridge.isEnabled()) {
@@ -197,7 +169,6 @@ class ConfigOffloadHandler : NativeOffloadHandler {
             put("data", JSONObject().apply {
                 put("topic", topic)
                 put("fields", ConfigBridge.fieldsForTopic(topic))
-                // [T-config-path-dotted-id] Collections say how to spell a child path.
                 ConfigBridge.pathNoteForTopic(topic)?.let { put("path_note", it) }
             })
         }
@@ -218,13 +189,6 @@ class ConfigOffloadHandler : NativeOffloadHandler {
 
     private fun cmdSet(args: OffloadArgs): NativeOffloadResult {
         val path = args.positional.getOrNull(1)
-        // [T-android-minis-config-set-shell-escape] (issue #36) `--file <path>`
-        // reads the value-json from a file instead of an argv positional. The
-        // value normally rides through the guest shell as a positional arg, so
-        // busybox ash mangles embedded double-quotes / backslashes / newlines /
-        // $ / backticks before this handler sees them — breaking large free-text
-        // writes like soul.body. Reading from a file bypasses shell escaping
-        // entirely. Mirrors iOS 5dcff277.
         val fileArg = args.get("file")
         val valueJSON = if (fileArg != null) {
             readLinuxPath(fileArg) ?: return errorResult(
@@ -252,15 +216,6 @@ class ConfigOffloadHandler : NativeOffloadHandler {
         return envelopeResult(args, envelope)
     }
 
-    /**
-     * `add <topic> <value-json>` — create a new child in an addable collection
-     * (e.g. `add providers …`, `add groups …`). Sugar over `set
-     * <topic>.append <value-json>`: it reuses the exact same collection-add
-     * path in the bridge, so the confirm dialog, audit row, redaction, exit
-     * codes, and the new child's auto-generated UUID (returned in
-     * applied[0].new) are all identical. Mirrors iOS `cmd_add`. (The bridge's
-     * collection-add suffix is `.append` on Android.)
-     */
     private fun cmdAdd(args: OffloadArgs): NativeOffloadResult {
         val topic = args.positional.getOrNull(1)
         val fileArg = args.get("file")
@@ -292,12 +247,6 @@ class ConfigOffloadHandler : NativeOffloadHandler {
     }
 
     private fun cmdSetBatch(args: OffloadArgs, request: NativeOffloadRequest): NativeOffloadResult {
-        // Batch JSON is passed positionally on Android — there is no
-        // stdin pipe on the native_offload protocol. Support either:
-        //   set-batch <json-array>      (shell can pass literal)
-        //   set-batch --batch <json>    (env-friendly form)
-        // The shape is the same as iOS stdin: array of
-        // {path, value_json}.
         val raw = args.positional.getOrNull(1) ?: args.get("batch") ?: return errorResult(
             args, EXIT_INVALID_ARGS, "INVALID_ARGS",
             "set-batch expects a JSON array argument with elements {\"path\":..., \"value_json\":...}."
@@ -350,7 +299,6 @@ class ConfigOffloadHandler : NativeOffloadHandler {
         return envelopeResult(args, envelope)
     }
 
-    // -- helpers --
 
     private fun envelopeResult(args: OffloadArgs, envelope: JSONObject): NativeOffloadResult {
         val exit = exitCodeFromEnvelope(envelope)
@@ -364,9 +312,6 @@ class ConfigOffloadHandler : NativeOffloadHandler {
             "permission_denied" -> EXIT_PERMISSION_DENIED
             "timeout" -> EXIT_TIMEOUT
             "user_rejected", "all_rejected" -> EXIT_USER_REJECTED
-            // already_exists is a structural validation failure: map to
-            // the generic invalid-args exit so the agent can still
-            // distinguish via the JSON `error` field. Mirrors iOS.
             "already_exists" -> EXIT_INVALID_ARGS
             else -> EXIT_INVALID_ARGS
         }
@@ -389,13 +334,6 @@ class ConfigOffloadHandler : NativeOffloadHandler {
         return NativeOffloadResult(exitCode, body)
     }
 
-    /**
-     * [T-android-minis-config-set-shell-escape] Read a file's text by its
-     * guest (Linux) path, resolving it to the host path through the rootfs /
-     * bind mounts. Same helper shape as ModelUseOffloadHandler.readLinuxPath —
-     * used by `set --file` so the value-json never transits the shell. Returns
-     * null when the path can't be resolved, doesn't exist, or read fails.
-     */
     private fun readLinuxPath(linuxPath: String): String? {
         val hostFile: File = PRootKernel.resolveHostPath(linuxPath) ?: return null
         if (!hostFile.exists() || !hostFile.isFile) return null

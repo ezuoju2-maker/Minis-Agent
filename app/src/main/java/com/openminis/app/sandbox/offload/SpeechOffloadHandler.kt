@@ -14,47 +14,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * android-speech — speech recognition (audio → text).
- *
- * T61: re-aligned with iOS `apple-speech` (NativeOffloads/SpeechOffload.m).
- *
- *   android-speech transcribe [--engine system|provider|auto] [--source mic|<path>]
- *                             [--language tag] [--duration N] [--on-device]
- *   android-speech listen [...]              # legacy alias for transcribe
- *   android-speech languages [--language prefix]
- *   android-speech status [--probe]
- *
- * [T-431] (GH #431; the analysis that found these is the issue author's):
- *   - Output uses the iOS envelope `{ok, tool, action, data|error, timestamp}`;
- *     success data is also copied to the top level for prompts that learned
- *     the flat pre-#431 shape. Failures exit non-zero (transcribe used to
- *     print `{"error": ...}` with exit 0).
- *   - `status` says why recognition may not work instead of only whether a
- *     service is listed.
- *   - `languages` asks the recognizer the documented way and fails with
- *     `unavailable` instead of printing an empty list.
- *   - Recognizer errors are actionable ("Client error" → which service, why,
- *     what to try).
- *   - [T-431-fallback] The regular recognizer is the default; `--on-device`
- *     prefers the on-device one. A client / disconnect / language failure
- *     tries the other kind once (rule shared with the chat voice input), and
- *     the result names the recognizer that answered.
- *
- *   - [T-431-engine] `--engine provider|auto` transcribes with the Voice Input
- *     group's speech-to-text model (the chat voice input's provider path),
- *     from the mic or from an audio file. Default stays `system`, so audio
- *     does not silently start going to a third-party service; every provider
- *     result says where it went (rules in [SpeechEngines]).
- *
- * The system recognizer takes the microphone only: Android's [SpeechRecognizer]
- * accepts no audio files on the vendor implementations we ship to, so
- * `--source <path>` needs `--engine provider` (or `auto`).
- *
- * Permission flow: when a transcribe attempt needs RECORD_AUDIO and the user
- * has already permanently denied it, we route through the same 3-stage flow
- * the chat composer's mic button uses (T67).
- */
 class SpeechOffloadHandler internal constructor(
     private val system: SpeechSystem,
 ) : NativeOffloadHandler {
@@ -88,7 +47,6 @@ class SpeechOffloadHandler internal constructor(
         }
     }
 
-    // ── Subcommands ──────────────────────────────────────────────────────────
 
     private fun cmdStatus(args: OffloadArgs): NativeOffloadResult {
         val probe = if (args.hasFlag("probe")) system.probe(PROBE_TIMEOUT_MS) else null
@@ -111,7 +69,6 @@ class SpeechOffloadHandler internal constructor(
     }
 
     private fun cmdTranscribe(args: OffloadArgs, callerPid: Int): NativeOffloadResult {
-        // [T-431-cancel] Checked while recording and before any upload.
         val callerGone = { !system.callerAlive(callerPid) }
         val engine = SpeechEngines.parse(args.get("engine")) ?: return emit(
             args,
@@ -119,8 +76,6 @@ class SpeechOffloadHandler internal constructor(
             SpeechCli.error("transcribe", "invalid_args", "--engine must be system, provider or auto."),
         )
         val env = system.environment()
-        // iOS-style flag names: --language, --duration. Pre-T61 callers also
-        // passed --max / --timeout; preserve those.
         val language = args.get("language")?.takeIf { it.isNotBlank() }?.let { RecognizerLocales.recognizerTag(it) }
         val maxResults = args.getInt("max") ?: 3
         val durationSec = (args.getInt("duration") ?: args.getInt("timeout") ?: DEFAULT_DURATION_SEC)
@@ -128,7 +83,6 @@ class SpeechOffloadHandler internal constructor(
         val onDeviceRequested = args.hasFlag("on-device")
         val models = system.voiceInputModels()
 
-        // --source: default mic, accept "mic" / "system-mic" / any /var/minis/... path.
         val source = args.get("source")
         if (source != null && !sourceIsMic(source)) return transcribeFile(args, engine, source, language, models, callerGone)
 
@@ -183,8 +137,6 @@ class SpeechOffloadHandler internal constructor(
             }
             val attempts = Attempts(order, failed, onDeviceRequested)
             if (engine == SpeechEngines.Engine.AUTO && models.isNotEmpty() && SpeechEngines.autoFallsBack(outcome)) {
-                // [T-431-engine] The system recognizer could not be reached:
-                // record it for `status`, then capture again for the provider.
                 val from = JSONObject().put("engine", "system").put("failed_attempts", attempts.json())
                 (outcome as? RecognizeOutcome.Failure)?.let {
                     system.recordLastError(it.code, it.recognizer)
@@ -197,9 +149,7 @@ class SpeechOffloadHandler internal constructor(
         }
     }
 
-    // ── [T-431-engine] provider engine ───────────────────────────────────────
 
-    /** What the system engine's errors suggest about the provider engine. */
     private fun providerHint(models: List<SpeechEngines.VoiceModel>): String {
         val m = models.firstOrNull()
             ?: return "To transcribe with a model service instead, add a speech-to-text model to " +
@@ -208,10 +158,6 @@ class SpeechOffloadHandler internal constructor(
             "the audio is then uploaded to ${SpeechEngines.destination(m)}."
     }
 
-    /**
-     * [T-431-cancel] The caller is gone, so nobody reads this; it is for the
-     * log. The point is what did NOT happen: no further capture, no upload.
-     */
     private fun cancelled(args: OffloadArgs, uploaded: Boolean): NativeOffloadResult {
         AppLogger.info(TAG, "transcribe: caller exited - stopped${if (uploaded) "" else ", nothing uploaded"}")
         return emit(
@@ -295,7 +241,6 @@ class SpeechOffloadHandler internal constructor(
                 SpeechCli.error("transcribe", "invalid_args", "Audio file not found: $source", pathInfo),
             )
         }
-        // [T-speech-decode-streaming] The decode stops as soon as the caller is gone.
         val decoded = system.decodeAudioFile(file, callerGone)
         if (callerGone()) return cancelled(args, uploaded = false)
         return when (decoded) {
@@ -373,7 +318,6 @@ class SpeechOffloadHandler internal constructor(
         }
     }
 
-    /** What the recognizer fallback did, for the result. */
     private data class Attempts(
         val order: List<RecognizerFallback.Kind>,
         val failed: List<RecognizeOutcome.Failure>,
@@ -406,7 +350,6 @@ class SpeechOffloadHandler internal constructor(
             return data
         }
 
-        /** What else the caller can try, after everything was tried. */
         fun hints(env: SpeechCli.Environment): List<String> {
             val tried = order.take(failed.size + 1)
             return when {
@@ -417,11 +360,6 @@ class SpeechOffloadHandler internal constructor(
         }
     }
 
-    /**
-     * One microphone capture at a time, process-wide: two recognizer sessions
-     * fight over the mic and the second one fails or records nothing. The chat
-     * voice input owns the mic while it records, as it does for its own taps.
-     */
     private fun withMic(args: OffloadArgs, body: () -> NativeOffloadResult): NativeOffloadResult {
         system.micBusyReason()?.let { return busy(args, it) }
         if (!micInUse.compareAndSet(false, true)) {
@@ -458,8 +396,6 @@ class SpeechOffloadHandler internal constructor(
             }
             is RecognizeOutcome.Failure -> {
                 if (outcome.code == SpeechRecognizer.ERROR_NO_MATCH || outcome.code == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                    // The recognizer worked and heard nothing: an empty
-                    // result, not a failure (iOS returns its empty text too).
                     system.recordLastError(null, null)
                     val data = attempts.annotate(baseData(locale, durationSec, outcome.recognizer), env)
                         .put("text", "")
@@ -530,7 +466,6 @@ class SpeechOffloadHandler internal constructor(
         return data
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
 
     private fun permissionGate(args: OffloadArgs): NativeOffloadResult? {
         if (system.hasMicPermission()) return null
@@ -570,7 +505,6 @@ class SpeechOffloadHandler internal constructor(
         private const val LANGUAGES_TIMEOUT_MS = 3_000L
         private val BOOLEAN_FLAGS = setOf("h", "help", "probe", "on-device")
 
-        /** Process-wide: one android-speech microphone capture at a time. */
         private val micInUse = AtomicBoolean(false)
 
         private const val HELP = """android-speech — speech recognition (audio → text)

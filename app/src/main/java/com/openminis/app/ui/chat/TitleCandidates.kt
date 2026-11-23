@@ -12,53 +12,17 @@ import com.openminis.app.provider.ProviderFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
-/**
- * [T-titlegen-group-order] Which models title generation tries, and in what
- * order. iOS parity: `regenerateTitleCandidates` + `expandSourceForSubTasks`
- * (987f1f70d, 26ccf9cb4).
- *
- * A title call used to reach ONE model. The auto path resolved the title
- * group's first member (or fell back to the chat's model) and called it once
- * per turn; manual Regenerate took the title group's first member, the
- * session's model id, then every other entry. So a rate-limited title model
- * left the chat on "New Chat" until the first-message fallback, and the other
- * members of the group the user had ordered precisely for this — the point of
- * a fallback group — were never asked.
- *
- * Order, deduped by entry id, every candidate available (provider enabled +
- * credentialed + entry visible) and title-eligible:
- *   1  title sub group (`defaultSubGroupId`) — the WHOLE group, router order
- *   2  the session's primary source — its whole group, or its pinned entry
- *   2b only if nothing so far: the session row's model id
- *   2c the default primary group — whole group, router order
- *   3  every other available eligible entry
- *
- * "Router order" is the order the agent loop walks a group on provider
- * failure: the member it would pick first (the preferred/last-used member
- * when still available, else the strategy's pick — first available for
- * `fallback`, session-id hash for `loadBalance`), then the members after it,
- * wrapping around. See ChatViewModel.resolveProviderFromGroup +
- * buildFallbackProviders.
- */
 internal object TitleCandidates {
 
-    /**
-     * Cap on models tried per title request: enough to exhaust a typical
-     * 6-member title group before the first-message fallback, without letting
-     * a systemic outage spray every configured model. iOS auto path: 6.
-     */
     const val MAX_TRIES = 6
 
-    /** Pause between auto-title tries: rate limits recover in seconds. */
     const val AUTO_PAUSE_MS = 1_500L
 
-    /** Where the session's primary model comes from (ChatSessionEntity.modelBinding). */
     sealed class PrimarySource {
         data class Group(val groupId: String, val preferredEntryId: String?) : PrimarySource()
         data class Entry(val entryId: String) : PrimarySource()
 
         companion object {
-            /** Parse the persisted binding JSON; null for none / unreadable. */
             fun parse(bindingJson: String?): PrimarySource? {
                 if (bindingJson.isNullOrBlank()) return null
                 return try {
@@ -76,12 +40,6 @@ internal object TitleCandidates {
         }
     }
 
-    /**
-     * T334 title-eligibility, shared by both paths: the model must output
-     * text (no declared modalities counts as text) and its id must not name a
-     * non-chat capability — those endpoints reject the chat schema or stream
-     * nothing useful.
-     */
     fun isTitleEligible(entry: ModelEntry): Boolean {
         val outs = entry.model.outputModalities
         val outputsText = outs == null || outs.isEmpty() || outs.contains("text")
@@ -91,10 +49,6 @@ internal object TitleCandidates {
         return outputsText && !nonChatId
     }
 
-    /**
-     * [group]'s [available] members (already filtered, in member order) in
-     * router order: the first pick, then the rest wrapping around.
-     */
     fun expandGroup(
         group: ModelGroup,
         available: List<ModelEntry>,
@@ -110,11 +64,6 @@ internal object TitleCandidates {
         return List(available.size) { available[(start + it) % available.size] }
     }
 
-    /**
-     * Assemble the ordered list from the tiers (see the class doc). Pure: the
-     * caller supplies lookups, so the ordering is unit-tested without a
-     * repository.
-     */
     fun order(
         sessionId: String,
         subGroup: ModelGroup?,
@@ -153,7 +102,6 @@ internal object TitleCandidates {
         return ordered
     }
 
-    /** [order] against the live provider configuration. */
     fun forSession(
         repo: ProviderRepository,
         sessionId: String,
@@ -161,10 +109,6 @@ internal object TitleCandidates {
         sessionModelId: String?,
     ): List<ModelEntry> {
         val config = repo.config.value
-        // One credential check per INSTANCE, not per entry: hasAnyCredential
-        // reads the (encrypted) key store, and a large catalog has hundreds of
-        // entries on a handful of instances — measured 12.5 s for 901 entries
-        // on a Pixel 4a before this, on the thread finishing the agent turn.
         val instanceUsable = HashMap<String, Boolean>()
         fun isAvailable(e: ModelEntry): Boolean {
             if (e.isHidden) return false
@@ -183,21 +127,11 @@ internal object TitleCandidates {
             pool = repo.allVisibleEntries(),
             group = { repo.group(it) },
             entry = { id -> entriesById[id] },
-            // Same filter as ProviderRepository.availableMemberEntries (hidden /
-            // disabled / uncredentialed dropped, member order kept), through
-            // the memoized check.
             availableMembers = { g -> g.memberEntryIds.mapNotNull { entriesById[it] }.filter(::isAvailable) },
             isAvailable = ::isAvailable,
         )
     }
 
-    /**
-     * Build a provider for one candidate: usable key (keyless self-hosted
-     * endpoints and OAuth instances included), OAuth token refreshed first so
-     * an expired cached token does not 401 the title call, tagged with the
-     * chat id (OpenCode Go needs `x-opencode-session`). Null when the entry
-     * cannot be driven at all — the walk then moves on.
-     */
     suspend fun providerFor(
         repo: ProviderRepository,
         context: Context,
@@ -214,31 +148,9 @@ internal object TitleCandidates {
         }
     }
 
-    /**
-     * [T-android-titlegen-stream-error-walk] Whether [e] is the caller being
-     * cancelled, rather than one model failing.
-     *
-     * Providers report a mid-stream failure (an inline SSE `error` frame such
-     * as OpenRouter's 429, `response.failed`, a stream that closed empty) by
-     * cancelling their producer with the real LLMError as the cause, so the
-     * collector sees a CancellationException that is NOT a cancellation of
-     * this coroutine. Rethrowing every CancellationException ended the whole
-     * walk on the first such error and never tried the next title model — the
-     * exact report 0047dc76c set out to fix. Same rule as the agent loop
-     * (`e is CancellationException && e.cause == null`), plus the coroutine's
-     * own state, so a real cancellation that happens to carry a cause still
-     * propagates.
-     */
     suspend fun isRealCancellation(e: kotlinx.coroutines.CancellationException): Boolean =
         e.cause == null || !kotlinx.coroutines.currentCoroutineContext().isActive
 
-    /**
-     * Walk [candidates] (at most [maxTries]) until [tryOne] returns non-null.
-     * A throw or a null result is a failure and moves on to the next model —
-     * an empty or unparseable title counts too. [shouldStop] is checked before
-     * each try (e.g. the user renamed the chat meanwhile). [pauseMs] separates
-     * tries. Returns the first success, or null when every try failed.
-     */
     suspend fun <T : Any> walk(
         candidates: List<ModelEntry>,
         origin: String,

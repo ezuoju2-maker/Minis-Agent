@@ -66,26 +66,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.openminis.app.logging.AppLogger
 import com.openminis.app.ui.theme.ChatColors
 
-/**
- * Immersive 90%-tall bottom sheet that hosts a [WebViewHolder] for a
- * Markdown link preview. Mirrors iOS [WebPreviewSheet.swift]
- * `MinisLinkPreviewView` (L243-312):
- *
- *  - Sheet height is `.fillMaxHeight(0.9f)` (iOS uses `.large` detent).
- *  - Top row carries four floating-style icons: Close, Reload/Stop,
- *    Open in external browser, Expand to fullscreen.
- *  - WebView is hosted via the **shared** [WebViewHolder] so tapping
- *    Expand can hand the same WebView to a fullscreen screen without
- *    a reload — exactly what iOS does by passing the holder up.
- *
- * The composable does not own the holder's lifecycle. The caller (chat
- * screen) is responsible for `holder.destroy()` once the user fully
- * dismisses every preview surface, so a sheet → fullscreen → close
- * sequence still routes through one teardown.
- */
-// TODO(webapp-hidden): flip to `true` to restore the WebApp "Pin to Home
-// Screen" entry in the web preview "..." menu. Feature is intentionally
-// hidden until validation/development completes.
 private const val WEBAPP_PIN_ENTRY_ENABLED = false
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -95,10 +75,7 @@ fun WebPreviewBottomSheet(
     holder: WebViewHolder,
     onDismiss: () -> Unit,
     onExpandFullscreen: (() -> Unit)? = null,
-    /** Shown as the fallback title before the page reports its own. */
     fallbackTitle: String = "",
-    /** Non-null enables the "Add to Home screen" menu item; binds the
-     *  pinned shortcut to this session so it re-opens here. */
     pinSessionId: String? = null,
 ) {
     val context = LocalContext.current
@@ -110,21 +87,12 @@ fun WebPreviewBottomSheet(
         holder.startIfNeeded()
     }
 
-    // When this composable leaves the tree (sheet dismissed OR caller
-    // handed the holder to fullscreen), pull the WebView out of our
-    // AndroidView so it can be re-parented elsewhere without crashing.
     DisposableEffect(holder) {
         onDispose {
             holder.detach()
         }
     }
 
-    // T165: ModalBottomSheet draws over the activity but the status bar
-    // belongs to the activity window. The sheet's container is
-    // colorScheme.surface — light in light mode, dark in dark mode — so
-    // status-bar icon appearance must follow the theme: dark icons on
-    // light surface, light icons on dark surface. Restore the prior value
-    // when the sheet leaves so the chat screen's setting isn't clobbered.
     DisposableEffect(view, darkTheme) {
         val window = (view.context as? Activity)?.window
         if (window == null) {
@@ -133,23 +101,6 @@ fun WebPreviewBottomSheet(
             val controller = WindowCompat.getInsetsController(window, view)
             controller.isAppearanceLightStatusBars = !darkTheme
             onDispose {
-                // [T-android-preview-statusbar-leak] Restore to the value the
-                // THEME implies, not to a value captured on entry.
-                //
-                // isAppearanceLightStatusBars is a single mutable flag on the
-                // ACTIVITY window, and this sheet is not its only writer — the
-                // fullscreen preview writes it too, and the two overlap when
-                // the user swaps between them (ChatScreen swaps the sheet for
-                // the fullscreen dialog in one recomposition, so there is no
-                // guaranteed dispose-then-enter ordering across the siblings).
-                // A captured "previous" therefore restores whatever the OTHER
-                // screen happened to have set mid-swap, and the pair can settle
-                // on `true` — dark icons — while the app is on a dark
-                // background, leaving the status bar unreadable.
-                //
-                // Deriving the restore from `darkTheme` makes it idempotent and
-                // order-independent: whichever writer disposes last, the flag
-                // lands on the value the theme actually wants.
                 controller.isAppearanceLightStatusBars = !darkTheme
             }
         }
@@ -163,19 +114,8 @@ fun WebPreviewBottomSheet(
         sheetState = sheetState,
         dragHandle = null,
         containerColor = MaterialTheme.colorScheme.surface,
-        // Sheet is full-height so the scrim region above the sheet collapses
-        // to nothing — avoids the grey scrim band above the sheet top.
-        // Zero content insets so the sheet's surface paints all the way under
-        // the status bar; toolbar below re-applies the status-bar inset.
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
     ) {
-        // ModalBottomSheet runs in its own Dialog window. The activity is
-        // edge-to-edge (MainActivity.enableEdgeToEdge), but the sheet's
-        // dialog window isn't — by default it stops at the status bar inset,
-        // leaving the activity's status-bar background visible above the
-        // sheet. Flip the dialog window to edge-to-edge + transparent bars
-        // so the sheet's surface actually paints under the status bar.
-        // Mirrors FullscreenImageViewer / InlineMediaPlayer.
         val localView = LocalView.current
         DisposableEffect(localView, darkTheme) {
             val win = findDialogWindow(localView)
@@ -222,10 +162,6 @@ fun WebPreviewBottomSheet(
                     openExternalFromSheet(context, holder.currentUrl)
                 },
                 onToggleDesktop = { holder.toggleDesktopMode() },
-                // TODO(webapp-hidden): WebApp "Pin to Home Screen" entry
-                // temporarily hidden — feature not yet validated/complete.
-                // Re-enable by removing the `@Suppress` block and restoring
-                // the original `if (pinSessionId != null && …)` guard.
                 onPinToHome = if (pinSessionId != null && holder.currentUrl.startsWith("file://") && WEBAPP_PIN_ENTRY_ENABLED) {
                     {
                         com.openminis.app.ui.preview.WebPreviewShortcut.pin(
@@ -251,16 +187,6 @@ fun WebPreviewBottomSheet(
             Box(modifier = Modifier.fillMaxSize()) {
                 AndroidView(
                     factory = {
-                        // Issue #24: ModalBottomSheet's nested-scroll grabbed
-                        // every vertical drag on the hosted WebView, so the
-                        // user could never scroll the HTML report inside the
-                        // sheet (drag would either do nothing or try to drag
-                        // the sheet itself). AndroidView-hosted WebView does
-                        // not participate in Compose nested scroll, so the
-                        // sheet's drag handler wins by default. Mirror the
-                        // BrowserWebView fix: as soon as a finger touches the
-                        // WebView, ask every ancestor (the sheet included)
-                        // to stop intercepting; release on UP/CANCEL.
                         holder.webView.setOnTouchListener { v, event ->
                             when (event.actionMasked) {
                                 MotionEvent.ACTION_DOWN,
@@ -282,11 +208,6 @@ fun WebPreviewBottomSheet(
     }
 }
 
-/**
- * Top-of-sheet toolbar: X on far left, two-line title + URL host in the
- * middle, collapse (▾) and overflow (⋯) on the right. The overflow menu
- * holds Open-in / Refresh / Desktop-site / Fullscreen.
- */
 @Composable
 internal fun WebPreviewToolbar(
     title: String,
@@ -300,7 +221,6 @@ internal fun WebPreviewToolbar(
     onToggleDesktop: () -> Unit,
     onPinToHome: (() -> Unit)? = null,
     onExpand: (() -> Unit)?,
-    /** Pad the row's top edge by the status-bar inset. */
     topInsetPadding: Boolean = false,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -457,17 +377,6 @@ private fun findDialogWindow(view: android.view.View): android.view.Window? {
     return null
 }
 
-/**
- * Open a URL in an external browser / app.
- *
- * T-htmlpreview-2d5c4f3d: previously this just built `Intent(ACTION_VIEW,
- * file://...)` and ran it under `runCatching {}`. Since API 24 Android
- * refuses to pass `file://` URIs across Activity boundaries and throws
- * `FileUriExposedException`, which `runCatching` swallows — so the "Open
- * in browser" button on a sandbox HTML preview silently did nothing. Fix:
- * for `file://` URLs, mint a `content://` URI through FileProvider; for
- * other schemes hand the original URL off as before.
- */
 internal fun openExternalFromSheet(context: android.content.Context, url: String) {
     AppLogger.info("WebPreviewSheet", "open external: $url")
     val intent = if (url.startsWith("file://")) {

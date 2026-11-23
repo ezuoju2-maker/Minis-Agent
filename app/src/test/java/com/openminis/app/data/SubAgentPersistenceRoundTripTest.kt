@@ -9,20 +9,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-subagent-own-store] The roster must survive the database mirror.
- *
- * ProviderConfig is mirrored into two stores of different shape: a JSON blob
- * carrying every field, and a Room database carrying instances, entries and
- * groups. The config is rebuilt FROM THE DATABASE on launch, so any field the
- * database does not hold returns as its default and then overwrites the
- * complete copy on the next save.
- *
- * For the roster that is silent data loss — custom agents vanish on relaunch,
- * and the list reads as merely empty because the accessor re-inserts the
- * built-in. iOS reproduced exactly this before moving the roster out of the
- * blob; this test is what stops it recurring here.
- */
 class SubAgentPersistenceRoundTripTest {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -57,8 +43,6 @@ class SubAgentPersistenceRoundTripTest {
 
     @Test
     fun `a database written before sub agents existed restores cleanly`() {
-        // No meta row at all: the roster comes back empty, which normalize
-        // turns into "built-in only" — the same as a fresh install, not a crash.
         val snapshot = ProviderConfig().toSnapshot(json)
         val withoutRow = snapshot.copy(
             meta = snapshot.meta.filterNot { it.key == "sub_agents_json" },
@@ -75,7 +59,6 @@ class SubAgentPersistenceRoundTripTest {
                 if (it.key == "sub_agents_json") it.copy(value = "{not json") else it
             },
         )
-        // The rest of the config must still load; the roster degrades to empty.
         val restored = corrupted.toProviderConfig(json)
         assertTrue(restored.subAgents.isEmpty())
     }

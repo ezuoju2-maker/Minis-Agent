@@ -8,14 +8,11 @@ import java.io.File
 import java.net.URI
 import java.util.UUID
 
-/**
- * Tracks browser history with 7-day retention, mirroring iOS BrowserHistoryStore.
- */
 class BrowserHistoryStore private constructor(private val context: Context) {
 
     companion object {
         private const val TAG = "BrowserHistory"
-        private const val MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000L // 7 days
+        private const val MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000L
         private const val FILENAME = "browser_history.json"
 
         @Volatile
@@ -44,7 +41,6 @@ class BrowserHistoryStore private constructor(private val context: Context) {
 
     fun record(url: String, title: String) {
         if (url.isEmpty()) return
-        // Deduplicate consecutive visits to same URL
         if (entries.lastOrNull()?.url == url) return
 
         entries.add(Entry(url = url, title = title))
@@ -83,7 +79,6 @@ class BrowserHistoryStore private constructor(private val context: Context) {
         }
     }
 
-    /** Get unique domains from history (for cookie domain listing). */
     fun uniqueDomains(): List<String> {
         return entries.map { it.domain }.filter { it.isNotEmpty() }.distinct().sorted()
     }

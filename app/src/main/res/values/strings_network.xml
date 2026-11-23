@@ -1,5 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Settings > Network. Translations shared with iOS come from its Localizable.xcstrings; locales without one fall back to English. -->
 <resources>
     <string name="network_title">Network</string>
     <string name="network_settings_subtitle">Tailscale, proxies and routes</string>
@@ -81,15 +79,12 @@
     <string name="network_diagnostics_copy">Copy Result</string>
     <string name="network_copied">Copied</string>
     <string name="network_entry_note">Minis listens on 127.0.0.1 for its own connections. Other apps on this device can reach that port but cannot use it without a password that changes every time Minis starts.</string>
-    <!-- [FEAT-261021-04] Settings > Network section -->
     <string name="network_routing_title">Network Routing</string>
     <string name="network_container_dns">Shell Container DNS</string>
-    <!-- [PAR-261021-01] LLM Providers: only routed ones listed, bulk add -->
     <string name="network_add_providers">Add Providers</string>
     <string name="network_route">Route</string>
     <string name="network_add">Add</string>
     <string name="network_providers_unlisted_footer">Providers not listed here follow the Default Route, which is Direct unless you change it. A provider\'s route can also be set on its page in Settings &gt; Providers.</string>
-    <!-- [FEAT-261021-05] Proxy / Tailscale keeps failing -->
     <string name="network_alert_proxy_title">Proxy “%1$s” keeps failing</string>
     <string name="network_alert_tailscale_title">Tailscale keeps failing</string>
     <string name="network_alert_banner_body">%1$d connections in a row failed (%2$s). Tap to choose whether to keep using it.</string>
@@ -108,7 +103,6 @@
     <string name="network_reason_tls">secure connection failed</string>
     <string name="network_reason_closed">connection closed</string>
     <string name="network_reason_other">connection failed</string>
-    <!-- [FEAT-261021-07] Home screen network pills -->
     <string name="network_badge_not_connected">Not Connected</string>
     <string name="network_badge_unavailable">Unavailable</string>
     <string name="network_badge_awaiting_approval">Awaiting Approval</string>

@@ -5,11 +5,6 @@ import android.util.Log
 import com.openminis.app.sandbox.PRootKernel
 import java.io.File
 
-/**
- * Manages multiple concurrent MediaPlayer sessions keyed by session ID.
- * Supports audio playback with play/pause/resume/seek/stop/status operations.
- * Paths are resolved through PRootKernel.resolveHostPath().
- */
 object MediaPlayerManager {
 
     private const val TAG = "MediaPlayerManager"
@@ -17,7 +12,7 @@ object MediaPlayerManager {
     private data class Session(
         val player: MediaPlayer,
         val filePath: String,
-        val mediaType: String, // "audio" or "video"
+        val mediaType: String,
         var state: PlayerState = PlayerState.IDLE,
     )
 
@@ -32,12 +27,7 @@ object MediaPlayerManager {
         "mp4", "mkv", "avi", "mov", "webm", "3gp", "flv", "wmv", "ts", "m4v",
     )
 
-    /**
-     * Start playback of a file in a new or existing session.
-     * If the session already exists, the previous player is released first.
-     */
     fun play(sessionId: String, filePath: String): String {
-        // Stop existing session if any
         sessions[sessionId]?.let { existing ->
             releaseSession(existing)
         }
@@ -53,7 +43,7 @@ object MediaPlayerManager {
         val mediaType = when {
             audioExtensions.contains(ext) -> "audio"
             videoExtensions.contains(ext) -> "video"
-            else -> "audio" // default to audio for unknown extensions
+            else -> "audio"
         }
 
         if (mediaType == "video") {
@@ -191,7 +181,6 @@ object MediaPlayerManager {
         return sb.toString().trimEnd()
     }
 
-    // ── Internal ────────────────────────────────────────────────────────
 
     private fun releaseSession(session: Session) {
         try {

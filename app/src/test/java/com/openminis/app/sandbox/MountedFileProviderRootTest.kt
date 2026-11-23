@@ -7,29 +7,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.w3c.dom.Element
 
-/**
- * [T-android-mount-fileprovider-root] A file inside a mounted folder can be
- * shared and opened with another app.
- *
- * Reported (2026-09-24, with log + screen recording): an .xlsx the agent wrote
- * into a mounted folder showed in the file preview, but Share failed with
- * "Failed to find configured root that contains
- * /storage/emulated/0/agents/meituan/…xlsx", and "Open externally" said
- * "No app available to open this file." Both went through
- * FileProvider.getUriForFile, and no declared root covered shared storage —
- * mounts are picked with OpenDocumentTree (on-device only) and used by their
- * real /storage path.
- *
- * FileProvider needs a Context, so this reads the declared roots from the
- * resource and applies its matching rule (a file is covered when its path
- * lies under a root's directory). Only the storage roots are resolved;
- * files-/cache- paths live under the app's private dir and cannot match.
- */
 class MountedFileProviderRootTest {
 
     private val xml = File("src/main/res/xml/file_provider_paths.xml")
 
-    /** (tag, directory) for every root that resolves to an absolute device path. */
     private fun storageRoots(): List<Pair<String, String>> {
         assertTrue("missing ${xml.absolutePath}", xml.exists())
         val doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(xml)
@@ -39,7 +20,6 @@ class MountedFileProviderRootTest {
             val path = el.getAttribute("path").trim('/')
             val base = when (el.tagName) {
                 "root-path" -> ""
-                // Environment.getExternalStorageDirectory() on every device we ship to.
                 "external-path" -> "/storage/emulated/0"
                 else -> return@mapNotNull null
             }
@@ -53,13 +33,11 @@ class MountedFileProviderRootTest {
 
     @Test
     fun `a file in a mounted folder on internal storage has a provider root`() {
-        // The exact path from the report.
         assertTrue(covered("/storage/emulated/0/agents/meituan/益丰大药房_搜索页_商品清单.xlsx"))
     }
 
     @Test
     fun `a file in a mounted folder on an SD card has a provider root`() {
-        // OpenDocumentTree also offers removable volumes; they mount at /storage/<UUID>.
         assertTrue(covered("/storage/1A2B-3C4D/Documents/report.pdf"))
     }
 

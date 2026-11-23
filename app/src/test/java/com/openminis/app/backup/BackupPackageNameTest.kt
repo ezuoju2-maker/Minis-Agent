@@ -7,14 +7,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-backup-package-name-parity] Android must name a package exactly
- * as iOS does. Every expected value below was produced by running the iOS
- * implementation (the logic in MinisTests/Standalone/BackupPackageNameTests.swift,
- * itself pinned to BackupExporter.swift) on the same input, with the date
- * formatter in UTC — so a mismatch here is a cross-platform divergence, not a
- * matter of taste.
- */
 class BackupPackageNameTest {
 
     private val utc = TimeZone.getTimeZone("UTC")
@@ -51,7 +43,6 @@ class BackupPackageNameTest {
             "  Pixel 6 Pro  " to "Pixel-6-Pro",
             "a/b:c" to "a-b-c",
             "Samsung Galaxy S24 Ultra Enterprise Edition" to "Samsung-Galaxy-S24-Ultra",
-            // A decomposed é is ONE Swift Character, so its `e` is dropped too.
             "école" to "cole",
             "Café Phone" to "Caf-Phone",
             "🙂 Phone" to "Phone",
@@ -73,7 +64,6 @@ class BackupPackageNameTest {
             assertTrue("$prev < $cur", prev < cur)
             prev = cur
         }
-        // Crossing every Base32 digit boundary is where a naive encoder breaks.
         for (shift in 5..39) {
             val edge = 1L shl shift
             assertTrue(BackupPackageName.sortableId("id", edge - 2) < BackupPackageName.sortableId("id", edge + 2))

@@ -18,29 +18,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * Wire-level tests for [OpenAIProvider] against a [MockWebServer].
- *
- * SSE-ONLY CONTRACT: every mock response in this class MUST be a
- * `text/event-stream` body of Chat Completions chunks (`data: {...}\n\n`
- * terminated by `data: [DONE]\n\n`), built with [sse]. There is no
- * non-streaming path any more: [OpenAIProvider.sendMessageClamped] delegates
- * to [OpenAIProvider.streamMessageClamped] (some gateways reject
- * `stream=false` outright) and concatenates the deltas, and the T321 guard in
- * the stream parser throws a `TransientError("stream closed without producing
- * any data")` when the body carried zero SSE events. A plain ChatCompletions
- * JSON object is therefore not "parsed leniently" — it is an empty stream, and
- * the test fails with `Stream error`. Do not re-add JSON mocks here.
- */
 class OpenAIProviderTest {
     private lateinit var server: MockWebServer
     private lateinit var provider: OpenAIProvider
 
-    /**
-     * One SSE response: each [events] entry becomes a `data:` line, followed by
-     * the `[DONE]` sentinel. Pass the usage block on the final chunk, as the
-     * real API does when `stream_options.include_usage` is set.
-     */
     private fun sse(vararg events: String): MockResponse = MockResponse()
         .setHeader("Content-Type", "text/event-stream")
         .setBody(
@@ -50,7 +31,6 @@ class OpenAIProviderTest {
             },
         )
 
-    /** Minimal successful reply: one content delta with a stop reason. */
     private fun okReply(): MockResponse = sse(
         """{"choices":[{"delta":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}""",
     )
@@ -71,11 +51,9 @@ class OpenAIProviderTest {
         server.shutdown()
     }
 
-    // -- sendMessage response parsing --
 
     @Test
     fun `sendMessage parses ChatCompletions response`() = runBlocking {
-        // sendMessage concatenates the streamed deltas back into one response.
         server.enqueue(
             sse(
                 """{"choices":[{"delta":{"role":"assistant","content":"Hello "}}]}""",
@@ -105,9 +83,6 @@ class OpenAIProviderTest {
         )
         val response = provider.sendMessage(listOf(LLMMessage(LLMMessage.Role.USER, "Hi")), null, 1024)
 
-        // parseChatCompletionsUsage keeps `inputTokens` fresh-only (prompt_tokens
-        // minus the cached portion, the Anthropic convention) and reports the
-        // full prompt on latestContextTokens.
         assertEquals(50, response.usage?.inputTokens)
         assertEquals(100, response.usage?.latestContextTokens)
         assertEquals(10, response.usage?.outputTokens)
@@ -130,12 +105,6 @@ class OpenAIProviderTest {
 
     @Test
     fun `sendMessage handles empty choices`() = runBlocking {
-        // A stream whose only chunk carries a usage block and no choices: the
-        // parser sees one SSE event (so the T321 zero-event guard stays quiet)
-        // and emits Usage + Finished(null). failOnSilentEmptyCompletion then
-        // rejects the turn — no content and no finish reason is the shape of
-        // a relay that dropped the connection — as a retryable TransientError
-        // rather than returning an empty LLMResponse.
         server.enqueue(sse("""{"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":0}}"""))
 
         try {
@@ -148,7 +117,6 @@ class OpenAIProviderTest {
         throw AssertionError("Expected TransientError for a stream with no choices and no finish reason")
     }
 
-    // -- Request construction --
 
     @Test
     fun `sendMessage includes Bearer auth header`() = runBlocking {
@@ -173,10 +141,8 @@ class OpenAIProviderTest {
         val request = server.takeRequest()
         val body = JSONObject(request.body.readUtf8())
         val messages = body.getJSONArray("messages")
-        // System message should be first
         assertEquals("system", messages.getJSONObject(0).getString("role"))
         assertEquals("You are helpful", messages.getJSONObject(0).getString("content"))
-        // User message follows
         assertEquals("user", messages.getJSONObject(1).getString("role"))
     }
 
@@ -229,12 +195,6 @@ class OpenAIProviderTest {
 
     @Test
     fun `sendMessage always streams on the wire`() = runBlocking {
-        // This used to assert `stream: false` for the non-streaming entry
-        // point. That design no longer exists: sendMessageClamped always issues
-        // a streaming request (some gateways 400 on `stream=false`) and folds
-        // the deltas into one LLMResponse, so the wire shape is identical to
-        // streamMessage — including stream_options.include_usage, which is
-        // how the usage block reaches the final chunk.
         server.enqueue(okReply())
 
         provider.sendMessage(listOf(LLMMessage(LLMMessage.Role.USER, "test")), null, 100)
@@ -245,7 +205,6 @@ class OpenAIProviderTest {
         assertTrue(body.getJSONObject("stream_options").getBoolean("include_usage"))
     }
 
-    // -- Streaming --
 
     @Test
     fun `streamMessage parses SSE events with DONE`() = runBlocking {
@@ -340,7 +299,6 @@ class OpenAIProviderTest {
         assertEquals(50, usageChunks[0].usage.cacheReadInputTokens)
     }
 
-    // -- Error handling --
 
     @Test(expected = LLMError.InvalidApiKey::class)
     fun `sendMessage throws InvalidApiKey on 401`() = runBlocking {
@@ -378,7 +336,6 @@ class OpenAIProviderTest {
         throw AssertionError("Expected ProviderError")
     }
 
-    // -- Provider metadata --
 
     @Test
     fun `provider name is OpenAI`() {
@@ -391,15 +348,7 @@ class OpenAIProviderTest {
         assertEquals(LLMModel.gpt4o, provider.model)
     }
 
-    // -- [T-reasoning-effort-data-driven] reasoning_effort on the wire --
-    //
-    // Regression guard for the GLM-via-relay report: a model whose id contains
-    // "glm" used to hit a hardcoded deepseek/glm/kimi/minimax skip list and get
-    // NO thinking field at all, while an otherwise identical non-matching id
-    // (Hermes) got reasoning_effort. These assert the ACTUAL request body
-    // captured off MockWebServer, not the injector in isolation.
 
-    /** Drive one request through the real stack and return the parsed body. */
     private fun captureBody(model: LLMModel, level: ThinkingLevel): JSONObject {
         server.enqueue(okReply())
         provider.model = model
@@ -419,19 +368,16 @@ class OpenAIProviderTest {
 
     @Test
     fun `glm with declared effort tiers sends reasoning_effort`() {
-        // zhipuai's real catalog declaration for glm-5.2.
         val glm = LLMModel(
             id = "glm-5.2", displayName = "GLM 5.2", provider = "CPA",
             supportsReasoning = true,
             reasoningEffortValues = listOf("high", "max"),
         )
         val body = captureBody(glm, ThinkingLevel.XHIGH)
-        // Was absent entirely before the fix.
         assertTrue(
             "reasoning_effort missing for GLM: $body",
             body.has("reasoning_effort"),
         )
-        // xhigh is NOT in ["high","max"] — must clamp DOWN to high, not 400.
         assertEquals("high", body.getString("reasoning_effort"))
     }
 
@@ -461,14 +407,10 @@ class OpenAIProviderTest {
 
     @Test
     fun `clampEffort snaps onto declared tiers`() {
-        // Down to the nearest declared tier at or below the request.
         assertEquals("high", provider.clampEffort("xhigh", listOf("high", "max")))
         assertEquals("high", provider.clampEffort("xhigh", listOf("low", "medium", "high")))
-        // Exact matches pass through.
         assertEquals("xhigh", provider.clampEffort("xhigh", listOf("high", "xhigh")))
-        // Nothing at-or-below: step up to the lowest declared tier.
         assertEquals("high", provider.clampEffort("low", listOf("high", "max")))
-        // No declaration: untouched (pre-existing behavior).
         assertEquals("xhigh", provider.clampEffort("xhigh", null))
         assertEquals("xhigh", provider.clampEffort("xhigh", emptyList()))
     }

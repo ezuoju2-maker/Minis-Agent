@@ -33,16 +33,6 @@ import com.openminis.app.R
 import com.openminis.app.ui.components.MinisButton
 import com.openminis.app.ui.components.MinisTextButton
 
-/**
- * Detail / edit screen for a single ModelEntry. T210: brought to iOS
- * parity with five inset-grouped sections — Identity, Capabilities,
- * Visibility, Input Modality, Output Modality (+ optional Reset). The
- * data layer (`ModelOverrides.contextWindow`, `supportsReasoning`,
- * `inputModalities`, `outputModalities`) was already in place; pre-T210
- * the UI only exposed displayName / maxOutputTokens / hidden, which
- * meant Android users had no way to override the things iOS lets them
- * tweak (context window, thinking flag, per-modality enablement).
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelEntryDetailScreen(
@@ -71,26 +61,10 @@ fun ModelEntryDetailScreen(
     var thinkingEnabled by remember {
         mutableStateOf(overrides.supportsReasoning ?: baseModel.supportsReasoning ?: false)
     }
-    // [T-model-override-silent-drop] "Did the user touch this control?" — the
-    // only thing that distinguishes a deliberate choice from an untouched
-    // default on a control with no empty state. See the save block below.
     var thinkingTouched by remember { mutableStateOf(false) }
     var isHidden by remember { mutableStateOf(entry.isHidden) }
     var showQuickTest by remember { mutableStateOf(false) }
 
-    // Modality state — derive from override-or-base so the toggles reflect
-    // what the model actually supports today, then let the user flip from
-    // there. A null override means "inherit baseModel" (data-layer
-    // contract); on save we only persist a non-null list when it diverges
-    // from the inherited set.
-    // Defensive normalization: pre-T213 SharedPreferences may hold suffixed strings
-    // (`image_input`) saved before the parse-boundary fix, which would silently fail
-    // the bare-name `"image" in effectiveInput` checks below.
-    // [T-android-modality-provider-fallback] Fall back to the provider default
-    // when the model declares nothing, so a model models.dev has not catalogued
-    // yet (Fable 5.1 on its release day) shows its real capabilities instead of
-    // every switch OFF. Precedence is unchanged above that: a user override
-    // still wins, then the model's own list, and only then the provider table.
     val effectiveInput = (
         overrides.inputModalities
             ?: baseModel.effectiveInputModalities
@@ -107,20 +81,11 @@ fun ModelEntryDetailScreen(
     var videoInput by remember { mutableStateOf("video" in effectiveInput) }
     var imageOutput by remember { mutableStateOf("image" in effectiveOutput) }
     var audioOutput by remember { mutableStateOf("audio" in effectiveOutput) }
-    // One flag per dimension, not per switch: the override is a LIST covering
-    // the whole dimension, so touching any one switch is a statement about the
-    // whole set and the entire list must then be recorded.
     var inputModalitiesTouched by remember { mutableStateOf(false) }
     var outputModalitiesTouched by remember { mutableStateOf(false) }
 
     SettingsScaffold(
         title = stringResource(R.string.model_entry_model_detail),
-        // [T-android-modeldetail-savecancel-ios-parity] iOS modal pattern
-        // (ProviderInstanceDetailView toolbar): Cancel is a plain leading
-        // text action, the title is centered, and Save is the single
-        // emphasized trailing action — the filled pill is the MD3 analog of
-        // iOS's semibold Save. No back arrow: Cancel and system back both
-        // discard + pop.
         onBack = null,
         centerTitle = true,
         navigation = {
@@ -135,16 +100,6 @@ fun ModelEntryDetailScreen(
         actions = {
             MinisButton(
                 onClick = {
-                    // No baseline is computed here any more. It used to be
-                    // `baseModel.effective*Modalities`, and [T-android-modality-provider-fallback]
-                    // had already had to move it once — from the raw lists to the
-                    // provider-fallback ones — because opening an un-catalogued model
-                    // and pressing Save untouched compared {image,pdf} against {} and
-                    // persisted a pointless override, freezing the entry so it no
-                    // longer tracked the real modalities. The touched flag removes the
-                    // comparison altogether, so that class of mismatch cannot recur:
-                    // an untouched Save now writes nothing regardless of which
-                    // baseline would have been chosen.
                     val newInputs = buildList {
                         if (imageInput) add("image")
                         if (pdfInput) add("pdf")
@@ -180,7 +135,6 @@ fun ModelEntryDetailScreen(
             ) { Text(stringResource(R.string.common_save)) }
         },
     ) {
-        // ── Identity ────────────────────────────────────────────────────
         SettingsSection(
             header = stringResource(R.string.add_provider_identity),
             footer = if (entry.isCustom) stringResource(R.string.modeldetail_identity_footer_custom)
@@ -210,7 +164,6 @@ fun ModelEntryDetailScreen(
             )
         }
 
-        // ── Capabilities ────────────────────────────────────────────────
         SettingsSection(
             header = stringResource(R.string.modeldetail_section_capabilities),
             footer = stringResource(R.string.modeldetail_capabilities_footer),
@@ -235,9 +188,6 @@ fun ModelEntryDetailScreen(
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
-                // Inline warning when the value exceeds the provider-reported
-                // limit. The save still goes through so power users can probe
-                // a higher cap; we just flag it.
                 val enteredTokens = maxOutputTokensText.trim().toIntOrNull()
                 val baseLimit = baseModel.maxOutputTokens
                 if (enteredTokens != null && baseLimit != null && enteredTokens > baseLimit) {
@@ -257,7 +207,6 @@ fun ModelEntryDetailScreen(
             )
         }
 
-        // ── Visibility ──────────────────────────────────────────────────
         SettingsSection(
             header = stringResource(R.string.model_entry_visibility),
             footer = stringResource(R.string.model_entry_hidden_models_won_t_appear_in_the_model_),
@@ -270,7 +219,6 @@ fun ModelEntryDetailScreen(
             )
         }
 
-        // ── Input Modality ──────────────────────────────────────────────
         SettingsSection(
             header = stringResource(R.string.modeldetail_section_input_modality),
             footer = stringResource(R.string.modeldetail_input_modality_footer),
@@ -298,7 +246,6 @@ fun ModelEntryDetailScreen(
             )
         }
 
-        // ── Output Modality ─────────────────────────────────────────────
         SettingsSection(
             header = stringResource(R.string.modeldetail_section_output_modality),
             footer = stringResource(R.string.modeldetail_output_modality_footer),
@@ -316,7 +263,6 @@ fun ModelEntryDetailScreen(
             )
         }
 
-        // ── Quick Test ──
         SettingsSection(
             footer = stringResource(R.string.quicktest_footer),
         ) {
@@ -329,7 +275,6 @@ fun ModelEntryDetailScreen(
             )
         }
 
-        // ── Reset (only for built-in models that have been customized) ──
         if (!entry.isCustom && entry.isUserModified) {
             SettingsSection(
                 footer = stringResource(R.string.model_entry_restores_the_provider_reported_display_n),
@@ -359,45 +304,6 @@ fun ModelEntryDetailScreen(
     }
 }
 
-/**
- * Decides which override fields the model detail screen persists on Save.
- *
- * [T-model-override-silent-drop] Record an override when the USER EXPRESSED AN
- * INTENT, not when the value happens to differ from today's API value. iOS fixed
- * the same defect in `ProviderInstanceDetailView` (4ef8a48d7).
- *
- * The old rule compared each field against `baseModel` while the controls LOAD
- * from override-or-base. That asymmetry closes a loop which drops intent two ways:
- *
- *  1. Setting a value equal to today's auto value records no override at all, so
- *     the next vendor bump shows straight through. This is the reported case: a
- *     context window typed as 400000 while the vendor also said 400000, which
- *     later read 1048576 after a refresh.
- *  2. An EXISTING override is cleared the moment the vendor catches up to it,
- *     because a no-op re-save then compares equal — and a later vendor flip
- *     loses the user's choice entirely.
- *
- * Two different mechanisms express intent, because the controls differ:
- *
- *  - `contextWindow` / `maxOutputTokens` are text fields, which HAVE an empty
- *    state, so "filled in" is expressible directly: any parsed value is recorded
- *    and empty means back to auto-detection, exactly as the footer promises.
- *    These were already correct and are deliberately unchanged — iOS adopted
- *    this behaviour from Android rather than the other way round.
- *  - Switches and modality lists have no empty state, so intent is carried by an
- *    explicit `touched` flag set from their change callbacks.
- *
- * An untouched control keeps whatever override already existed. It neither
- * invents one — so a never-touched field still inherits vendor updates, which is
- * what keeps [ModelOverrides.isEmpty] meaningful and preserves the fast path in
- * `ProviderConfig.model` — nor clears one, which is failure mode 2 above.
- *
- * This is marginally stronger than the iOS rule, which has no touched flag and
- * so still drops one case: toggling a switch away and back, ending on a value
- * equal to base with no prior override, records nothing there but is recorded
- * here. Every other case agrees across the two platforms. No serialized field
- * name or type changes, so the cross-platform wire format is untouched.
- */
 internal fun buildModelOverrides(
     existing: ModelOverrides,
     displayNameText: String,
@@ -421,14 +327,6 @@ internal fun buildModelOverrides(
     supportsReasoning = if (thinkingTouched) thinkingEnabled else existing.supportsReasoning,
     inputModalities = if (inputModalitiesTouched) inputModalities else existing.inputModalities,
     outputModalities = if (outputModalitiesTouched) outputModalities else existing.outputModalities,
-    // Carried through verbatim: this screen has no editor for any of them, so
-    // every one is by definition untouched and the rule above applies. The
-    // previous inline construction simply omitted them, which let them default
-    // to null — a save from this screen silently wiped per-model tuning that
-    // had arrived via backup import or iCloud sync (ProviderRepository reads
-    // and writes all five). Naming them explicitly also means adding a sixth
-    // field to ModelOverrides fails to compile here rather than quietly
-    // resurrecting that wipe.
     maxThinkingLevel = existing.maxThinkingLevel,
     temperature = existing.temperature,
     topP = existing.topP,

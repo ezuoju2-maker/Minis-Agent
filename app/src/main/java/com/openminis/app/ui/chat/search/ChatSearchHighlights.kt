@@ -8,31 +8,14 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 
-/*
- * [T-in-chat-search] Painting the matches where they are drawn (iOS
- * ChatSearchHighlights): each Text that is a search unit looks up its own
- * count in [ChatSearchHighlight], finds those occurrences again in the very
- * AnnotatedString it draws (ChatSearchMarkdown.searchable + the same
- * matcher), and adds a background span. Only spans are added - the text is
- * unchanged, so selection, copy and the streaming fade keep their offsets.
- */
 
-/** The current search highlight, provided once above the message list. */
 internal val LocalChatSearchHighlight = compositionLocalOf { ChatSearchHighlight.NONE }
 
-/** The list row (FlatChatItem key) the composable belongs to; null outside the chat list. */
 internal val LocalChatSearchRow = compositionLocalOf<String?> { null }
 
-/** Background of every match, and of the current one (iOS: yellow / orange). */
 internal val ChatSearchMatchBackground = Color(0x66FFD60A)
 internal val ChatSearchCurrentBackground = Color(0xCCFF9F0A)
 
-/**
- * [text] with the matches of [key] painted: the first `count(key)`
- * occurrences of the query, the current one in [current], the others in
- * [match]. [offset] shifts the search start: a unit that is the tail of the
- * drawn string (an agent callback's title after "Agent result · ").
- */
 internal fun applyChatSearchHighlight(
     text: AnnotatedString,
     key: ChatSearchUnitKey,
@@ -55,7 +38,6 @@ internal fun applyChatSearchHighlight(
     }
 }
 
-/** Highlight for a plain string unit of the current row. */
 @Composable
 internal fun rememberChatSearchHighlighted(text: String, field: String, offset: Int = 0): AnnotatedString {
     val row = LocalChatSearchRow.current
@@ -66,7 +48,6 @@ internal fun rememberChatSearchHighlighted(text: String, field: String, offset: 
     }
 }
 
-/** Highlight for an AnnotatedString unit of the current row (markdown pieces). */
 @Composable
 internal fun rememberChatSearchHighlighted(text: AnnotatedString, field: String?): AnnotatedString {
     val row = LocalChatSearchRow.current
@@ -75,7 +56,6 @@ internal fun rememberChatSearchHighlighted(text: AnnotatedString, field: String?
     return remember(text, row, field, h) { applyChatSearchHighlight(text, ChatSearchUnitKey(row, field), h) }
 }
 
-/** True when the current match is in [field] of the current row (whole-block outline). */
 @Composable
 internal fun chatSearchFieldIsCurrent(field: String?): Boolean {
     val row = LocalChatSearchRow.current ?: return false
@@ -83,12 +63,6 @@ internal fun chatSearchFieldIsCurrent(field: String?): Boolean {
     return LocalChatSearchHighlight.current.current?.key == ChatSearchUnitKey(row, field)
 }
 
-/**
- * Provides the highlight and this row's key to one list row. The highlight is
- * read HERE, in this small scope, so moving the current match recomposes this
- * wrapper and the Texts that read [LocalChatSearchHighlight] - not the chat
- * screen and not the row's own content.
- */
 @Composable
 internal fun ChatSearchRowScope(controller: ChatSearchController, rowKey: String, content: @Composable () -> Unit) {
     androidx.compose.runtime.CompositionLocalProvider(

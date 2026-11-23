@@ -7,12 +7,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-offload-caller-session] minis-model-use and minis-scheduled attribute
- * their work to the chat whose /var/minis the calling shell sees, which for a
- * sub agent is its PARENT (iOS 7effb6f2f, b99e4da87: the fs_context of a
- * helper's shell names the parent).
- */
 class OffloadCallerSessionTest {
 
     private val parentOf = mapOf("helper-1" to "parent-A")
@@ -34,9 +28,6 @@ class OffloadCallerSessionTest {
 
     @Test
     fun `a helper whose mapping is gone falls back to its own id`() {
-        // ExecutionCoordinator drops the mapping when the helper terminates,
-        // e.g. for a nohup'd process that outlives it. Same fallback as iOS's
-        // "unknown fs_context" case: never a null or a guessed chat.
         val c = OffloadCallerSession.resolve("helper-gone", ::mounted)
         assertEquals("helper-gone", c.sid)
         assertEquals("env", c.source)
@@ -48,7 +39,6 @@ class OffloadCallerSessionTest {
         assertNull(OffloadCallerSession.resolve("", ::mounted).sid)
     }
 
-    // ── Wiring ───────────────────────────────────────────────────────────
 
     private val modelUse = ProductionSources.read("sandbox/offload/ModelUseOffloadHandler.kt")
     private val scheduled = ProductionSources.read("sandbox/offload/ScheduledTaskOffloadHandler.kt")
@@ -61,7 +51,6 @@ class OffloadCallerSessionTest {
             "request.sessionId is read only by the resolver",
             1, Regex("""request\.sessionId""").findAll(modelUse).count(),
         )
-        // Provider session header, passthrough, image routing, and the write path.
         assertTrue(modelUse.contains("sessionId = callerSid, overrides = entry.overrides,"))
         assertEquals(2, Regex("""sessionId = callerSid,\n""").findAll(modelUse).count())
         assertTrue(modelUse.contains("val sessionId = callerSid\n"))
@@ -86,8 +75,6 @@ class OffloadCallerSessionTest {
 
     @Test
     fun `no offload handler builds a per-session host dir from the raw dispatch id`() {
-        // Every host path under minis-sessions/<sid>/ must come from a resolved
-        // caller: the raw MINIS_CHAT_SESSION_ID is a helper's own session.
         val dir = java.io.File(ProductionSources.mainRoot(), "sandbox/offload")
         val offenders = dir.listFiles { f -> f.extension == "kt" }!!.filter { f ->
             val src = f.readText()

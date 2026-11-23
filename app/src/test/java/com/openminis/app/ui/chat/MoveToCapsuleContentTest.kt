@@ -5,11 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-moveto-empty-content] User report (Honor Magic7): after sharing
- * files into Minis and deleting both attachments, the "Move to…" capsule
- * stayed, and after moving it was still there in the other chat.
- */
 class MoveToCapsuleContentTest {
 
     private val screen = ProductionSources.read("ui/chat/ChatScreen.kt")

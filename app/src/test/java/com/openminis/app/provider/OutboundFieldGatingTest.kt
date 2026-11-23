@@ -17,23 +17,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T19] Outbound fields are gated per gateway — a field one vendor requires is a
- * hard 400 on another, so every one of these has to be asserted BOTH present
- * where it belongs and absent where it does not.
- *
- * Field reports behind each row: GH#247/#259/#268 (`prompt_cache_key` rejected by
- * a strict-schema gateway — NVIDIA), GH#86 (Venice rejects a root `thinking` key
- * before model dispatch), GH#177 (`reasoning_effort` placement differs per
- * protocol: root on Chat, `reasoning.effort` on Responses / OpenRouter,
- * `output_config.effort` on Anthropic adaptive), GH#87 (Mistral rejects every
- * thinking field), T-responses-include (`include: reasoning.encrypted_content` is
- * Codex-OAuth-only), GH#191 (OpenRouter `cache_control` only for anthropic/ ids).
- *
- * All rows drive the real provider into a MockWebServer whose path carries the
- * vendor literal the production URL predicate greps for, and read the serialized
- * request — the production gates are private, so this is the only honest seam.
- */
 class OutboundFieldGatingTest {
 
     private lateinit var server: MockWebServer
@@ -124,13 +107,7 @@ class OutboundFieldGatingTest {
         return JSONObject(server.takeRequest().body.readUtf8())
     }
 
-    // ============================================================ prompt_cache_key
 
-    /**
-     * GH#247/#259/#268: a strict-schema gateway (NVIDIA NIM) answers an unknown
-     * request field with `400 UNKNOWN_FIELD`, failing the whole request. On the
-     * Chat Completions path a custom base therefore never gets `prompt_cache_key`.
-     */
     @Test
     fun `chat completions on a custom base sends no prompt_cache_key`() {
         for (path in listOf("/v1", "/integrate.api.nvidia.com/v1", "/api.venice.ai/api/v1")) {
@@ -139,12 +116,6 @@ class OutboundFieldGatingTest {
         }
     }
 
-    /**
-     * The Responses path is an explicit opt-in ("this base speaks the Responses
-     * API"), and relays like sub2api NEED the key because they synthesize no
-     * server-side fallback — same decision as iOS (T-ios-prompt-cache-key-400).
-     * The key must be stable across turns of one chat and distinct between chats.
-     */
     @Test
     fun `responses opt-in keeps a stable per-conversation prompt_cache_key`() {
         val a1 = capture(model("gpt-5.3"), ThinkingLevel.OFF, responses = true, firstUserText = "chat A")
@@ -155,20 +126,13 @@ class OutboundFieldGatingTest {
         assertNotEquals("different chat → different key", a1.getString("prompt_cache_key"), b.getString("prompt_cache_key"))
     }
 
-    /** T-responses-include: `include: reasoning.encrypted_content` is ChatGPT-backend-only. */
     @Test
     fun `api-key responses path sends no include field`() {
         val body = capture(model("gpt-5.3"), ThinkingLevel.HIGH, responses = true)
         assertFalse("include is Codex-OAuth-only; third-party Responses relays 400 on it: $body", body.has("include"))
     }
 
-    // ============================================================ Venice root thinking
 
-    /**
-     * GH#86: Venice's ChatCompletionRequest is `additionalProperties:false`, so a
-     * root `thinking` key is rejected during schema validation. The deepseek id
-     * is the exact trigger — its vendor rule WOULD emit `thinking:{}` elsewhere.
-     */
     @Test
     fun `venice never receives a root thinking key`() {
         for (level in listOf(ThinkingLevel.OFF, ThinkingLevel.HIGH)) {
@@ -187,9 +151,7 @@ class OutboundFieldGatingTest {
         assertEquals("Venice takes the tier as root reasoning_effort", "high", on.getString("reasoning_effort"))
     }
 
-    // ============================================================ reasoning_effort placement
 
-    /** GH#177 — Chat Completions: ROOT `reasoning_effort`, no `reasoning` object. */
     @Test
     fun `chat completions puts reasoning_effort at the root`() {
         val body = capture(model("gpt-5.3", reasoningEffortValues = listOf("low", "medium", "high")), ThinkingLevel.HIGH)
@@ -197,7 +159,6 @@ class OutboundFieldGatingTest {
         assertFalse("no nested reasoning object on chat: $body", body.has("reasoning"))
     }
 
-    /** GH#177 — Responses: nested `reasoning.effort`, no root `reasoning_effort`. */
     @Test
     fun `responses api nests the effort under reasoning`() {
         val body = capture(model("gpt-5.3", reasoningEffortValues = listOf("low", "medium", "high")), ThinkingLevel.HIGH, responses = true)
@@ -205,7 +166,6 @@ class OutboundFieldGatingTest {
         assertFalse("no root reasoning_effort on Responses: $body", body.has("reasoning_effort"))
     }
 
-    /** OpenRouter speaks Chat Completions but takes the NESTED shape. */
     @Test
     fun `openrouter chat nests the effort under reasoning`() {
         val body = capture(
@@ -217,7 +177,6 @@ class OutboundFieldGatingTest {
         assertFalse(body.has("reasoning_effort"))
     }
 
-    /** Anthropic adaptive (4.6+): `thinking.type=adaptive` + `output_config.effort`. */
     @Test
     fun `anthropic adaptive puts the effort under output_config`() {
         val body = captureAnthropic(model("claude-opus-4-8"), ThinkingLevel.HIGH)
@@ -228,7 +187,6 @@ class OutboundFieldGatingTest {
         assertFalse("adaptive models reject temperature", body.has("temperature"))
     }
 
-    /** Legacy Anthropic (≤4.5): `thinking.type=enabled` + `budget_tokens`, no effort anywhere. */
     @Test
     fun `anthropic legacy uses budget_tokens and no effort`() {
         val body = captureAnthropic(model("claude-haiku-4-5"), ThinkingLevel.MEDIUM)
@@ -239,9 +197,7 @@ class OutboundFieldGatingTest {
         assertEquals("legacy thinking requires temperature=1", 1, body.getInt("temperature"))
     }
 
-    // ============================================================ Mistral
 
-    /** GH#87 — Mistral takes NOTHING, on either API flavour. */
     @Test
     fun `mistral gets no thinking control on either path`() {
         val watched = listOf("reasoning_effort", "reasoning", "thinking", "enable_thinking", "thinking_budget", "extra_body")
@@ -251,9 +207,7 @@ class OutboundFieldGatingTest {
         assertEquals(emptyList<String>(), watched.filter { resp.has(it) })
     }
 
-    // ============================================================ OpenRouter cache_control
 
-    /** GH#191 — top-level `cache_control` only for OpenRouter + `anthropic/` ids. */
     @Test
     fun `openrouter cache_control is scoped to anthropic ids`() {
         val claude = capture(model("anthropic/claude-sonnet-4-6"), ThinkingLevel.OFF, path = "/openrouter.ai/api/v1")
@@ -264,7 +218,6 @@ class OutboundFieldGatingTest {
         assertFalse("the field is OpenRouter-only: $direct", direct.has("cache_control"))
     }
 
-    /** OpenRouter takes `max_tokens`; everyone else on this path takes `max_completion_tokens`. */
     @Test
     fun `max tokens field name follows the gateway`() {
         val or = capture(model("openai/gpt-4o", supportsReasoning = false), ThinkingLevel.OFF, path = "/openrouter.ai/api/v1")

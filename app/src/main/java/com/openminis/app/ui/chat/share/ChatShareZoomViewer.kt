@@ -63,21 +63,8 @@ import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-/** One page of a [ChatShareZoomViewer], in dp at the 1:1 zoom. */
 internal data class ChatShareViewerPage(val widthDp: Float, val heightDp: Float)
 
-/**
- * [T-multi-select-share] The preview's viewer for a long image (as strips) or a PDF
- * (as pages): shown at 1:1 — one dp of the export per dp of screen, the size it was
- * drawn at — scrollable both ways, pinch out to fit the width, in to 4x; double-tap
- * zooms 2x around the tap and back to 1:1 (iOS ChatExportImagePreview /
- * ChatExportPDFPreview). Pages are drawn lazily from [render] at a resolution that
- * follows the zoom, so a 50,000-pixel image never has to be decoded whole.
- *
- * Content starts below [topClearanceDp] (the floating format switch); with
- * [centerShortContent] content shorter than the screen is centred vertically, the
- * top never above that clearance.
- */
 @Composable
 internal fun ChatShareZoomViewer(
     pages: List<ChatShareViewerPage>,
@@ -109,25 +96,21 @@ internal fun ChatShareZoomViewer(
             val h = totalH * z
             return if (centerShortContent && h < vpH) max(0f, vpH - h - topPad(z)) else 8f
         }
-        /** Unscaled top of each page (dp), gaps included. */
         val tops = remember(pages, gapDp) {
             var acc = 0f
             pages.map { p -> acc.also { acc += p.heightDp + gapDp } }
         }
 
-        /** Zooms to [target] keeping the content under [focus] (viewer px) where it is. */
         fun zoomAround(target: Float, focus: Offset) {
             val z0 = zoom
             val z1 = target.coerceIn(minZoom, MAX_ZOOM)
             if (z1 == z0) return
             val fx = focus.x / density
             val fy = focus.y / density
-            // Horizontal: content x at the focus, then the offset that keeps it there.
             val left0 = (rowWidth(z0) - contentW * z0) / 2f
             val left1 = (rowWidth(z1) - contentW * z1) / 2f
             val cx = (offsetX / density + fx - left0) / z0
             offsetX = ((cx * z1 + left1 - fx) * density).coerceIn(0f, maxOffsetX(z1))
-            // Vertical: content y at the focus from the list's first visible item.
             val i = listState.firstVisibleItemIndex.coerceIn(0, max(0, pages.size - 1))
             val o = listState.firstVisibleItemScrollOffset / density
             val y0 = if (pages.isEmpty()) 0f else tops[i] * z0 + o
@@ -151,7 +134,6 @@ internal fun ChatShareZoomViewer(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                // Two fingers: pinch and pan, taken before the list sees them.
                 .pointerInput(pages) {
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -169,7 +151,6 @@ internal fun ChatShareZoomViewer(
                         } while (event.changes.any { it.pressed })
                     }
                 }
-                // Like Photos: at 1:1 zoom in 2x around the tap; otherwise back to 1:1.
                 .pointerInput(pages) {
                     detectTapGestures(onDoubleTap = { point ->
                         val target = if (kotlin.math.abs(zoom - 1f) > 0.01f) 1f else DOUBLE_TAP_ZOOM
@@ -210,9 +191,6 @@ private fun ViewerPage(
     density: Float,
     render: suspend (Int, Int) -> Bitmap?,
 ) {
-    // Resolution steps of √2, so a pinch re-renders a page a few times at most
-    // rather than on every frame, while a page is never decoded at more than ~1.4x
-    // the width it is shown at (2x the pixels) - a power-of-two step allowed 4x.
     val want = page.widthDp * zoom * density
     val step = 2.0.pow(ceil(2.0 * ln(max(want, 64f) / 64f) / ln(2f)) / 2.0).toFloat() * 64f
     val widthPx = step.roundToInt()
@@ -236,11 +214,6 @@ private fun ViewerPage(
 private const val MAX_ZOOM = 4f
 private const val DOUBLE_TAP_ZOOM = 2f
 
-/**
- * A long PNG cut into horizontal strips for [ChatShareZoomViewer]: each strip is
- * decoded on its own (BitmapRegionDecoder), at a sample size that matches the width it
- * is shown at, so memory follows what is on screen rather than the image's height.
- */
 internal class ChatShareImageStrips(private val file: File, val widthPx: Int, val heightPx: Int, val scale: Float) {
     private val decoder: BitmapRegionDecoder? by lazy {
         runCatching {
@@ -282,12 +255,6 @@ internal class ChatShareImageStrips(private val file: File, val widthPx: Int, va
     }
 }
 
-/**
- * A PDF's pages for [ChatShareZoomViewer]: one page point per dp at 1:1, each page
- * rendered on its own at the width it is shown at (capped, so a 4x zoom of a wide
- * page cannot ask for a hundred-megabyte bitmap). PdfRenderer allows one open page
- * at a time, hence the lock.
- */
 internal class ChatSharePdfPages(file: File) {
     private val fd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
     private val renderer = android.graphics.pdf.PdfRenderer(fd)
@@ -326,7 +293,6 @@ internal class ChatSharePdfPages(file: File) {
     }
 
     private companion object {
-        /** ~48 MB per rendered page at 4 bytes a pixel. */
         const val MAX_PAGE_PIXELS = 12_000_000f
     }
 }

@@ -9,30 +9,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.Locale
 
-/**
- * [T-android-system-voice-catalog] Enumerates the device TTS engine's voices —
- * the Android counterpart of iOS `SystemVoiceCatalog`, which is what lets the
- * iOS voice-output picker list "Tingting (Chinese)…, Anna (German)…" as
- * individually selectable rows while Android only offered a single generic
- * "System Voice (Auto)".
- *
- * Android's [Voice] API exposes no human display name (names are technical,
- * e.g. "cmn-cn-x-ssa-local"), so rows are labelled from the voice's locale
- * plus a variant marker derived from the technical name — "中文 (中国) · ssa"
- * — with a network tag where the voice is cloud-only. Not as pretty as iOS's
- * curated names, but honest about what the engine actually reports.
- *
- * Enumeration requires a BOUND engine, so the first call spins up a throwaway
- * TextToSpeech, waits for init (bounded), snapshots `voices`, and shuts it
- * down; the result is cached for the process (the installed voice set doesn't
- * change under a running app in practice).
- */
 object SystemTtsVoiceCatalog {
 
     data class SystemVoice(
-        /** Engine voice name — the stable id passed to TextToSpeech.setVoice. */
         val name: String,
-        /** Human-facing label: localized locale name + variant + network tag. */
         val label: String,
         val locale: Locale,
         val networkRequired: Boolean,
@@ -50,13 +30,6 @@ object SystemTtsVoiceCatalog {
         return lock.withLock {
             cache?.let { return it }
             val listed = enumerate(context.applicationContext)
-            // [T-android-tts-catalog-empty-cache] Never cache an EMPTY result.
-            // Enumeration fails transiently — cold boot before the TTS service
-            // binds, or the 4 s timeout expiring on a slow OEM engine — and
-            // caching that for the process left the voice picker permanently
-            // blank, including after the user installed a TTS engine from the
-            // prompt. Only a non-empty listing is a real answer worth keeping;
-            // an empty one just means "ask again next time".
             if (listed.isNotEmpty()) cache = listed
             listed
         }
@@ -70,7 +43,6 @@ object SystemTtsVoiceCatalog {
         }
         val ok = kotlinx.coroutines.withTimeoutOrNull(INIT_TIMEOUT_MS) { ready.await() } ?: false
         val raw: Set<Voice> = if (ok) {
-            // voices can THROW on some engines (documented fragmentation).
             runCatching { tts.voices ?: emptySet() }.getOrElse { emptySet() }
         } else emptySet()
         runCatching { tts.shutdown() }
@@ -94,8 +66,6 @@ object SystemTtsVoiceCatalog {
                 }
                 SystemVoice(name = v.name, label = label, locale = v.locale, networkRequired = net)
             }
-            // UI language's voices first, then other Chinese/English, then rest;
-            // stable alphabetical inside each tier so the list is reproducible.
             .sortedWith(
                 compareBy(
                     { tier(it.locale, uiLocale) },

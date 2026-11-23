@@ -4,18 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-voice-correction] Mirrors iOS MinisTests/VoiceCorrectionTests
- * (L116-162). The tokenizer is injected so these run on the JVM without jieba.
- */
 class VoiceCorrectionDiffTest {
 
-    /**
-     * Stand-in for jieba that reproduces the exact behaviour the design is
-     * built around: a fix changes how the NEIGHBOUR is cut.
-     *   "张山说..." -> ["张山", "说", ...]     (two tokens)
-     *   "张三说..." -> ["张三说", ...]          (fused into one)
-     */
     private val resegmentingTokenizer: (String) -> List<String> = { text ->
         when {
             text.startsWith("张山说") -> listOf("张山", "说") + rest(text, "张山说")
@@ -29,7 +19,6 @@ class VoiceCorrectionDiffTest {
     private fun rest(text: String, prefix: String): List<String> =
         text.removePrefix(prefix).map { it.toString() }
 
-    /** Split so the listed multi-char words stay whole, everything else per char. */
     private fun String.chunkedWords(words: List<String>): List<String> {
         val out = mutableListOf<String>()
         var i = 0
@@ -45,11 +34,9 @@ class VoiceCorrectionDiffTest {
     private fun pairs(from: String, to: String) =
         VoiceCorrectionDiff.tokenPairs(from, to, resegmentingTokenizer)
 
-    // -- the regression the character-level design exists for --
 
     @Test
     fun `widens a minimal char replace out to the whole word`() {
-        // Must be 张山→张三, NOT the minimal 山→三.
         val p = pairs("张山说今天有空", "张三说今天有空")
         assertEquals(1, p.size)
         assertEquals("张山", p[0].from)
@@ -76,7 +63,6 @@ class VoiceCorrectionDiffTest {
 
     @Test
     fun `pure insertion produces no pair`() {
-        // Adding words carries no "misheard as" information.
         val p = VoiceCorrectionDiff.tokenPairs("今天", "今天很好") { it.map { c -> c.toString() } }
         assertEquals(emptyList<VoiceCorrectionDiff.Pair>(), p)
     }
@@ -89,14 +75,12 @@ class VoiceCorrectionDiffTest {
 
     @Test
     fun `length-imbalanced replacements are dropped as rewrites`() {
-        // 1 char replaced by 8 -> ratio 8.0 > 2.0, dropped.
         val p = VoiceCorrectionDiff.tokenPairs("我说甲", "我说乙丙丁戊己庚辛壬") {
             it.map { c -> c.toString() }
         }
         assertTrue("expected imbalanced replace to be dropped, got $p", p.isEmpty())
     }
 
-    // -- charChangeRatio --
 
     @Test
     fun `charChangeRatio is small for a targeted fix`() {
@@ -115,7 +99,6 @@ class VoiceCorrectionDiffTest {
         assertEquals(0.0, VoiceCorrectionDiff.charChangeRatio("一样", "一样"), 0.0001)
     }
 
-    // -- LcsDiff primitives --
 
     @Test
     fun `lcs detects a replace`() {

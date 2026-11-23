@@ -9,16 +9,10 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.charset.Charset
 
-/**
- * Tests for the POSIX tar extraction logic in RootfsManager.
- * Since RootfsManager requires Android Context for construction,
- * we access the internal extraction methods via a test helper
- * that builds synthetic tar archives in memory.
- */
 class TarExtractionTest {
 
     private lateinit var targetDir: File
-    private lateinit var manager: Any // We'll use reflection to call internal methods
+    private lateinit var manager: Any
 
     @Before
     fun setUp() {
@@ -31,16 +25,12 @@ class TarExtractionTest {
         targetDir.deleteRecursively()
     }
 
-    // ==================== extractString ====================
 
     @Test
     fun `extractString reads null-terminated field`() {
         val header = ByteArray(512)
         val name = "hello.txt"
         name.toByteArray().copyInto(header, 0)
-        // The method is internal, test via calling it through the private method approach
-        // Since we can't easily instantiate RootfsManager without Context,
-        // we test the logic by verifying tar extraction end-to-end
         val extracted = extractStringHelper(header, 0, 100)
         assertEquals("hello.txt", extracted)
     }
@@ -65,12 +55,11 @@ class TarExtractionTest {
     fun `extractString reads from offset`() {
         val header = ByteArray(512)
         val data = "test-data"
-        data.toByteArray().copyInto(header, 157) // link name offset
+        data.toByteArray().copyInto(header, 157)
         val extracted = extractStringHelper(header, 157, 100)
         assertEquals("test-data", extracted)
     }
 
-    // ==================== Full tar extraction ====================
 
     @Test
     fun `extractTar creates regular file`() {
@@ -116,7 +105,6 @@ class TarExtractionTest {
 
     @Test
     fun `extractTar handles file without parent directory entry`() {
-        // Tar may contain files without explicit directory entries
         val tar = buildTar {
             addFile("some/nested/file.txt", "data")
         }
@@ -143,7 +131,6 @@ class TarExtractionTest {
 
     @Test
     fun `extractTar handles large file spanning multiple blocks`() {
-        // A file larger than 512 bytes to test multi-block reading
         val content = "x".repeat(2000)
         val tar = buildTar {
             addFile("large.txt", content)
@@ -171,7 +158,6 @@ class TarExtractionTest {
 
     @Test
     fun `extractTar handles file with exact block-size content`() {
-        // 512 bytes exactly — no padding needed
         val content = "y".repeat(512)
         val tar = buildTar {
             addFile("exact.txt", content)
@@ -205,9 +191,7 @@ class TarExtractionTest {
 
         extractTarHelper(ByteArrayInputStream(tar), targetDir)
 
-        // Real file should exist
         assertEquals("real content", File(targetDir, "real.txt").readText())
-        // Symlink creation may succeed or fail depending on OS — just verify no crash
     }
 
     @Test
@@ -227,9 +211,7 @@ class TarExtractionTest {
     fun `extractTar stops at end-of-archive marker`() {
         val tar = buildTar {
             addFile("before.txt", "before")
-            // End-of-archive is automatically appended by buildTar
         }
-        // Append garbage after the archive
         val extended = tar + ByteArray(1024) { 0xFF.toByte() }
 
         extractTarHelper(ByteArrayInputStream(extended), targetDir)
@@ -263,7 +245,6 @@ class TarExtractionTest {
         assertEquals(content, File(targetDir, "legacy.txt").readText())
     }
 
-    // ==================== readFully ====================
 
     @Test
     fun `readFully reads exact number of bytes`() {
@@ -292,12 +273,7 @@ class TarExtractionTest {
         assertEquals(0, read)
     }
 
-    // ==================== Helper: extract string (reimplemented for JVM test) ====================
 
-    /**
-     * Reimplementation of RootfsManager.extractString for JVM testing.
-     * This tests the same algorithm without needing Android Context.
-     */
     private fun extractStringHelper(header: ByteArray, offset: Int, length: Int): String {
         val end = minOf(offset + length, header.size)
         var actualEnd = offset
@@ -308,9 +284,6 @@ class TarExtractionTest {
         return String(header, offset, actualEnd - offset, Charset.forName("UTF-8"))
     }
 
-    /**
-     * Reimplementation of RootfsManager.readFully for JVM testing.
-     */
     private fun readFullyHelper(input: java.io.InputStream, buf: ByteArray): Int {
         var offset = 0
         while (offset < buf.size) {
@@ -321,10 +294,6 @@ class TarExtractionTest {
         return offset
     }
 
-    /**
-     * Reimplementation of RootfsManager.extractTar for JVM testing.
-     * Uses the exact same algorithm as the production code.
-     */
     private fun extractTarHelper(input: java.io.InputStream, targetDir: File) {
         val header = ByteArray(512)
 
@@ -398,7 +367,6 @@ class TarExtractionTest {
         }
     }
 
-    // ==================== Tar builder DSL ====================
 
     private class TarBuilder {
         private val out = ByteArrayOutputStream()
@@ -411,7 +379,6 @@ class TarExtractionTest {
             val header = buildHeader(name, content.size.toLong(), typeFlag)
             out.write(header)
             out.write(content)
-            // Pad to 512-byte boundary
             val remainder = content.size % 512
             if (remainder != 0) {
                 out.write(ByteArray(512 - remainder))
@@ -445,7 +412,6 @@ class TarExtractionTest {
         }
 
         fun build(): ByteArray {
-            // End-of-archive: two zero blocks
             out.write(ByteArray(1024))
             return out.toByteArray()
         }
@@ -459,48 +425,36 @@ class TarExtractionTest {
         ): ByteArray {
             val header = ByteArray(512)
 
-            // Name (0-99)
             writeString(header, 0, 100, name)
 
-            // Mode (100-107) — 0644 for files, 0755 for dirs
             val mode = if (typeFlag == '5') "0000755" else "0000644"
             writeString(header, 100, 8, mode)
 
-            // UID (108-115)
             writeString(header, 108, 8, "0000000")
 
-            // GID (116-123)
             writeString(header, 116, 8, "0000000")
 
-            // Size (124-135) — octal
             val sizeStr = String.format("%011o", size)
             writeString(header, 124, 12, sizeStr)
 
-            // Mtime (136-147)
             writeString(header, 136, 12, "00000000000")
 
-            // Type flag (156)
             header[156] = typeFlag.code.toByte()
 
-            // Link name (157-256)
             if (linkName.isNotEmpty()) {
                 writeString(header, 157, 100, linkName)
             }
 
-            // Magic (257-262) "ustar\0"
             writeString(header, 257, 6, "ustar")
             header[262] = 0
 
-            // Version (263-264) "00"
             header[263] = '0'.code.toByte()
             header[264] = '0'.code.toByte()
 
-            // Prefix (345-499)
             if (prefix.isNotEmpty()) {
                 writeString(header, 345, 155, prefix)
             }
 
-            // Checksum (148-155) — spaces first, then compute
             for (i in 148 until 156) header[i] = ' '.code.toByte()
             var checksum = 0
             for (b in header) {

@@ -7,28 +7,6 @@ import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 
-/**
- * Persists a downloaded-but-not-yet-installed APK across Activity recreate /
- * process death.
- *
- * Why this exists: the original update flow held the downloaded [File]
- * reference in a Composable `remember{}` slot. When the user tapped "Open
- * Settings" to grant "install unknown apps" permission, the system pushed
- * Minis to the background; on return the Activity often recreated, the slot
- * was reset, and the UI silently asked the user to download the APK again.
- *
- * Storage: a single SharedPreferences key holding a small JSON blob. We
- * deliberately avoid DataStore here — this object is touched at most a
- * couple times per update flow, blocking access is fine, and SharedPreferences
- * is already initialised elsewhere.
- *
- * Freshness: a [PendingUpdate] older than [MAX_AGE_MS] (24 h) is discarded
- * on read so a stale APK can't auto-install on cold start a week later
- * after the GitHub release was re-rolled.
- *
- * Integrity: we compute and store sha256 if [setPending] is given the
- * file bytes; if absent, [verify] falls back to (size == expectedSize).
- */
 object PendingUpdateStore {
 
     private const val TAG = "PendingUpdateStore"
@@ -38,7 +16,6 @@ object PendingUpdateStore {
 
     data class PendingUpdate(
         val targetVersionName: String,
-        /** [T-update-channels] Build number of the target; null on records from before builds. */
         val targetVersionCode: Int? = null,
         val apkPath: String,
         val apkSize: Long,
@@ -48,7 +25,6 @@ object PendingUpdateStore {
 
     private var prefs: SharedPreferences? = null
 
-    /** Idempotent. Safe to call from MinisApp.onCreate. */
     fun init(context: Context) {
         if (prefs != null) return
         prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -76,13 +52,6 @@ object PendingUpdateStore {
         )
     }
 
-    /**
-     * Returns the persisted pending update, or null when:
-     *  - nothing stored
-     *  - JSON malformed (treated as gone, cleared)
-     *  - older than [MAX_AGE_MS] (cleared)
-     *  - target version no longer newer than the running build
-     */
     fun getPending(context: Context): PendingUpdate? {
         val p = requirePrefs(context)
         val raw = p.getString(KEY, null) ?: return null
@@ -114,15 +83,6 @@ object PendingUpdateStore {
         AppLogger.info(TAG, "clearPending")
     }
 
-    /**
-     * Strict integrity check used before firing the install intent on resume:
-     *  - file exists
-     *  - length matches recorded size
-     *  - if sha256 was recorded, recomputed hash matches
-     *
-     * Returns the File when valid, null when corrupt/missing (caller should
-     * clear the pending record and re-download).
-     */
     fun verify(pending: PendingUpdate): File? {
         val f = File(pending.apkPath)
         if (!f.exists()) {

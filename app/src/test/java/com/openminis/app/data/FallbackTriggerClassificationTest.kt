@@ -16,18 +16,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * [T-android-503-fallback] Group-fallback trigger classification.
- *
- * The decision itself lives inside `ChatViewModel.runAgentLoop`, which cannot
- * be exercised without a live provider and streaming loop. These tests pin the
- * two pieces the decision is built from — the structured 5xx status on
- * [LLMError] and the boolean the loop derives from it — so a regression in the
- * classification is caught even though the loop is not instantiated.
- *
- * Kept byte-identical to the production expression at
- * `ChatViewModel.kt` (`shouldFallback`); if that line changes, this must too.
- */
 class FallbackTriggerClassificationTest {
 
     private fun shouldFallback(error: LLMError, strategy: FallbackStrategy): Boolean {
@@ -36,11 +24,9 @@ class FallbackTriggerClassificationTest {
         return isRateLimit || is5xx || strategy == FallbackStrategy.always
     }
 
-    /** Mirrors the loop's same-model retry membership. */
     private fun isTransient(error: LLMError): Boolean =
         error is LLMError.NetworkError || error is LLMError.TransientError
 
-    // ── 1. default + HTTP 503 → retried on the same model, then falls back ──
 
     @Test
     fun `default falls back on a provider HTTP 503`() {
@@ -73,7 +59,6 @@ class FallbackTriggerClassificationTest {
         }
     }
 
-    // ── 2. always + HTTP 503 → unchanged ────────────────────────────────────
 
     @Test
     fun `always still falls back on a 503`() {
@@ -97,7 +82,6 @@ class FallbackTriggerClassificationTest {
         }
     }
 
-    // ── 3. local / link failures must NOT newly trigger fallback ────────────
 
     @Test
     fun `default does not fall back on a network error`() {
@@ -108,8 +92,6 @@ class FallbackTriggerClassificationTest {
 
     @Test
     fun `default does not fall back on a transient error with no http status`() {
-        // TTFB timeout, dropped connection, empty stream — never got a response
-        // code, so switching models cannot help.
         val errors = listOf(
             LLMError.TransientError("no response from server (30s TTFB) — check network/proxy"),
             LLMError.TransientError("Server returned an empty response (connection dropped or upstream error)"),
@@ -131,7 +113,6 @@ class FallbackTriggerClassificationTest {
         assertFalse(shouldFallback(err, FallbackStrategy.default))
     }
 
-    // ── 4. 429 and the permanent-5xx ProviderError path stay as they were ───
 
     @Test
     fun `rate limiting still falls back under default`() {
@@ -143,8 +124,6 @@ class FallbackTriggerClassificationTest {
 
     @Test
     fun `a permanent 5xx provider error falls back immediately without retrying`() {
-        // OpenAI maps 503 + no_available_providers / model_not_found to
-        // ProviderError, whose detail carries the `[503]` prefix.
         val err = LLMError.ProviderError("[503] no_available_providers")
         assertEquals(503, err.httpServerErrorStatus)
         assertTrue(shouldFallback(err, FallbackStrategy.default))
@@ -154,12 +133,9 @@ class FallbackTriggerClassificationTest {
         )
     }
 
-    // ── Anchored parsing: the old regex over-matched ────────────────────────
 
     @Test
     fun `a token count starting with 5 is not read as a status code`() {
-        // The previous `[5][0-9]{2}` scan matched "5000 tokens" anywhere in the
-        // message and misclassified an over-length refusal as a server error.
         val err = LLMError.ProviderError(
             "[400] This model's maximum context length is 5000 tokens",
         )
@@ -176,25 +152,9 @@ class FallbackTriggerClassificationTest {
         )
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // [T31] sticky fallback / error-trail fidelity / disabled member skipped
-    //
-    // GH#229 (a session that fell back stays on the backup model), GH#368 (the
-    // upstream 400 text — "reasoning_text must be passed back" — was swallowed
-    // by the retry/fallback wrapper), GH#34 (a DISABLED provider was still
-    // reachable through a group). The decisions live in ChatViewModel, so each
-    // is ported verbatim (source cited) with a grep drift guard.
-    // ══════════════════════════════════════════════════════════════════════
 
     private val vmSrc by lazy { File("src/main/java/com/openminis/app/ui/chat/ChatViewModel.kt").readText() }
 
-    // ── Port of the recentlyFailedEntryIds marks ────────────────────────
-    //
-    //   ChatViewModel.kt ~L6283  RoutingStrategy.fallback ->
-    //       available.firstOrNull { it.id !in recentlyFailedEntryIds } ?: available.first()
-    //   ChatViewModel.kt ~L6500  recentlyFailedEntryIds.remove(entry.id)      // explicit user pick
-    //   ChatViewModel.kt ~L6677  noteEntryFailed: if (!entryId.isNullOrEmpty()) recentlyFailedEntryIds.add(entryId)
-    //   ChatViewModel.kt ~L6682  adoptFallbackCandidate: noteEntryFailed(active); recentlyFailedEntryIds.remove(candidate.entryId)
     private class FailureMarks {
         val ids = mutableSetOf<String>()
         fun noteEntryFailed(entryId: String?) { if (!entryId.isNullOrEmpty()) ids.add(entryId) }
@@ -228,20 +188,10 @@ class FallbackTriggerClassificationTest {
         assertEquals(group.first(), marks.resolveFallback(group))
     }
 
-    /**
-     * GH#229 — the primary recovers and a cooldown elapses; the NEXT request
-     * should return to it. Android's marks have no expiry: nothing but an
-     * explicit pick (or a failure of the backup itself) ever un-marks the
-     * primary, so a session that fell back once stays on the backup.
-     *
-     * KNOWN GAP: expected the primary to be resolved again once its cooldown
-     * expired. Reported as ⚠️, not a failure.
-     */
     @Test
     fun `primary recovered and cooldown expired returns to the primary`() {
         val marks = FailureMarks()
         marks.adoptFallbackCandidate("B-backup", "A-primary")
-        // "Time passes": the port exposes no clock and no expiry, exactly like production.
         val next = marks.resolveFallback(group)
         if (next != "A-primary") {
             println("⚠️ KNOWN GAP [T31/sticky-fallback]: no cooldown — after one fallback the primary is never re-tried without a manual pick (resolved '$next', GH#229)")
@@ -258,18 +208,6 @@ class FallbackTriggerClassificationTest {
         assertTrue(vmSrc.contains("if (!entryId.isNullOrEmpty()) recentlyFailedEntryIds.add(entryId)"))
     }
 
-    // ── Port of the fallback error trail ────────────────────────────────
-    //
-    //   ChatViewModel.kt ~L10740  val reason = when {
-    //       isRateLimit -> "Rate limited"
-    //       actual is LLMError.ProviderError -> actual.detail
-    //       else -> actual.message ?: "Error"
-    //   }
-    //   fallbackReasons.add("⚠️ ${currentProvider.model.displayName}: $reason")
-    //   ...exhausted:
-    //   val trail = (fallbackReasons + skipped).joinToString("\n")
-    //   val finalDesc = actual.message ?: actual.toString()
-    //   throw LLMError.ProviderError("$trail\n$finalDesc")
     private fun fallbackReason(actual: Throwable, isRateLimit: Boolean): String = when {
         isRateLimit -> "Rate limited"
         actual is LLMError.ProviderError -> actual.detail
@@ -330,16 +268,6 @@ class FallbackTriggerClassificationTest {
         assertTrue(vmSrc.contains("throw com.openminis.app.data.model.LLMError.ProviderError(\"\$trail\\n\$finalDesc\")"))
     }
 
-    // ── Port of buildFallbackProviders / unavailableGroupMembers (~L6549-6620) ──
-    //
-    //   for (offset in 1 until members.size) {
-    //       val idx = (currentIdx + offset) % members.size
-    //       val entry = config.modelEntries.find { it.id == entryId } ?: continue
-    //       val instance = config.instances.find { it.id == entry.providerInstanceId } ?: continue
-    //       if (!instance.isEnabled) continue
-    //       if (!providerRepository.hasAnyCredential(instance)) continue
-    //       result.add(FallbackCandidate(provider = p, entryId = entry.id))
-    //   }
     private fun fallbackChain(
         config: ProviderConfig,
         groupId: String,
@@ -399,9 +327,9 @@ class FallbackTriggerClassificationTest {
     private fun config(): ProviderConfig {
         val cfg = ProviderConfig()
         cfg.instances += instance("inst-A", enabled = true)
-        cfg.instances += instance("inst-B", enabled = false)   // the disabled provider (GH#34)
+        cfg.instances += instance("inst-B", enabled = false)
         cfg.instances += instance("inst-C", enabled = true)
-        cfg.instances += instance("inst-D", enabled = true)    // no credential
+        cfg.instances += instance("inst-D", enabled = true)
         cfg.modelEntries += entry("e-A", "inst-A", "gpt-5.3")
         cfg.modelEntries += entry("e-B", "inst-B", "claude-sonnet-4-6")
         cfg.modelEntries += entry("e-C", "inst-C", "deepseek-flash")

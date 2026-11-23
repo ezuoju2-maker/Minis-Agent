@@ -56,32 +56,14 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.RandomAccessFile
 
-/**
- * Log management screen — adopts the SettingsSection/SettingsRow toolkit
- * shared with the rest of Settings (T81). Sections:
- *   - Logging — Enable Logging switch + footer explaining capture
- *   - Log Files — daily files list (each row → LogDetailScreen)
- *   - Storage — Delete All Logs (only when files exist) + total-size footer
- *
- * Mirrors iOS LogManagementView's grouped-card layout.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogManagementScreen(
     onBack: () -> Unit,
     onLogFileClick: (fileName: String) -> Unit = {},
-    /** [T-config-readable] Opens a Config Changes record's detail page. */
     onConfigAuditEntryClick: (auditId: String) -> Unit = {},
 ) {
     val context = LocalContext.current
-    // T-logs-perf: capped, separated daily/crash lists. Pre-T-logs-perf the
-    // screen called AppLogger.listLogFiles() + totalSize() synchronously on
-    // the main thread inside a LaunchedEffect, AND each row called
-    // file.length() on every recomposition. With ~14 daily logs + dozens
-    // of crash files in long-running installs the directory scan + per-row
-    // stats stalled the screen for noticeable seconds. Now: stat once on
-    // Dispatchers.IO, cap each kind at 100, render LogFileMeta directly
-    // (no further stat calls).
     val dailyLogs = remember { mutableStateListOf<AppLogger.LogFileMeta>() }
     val crashLogs = remember { mutableStateListOf<AppLogger.LogFileMeta>() }
     var totalSize by remember { mutableStateOf(0L) }
@@ -90,34 +72,19 @@ fun LogManagementScreen(
     var loggingEnabled by remember { mutableStateOf(AppLogger.isEnabled(context)) }
     var loggingVerbose by remember { mutableStateOf(AppLogger.isVerbose(context)) }
 
-    // T-config: Logs / Config Changes segmented control. Default to
-    // "logs"; a `?tab=config-audit` deep-link query lands users straight
-    // on the audit list. Mirrors iOS LogManagementView.
     val initialTab = remember {
         com.openminis.app.deeplink.DeepLinkCoordinator.consumePendingLogsTab() ?: "logs"
     }
-    // rememberSaveable: coming back from a Config Changes record's detail
-    // page [T-config-readable] must land on the same tab.
     var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initialTab) }
 
     val refreshTrigger = remember { mutableStateOf(0) }
     LaunchedEffect(refreshTrigger.value) {
         loading = true
-        // Daily logs are named `minis-YYYY-MM-DD.log`. Crash files are
-        // `crash-…` (Java/Kotlin) and `native-crash-…` (NDK signal handler);
-        // grouped together as one "crash" list so the user sees one
-        // chronological stream regardless of which side trapped the fault.
-        // 100 of each is far past any reasonable inspection horizon.
         val (daily, crash, total) = withContext(Dispatchers.IO) {
             val d = AppLogger.listLogFileMetas(prefix = "minis-", limit = 100)
             val cJ = AppLogger.listLogFileMetas(prefix = "crash-", limit = 100)
             val cN = AppLogger.listLogFileMetas(prefix = "native-crash-", limit = 100)
-            // Merge Java + native crashes, sort newest-first by name (both
-            // share the YYYY-MM-DD_HH-mm-ss suffix that sorts cleanly), cap.
             val merged = (cJ + cN).sortedByDescending { it.name }.take(100)
-            // totalSize sums only the displayed rows. Older / over-cap files
-            // are still on disk but excluded from the cap-100 view; the
-            // footer wording matches what the user actually sees here.
             val sum = (d.sumOf { it.sizeBytes }) + (merged.sumOf { it.sizeBytes })
             Triple(d, merged, sum)
         }
@@ -133,8 +100,6 @@ fun LogManagementScreen(
         onBack = onBack,
         scrollable = false,
     ) {
-        // Segmented selector lives outside the scrolling content so the
-        // tabs stay visible as the body scrolls.
         SingleChoiceSegmentedButtonRow(
             modifier = Modifier
                 .fillMaxWidth()
@@ -153,11 +118,8 @@ fun LogManagementScreen(
         }
 
         if (tab == "config-audit") {
-            // Audit body. Owns its own scrolling.
             ConfigAuditScreen(modifier = Modifier.fillMaxSize(), onOpenEntry = onConfigAuditEntryClick)
         } else {
-            // Logs body — original layout. The LazyColumn picks up
-            // viewport height since the scaffold gave us a Column slot.
             LogsBody(
                 context = context,
                 dailyLogs = dailyLogs,
@@ -205,7 +167,6 @@ fun LogManagementScreen(
     }
 }
 
-/** Original logs-tab body, extracted so the segmented selector can switch into the audit view. */
 @Composable
 private fun LogsBody(
     context: Context,
@@ -226,7 +187,6 @@ private fun LogsBody(
             .fillMaxWidth()
             .verticalScroll(rememberScrollState()),
     ) {
-        // ── Logging ─────────────────────────────────────────────────────
         SettingsSection(
             header = stringResource(R.string.log_section_logging),
             footer = stringResource(R.string.log_section_logging_footer),
@@ -239,7 +199,6 @@ private fun LogsBody(
             )
         }
 
-        // [T-android-log-level] Mirrors iOS's "Detail Level" picker.
         if (loggingEnabled) {
             SettingsSection(
                 header = stringResource(R.string.log_section_detail_level),
@@ -259,10 +218,6 @@ private fun LogsBody(
             }
         }
 
-        // While the IO load is in flight (single frame in practice, but the
-        // dir scan + 100×stat can spike on slow eMMC), show a centered
-        // spinner instead of the empty-state row — otherwise the screen
-        // briefly reads as "no logs yet" before the real list pops in.
         if (loading) {
             Box(
                 modifier = Modifier
@@ -275,7 +230,6 @@ private fun LogsBody(
             return@Column
         }
 
-        // ── Log Files (daily) ───────────────────────────────────────────
         SettingsSection(
             header = stringResource(R.string.log_section_files),
             footer = stringResource(R.string.log_section_files_footer),
@@ -299,7 +253,6 @@ private fun LogsBody(
             }
         }
 
-        // ── Crash Logs (T283) — only show when present ──────────────────
         if (crashLogs.isNotEmpty()) {
             SettingsSection(
                 header = "Crash Logs",
@@ -316,7 +269,6 @@ private fun LogsBody(
             }
         }
 
-        // ── Storage / Delete All (only when files exist) ───────────────
         if (anyFiles) {
             SettingsSection(
                 header = stringResource(R.string.log_section_storage),
@@ -343,29 +295,7 @@ private fun LogsBody(
     }
 }
 
-// ─── Log Detail Screen ─────────────────────────────────────────────────────────
 
-/**
- * T176: lazy line-index loader for the log detail viewer. The previous
- * `file.readText()` approach allocated the entire file as a single
- * String + a single `Text` Composable, which ANR'd / OOM'd at the user's
- * 33MB log. Strategy:
- *
- *  1. One pass through the file to record byte-offset of every newline.
- *     Yields a `LongArray` of ~30-50 K entries for a 33MB log
- *     (≈ 4MB heap), well below any practical limit.
- *  2. `readLine(i)` seeks to `offsets[i]` and reads a single line on
- *     demand. Cached `RandomAccessFile` so each lookup is one I/O.
- *  3. `LazyColumn` renders only viewport-visible rows + overscan, so
- *     scroll is bounded by the visible rows count, not the file size.
- *  4. `DisposableEffect.onDispose` closes the RAF when the user leaves
- *     the screen so we don't leak descriptors across navigations.
- *
- * Trade-off: the indexing pass IS a full file read, but it's
- * sequential bytewise and runs on Dispatchers.IO — measured ~200-400 ms
- * for 33MB on Pixel 4a, vs the old `readText()` path which never
- * recovered.
- */
 private class LazyLogFile private constructor(
     private val raf: RandomAccessFile,
     val lineOffsets: LongArray,
@@ -377,9 +307,6 @@ private class LazyLogFile private constructor(
         if (index !in 0 until lineCount) return ""
         return try {
             raf.seek(lineOffsets[index])
-            // RAF.readLine reads bytes, so non-ASCII (CJK) gets mangled
-            // — log files are ASCII timestamp + UTF-8 message bodies,
-            // so read raw bytes up to the next newline and decode UTF-8.
             val buf = ByteArray(8 * 1024)
             val sb = StringBuilder()
             while (true) {
@@ -407,10 +334,6 @@ private class LazyLogFile private constructor(
     companion object {
         fun open(file: File): LazyLogFile {
             val raf = RandomAccessFile(file, "r")
-            // First-line offset is always 0; subsequent offsets sit
-            // immediately after each newline. Dynamic LongArray growth
-            // via mutableList is fine — 30-50 K Long boxings is a few MB
-            // of churn that the GC handles easily.
             val offsets = mutableListOf(0L)
             val buf = ByteArray(64 * 1024)
             var pos = 0L
@@ -424,16 +347,11 @@ private class LazyLogFile private constructor(
                 }
                 pos += n
             }
-            // Drop a trailing empty offset if the file ends with \n
-            // (the last "line" past the final newline is empty, but
-            // logs typically end with a newline so this prevents
-            // showing a blank ghost row at the bottom).
             val arr = if (offsets.size > 1 && offsets.last() >= raf.length()) {
                 offsets.dropLast(1).toLongArray()
             } else {
                 offsets.toLongArray()
             }
-            // Reset cursor — readLine will seek per call.
             raf.seek(0)
             return LazyLogFile(raf, arr)
         }
@@ -550,7 +468,6 @@ fun LogDetailScreen(
     }
 }
 
-// ─── Share Utilities ───────────────────────────────────────────────────────────
 
 private fun shareLogFile(context: Context, file: File) {
     try {
@@ -558,27 +475,13 @@ private fun shareLogFile(context: Context, file: File) {
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
             putExtra(Intent.EXTRA_STREAM, uri)
-            // Clip carries the URI in a way that downstream chooser
-            // hosts can introspect for the grant when EXTRA_STREAM
-            // alone isn't enough (Issue #17 — SecurityException
-            // "Permission Denial: opening provider … requires the
-            // provider be exported, or grantUriPermission()").
             clipData = android.content.ClipData.newRawUri(file.name, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         val chooser = Intent.createChooser(intent, context.getString(R.string.log_share_chooser))
-        // The chooser itself starts the receiver; on some OEM builds
-        // the grant flag has to live on the outer intent too or the
-        // receiver hits SecurityException reading the content://
-        // FileProvider URI.
         chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         context.startActivity(chooser)
     } catch (e: Exception) {
-        // Log the FileProvider failure — earlier this catch silently dropped
-        // the exception and fell back to EXTRA_TEXT, masking config bugs
-        // (e.g. a missing files-path root) as "share works but pastes the
-        // whole file as text body" UX. Now any future regression is one
-        // logcat line away from being root-caused.
         AppLogger.warning(
             "LogShare",
             "FileProvider share failed for ${file.name}: ${e.message} — falling back to EXTRA_TEXT",
@@ -591,4 +494,3 @@ private fun shareLogFile(context: Context, file: File) {
         context.startActivity(Intent.createChooser(intent, context.getString(R.string.log_share_chooser)))
     }
 }
-

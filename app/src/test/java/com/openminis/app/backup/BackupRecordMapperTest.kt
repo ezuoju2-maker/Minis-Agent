@@ -15,18 +15,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * The record <-> entity mapping and merge rules behind a restore, exercised
- * through the REAL exporter builders and the REAL importer mapping — the
- * error-prone part of backup: a wrong default or merge comparison silently
- * drops or overwrites user data, and the restore still reports success.
- */
 class BackupRecordMapperTest {
 
     private fun json(text: String): JsonObject = BackupFormat.json.parseToJsonElement(text).jsonObject
 
-    // Whole seconds: the wire format is second-precision ISO-8601 (see the
-    // truncation test below), so fixtures that round-trip exactly use them.
     private val t0 = 1_758_000_000_000L
     private fun at(sec: Long) = t0 + sec * 1000
 
@@ -47,7 +39,6 @@ class BackupRecordMapperTest {
         return (d as Decoded.Apply).entity
     }
 
-    // -- Sessions: round trip ---------------------------------------------------
 
     @Test
     fun `a session survives export then import field for field`() {
@@ -63,7 +54,6 @@ class BackupRecordMapperTest {
 
     @Test
     fun `an iPhone session record imports, with Android-only fields defaulted`() {
-        // Shape of a real iOS line: nested, no lastMessage / editCount / thinkingOverride.
         val ios = json(
             """{"memoryEnabled":false,"modelBinding":"group:g1","session":{
               "id":"S-2","title":"From iPhone","modelId":"gpt-6-sol",
@@ -87,7 +77,6 @@ class BackupRecordMapperTest {
         assertEquals("inner", applied(BackupRecordMapper.session(rec, null)).title)
     }
 
-    // -- Sessions: defaults -------------------------------------------------------
 
     @Test
     fun `memory stays ON unless the record explicitly says false`() {
@@ -122,11 +111,10 @@ class BackupRecordMapperTest {
         assertEquals(Decoded.Unreadable, BackupRecordMapper.session(json("""{"id":null}"""), null))
     }
 
-    // -- Merge ------------------------------------------------------------------
 
     @Test
     fun `merge - newer backup wins, equal or older keeps the local row`() {
-        val rec = sessionOut() // updatedAt = at(60)
+        val rec = sessionOut()
         assertEquals(Decoded.Stale("S-1"), BackupRecordMapper.session(rec, session.copy(updatedAt = at(60))))
         assertEquals(Decoded.Stale("S-1"), BackupRecordMapper.session(rec, session.copy(updatedAt = at(61))))
         val newer = BackupRecordMapper.session(rec, session.copy(updatedAt = at(59)))
@@ -149,8 +137,6 @@ class BackupRecordMapperTest {
 
     @Test
     fun `sub-second local edits are not clobbered by the same state exported to whole seconds`() {
-        // The wire truncates to seconds, so a backup of the CURRENT state reads
-        // as slightly older than the local row — and must lose, not win.
         val local = session.copy(updatedAt = at(60) + 750)
         assertEquals(Decoded.Stale("S-1"), BackupRecordMapper.session(sessionOut(local), local))
     }
@@ -163,7 +149,6 @@ class BackupRecordMapperTest {
         assertTrue(!BackupRecordMapper.incomingWins(10, 9))
     }
 
-    // -- Folders ----------------------------------------------------------------
 
     private val folder = FolderEntity(
         id = "F-1", name = "Work", icon = "briefcase", color = "blue",
@@ -200,7 +185,6 @@ class BackupRecordMapperTest {
         assertEquals(Decoded.Stale("F-1"), BackupRecordMapper.folder(rec, folder.copy(name = "Renamed", updatedAt = at(9))))
     }
 
-    // -- Messages -----------------------------------------------------------------
 
     private val message = MessageEntity(
         id = "M-1", sessionId = "S-1", role = "assistant",
@@ -253,7 +237,6 @@ class BackupRecordMapperTest {
         assertEquals("[]", rec["parts"].toString())
     }
 
-    // -- Compact markers --------------------------------------------------------
 
     @Test
     fun `a compact marker survives export then import field for field`() {
@@ -266,7 +249,6 @@ class BackupRecordMapperTest {
         assertNull(BackupRecordMapper.compactMarker(json("""{"id":"C"}""")))
     }
 
-    // -- Value parsing -----------------------------------------------------------
 
     @Test
     fun `timestamps - every accepted spelling lands on the same instant`() {

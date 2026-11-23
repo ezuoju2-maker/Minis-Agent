@@ -17,23 +17,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T-android-gemini-tool-field] The Gemini tool wrapper must be the REST
- * spelling, `functionDeclarations`, on every request path.
- *
- * `function_declarations` is the proto/gRPC field name. Google's own endpoint
- * accepts both, so this was invisible on a direct key — but a relay that
- * transcodes the request does not: against the same Flash model, camelCase
- * returned a real `functionCall` while snake_case returned TOOL_UNAVAILABLE,
- * and a native streaming request answered HTTP 200 with `parts: []` and
- * finishReason STOP, which surfaces to the user as "the model returned an
- * empty response". iOS has always sent camelCase, which is why the same
- * account worked there and not here.
- *
- * These assert on the bytes actually put on the wire, through the real
- * provider, because the bug was invisible at every other layer: the tool
- * schema, the response parser and the history replay were all already correct.
- */
 class GeminiToolFieldNamingTest {
 
     private lateinit var server: MockWebServer
@@ -73,9 +56,6 @@ class GeminiToolFieldNamingTest {
             "file_write",
             wrapper.getJSONArray("functionDeclarations").getJSONObject(0).getString("name"),
         )
-        // iOS pairs the declarations with an explicit AUTO mode on both paths;
-        // leaving the mode to the endpoint's default lets a relay decline to
-        // call tools at all while still answering 200.
         assertEquals(
             "toolConfig must request AUTO function calling, matching iOS: $body",
             "AUTO",
@@ -125,9 +105,6 @@ class GeminiToolFieldNamingTest {
 
     @Test
     fun `a request without tools carries neither tools nor toolConfig`() = runBlocking {
-        // toolConfig must not leak onto plain chat turns: a config naming a
-        // calling mode with no declarations is a shape the endpoint has no
-        // reason to accept.
         server.enqueue(
             MockResponse()
                 .setHeader("Content-Type", "application/json")

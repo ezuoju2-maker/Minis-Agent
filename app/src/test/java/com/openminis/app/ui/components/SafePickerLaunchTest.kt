@@ -7,12 +7,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * [T-android-picker-anf] A picker launch on a device with no resolvable
- * DocumentsUI throws ActivityNotFoundException out of startActivityForResult;
- * [launchPickerSafely] must keep it from crashing the app, log it and tell the
- * user, and leave the normal path untouched.
- */
 class SafePickerLaunchTest {
 
     private val logs = mutableListOf<String>()
@@ -23,8 +17,6 @@ class SafePickerLaunchTest {
 
     @Test
     fun `a missing picker does not escape, and is logged and shown`() {
-        // A launcher that behaves like startActivityForResult on a ROM with no
-        // DocumentsUI.
         val launched = run { throw ActivityNotFoundException("No Activity found to handle Intent") }
 
         assertFalse(launched)

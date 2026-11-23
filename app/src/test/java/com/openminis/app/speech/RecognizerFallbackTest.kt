@@ -9,11 +9,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-431-fallback] GH #431: the CLI took the on-device recognizer on Android
- * 12+ and never fell back, so a missing language pack (a zh-CN Pixel 4a: error
- * 12) or an unreachable service (vivo: ERROR_CLIENT) was a dead end.
- */
 class RecognizerFallbackTest {
 
     @Test
@@ -25,8 +20,6 @@ class RecognizerFallbackTest {
         assertFalse(RecognizerFallback.shouldSwitch(SpeechRecognizer.ERROR_NETWORK))
         assertFalse(RecognizerFallback.shouldSwitch(SpeechRecognizer.ERROR_NO_MATCH))
         assertFalse(RecognizerFallback.shouldSwitch(SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS))
-        // Quota exhaustion is a different problem: switching would just spend
-        // the other recognizer's quota too.
         assertFalse(RecognizerFallback.shouldSwitch(RecognizerErrorCodes.TOO_MANY_REQUESTS))
     }
 
@@ -59,8 +52,6 @@ class RecognizerFallbackTest {
 
     @Test
     fun `the chat voice input never falls back once the take has something to lose`() {
-        // [T-voice-fallback-after-stop] ERROR_CLIENT after the user's stop wiped
-        // the transcript and restarted a recognizer that opened the mic again.
         val src = ProductionSources.read("speech/SystemSpeechRecognitionEngine.kt")
         assertTrue(src.contains("val beforeAnything = !sessionCommitted && !stopRequested && !heardSpeech &&\n                segmentTranscript.isEmpty() && bufferedPartial.isNullOrEmpty()"))
         assertTrue(src.contains("val mayFallBack = RecognizerErrorCodes.isLanguageError(errorCode) || replayPcm != null || beforeAnything"))

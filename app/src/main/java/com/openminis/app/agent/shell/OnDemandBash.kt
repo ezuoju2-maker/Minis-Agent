@@ -7,18 +7,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/**
- * Confirms/installs bash on demand with the design-review guards
- * (T-bash-on-demand §2/§3, F2/M5). Isomorphic to iOS OnDemandBash.swift:
- *   - tri-state availability cache (unavailable has a 10-min TTL; available
- *     self-heals on a later 127),
- *   - host-side 5s network precheck before running apt (F2),
- *   - persistent failure backoff (24h / 3-strikes) via SharedPreferences (F2),
- *   - one install attempt per process launch.
- *
- * On Android PRoot runs `apt-get` natively, so the wait is minor; the
- * guards still matter for the offline / broken-source case.
- */
 object OnDemandBash {
 
     private const val TAG = "Bashism"
@@ -29,7 +17,6 @@ object OnDemandBash {
     private const val BACKOFF_WINDOW_MS = 24L * 3600 * 1000
     private const val UNAVAILABLE_TTL_MS = 10L * 60 * 1000
     private const val INSTALL_BUDGET_MS = 60_000L
-    /** [FIX-261025-05] FreshProcessShell.CANCELLED_EXIT: the user pressed Stop. */
     private const val STOPPED_EXIT = 130
     const val STOPPED_REASON = "stopped by the user"
     private const val APK_PROBE_URL = "http://ports.ubuntu.com/ubuntu-ports/dists/noble/Release"
@@ -44,7 +31,6 @@ object OnDemandBash {
     private var availability: Availability = Availability.Unknown
     private var attemptedInstallThisLaunch = false
 
-    /** Runs a guest command, returns its exit code. */
     fun interface Executor {
         suspend fun run(command: String, timeoutMs: Long): Int
     }
@@ -59,7 +45,7 @@ object OnDemandBash {
             is Availability.Available -> return Outcome.Available
             is Availability.Unavailable -> {
                 if (System.currentTimeMillis() < a.until) return Outcome.Unavailable("bash not installed")
-                availability = Availability.Unknown // TTL expired — re-probe
+                availability = Availability.Unknown
             }
             is Availability.Unknown -> {}
         }
@@ -69,8 +55,6 @@ object OnDemandBash {
             availability = Availability.Available
             return Outcome.Available
         }
-        // [FIX-261025-05] A user Stop (exit 130) says nothing about bash:
-        // leave every flag as it was so the next command can try again.
         if (probe == STOPPED_EXIT) return Outcome.Unavailable(STOPPED_REASON)
 
         if (attemptedInstallThisLaunch) {
@@ -91,9 +75,6 @@ object OnDemandBash {
         Log.i(TAG, "installing bash (budget ${INSTALL_BUDGET_MS / 1000}s)…")
         val rc = executor.run("apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y bash", INSTALL_BUDGET_MS)
         if (rc == STOPPED_EXIT) {
-            // [FIX-261025-05] Stopped mid-install by the user: not a failed
-            // install, so no strike and no back-off; a later command may
-            // install again.
             attemptedInstallThisLaunch = false
             Log.i(TAG, "bash install stopped by the user")
             return Outcome.Unavailable(STOPPED_REASON)
@@ -102,9 +83,6 @@ object OnDemandBash {
         if (verified) {
             clearFailure(context)
             availability = Availability.Available
-            // A SUCCESSFUL install re-arms the per-launch guard (M5 self-heal:
-            // if the user later removes bash this session, one fresh reinstall
-            // is still allowed). The guard only blocks repeated FAILING installs.
             attemptedInstallThisLaunch = false
             Log.i(TAG, "bash installed OK")
             return Outcome.Available
@@ -114,7 +92,6 @@ object OnDemandBash {
         return Outcome.Unavailable("apt-get install bash failed (rc=$rc)")
     }
 
-    /** Called when `bash <file>` itself returned 127 (user removed bash) — M5. */
     suspend fun markDisappeared() = lock.withLock { availability = Availability.Unknown }
 
     private fun markUnavailable() {
@@ -143,8 +120,6 @@ object OnDemandBash {
 
     private suspend fun networkReachable(): Boolean = withContext(Dispatchers.IO) {
         try {
-            // [FEAT-261021-16] Probe the way the shell's `apt-get` will go: its
-            // route in Settings > Network (unrouted: the same HttpURLConnection HEAD).
             val code = com.openminis.app.network.NetworkUrlRequest.open(
                 com.openminis.app.network.NetworkScope.SHELL.tag, APK_PROBE_URL, "HEAD",
                 connectTimeoutMs = 5000, readTimeoutMs = 5000,

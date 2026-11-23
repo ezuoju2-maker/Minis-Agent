@@ -4,21 +4,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-copy-full-plain-text] "Copy Full Reply ▸ Plain Text" copies the
- * RENDERED text, not the raw markdown with its markers deleted.
- *
- * The distinction from iOS `1b4353367`: headings, lists and quotes land the
- * way the user SEES them — no `#`, `-`, `**`, `>` left behind — but tables and
- * math still expand, because dropping those loses *content*, not formatting.
- * A table that came back as an empty line would be a silent data loss in the
- * paste target.
- */
 class CopyPlainTextTest {
 
     private fun plain(md: String) = MarkdownClipboard.markdownToPlainText(md)
 
-    // ─── Markers are stripped ────────────────────────────────────────────
 
     @Test
     fun `heading markers are removed but the text stays`() {
@@ -53,12 +42,9 @@ class CopyPlainTextTest {
         assertFalse(out.contains("]("))
     }
 
-    // ─── Content is NOT lost ─────────────────────────────────────────────
 
     @Test
     fun `table cell content survives`() {
-        // The separator row is dropped as pure formatting, but every cell
-        // value must still be present — losing them is losing content.
         val out = plain(
             """
             | Col A | Col B |
@@ -92,7 +78,6 @@ class CopyPlainTextTest {
         val out = plain("- first\n- second")
         assertTrue(out.contains("first"))
         assertTrue(out.contains("second"))
-        // Raw markdown bullets are replaced by a rendered bullet glyph.
         assertFalse("no raw dash bullets", out.lines().any { it.trimStart().startsWith("- ") })
     }
 
@@ -105,13 +90,9 @@ class CopyPlainTextTest {
         assertTrue(out.contains("beta"))
     }
 
-    // ─── Plain text differs from raw markdown ────────────────────────────
 
     @Test
     fun `plain text is not merely the raw markdown`() {
-        // Guards against a regression where the Plain Text action is wired to
-        // the same source as Copy Markdown — the two must produce different
-        // output for marked-up input, or the menu item is a lie.
         val md = "# Title\n\nSome **bold** text."
         assertFalse(plain(md) == md)
     }

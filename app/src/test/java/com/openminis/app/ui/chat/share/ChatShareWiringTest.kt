@@ -5,12 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-multi-select-share] Pins the entry points and the render path (iOS
- * ChatShareModelTests "Wiring"): Share Chat… in the user-bubble menu after
- * Copy / Retry / Edit, last in both selection bars, in the "…" menu, all opening the
- * same picker; the export draws the chat's own rows in its own appearance.
- */
 class ChatShareWiringTest {
     @Test fun `every entry opens the same picker`() {
         val bubble = ProductionSources.read("ui/chat/ChatUserMessageUI.kt")
@@ -128,7 +122,6 @@ class ChatShareWiringTest {
     }
 
     @Test fun `file names are cut on character boundaries`() {
-        // take(60) would keep only the first half of the surrogate pair.
         val title = "a".repeat(59) + "😀tail"
         assertEquals("a".repeat(59) + "😀", takeGraphemes(title, 60))
         assertEquals("short", takeGraphemes("short", 60))

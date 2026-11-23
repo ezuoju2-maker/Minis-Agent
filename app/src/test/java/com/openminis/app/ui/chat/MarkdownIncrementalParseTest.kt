@@ -5,16 +5,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * [T-android-md-parse-incremental] The incremental streaming parse freezes
- * every block before the newest "sealed" blank-line boundary and re-parses
- * only the tail. A boundary wrongly declared sealed would freeze a half-open
- * code fence or math span and corrupt the render for the rest of the stream,
- * so the boundary rule is pinned here.
- */
 class MarkdownIncrementalParseTest {
 
-    /** Literal "$$" without tripping Kotlin string interpolation. */
     private val D = "$" + "$"
 
     @Test
@@ -27,7 +19,6 @@ class MarkdownIncrementalParseTest {
 
     @Test
     fun `a blank line INSIDE an open code fence is not sealed`() {
-        // The fence opens and never closes — everything after it is still live.
         val md = "intro\n\n```kotlin\nval a = 1\n\nval b = 2"
         val end = stableParsePrefixEnd(md, 0)
         assertEquals("only the pre-fence boundary may freeze", "intro\n\n".length, end)
@@ -55,7 +46,6 @@ class MarkdownIncrementalParseTest {
     @Test
     fun `the prefix only ever grows`() {
         val md = "a\n\nb\n\nc"
-        // Already frozen past the first boundary → never hand back a smaller one.
         val already = "a\n\nb\n\n".length
         assertEquals(already, stableParsePrefixEnd(md, already))
     }
@@ -67,7 +57,6 @@ class MarkdownIncrementalParseTest {
 
     @Test
     fun `isSealedBoundary counts only line-leading delimiters`() {
-        // A ``` appearing mid-sentence is not a fence opener.
         assertTrue(isSealedBoundary("see the ``` marker inline\n\n", "see the ``` marker inline\n\n".length))
         assertFalse(isSealedBoundary("```\nopen\n\n", "```\nopen\n\n".length))
     }
@@ -78,9 +67,7 @@ class MarkdownIncrementalParseTest {
         assertFalse(isSealedBoundary(md, md.length))
     }
 
-    // ─── Equivalence: incremental replay must equal a single full parse ────
 
-    /** Feed [full] in growing prefixes, as a stream would arrive. */
     private fun chunked(full: String, step: Int): List<String> =
         generateSequence(step) { it + step }.takeWhile { it < full.length }
             .map { full.substring(0, it) }.toList() + listOf(full)
@@ -119,8 +106,6 @@ class MarkdownIncrementalParseTest {
 
     @Test
     fun `a non-append edit invalidates the cached prefix`() {
-        // Grow, then replace the text entirely — the result must match a full
-        // parse of the NEW text, not a splice of the old prefix.
         val a = "alpha para\n\nbeta para\n\ngamma"
         val b = "totally different\n\ncontent here"
         assertEquals(debugParseBlockRaws(b), debugParseIncrementalRaws(listOf(a, b)))

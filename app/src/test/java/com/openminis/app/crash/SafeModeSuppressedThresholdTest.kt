@@ -16,12 +16,6 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
 
-/**
- * [T-safe-mode-suppressed-threshold] After "Not now" the 24 h suppress window
- * raises the safe-mode threshold from 2 to 5 crashes in the last hour instead
- * of switching detection off (which let a crash-on-launch loop run with no
- * safe mode and no exit).
- */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], application = Application::class)
 class SafeModeSuppressedThresholdTest {
@@ -53,7 +47,6 @@ class SafeModeSuppressedThresholdTest {
         p.set(CrashFrequencyDetector, null)
     }
 
-    /** [n] crash files from the last few minutes, one per crash, alternating both sources. */
     private fun crashes(n: Int) {
         val now = System.currentTimeMillis()
         repeat(n) { i ->

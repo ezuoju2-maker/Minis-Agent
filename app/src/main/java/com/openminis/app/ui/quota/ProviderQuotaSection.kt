@@ -62,13 +62,6 @@ import com.openminis.app.ui.components.UrlPreviewSheet
 import com.openminis.app.ui.theme.ChatColors
 import kotlinx.coroutines.launch
 
-// [T-provider-quota] "Quota" section of the provider detail page: the upstream
-// balance / quota of this instance's account, from the vendor itself - never
-// Minis's own token counts. Port of iOS ProviderQuotaSection.swift.
-//
-// - Shared pools appear once, labelled as shared by every model on the account.
-// - Amounts are shown in their own unit; a prepaid balance has no bar and no percent.
-// - Windows are listed side by side with their own reset time, never summed.
 
 @Composable
 fun ProviderQuotaSection(instance: ProviderInstance) {
@@ -78,8 +71,6 @@ fun ProviderQuotaSection(instance: ProviderInstance) {
     val display = st.display(descriptor)
     if (display is QuotaInstanceDisplay.Hidden) return
 
-    // [T-quota-attention-refresh] Refreshes on open when due, and keeps the
-    // watched interval while the page is open.
     QuotaWatch(instance.id, "detailAppeared")
 
     val scope = rememberCoroutineScope()
@@ -88,7 +79,6 @@ fun ProviderQuotaSection(instance: ProviderInstance) {
     val linkUrl = QuotaConsoleLink.url(descriptor)
 
     Column(Modifier.fillMaxWidth().padding(top = 24.dp)) {
-        // Header: "QUOTA" + refresh (same type as SettingsSection's header).
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth().padding(start = 32.dp, end = 20.dp).height(28.dp),
@@ -230,7 +220,7 @@ internal fun CheckingRow(modifier: Modifier = Modifier) {
 @Composable
 private fun SectionFooter(st: QuotaState, display: QuotaInstanceDisplay, instance: ProviderInstance, blocked: String?) {
     val context = LocalContext.current
-    val lines = mutableListOf<Pair<String, Boolean>>() // text, warning
+    val lines = mutableListOf<Pair<String, Boolean>>()
     if (display is QuotaInstanceDisplay.Pools) {
         val subject = st.subjects[display.subjectId]
         val pools = st.poolsOf(display.subjectId)
@@ -271,7 +261,6 @@ private fun SectionFooter(st: QuotaState, display: QuotaInstanceDisplay, instanc
 internal fun rememberProviderRepository(): com.openminis.app.data.repository.ProviderRepository? =
     (LocalContext.current.applicationContext as? com.openminis.app.MinisApp)?.providerRepositoryOrNull
 
-/** Labels of the other instances on the same account. */
 @Composable
 internal fun sharingLabels(st: QuotaState, instanceId: String): List<String> {
     val repo = rememberProviderRepository() ?: return emptyList()
@@ -279,10 +268,6 @@ internal fun sharingLabels(st: QuotaState, instanceId: String): List<String> {
     return st.sharingInstanceIds(instanceId).mapNotNull { id -> config.instances.find { it.id == id }?.label }
 }
 
-/**
- * [T-quota-relay-probe] "Relay type: Sub2API · /v1/usage (detected 2 hr. ago)"
- * or what was checked when nothing answered.
- */
 @Composable
 internal fun relayDetectionLine(st: QuotaState, instance: ProviderInstance): String? {
     val context = LocalContext.current
@@ -295,28 +280,12 @@ internal fun relayDetectionLine(st: QuotaState, instance: ProviderInstance): Str
     }
 }
 
-// MARK: - Detail sheet
 
-/**
- * [T-quota-badge-ui] The full quota picture of one provider account, opened
- * from the pill on the model picker's provider header (and the Model Group
- * member pills). Read-only quota, nothing else. Port of iOS QuotaDetailSheet.
- *
- * - One card per canonical pool ([QuotaPoolRow], detailed).
- * - Per pool: source and confidence, update time, and what it applies to.
- * - No key, not even masked.
- * - Pull to refresh / toolbar refresh use the store's forced refresh:
- *   single flight, Retry-After and the 30 s debounce still apply.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QuotaDetailSheet(
     instanceId: String,
     onDismiss: () -> Unit,
-    /**
-     * Open at half height, draggable to full (iOS `.medium, .large` detents
-     * over the model picker). The Model Group page opens it full height, as iOS.
-     */
     halfHeight: Boolean = true,
 ) {
     val context = LocalContext.current
@@ -353,7 +322,6 @@ fun QuotaDetailSheet(
         },
     ) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f).navigationBarsPadding()) {
-            // Title bar: Done | label | refresh.
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
@@ -466,7 +434,6 @@ private fun SheetSection(header: String?, content: @Composable ColumnScope.() ->
     }
 }
 
-/** "Title ........ value" row (SwiftUI LabeledContent). */
 @Composable
 private fun LabeledRow(title: String, value: @Composable () -> Unit) {
     Row(
@@ -535,7 +502,6 @@ private fun AccountSection(
     }
 }
 
-/** [T-quota-relay-probe] "Relay type  Sub2API · /v1/usage / detected 2 hr. ago", only when found. */
 @Composable
 internal fun relaySheetRows(st: QuotaState, instance: ProviderInstance): (@Composable () -> Unit)? {
     val d = st.relayDetection(QuotaStore.descriptor(instance))?.takeIf { it.found } ?: return null

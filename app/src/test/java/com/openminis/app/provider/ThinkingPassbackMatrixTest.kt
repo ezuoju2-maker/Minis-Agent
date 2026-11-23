@@ -20,27 +20,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * [T18] Thinking passback matrix — one golden sample per protocol of how the
- * reasoning captured on a prior assistant turn is echoed back AFTER a tool call.
- *
- * Pins: 20c074454 (Anthropic-protocol interleaved thinking echo, issue #70),
- * ThinkingRuleResolver's deepseek-flash rule (GH#356), the OpenAI-chat
- * reasoning_content echo gate (GH#22 / #87 / #171), the Gemini thoughtSignature
- * replay (#179), and the Responses API input conversion.
- *
- * Nine field reports (GH #1, #16, #22, #70, #87, #171, #356, #361, #368) are all
- * the same seam: the SAME captured reasoning must land in a DIFFERENT field, at a
- * DIFFERENT position, per protocol — and for some protocols must NOT be sent at
- * all. Every case drives the real provider through a MockWebServer and reads the
- * serialized request, because the failure mode is a silent shape drift, not an
- * exception.
- *
- * The shared history is one tool-call round: user → assistant (reasoning + text
- * + tool_use) → tool_result → user. Only the assistant turn's serialization
- * differs across protocols; the tool pairing is asserted alongside so a passback
- * change cannot silently break the run it sits in.
- */
 class ThinkingPassbackMatrixTest {
 
     private lateinit var server: MockWebServer
@@ -56,7 +35,6 @@ class ThinkingPassbackMatrixTest {
         server.shutdown()
     }
 
-    // ------------------------------------------------------------ fixtures
 
     private val reasoning = "chain of thought"
 
@@ -102,7 +80,6 @@ class ThinkingPassbackMatrixTest {
         outputModalities = outputModalities,
     )
 
-    /** Stable textual form: sorted keys at every level. Strings are quoted verbatim. */
     private fun canonical(v: Any?): String = when (v) {
         null, JSONObject.NULL -> "null"
         is JSONObject -> v.keys().asSequence().sorted()
@@ -209,15 +186,7 @@ class ThinkingPassbackMatrixTest {
         return false
     }
 
-    // ============================================================ OpenAI chat
 
-    /**
-     * OpenAI Chat Completions on an interleaved-reasoning vendor: the captured
-     * reasoning rides on the assistant MESSAGE as `reasoning_content`, a sibling
-     * of `content` / `tool_calls` — never inside the content string, never on the
-     * `tool` reply. The whole assistant turn is pinned, so a shape drift in any of
-     * the three fields shows up as a one-line diff.
-     */
     @Test
     fun `openai chat echoes reasoning_content as a message-level sibling of tool_calls`() {
         val body = captureOpenAI(
@@ -237,12 +206,6 @@ class ThinkingPassbackMatrixTest {
         assertEquals("q2", msgs.getJSONObject(3).getString("content"))
     }
 
-    /**
-     * DeepSeek native (V4 / deepseek-flash): a prior turn whose reasoning was never
-     * captured still needs the FIELD present — as `""`, not a synthetic marker
-     * (the "[no prior reasoning]" / single-space placeholders were in-context
-     * learned and echoed back as the model's own reasoning, T249/T257).
-     */
     @Test
     fun `deepseek native sends an empty reasoning_content placeholder when nothing was captured`() {
         val body = captureOpenAI(
@@ -255,11 +218,6 @@ class ThinkingPassbackMatrixTest {
         assertEquals("", assistant.getString("reasoning_content"))
     }
 
-    /**
-     * DeepSeek native: the thinking SWITCH is a root object and the tier is a root
-     * sibling — the reasoning goes in `messages[]`, never in `content[]` (there is
-     * no content array on this path at all).
-     */
     @Test
     fun `deepseek native keeps thinking at the root and reasoning out of content`() {
         val body = captureOpenAI(
@@ -273,7 +231,6 @@ class ThinkingPassbackMatrixTest {
         assertTrue("content must stay a plain string on the chat path: $assistant", assistant.get("content") is String)
     }
 
-    /** GH#356 — the bare `deepseek-flash` id lands on the DeepSeek rule, OFF included. */
     @Test
     fun `deepseek-flash hits the deepseek rule at OFF too`() {
         val body = captureOpenAI(
@@ -284,19 +241,7 @@ class ThinkingPassbackMatrixTest {
         assertFalse("OFF sends no tier on the vendor-native shape: $body", body.has("reasoning_effort"))
     }
 
-    // ============================================================ Responses API
 
-    /**
-     * Responses API: structured history becomes typed input items. The tool
-     * round-trip is a `function_call` (synthetic `fc_syn_` id when the call was not
-     * born on this path) followed by its `function_call_output`.
-     *
-     * KNOWN GAP: no `reasoning` item is echoed. iOS re-attaches captured
-     * reasoning items (id + encrypted_content) so a relay that validates
-     * "reasoning_text must be passed back" (GH#368) accepts the next turn; Android
-     * has no reasoning item on the input array at all. Pinned as ⚠️ rather than a
-     * failure so the rest of the matrix stays green.
-     */
     @Test
     fun `responses api converts the tool round-trip to typed items`() {
         val body = captureOpenAI(
@@ -320,21 +265,12 @@ class ThinkingPassbackMatrixTest {
         )
         assertEquals("high", body.getJSONObject("reasoning").getString("effort"))
         assertFalse("reasoning_content is a chat-completions field, not a Responses one", body.toString().contains("reasoning_content"))
-        // KNOWN GAP: expected a {"type":"reasoning", ...} item ahead of the
-        // function_call carrying the captured reasoning back (iOS parity).
         if (types.none { it == "reasoning" }) {
             println("⚠️ KNOWN GAP [T18/responses]: Android Responses input carries no reasoning item — captured reasoning is not passed back (GH#368 class)")
         }
     }
 
-    // ============================================================ Anthropic protocol
 
-    /**
-     * 20c074454 — Anthropic protocol + DeepSeek-class compat proxy: the captured
-     * reasoning is replayed verbatim as an UNSIGNED `thinking` block that LEADS
-     * the assistant content, ahead of text and tool_use. No `signature` key: we
-     * never capture one, and the proxy accepts an unsigned block.
-     */
     @Test
     fun `anthropic protocol interleaved thinking is echoed as the leading unsigned block`() {
         val body = captureAnthropic(
@@ -348,7 +284,6 @@ class ThinkingPassbackMatrixTest {
         assertEquals(listOf("thinking", "text", "tool_use"), types)
         assertEquals("""{thinking:"chain of thought",type:"thinking"}""", canonical(content.getJSONObject(0)))
         assertFalse("never fabricate a signature", content.getJSONObject(0).has("signature"))
-        // The tool_result turn (merged with the following user turn) carries no thinking.
         val user = msgs.getJSONObject(2)
         val userContent = user.getJSONArray("content")
         for (i in 0 until userContent.length()) {
@@ -358,7 +293,6 @@ class ThinkingPassbackMatrixTest {
         assertEquals("call_1", userContent.getJSONObject(0).getString("tool_use_id"))
     }
 
-    /** Same protocol, uncaptured reasoning → empty placeholder block (the proxy still 400s without it). */
     @Test
     fun `anthropic protocol echoes an empty thinking placeholder when nothing was captured`() {
         val body = captureAnthropic(
@@ -370,12 +304,6 @@ class ThinkingPassbackMatrixTest {
         assertEquals("""{thinking:"",type:"thinking"}""", canonical(first))
     }
 
-    /**
-     * The gate that makes the echo safe: a strict Claude-class model (no
-     * interleavedReasoningField) verifies signatures, so an unsigned block would
-     * be rejected with `thinking.signature: invalid_request_error`. Captured
-     * reasoning is NOT echoed there — even with supportsReasoning=true.
-     */
     @Test
     fun `strict claude-class model never receives an unsigned thinking block`() {
         val body = captureAnthropic(
@@ -388,15 +316,6 @@ class ThinkingPassbackMatrixTest {
         assertFalse("captured reasoning must not leak into a strict endpoint", body.toString().contains(reasoning))
     }
 
-    /**
-     * Claude at OFF, per model. [T-claude5-thinking-off] (iOS ef86ed890) An
-     * absent thinking field is NOT off on Claude 5 — it is adaptive thinking at
-     * the model's default effort (the iOS report: voice correction on
-     * claude-sonnet-5-5 spent its whole 5 s budget thinking). And the literal
-     * `disabled` 400s on Sonnet 5.5 / Opus 5.5 / Fable (iOS 69be65763). So each
-     * model gets the lowest setting it accepts, from Anthropic's per-model table:
-     * never a literal it 400s on, never an absent field on Claude 5.
-     */
     @Test
     fun `claude off is encoded per model`() {
         fun off(id: String) = captureAnthropic(model(id, supportsReasoning = true), ThinkingLevel.OFF)
@@ -416,20 +335,13 @@ class ThinkingPassbackMatrixTest {
         assertFalse("legacy 4.5 writes nothing (off is its default)", off("claude-sonnet-4-5").has("thinking"))
     }
 
-    /** Control: 4.6-4.x thinks by default, so OFF MUST stay explicit there. */
     @Test
     fun `claude 4_6 off keeps the explicit disabled literal`() {
         val body = captureAnthropic(model("claude-sonnet-4-6", supportsReasoning = true), ThinkingLevel.OFF)
         assertEquals("disabled", body.getJSONObject("thinking").getString("type"))
     }
 
-    // ============================================================ Gemini
 
-    /**
-     * Gemini takes no reasoning text back at all — its passback is the opaque
-     * `thoughtSignature`, a SIBLING of `functionCall` on the historical part.
-     * The captured reasoning string must not appear anywhere in the body.
-     */
     @Test
     fun `gemini replays the thought signature on the functionCall part and no reasoning text`() {
         val body = captureGemini(
@@ -453,14 +365,7 @@ class ThinkingPassbackMatrixTest {
         )
     }
 
-    // ============================================================ foreign reasoning dropped
 
-    /**
-     * Reasoning captured from another model must be DROPPED for endpoints that
-     * reject the field: Mistral's AssistantMessage is a closed schema (422
-     * extra_forbidden, GH#87), and a non-reasoning model has no business
-     * receiving it either.
-     */
     @Test
     fun `foreign reasoning is dropped for mistral and for non-reasoning models`() {
         val mistral = captureOpenAI(
@@ -475,13 +380,7 @@ class ThinkingPassbackMatrixTest {
         assertFalse("a non-reasoning model gets no reasoning_content: $plain", anyMessageHasKey(plain, "reasoning_content"))
     }
 
-    // ============================================================ no enable_thinking where the rule says so
 
-    /**
-     * A qwen id served by OpenRouter follows OpenRouter's contract (nested
-     * `reasoning.effort`), not the vendor-native `enable_thinking` dual-send that
-     * the same id would get on DashScope. The endpoint rule outranks the id rule.
-     */
     @Test
     fun `qwen on openrouter gets nested reasoning and no enable_thinking`() {
         val body = captureOpenAI(model("qwen3-32b"), ThinkingLevel.MEDIUM, path = "/openrouter.ai/api/v1")
@@ -491,7 +390,6 @@ class ThinkingPassbackMatrixTest {
         assertEquals("medium", body.getJSONObject("reasoning").getString("effort"))
     }
 
-    /** Control: the same id on DashScope keeps the vendor-native dual-send. */
     @Test
     fun `qwen on dashscope keeps enable_thinking`() {
         val body = captureOpenAI(model("qwen3-32b"), ThinkingLevel.MEDIUM, path = "/dashscope.aliyuncs.com/compatible-mode/v1")

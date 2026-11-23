@@ -1,9 +1,5 @@
 package com.openminis.app.ui.chat
 
-// [T-android-split-chat] User-message rendering extracted verbatim from
-// ChatScreen.kt: UserMessageBubble, UserAttachmentList, FileAttachmentTile,
-// fileIconFor, ImageGalleryDialog. Full import block copied (unused=warnings).
-// Externally-called ones (UserMessageBubble, UserAttachmentList) are internal.
 
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -276,35 +272,20 @@ import com.openminis.app.ui.browser.BrowserSheet
 import com.openminis.app.ui.theme.ChatColors
 import com.openminis.app.ui.components.MinisTextButton
 
-// ─── User Message (right-aligned, iOS: tertiarySystemFill bubble, 18dp radius) ─
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 internal fun UserMessageBubble(
     message: ChatMessage,
-    // [T-android-candidate-bubble-gap] When true, this bubble directly
-    // follows another user bubble (no AssistantHeader between them), so add
-    // extra top padding to keep the two visually separated. Default false
-    // preserves the original 4dp symmetric spacing for the normal
-    // user→assistant→user cadence.
     precededByUser: Boolean = false,
     onCopy: () -> Unit = {},
     onRetry: (() -> Unit)? = {},
     onEdit: (() -> Unit)? = null,
-    // [T-android-delete-from-here] Delete this message and everything after
-    // it. Null hides the action (streaming, or a host with no truncation
-    // capability).
     onDeleteFromHere: (() -> Unit)? = null,
-    // [T-android-compact-above] Summarize everything above this message
-    // (iOS parity: ChatMessageViews.swift's `onCompact`). Null hides the
-    // action — same streaming gate as Retry/Edit/Delete From Here.
     onCompactAbove: (() -> Unit)? = null,
     onWithdraw: (() -> Unit)? = null,
     onPreviewFile: (Uri, String) -> Unit = { _, _ -> },
-    // [T-multi-select-share] Opens the share picker with this message's round
-    // selected. Null hides the action.
     onShareChat: (() -> Unit)? = null,
-    // [T-in-chat-search] Opens Search in Chat. Null hides the action.
     onSearchInChat: (() -> Unit)? = null,
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -314,18 +295,8 @@ internal fun UserMessageBubble(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            // [T-android-user-assistant-spacing-16] 14dp top when stacked on
-            // another user bubble (User→User, left intentionally larger to
-            // separate distinct user messages — unchanged). When preceded by an
-            // ASSISTANT turn, 10dp so the Assistant→User boundary reads ~16dp
-            // together with the assistant trailing-block bottom + LazyColumn
-            // spacedBy(2). Bottom stays 4dp: the User→Assistant boundary is
-            // user.bottom(4) + spacedBy(2) + AssistantHeader.top(10) = 16.
             .padding(top = if (precededByUser) 14.dp else 10.dp, bottom = 4.dp),
     ) {
-        // Cap the bubble at 80% of the LazyColumn's available width (mirrors iOS
-        // proportional sizing; prevents single-line messages from spanning the
-        // full row and losing their "trailing bubble" shape).
         val bubbleMaxWidth = this.maxWidth * 0.8f
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -334,37 +305,19 @@ internal fun UserMessageBubble(
         Box(
             modifier = Modifier
                 .widthIn(max = bubbleMaxWidth)
-                // pointerInput on the OUTER box (= MinisMenu's anchor). Long-press
-                // anywhere on the bubble (text or attachments) opens the menu;
-                // press coords are stored in this box's coordinate space, which
-                // is exactly what DropdownMenu's `offset` parameter expects.
                 .pointerInput(message.id) {
                     detectTapGestures(
                         onLongPress = {
-                            // Haptic must be fired by hand here. `combinedClickable`
-                            // (what the tool pill uses) buzzes on long-press for
-                            // free; raw `detectTapGestures` does not, so this
-                            // gesture — chosen for its press OFFSET — silently
-                            // lost the feedback every other long-press menu has.
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            // Anchor the menu to the bubble — DropdownMenu
-                            // already places itself just below the anchor and
-                            // auto-flips above when there's no room. Using
-                            // the press y as offset (previous behavior) made
-                            // the menu jump halfway down a tall bubble away
-                            // from the user's finger, which on multi-line
-                            // user messages landed in screen center.
                             showMenu = true
                         }
                     )
                 }
         ) {
-            // iOS: VStack(alignment: .trailing, spacing: 6) { attachments; text bubble }
             Column(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                // Attachments ABOVE the text bubble, right-aligned FlowRow (iOS UserAttachmentList)
                 val hasAttachments = message.imageUris.isNotEmpty() || message.attachmentNames.isNotEmpty()
                 if (hasAttachments) {
                     UserAttachmentList(
@@ -376,9 +329,6 @@ internal fun UserMessageBubble(
                 }
 
                 if (message.content.isNotBlank()) {
-                    // Queued: transparent bg + dashed border + dimmed text +
-                    // a red withdraw button alongside. Mirrors iOS
-                    // AIChatView.swift queued-bubble overlay.
                     val secondaryTextColor = ChatColors.secondaryText
                     val userBubbleColor = ChatColors.userBubble
                     Row(
@@ -404,38 +354,16 @@ internal fun UserMessageBubble(
                                 )
                             }
                         } else Modifier
-                        // The whole LazyColumn is wrapped in a SelectionContainer,
-                        // which by default starts text-selection on long-press. We
-                        // want long-press on a user bubble to open the Copy/Retry
-                        // menu instead, with NO selection ever registered against
-                        // this Text. If we let selection register and the user
-                        // taps "Retry", retryFromMessage truncates the list and
-                        // the SelectionManager toolbar update then sorts stale
-                        // LayoutCoordinates → IllegalArgumentException
-                        // ("layouts are not part of the same hierarchy").
-                        // DisableSelection scopes the bubble out of selection.
-                        // Long-press is captured on the outer Box (above) so
-                        // press coords share a LayoutCoordinates space with the
-                        // menu anchor.
                         androidx.compose.foundation.text.selection.DisableSelection {
-                            // T167: when queued, leave room for the 44dp cancel
-                            // IconButton sibling. Without weight(1f, fill=false)
-                            // a wide bubble would consume the full 80% width
-                            // cap and squeeze the cancel button off-screen.
                             val bubbleModifier = if (isQueued && onWithdraw != null) {
                                 Modifier.weight(1f, fill = false)
                             } else Modifier
-                            // T-android-gc-storm-issue17: long user messages (rare,
-                            // but legacy sessions can carry pasted log dumps) blow
-                            // up text layout the same way large assistant content
-                            // does. User bubbles never stream so isStreaming=false.
                             LargeContentGuard(
                                 content = message.content,
                                 isStreaming = false,
                                 stableKey = "user:${message.id}",
                             ) {
                                 Text(
-                                    // [T-in-chat-search] matches painted in place
                                     text = com.openminis.app.ui.chat.search.rememberChatSearchHighlighted(message.content, com.openminis.app.ui.chat.search.ChatSearchUnits.BODY),
                                     color = textColor,
                                     style = MaterialTheme.typography.bodyMedium.copy(fontSize = 16.5.sp),
@@ -448,12 +376,6 @@ internal fun UserMessageBubble(
                             }
                         }
                         if (isQueued && onWithdraw != null) {
-                            // T52: bring the withdraw target up to Material's
-                            // 44dp recommended minimum so it can be hit
-                            // reliably from the soft-IME-keyboard region;
-                            // 28dp was below the spec and frustrating on
-                            // Pixel-class displays. Icon nudged to 24dp to
-                            // stay visually centred in the larger ring.
                             IconButton(
                                 onClick = onWithdraw,
                                 modifier = Modifier.size(44.dp),
@@ -470,23 +392,6 @@ internal fun UserMessageBubble(
                 }
             }
 
-            // Long-press context menu — anchored to the bubble itself.
-            // Small positive y-offset so the menu doesn't sit flush against
-            // the bubble; the alignEnd path mirrors the offset when it
-            // auto-flips above (no room below), so the gap is symmetric in
-            // both directions. T238: alignEnd pins the menu's right edge to
-            // the bubble's right edge — user bubbles are right-aligned, the
-            // menu should follow. Mirrors iOS Messages.app context menu.
-            // T280: shrink width ~30% (default minWidth 240dp → 168dp,
-            // alignEnd-branch max 280dp → 196dp) so the popup feels less
-            // chunky on user bubbles, which only host 2-3 short items
-            // (Copy / Retry / Edit). Override is local to the user-message
-            // call site — other MinisMenu callers keep the default 240dp
-            // minimum.
-            // [T-android-tool-menu-minwidth] Match the tool-pill long-press
-            // menu: width = min(220dp, screen width). Wants 220dp but must never
-            // exceed the device width on a narrow screen; cap max to the same
-            // value so the widthIn(min,max) range is always valid.
             val userMenuWidthDp = minOf(220, LocalConfiguration.current.screenWidthDp).dp
             MinisMenu(
                 expanded = showMenu,
@@ -501,10 +406,6 @@ internal fun UserMessageBubble(
                     onClick = { showMenu = false; onCopy() },
                     leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp)) },
                 )
-                // T119: while the model is generating, hide every action that
-                // would mutate the in-flight turn. Retry truncates history and
-                // restarts the stream, which corrupts state if it races a live
-                // tool loop. Caller passes null for `onRetry` while streaming.
                 if (onRetry != null) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.chat_longpress_retry)) },
@@ -512,8 +413,6 @@ internal fun UserMessageBubble(
                         leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     )
                 }
-                // T187: Edit replaces the original turn with edited text. Same
-                // gating as retry — caller passes null while streaming.
                 if (onEdit != null) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.chat_longpress_edit)) },
@@ -521,7 +420,6 @@ internal fun UserMessageBubble(
                         leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     )
                 }
-                // [T-in-chat-search] Beside the reading actions (iOS user menu).
                 if (onSearchInChat != null) {
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.chat_search_in_chat)) },
@@ -529,9 +427,6 @@ internal fun UserMessageBubble(
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     )
                 }
-                // [T-multi-select-share] Copy / Retry / Edit, a divider, then Share
-                // Chat… on its own; the destructive items stay last after their own
-                // divider (iOS ChatMessageRow's user menu).
                 if (onShareChat != null) {
                     MinisMenuDivider()
                     DropdownMenuItem(
@@ -541,12 +436,6 @@ internal fun UserMessageBubble(
                     )
                     if (onDeleteFromHere != null || onCompactAbove != null) MinisMenuDivider()
                 }
-                // [T-android-delete-from-here] Removes this message and every
-                // message after it. Destructive and not undoable, so it sits
-                // last (furthest from the thumb's resting position on the
-                // items above) and is tinted with the error colour like the
-                // Retry affordance. Gated while streaming for the same reason
-                // as Retry/Edit — the caller passes null.
                 if (onDeleteFromHere != null) {
                     DropdownMenuItem(
                         text = {
@@ -566,14 +455,6 @@ internal fun UserMessageBubble(
                         },
                     )
                 }
-                // [T-android-compact-above] Summarizes every message above this
-                // one. Sits last, after Delete From Here, matching the iOS
-                // context menu's order. Warning-tinted like Delete rather than
-                // plain: the replaced history is not recoverable, even though
-                // nothing is literally deleted from the DB. The caller passes
-                // null while streaming — compactAll() would reject the request
-                // anyway, so hiding it avoids a menu entry that only produces a
-                // "cannot compact while a turn is in progress" notice.
                 if (onCompactAbove != null) {
                     DropdownMenuItem(
                         text = {
@@ -599,14 +480,7 @@ internal fun UserMessageBubble(
     }
 }
 
-// ─── User Attachment List (iOS: UserAttachmentList — 64dp tiles, FlowRow, trailing) ─
 
-/**
- * Mirrors iOS UserAttachmentList (AIChatView.swift:4416-4518).
- * 64dp uniform tiles in a FlowRow, right-aligned, 6dp gaps.
- * Images render as thumbnail (tap → fullscreen preview dialog).
- * Files render as icon + 2-line filename (tap → system handler).
- */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun UserAttachmentList(
@@ -617,7 +491,6 @@ internal fun UserAttachmentList(
 ) {
     var previewImageIndex by remember { mutableStateOf<Int?>(null) }
 
-    // attachmentNames[0..imageUris.size-1] correspond to images; rest are non-image files.
     val imageCount = imageUris.size
     val fileNames = allFileNames.drop(imageCount)
 
@@ -649,10 +522,6 @@ internal fun UserAttachmentList(
                 searchIndex = idx,
                 tileSize = tileSize,
                 onClick = {
-                    // T150: route into FilePreviewScreen when we have a stable
-                    // host URI for this attachment (set via mediaRef on send
-                    // and on session restore). Fall back to no-op when the
-                    // chip predates T150 persistence.
                     if (uri != null) onPreviewFile(uri, name)
                 },
             )
@@ -660,11 +529,6 @@ internal fun UserAttachmentList(
     }
 
     previewImageIndex?.let { startIdx ->
-        // T-imgswipe-4f446d83: route through the shared swipe-able
-        // viewer so user-bubble image attachments get the same caption
-        // capsule + Copy/Share/Save chrome as composer chip / markdown
-        // taps. attachmentNames[0..imageCount-1] are the image filenames
-        // in display order so they line up 1:1 with imageUris.
         com.openminis.app.ui.components.ImageGalleryViewer(
             items = imageUris.mapIndexed { i, uri ->
                 com.openminis.app.ui.components.ImageGalleryItem(
@@ -681,7 +545,6 @@ internal fun UserAttachmentList(
 @Composable
 private fun FileAttachmentTile(
     fileName: String,
-    /** [T-in-chat-search] Index among the file tiles (unit field att:<i>). */
     searchIndex: Int = -1,
     tileSize: androidx.compose.ui.unit.Dp,
     onClick: () -> Unit,
@@ -717,7 +580,6 @@ private fun FileAttachmentTile(
     }
 }
 
-/** Map a filename extension to a Material icon. Mirrors iOS fileIconName(for:). */
 private fun fileIconFor(fileName: String): androidx.compose.ui.graphics.vector.ImageVector {
     val ext = fileName.substringAfterLast('.', "").lowercase()
     return when (ext) {
@@ -731,7 +593,6 @@ private fun fileIconFor(fileName: String): androidx.compose.ui.graphics.vector.I
     }
 }
 
-/** Fullscreen image preview dialog with pager across all image attachments. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ImageGalleryDialog(
@@ -795,13 +656,3 @@ private fun ImageGalleryDialog(
         }
     }
 }
-
-// ─── Assistant Message (left-aligned, no bubble, with "DeepSeek" header like iOS) ─
-
-// ─── Flattened chat items ────────────────────────────────────────────────────
-// Each message is expanded into a sequence of independent LazyColumn items (header,
-// text block, tool pill, etc.). This makes scroll-hovering stable during streaming:
-// LazyListState anchors on a stable per-item key, so only the trailing streaming item
-// changes height while earlier items remain frozen and their scroll positions
-// untouched.
-

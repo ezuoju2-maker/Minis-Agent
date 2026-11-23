@@ -40,7 +40,6 @@ class AnthropicProviderTest {
         server.shutdown()
     }
 
-    // -- sendMessage response parsing --
 
     @Test
     fun `sendMessage parses response correctly`() = runBlocking {
@@ -126,7 +125,6 @@ class AnthropicProviderTest {
         assertNull(response.usage?.cacheReadInputTokens)
     }
 
-    // -- Request construction --
 
     @Test
     fun `sendMessage includes correct headers`() = runBlocking {
@@ -135,7 +133,6 @@ class AnthropicProviderTest {
         provider.sendMessage(listOf(LLMMessage(LLMMessage.Role.USER, "test")), "system", 100)
 
         val request = server.takeRequest()
-        // MockWebServer uses custom base URL, so Bearer auth is used
         assertEquals("Bearer test-key", request.getHeader("Authorization"))
         assertEquals("2023-06-01", request.getHeader("anthropic-version"))
         assertEquals("POST", request.method)
@@ -150,7 +147,6 @@ class AnthropicProviderTest {
 
         val request = server.takeRequest()
         val body = JSONObject(request.body.readUtf8())
-        // System prompt is now a JSONArray with cache_control
         val system = body.getJSONArray("system")
         assertEquals(1, system.length())
         assertEquals("You are helpful", system.getJSONObject(0).getString("text"))
@@ -221,7 +217,6 @@ class AnthropicProviderTest {
         assertEquals("user", messages.getJSONObject(2).getString("role"))
     }
 
-    // -- Streaming --
 
     @Test
     fun `streamMessage parses SSE events`() = runBlocking {
@@ -252,9 +247,7 @@ class AnthropicProviderTest {
 
         val usageChunks = chunks.filterIsInstance<LLMStreamChunk.Usage>()
         assertTrue(usageChunks.isNotEmpty())
-        // message_start usage
         assertEquals(5, usageChunks[0].usage.inputTokens)
-        // message_delta usage
         assertEquals(3, usageChunks[1].usage.outputTokens)
 
         val finished = chunks.filterIsInstance<LLMStreamChunk.Finished>()
@@ -302,7 +295,6 @@ class AnthropicProviderTest {
         assertTrue(body.getBoolean("stream"))
     }
 
-    // -- Error handling --
 
     @Test(expected = LLMError.InvalidApiKey::class)
     fun `sendMessage throws InvalidApiKey on 401`() = runBlocking {
@@ -340,32 +332,18 @@ class AnthropicProviderTest {
         throw AssertionError("Expected ProviderError")
     }
 
-    // -- Claude version parsing (temperature rejection / thinking) --
 
-    // [T-anthropic-temp-claude5-android] Single-segment ids (claude-fable-5)
-    // must parse as (major, 0): previously the parser required a major-minor
-    // PAIR, returned null for the whole 5-series, temperature was sent, and
-    // the API answered 400 "temperature is deprecated for this model".
     @Test
     fun `modelRejectsTemperature handles single-segment and paired Claude versions`() {
-        // 5-series single-segment ids — were null pre-fix, now (5,0).
         assertTrue(AnthropicProvider.modelRejectsTemperature("claude-fable-5"))
         assertTrue(AnthropicProvider.modelRejectsTemperature("claude-opus-5"))
-        // [T-anthropic-fable51-android] Fable 5.1 parses as the PAIR (5,1),
-        // not (5,0) — a different branch of the optional-minor group than the
-        // single-segment ids above, so it is worth asserting separately.
         assertTrue(AnthropicProvider.modelRejectsTemperature("claude-fable-5-1"))
-        // major=5 with a date suffix in the minor slot — major wins.
         assertTrue(AnthropicProvider.modelRejectsTemperature("claude-sonnet-5-20260301"))
-        // Existing 4.6+ pairs — unchanged.
         assertTrue(AnthropicProvider.modelRejectsTemperature("claude-opus-4-8"))
         assertTrue(AnthropicProvider.modelRejectsTemperature("claude-sonnet-4-6-thinking"))
         assertTrue(AnthropicProvider.modelRejectsTemperature("anthropic/claude-opus-4.7"))
-        // The greedy optional minor must keep the 3-5 PAIR winning — (3,5), not (3,0).
         assertEquals(false, AnthropicProvider.modelRejectsTemperature("claude-3-5-sonnet"))
-        // (3,0) now parses where it used to be null — same outcome (sends temperature).
         assertEquals(false, AnthropicProvider.modelRejectsTemperature("claude-3-haiku-20240307"))
-        // Non-Claude ids stay null — temperature sent.
         assertEquals(false, AnthropicProvider.modelRejectsTemperature("gpt-4o"))
     }
 
@@ -374,39 +352,26 @@ class AnthropicProviderTest {
         assertTrue(AnthropicProvider.modelUsesAdaptiveThinking("claude-fable-5"))
         assertTrue(AnthropicProvider.supportsThinking("claude-fable-5"))
         assertTrue(AnthropicProvider.supportsThinking("claude-opus-5"))
-        // [T-anthropic-fable51-android] Fable 5.1 is adaptive-thinking only —
-        // it must take the SAME branch as the rest of the 5-series. If it ever
-        // fell through to the hybrid path, a manual thinking budget would be
-        // sent and the server would reject the request.
         assertTrue(AnthropicProvider.modelUsesAdaptiveThinking("claude-fable-5-1"))
         assertTrue(AnthropicProvider.supportsThinking("claude-fable-5-1"))
-        // Unchanged below the cutoffs.
         assertEquals(false, AnthropicProvider.modelUsesAdaptiveThinking("claude-3-5-sonnet"))
         assertEquals(false, AnthropicProvider.supportsThinking("claude-3-5-sonnet"))
     }
 
-    // -- Fable 5.1 catalog entry --
 
     @Test
     fun `Fable 5point1 is catalogued with Fable 5's specs and listed first`() {
-        // [T-anthropic-fable51-android] The id is what every capability check
-        // derives from (parseClaudeVersion), so a typo here would silently
-        // disable adaptive thinking and re-enable temperature.
         val m = LLMModel.claudeFable51
         assertEquals("claude-fable-5-1", m.id)
         assertEquals("Claude Fable 5.1", m.displayName)
         assertEquals("Anthropic", m.provider)
-        // Same spec as Fable 5 — pinned against that entry rather than
-        // repeating literals, so the two cannot drift apart.
         assertEquals(LLMModel.claudeFable5.contextWindow, m.contextWindow)
         assertEquals(LLMModel.claudeFable5.maxOutputTokens, m.maxOutputTokens)
         assertEquals(LLMModel.claudeFable5.supportsReasoning, m.supportsReasoning)
-        // Must be reachable from the picker, newest first (iOS ordering).
         assertTrue(LLMModel.allAnthropic.contains(m))
         assertEquals(m, LLMModel.allAnthropic.first())
     }
 
-    // -- Provider metadata --
 
     @Test
     fun `provider name is Anthropic`() {
@@ -419,16 +384,11 @@ class AnthropicProviderTest {
         assertEquals(LLMModel.claudeHaiku45, provider.model)
     }
 
-    // -- Thinking budget (legacy budget_tokens path) --
 
     @Test
     fun `thinking budget stays strictly below max tokens`() {
-        // Anthropic rejects budget_tokens == max_tokens with a 400. Every level
-        // that would clamp to exactly maxTokens must pull back to maxTokens - 1.
         val maxTokens = 40_000
-        // HIGH: min(maxTokens, 65536) == maxTokens here → must be maxTokens-1.
         assertEquals(maxTokens - 1, AnthropicProvider.thinkingBudget(maxTokens, ThinkingLevel.HIGH))
-        // Top tiers take the full budget → also pulled back by one.
         for (level in listOf(ThinkingLevel.XHIGH, ThinkingLevel.MAX, ThinkingLevel.ULTRA)) {
             val budget = AnthropicProvider.thinkingBudget(maxTokens, level)
             assertTrue("$level budget $budget must be < $maxTokens", budget < maxTokens)
@@ -438,34 +398,24 @@ class AnthropicProviderTest {
 
     @Test
     fun `thinking budget keeps sub-ceiling levels intact`() {
-        // When the cap is genuinely below maxTokens the value is unchanged.
         val maxTokens = 100_000
         assertEquals(0, AnthropicProvider.thinkingBudget(maxTokens, ThinkingLevel.OFF))
         assertEquals(8192, AnthropicProvider.thinkingBudget(maxTokens, ThinkingLevel.LOW))
         assertEquals(32768, AnthropicProvider.thinkingBudget(maxTokens, ThinkingLevel.MEDIUM))
-        // HIGH caps at 65536, well under 100k → unchanged.
         assertEquals(65536, AnthropicProvider.thinkingBudget(maxTokens, ThinkingLevel.HIGH))
     }
 
-    // -- ThinkingLevelCatalog: Claude Opus matching --
 
     @Test
     fun `catalog matches all claude opus 4x variants at MAX`() {
-        // The real LLMModel.id uses hyphenated minor versions; the old dotted
-        // startsWith rules never matched. Both spellings must resolve to MAX,
-        // and future 4.x versions (4.8+) too.
         assertEquals(ThinkingLevel.MAX, ThinkingLevelCatalog.declaredMaxLevel("claude-opus-4-8"))
         assertEquals(ThinkingLevel.MAX, ThinkingLevelCatalog.declaredMaxLevel("claude-opus-4-6"))
         assertEquals(ThinkingLevel.MAX, ThinkingLevelCatalog.declaredMaxLevel("claude-opus-4.7"))
         assertEquals(ThinkingLevel.MAX, ThinkingLevelCatalog.declaredMaxLevel("claude-opus-4-9-preview"))
-        // Non-Opus / older Claude stays uncovered (falls through to default).
         assertNull(ThinkingLevelCatalog.declaredMaxLevel("claude-3-5-sonnet"))
     }
 
-    // -- Interleaved thinking-block echo (issue #70) --
 
-    /** A DeepSeek-style compat model: reasons, needs interleaved (unsigned)
-     *  reasoning echoed back. Served from the MockWebServer (custom endpoint). */
     private val deepseekCompatModel = LLMModel(
         id = "deepseek-v4-flash",
         displayName = "DeepSeek V4 Flash",
@@ -474,9 +424,6 @@ class AnthropicProviderTest {
         interleavedReasoningField = "reasoning_content",
     )
 
-    /** Multi-turn tool history: user → assistant(thinking + tool_use) →
-     *  user(tool_result) → user(follow-up). The assistant turn carries
-     *  reasoningContent captured on the prior round. */
     private fun toolHistory(): List<LLMMessage> = listOf(
         LLMMessage(LLMMessage.Role.USER, "what's the weather?"),
         LLMMessage(
@@ -514,10 +461,8 @@ class AnthropicProviderTest {
 
         val body = JSONObject(server.takeRequest().body.readUtf8())
         val content = firstAssistantContent(body)
-        // Thinking block must lead the assistant turn, carrying the captured text.
         assertEquals("thinking", content.getJSONObject(0).getString("type"))
         assertEquals("I should call the weather tool.", content.getJSONObject(0).getString("thinking"))
-        // tool_use still present, after the thinking block.
         var sawToolUse = false
         for (i in 0 until content.length()) {
             if (content.getJSONObject(i).getString("type") == "tool_use") sawToolUse = true
@@ -530,8 +475,6 @@ class AnthropicProviderTest {
         provider.model = deepseekCompatModel
         server.enqueue(MockResponse().setBody("""{"content":[],"usage":{"input_tokens":0,"output_tokens":0}}"""))
 
-        // Assistant turn with NO captured reasoning (e.g. history from before
-        // thinking was on). Still must carry a thinking block or the proxy 400s.
         val history = listOf(
             LLMMessage(LLMMessage.Role.USER, "hi"),
             LLMMessage(
@@ -560,7 +503,6 @@ class AnthropicProviderTest {
         provider.model = deepseekCompatModel
         server.enqueue(MockResponse().setBody("""{"content":[],"usage":{"input_tokens":0,"output_tokens":0}}"""))
 
-        // Assistant turn with a plain string reply (no structured contentParts).
         val history = listOf(
             LLMMessage(LLMMessage.Role.USER, "hi"),
             LLMMessage(
@@ -581,10 +523,6 @@ class AnthropicProviderTest {
 
     @Test
     fun `non-interleaved model does NOT echo thinking block`() = runBlocking {
-        // A reasoning model WITHOUT interleavedReasoningField (Claude-class):
-        // real Anthropic verifies signatures and rejects unsigned thinking, so
-        // we must never echo. Served from the same custom endpoint to prove the
-        // gate keys off interleavedReasoningField, not the endpoint alone.
         provider.model = LLMModel(
             id = "claude-sonnet-5",
             displayName = "Claude Sonnet 5",
@@ -605,15 +543,10 @@ class AnthropicProviderTest {
         }
     }
 
-    // -- Thinking summary visibility (iOS parity: display=summarized + no redact beta) --
 
     @Test
     fun `adaptive thinking request sets display summarized so summary text is returned`() = runBlocking {
-        // Mirrors iOS 13ca19dd (T-anthropic-thinking-display). Adaptive-thinking
-        // models (Claude 4.6+) default `display` to "omitted" on newer tiers,
-        // which blanks the thinking block (signature only). We must pin
-        // display=summarized so the readable thinking summary comes back.
-        provider.model = LLMModel.claudeSonnet5 // major 5 → adaptive thinking
+        provider.model = LLMModel.claudeSonnet5
         server.enqueue(MockResponse().setBody("""{"content":[],"usage":{"input_tokens":0,"output_tokens":0}}"""))
 
         provider.sendMessage(
@@ -629,18 +562,10 @@ class AnthropicProviderTest {
 
     @Test
     fun `OAuth request omits redact-thinking beta so thinking text is not blanked`() = runBlocking {
-        // [test-config] Claude-Code OAuth requires the build-time identifier
-        // prompt, which the public source snapshot intentionally ships empty
-        // (reading it throws by design). Without it an OAuth request cannot be
-        // constructed at all, so this beta-header assertion cannot run here.
         org.junit.Assume.assumeTrue(
             "Claude OAuth identifier prompt is not configured in this build",
             com.openminis.app.BuildConfig.ANTHROPIC_OAUTH_IDENTIFIER_PROMPT.isNotEmpty(),
         )
-        // Mirrors iOS 958ee16c (T-anthropic-redact-thinking). The Claude-Code
-        // mimicry beta set must NOT carry `redact-thinking-2026-02-12`; with it,
-        // the server blanks thinking text (signature only) even though the model
-        // reasons. Omitting it == showThinkingSummaries:true.
         val oauthProvider = AnthropicProvider(
             apiKey = "test-oauth-token",
             model = LLMModel.claudeSonnet5,
@@ -659,7 +584,6 @@ class AnthropicProviderTest {
             "anthropic-beta must not contain redact-thinking; was: $beta",
             !beta.contains("redact-thinking"),
         )
-        // Sanity: the OAuth OAuth betas we DO expect are still present.
         assertTrue("oauth beta present", beta.contains("oauth-2025-04-20"))
     }
 }

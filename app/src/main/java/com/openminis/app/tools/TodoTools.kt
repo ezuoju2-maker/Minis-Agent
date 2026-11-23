@@ -8,16 +8,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/**
- * [OPT-todo-write] A lightweight in-session task plan the agent can maintain
- * with the `todo_write` tool. Stores one JSON file per chat session under
- * `filesDir/todos/<sessionId>.json`; no DB schema change. The current plan is
- * injected into the system prompt (see ChatViewModel.buildSystemPrompt) so it
- * survives across turns and the model can see progress without re-reading a
- * file. Mirrors the widely-used "TodoWrite" pattern in coding agents: break a
- * multi-step task into tracked items, mark exactly one in_progress, and keep
- * the list current as work proceeds.
- */
 object TodoTools {
 
     const val NAME = "todo_write"
@@ -58,7 +48,6 @@ object TodoTools {
         propertyOrdering = listOf("tool_title", "todos"),
     )
 
-    /** Persist a plan from the raw tool args. Returns a human-readable summary. */
     fun execute(context: Context, sessionId: String, argsJson: String): ToolExecutionResult {
         val args = try { JSONObject(argsJson) } catch (_: Exception) {
             return ToolExecutionResult("Error: invalid arguments", false)
@@ -111,7 +100,6 @@ object TodoTools {
         return ToolExecutionResult(summary, true, toolTitle = toolTitle)
     }
 
-    /** Render the current plan for injection into the system prompt. Null when none. */
     fun promptFragment(context: Context, sessionId: String): String? {
         val f = file(context, sessionId)
         if (!f.exists()) return null
@@ -140,11 +128,6 @@ object TodoTools {
                 val pri = if (it.priority == "high") " [HIGH]" else if (it.priority == "low") " [low]" else ""
                 append("$mark ${idx + 1}. ${it.content}$pri\n")
             }
-            // [self-improvement] Turn the plan into an ACTIVE driver: after a
-            // context compaction or a new turn, this line tells the model to
-            // resume the unfinished plan instead of forgetting it. This is the
-            // lightweight counterpart to Plan Mode — the plan is not just
-            // displayed, it drives continuation of long tasks.
             if (hasPending) {
                 append("This plan is still in progress. If the user's original request is still active, continue with the in_progress item (or the highest-priority pending item if none is in_progress) — do not restart completed steps.\n")
             }

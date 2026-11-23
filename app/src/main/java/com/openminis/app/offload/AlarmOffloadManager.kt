@@ -15,11 +15,6 @@ import java.util.UUID
 
 enum class RepeatMode { ONCE, DAILY, WEEKDAYS }
 
-/**
- * Manages scheduling and cancelling alarms/timers using Android AlarmManager.
- * Alarm metadata is persisted in SharedPreferences as a JSON array so it
- * survives process restarts.
- */
 class AlarmOffloadManager(private val context: Context) {
 
     companion object {
@@ -56,22 +51,16 @@ class AlarmOffloadManager(private val context: Context) {
         }
     }
 
-    // ── Scheduling ──────────────────────────────────────────────────────
 
-    /**
-     * Schedule an alarm at a specific hour:minute.
-     * Returns a human-readable confirmation string.
-     */
     fun scheduleAlarm(label: String, hour: Int, minute: Int, repeatMode: RepeatMode): String {
         val id = UUID.randomUUID().toString()
-        val requestCode = id.hashCode() and 0x7FFFFFFF // positive int
+        val requestCode = id.hashCode() and 0x7FFFFFFF
 
         val calendar = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, hour)
             set(Calendar.MINUTE, minute)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
-            // If the time is already past today, push to tomorrow
             if (before(Calendar.getInstance())) {
                 add(Calendar.DAY_OF_YEAR, 1)
             }
@@ -97,8 +86,6 @@ class AlarmOffloadManager(private val context: Context) {
                     )
                 }
                 RepeatMode.WEEKDAYS -> {
-                    // For weekdays we schedule the next weekday occurrence and
-                    // re-schedule from the receiver to keep the chain going.
                     skipToNextWeekday(calendar)
                     alarmManager.setExactAndAllowWhileIdle(
                         AlarmManager.RTC_WAKEUP,
@@ -128,9 +115,6 @@ class AlarmOffloadManager(private val context: Context) {
         return "Alarm scheduled: \"$label\" at $timeStr ($repeatMode) [id=$id]"
     }
 
-    /**
-     * Schedule a countdown timer that fires after [durationSec] seconds.
-     */
     fun scheduleTimer(label: String, durationSec: Int): String {
         val id = UUID.randomUUID().toString()
         val requestCode = id.hashCode() and 0x7FFFFFFF
@@ -162,13 +146,8 @@ class AlarmOffloadManager(private val context: Context) {
         return "Timer scheduled: \"$label\" in ${durationSec}s [id=$id]"
     }
 
-    // ── Listing / Cancelling ────────────────────────────────────────────
 
     fun listAlarms(): String {
-        // First sweep: drop ONCE alarms / timers whose triggerAtMs has passed.
-        // The receiver also cleans up on fire, but if it was killed by an OEM
-        // power-saver between schedule and trigger the prefs entry would
-        // otherwise stick around forever.
         sweepExpiredOnce()
 
         val alarms = loadAlarms()
@@ -185,10 +164,6 @@ class AlarmOffloadManager(private val context: Context) {
             } else if (a.has("durationSec")) {
                 sb.append(" duration=${a.getInt("durationSec")}s")
             }
-            // DAILY/WEEKDAYS may have a triggerAtMs from the *first* fire
-            // that's now in the past — that's normal (the OS keeps repeating
-            // them). Only mark non-repeating entries as [expired]; repeating
-            // entries we leave unannotated.
             val triggerAt = a.optLong("triggerAtMs", 0L)
             val mode = a.optString("repeatMode", "ONCE")
             val nonRepeating = a.getString("type") == "timer" || mode == "ONCE"
@@ -200,11 +175,6 @@ class AlarmOffloadManager(private val context: Context) {
         return sb.toString().trimEnd()
     }
 
-    /**
-     * Remove ONCE alarms / timers whose triggerAtMs has already passed.
-     * Called from [listAlarms] as a cheap GC and from [AlarmReceiver] right
-     * after the alarm fires. Idempotent and safe to call repeatedly.
-     */
     fun sweepExpiredOnce(): Int {
         val alarms = loadAlarms()
         if (alarms.length() == 0) return 0
@@ -229,11 +199,6 @@ class AlarmOffloadManager(private val context: Context) {
         return removed
     }
 
-    /**
-     * Called from [AlarmReceiver] right after an alarm fires. Looks up the
-     * entry in prefs and drops it iff it's a ONCE alarm or a timer; for
-     * DAILY/WEEKDAYS the OS re-fires on its own and we keep the entry.
-     */
     fun onAlarmFired(alarmId: String) {
         val alarms = loadAlarms()
         for (i in 0 until alarms.length()) {
@@ -277,12 +242,6 @@ class AlarmOffloadManager(private val context: Context) {
         return "Alarm cancelled: id=$alarmId"
     }
 
-    /**
-     * Cancel every persisted alarm/timer. Mirrors apple-alarm `cancel --all`.
-     * Returns the count cancelled (0 is a valid no-op). Each entry's
-     * PendingIntent is cancelled individually so the OS-side scheduling is
-     * cleared even if prefs become orphaned somehow.
-     */
     fun cancelAllAlarms(): Int {
         val alarms = loadAlarms()
         val n = alarms.length()
@@ -300,7 +259,6 @@ class AlarmOffloadManager(private val context: Context) {
         return n
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────────
 
     private fun buildPendingIntent(id: String, requestCode: Int, label: String): PendingIntent {
         val intent = Intent(context, AlarmReceiver::class.java).apply {
