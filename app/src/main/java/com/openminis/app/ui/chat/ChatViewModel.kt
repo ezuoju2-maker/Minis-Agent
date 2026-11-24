@@ -67,6 +67,7 @@ import com.openminis.app.tools.MemoryTools
 import com.openminis.app.tools.BatchToolOrder
 import com.openminis.app.tools.ReadImageTool
 import com.openminis.app.tools.ToolExecutionResult
+import com.openminis.app.tools.ToolResultCache
 import com.openminis.app.offload.OffloadPermissionManager
 import com.openminis.app.service.SessionActivityTracker
 import com.openminis.app.service.SessionConcurrencyManager
@@ -7520,7 +7521,7 @@ class ChatViewModel(
                             id, name,
                             cancellable = name != "shell_execute" && !isDelegation,
                             onInterrupted = { ToolExecutionResult(ForegroundToolInterrupts.INTERRUPTED_RESULT, false) },
-                        ) { executeTool(name, argsStr, id, allToolBlocks, assistantId, accumulatedText) }
+                        ) { executeToolCached(name, argsStr, id, allToolBlocks, assistantId, accumulatedText) }
                         val toolInterrupted = toolRun.interrupted && !isDelegation
                         val result = if (toolInterrupted && toolRun.value.output != ForegroundToolInterrupts.INTERRUPTED_RESULT) {
                             toolRun.value.copy(output = ForegroundToolInterrupts.withInterruptNote(toolRun.value.output), success = false)
@@ -7802,6 +7803,30 @@ class ChatViewModel(
         args: JSONObject,
         tools: List<AgentToolDefinition>,
     ): String? = preflightValidateToolCallImpl(name, args, tools)
+
+    private suspend fun executeToolCached(
+        name: String,
+        argsJson: String,
+        toolId: String,
+        toolBlocks: MutableList<AssistantBlock>,
+        assistantId: String,
+        currentText: String,
+    ): ToolExecutionResult {
+        val cacheKey = ToolResultCache.keyFor(name, argsJson)
+        if (cacheKey != null) {
+            val hit = ToolResultCache.get(cacheKey)
+            if (hit != null) {
+                AppLogger.info(TAG_STREAM, "[tool-cache] served $name from cache id=${toolId.take(16)}")
+                val title = try { JSONObject(argsJson).optString("tool_title", "") } catch (_: Exception) { "" }
+                return ToolExecutionResult(hit + ToolResultCache.HIT_NOTE, true, toolTitle = title)
+            }
+        } else if (!ToolResultCache.isReadOnly(name)) {
+            ToolResultCache.invalidateAll()
+        }
+        val fresh = executeTool(name, argsJson, toolId, toolBlocks, assistantId, currentText)
+        if (cacheKey != null && fresh.success) ToolResultCache.put(cacheKey, fresh.output)
+        return fresh
+    }
 
     private suspend fun executeTool(
         name: String,
