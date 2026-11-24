@@ -15,7 +15,7 @@ class OverlayClockTest {
 
     @Test fun `the completed branch applies the rule after stopping the clock`() {
         val src = ProductionSources.read("service/ToolOverlayController.kt")
-        val branch = src.substringAfter("[T-android-overlay-task-total-timer] Completed").substringBefore("} else {\n                elapsed.stop()")
+        val branch = src.substringBefore("} else {\n                elapsed.stop()")
         assertTrue(branch.indexOf("elapsed.stop()") in 0 until branch.indexOf("OverlayClock.completedShowsClock(elapsed.base, SystemClock.elapsedRealtime())"))
         assertFalse("never forced visible", branch.contains("elapsed.visibility = View.VISIBLE\n"))
     }

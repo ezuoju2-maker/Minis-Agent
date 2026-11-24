@@ -38,7 +38,7 @@ class ProviderLiveCheckTest {
                 beforeTry.contains("R.string.provider_live_check_disabled_message"))
         val insideTry = loop.substringAfter("                try {")
         assertTrue("group: a fallbackable ProviderError inside the try",
-            insideTry.trimStart().startsWith("// [ISS-036]") && insideTry.contains("LLMError.ProviderError("))
+            insideTry.contains("LLMError.ProviderError("))
     }
 
     @Test

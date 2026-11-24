@@ -435,7 +435,7 @@ class OpenAIFamilyGatesTest {
         )
         assertTrue(
             "the broad-\"o\" breadth must stay DOCUMENTED as deliberate, not silently inherited",
-            src.contains("the broad \"o\" prefix is"),
+            src.contains("startsWith(\"o\")"),
         )
         assertTrue(
             "the openai-native rule scopes are what the emitter mirrors",

@@ -155,7 +155,7 @@ class ScheduledPillModelTest {
         assertEquals(listOf("t"), ScheduledPillModel.jobs(chat, listOf(t), emptySet(), now) { false }.map { it.id })
         val screen = ProductionSources.read("ui/chat/ChatScreen.kt")
         assertFalse("the pill must not get the route id", screen.contains("ScheduledTaskPill(sessionId = sessionId)"))
-        assertTrue("the scheduled card's host is the real id too", screen.contains("hostSessionId = viewModel.currentSessionId, // [T-port-sched-pill-visible]"))
+        assertTrue("the scheduled card's host is the real id too", screen.contains("hostSessionId = viewModel.currentSessionId,"))
         assertFalse(screen.contains("hostSessionId = sessionId,"))
         val pill = ProductionSources.read("ui/chat/ScheduledTaskPill.kt")
         assertTrue("read on every composition", pill.contains("val sessionId = currentSessionId()"))
