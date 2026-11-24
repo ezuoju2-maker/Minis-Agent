@@ -7559,10 +7559,17 @@ class ChatViewModel(
                         val trimmedForModel = com.openminis.app.tools.ToolResultTrim.trim(
                             outputForLlmBase, maxLines = llmLimits.first, maxChars = llmLimits.second,
                         )
+                        val spillPath = if (trimmedForModel.wasTrimmed && outputForLlmBase.length <= 8_000_000) {
+                            ContextOffload.offloadContent(
+                                context, activeSessionId, outputForLlmBase, id, name,
+                            )
+                        } else {
+                            ""
+                        }
                         val outputForLLM = if (!trimmedForModel.wasTrimmed) {
                             trimmedForModel.text
                         } else {
-                            trimmedForModel.text + "\n\n" + trimmedForModel.noticeText()
+                            trimmedForModel.text + "\n\n" + trimmedForModel.noticeWithSpill(spillPath)
                         }
 
                         val blockIdx = allToolBlocks.indexOfFirst { it.id == id }

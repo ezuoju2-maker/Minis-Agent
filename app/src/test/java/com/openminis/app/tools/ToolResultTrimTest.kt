@@ -108,4 +108,21 @@ class ToolResultTrimTest {
         assertFalse(trimmed.structuredPayload)
         assertFalse(trimmed.noticeText().contains("structured-payload"))
     }
+
+    @Test
+    fun `spill notice points at the saved file`() {
+        val lines = (1..400).joinToString("\n") { "row " + it }
+        val trimmed = ToolResultTrim.trim(lines, maxLines = 40, maxChars = 3000)
+        val notice = trimmed.noticeWithSpill("/var/minis/offloads/tools/shell_execute_abc.txt")
+        assertTrue(notice.contains("full-output-saved"))
+        assertTrue(notice.contains("/var/minis/offloads/tools/shell_execute_abc.txt"))
+        assertTrue(notice.contains("sed -n"))
+    }
+
+    @Test
+    fun `spill notice is omitted when saving failed`() {
+        val lines = (1..400).joinToString("\n") { "row " + it }
+        val trimmed = ToolResultTrim.trim(lines, maxLines = 40, maxChars = 3000)
+        assertFalse(trimmed.noticeWithSpill("").contains("full-output-saved"))
+    }
 }

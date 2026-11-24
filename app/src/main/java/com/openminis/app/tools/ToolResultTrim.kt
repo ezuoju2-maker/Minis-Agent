@@ -25,6 +25,13 @@ object ToolResultTrim {
 
         private fun charSuffix(): String = if (omittedChars > 0) ", " + omittedChars + " chars dropped" else ""
 
+        fun noticeWithSpill(spillPath: String): String {
+            val base = noticeText()
+            if (spillPath.isEmpty()) return base
+            return base + " [full-output-saved: " + spillPath + " \u2014 read it with file_read, or" +
+                " slice it with sed -n / grep instead of re-running the command.]"
+        }
+
         fun noticeText(): String {
             val base = "[context-note: truncated before it reached you, kept " + keptLines + " of " + originalLines +
                 " lines (~" + omittedPercent + "% omitted" + charSuffix() + "). If the missing middle matters, re-run with a" +
