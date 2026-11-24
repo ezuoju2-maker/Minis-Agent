@@ -12,6 +12,7 @@ import com.openminis.app.accessibility.AccessibilityRecoveryManager
 import com.openminis.app.accessibility.MinisAccessibilityService
 import com.openminis.app.accessibility.NodeRegistry
 import com.openminis.app.accessibility.RestrictedSettingsManager
+import com.openminis.app.accessibility.ScreenTreeDiff
 import com.openminis.app.logging.AppLogger
 import com.openminis.app.sandbox.NativeOffloadHandler
 import com.openminis.app.sandbox.NativeOffloadRequest
@@ -53,7 +54,12 @@ Use --compact to emit on a single line; --quiet to strip the envelope.
 First-run: enable "DeepSeek" under Settings → Accessibility, then `service ping`.
 """
         private const val SERVICE_HELP = "service status | ping\n"
-        private const val UI_HELP = """ui dump | find | info | node | screenshot
+        private const val UI_HELP = """ui dump [--diff] | find | info | node | screenshot
+
+  ui dump --diff              Same tree as a full dump, but returns only the delta
+                              against the previous dump in this process (added
+                              nodes, changed nodes, removed ids). Use it for
+                              repeated polling of one screen to save context.
 
   ui screenshot                Capture a system-wide screenshot via
                                AccessibilityService.takeScreenshot (API 30+).
@@ -87,7 +93,7 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
                 "help", "h", "long", "double", "clear", "append",
                 "annotate", "compact", "inline", "b",
                 "clickable", "editable", "scrollable", "checked", "enabled",
-                "visible-only", "auto-scroll", "auto-dismiss", "auto-confirm",
+                "visible-only", "diff", "auto-scroll", "auto-dismiss", "auto-confirm",
                 "confirm", "deny", "children", "ancestors",
             ),
         )
@@ -209,16 +215,62 @@ First-run: enable "DeepSeek" under Settings → Accessibility, then `service pin
         }
     }
 
+    private var lastDumpNodes: List<ScreenTreeDiff.Node>? = null
+
     private fun uiDump(args: OffloadArgs): NativeOffloadResult {
         val svc = svcOrThrow()
         val maxDepth = args.getInt("depth") ?: 10
-        val compact = args.hasFlag("compact")
+        val wantDiff = args.hasFlag("diff")
+        val compact = !wantDiff && args.hasFlag("compact")
         val visibleOnly = args.getBool("visible-only") ?: true
         val arr = JSONArray()
         for (root in svc.rootNodes()) {
             walkNode(svc.nodeRegistry, root, 0, maxDepth, visibleOnly, compact, arr)
         }
+        val nodes = screenNodes(arr)
+        val previous = lastDumpNodes
+        lastDumpNodes = nodes
+        if (wantDiff && previous != null) {
+            val delta = ScreenTreeDiff.diff(previous, nodes)
+            return ok(args, JSONObject()
+                .put("diff", true)
+                .put("count", nodes.size)
+                .put("changed", delta.added.size + delta.removed.size + delta.changed.size)
+                .put("text", ScreenTreeDiff.render(delta)))
+        }
         return ok(args, JSONObject().put("count", arr.length()).put("nodes", arr))
+    }
+
+    private fun screenNodes(arr: JSONArray): List<ScreenTreeDiff.Node> {
+        val out = ArrayList<ScreenTreeDiff.Node>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val bounds = o.optJSONObject("bounds")
+            val center = o.optJSONObject("center")
+            val boundsText = when {
+                bounds != null -> "" + bounds.optInt("left") + "," + bounds.optInt("top") +
+                    "," + bounds.optInt("right") + "," + bounds.optInt("bottom")
+                center != null -> "c" + center.optInt("x") + "," + center.optInt("y")
+                else -> ""
+            }
+            var flags = 0
+            if (o.optBoolean("clickable")) flags = flags or 1
+            if (o.optBoolean("scrollable")) flags = flags or 2
+            if (o.optBoolean("editable")) flags = flags or 4
+            if (o.optBoolean("checked")) flags = flags or 8
+            val id = o.optString("resourceId", "").ifEmpty {
+                o.optString("className", "").ifEmpty { o.optString("contentDesc", "").ifEmpty { "node" } }
+            }
+            out.add(ScreenTreeDiff.Node(
+                id = id,
+                text = o.optString("text", ""),
+                contentDesc = o.optString("contentDesc", ""),
+                className = o.optString("className", ""),
+                bounds = boundsText,
+                flags = flags,
+            ))
+        }
+        return out
     }
 
     private fun walkNode(

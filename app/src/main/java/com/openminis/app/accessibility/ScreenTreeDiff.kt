@@ -37,7 +37,7 @@ object ScreenTreeDiff {
                 else -> changed.add(node to old.signature)
             }
         }
-        val removed = prevMap.keys.filter { it !in currMap }.map { it.first }
+        val removed = prevMap.keys.filter { it !in currMap }.map { it.first }.distinct()
         return Delta(added, removed, changed, unchanged)
     }
 

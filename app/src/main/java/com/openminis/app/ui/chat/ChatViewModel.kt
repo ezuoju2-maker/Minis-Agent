@@ -7545,11 +7545,25 @@ class ChatViewModel(
                         } else {
                             result.output
                         }
-                        val outputForLLM = if (toolLoopDetector.recordToolTitle(args, name in titledTools) != null) {
+                        val outputForLlmBase = if (toolLoopDetector.recordToolTitle(args, name in titledTools) != null) {
                             Log.i(TAG, "[ToolTitleReminder] $name came back without tool_title — soft reminder appended")
                             ToolTitleReminder.appending(outputWithLoopWarning)
                         } else {
                             outputWithLoopWarning
+                        }
+                        val outputForLLM = if (name == "shell_execute") {
+                            val trimmedForModel = com.openminis.app.tools.ToolResultTrim.trim(
+                                outputForLlmBase, maxLines = 240, maxChars = 40_000,
+                            )
+                            if (!trimmedForModel.wasTrimmed) {
+                                trimmedForModel.text
+                            } else {
+                                trimmedForModel.text + "\n\n[output truncated for context: kept " +
+                                    trimmedForModel.keptLines + " of " + trimmedForModel.originalLines +
+                                    " lines. Re-run with head/tail/grep to read the omitted part.]"
+                            }
+                        } else {
+                            outputForLlmBase
                         }
 
                         val blockIdx = allToolBlocks.indexOfFirst { it.id == id }

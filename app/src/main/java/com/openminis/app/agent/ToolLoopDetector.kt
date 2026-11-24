@@ -285,14 +285,15 @@ class ToolLoopDetector(private val config: ToolLoopConfig = ToolLoopConfig()) {
             }
             is Array<*> -> appendStable(value.toList())
             is String -> append(JSONObject.quote(value))
-            is Number, is Boolean -> append(value.toString())
-            is JSONObject -> appendStable(value.toMap())
-            is JSONArray -> appendStable(value.toList())
+            is Number -> append(ToolProgressSignature.canonicalNumber(value))
+            is Boolean -> append(value.toString())
+            is JSONObject -> appendStable(value.toPlainMap())
+            is JSONArray -> appendStable(value.toPlainList())
             else -> append(JSONObject.quote(value.toString()))
         }
     }
 
-    private fun JSONObject.toMap(): Map<String, Any?> {
+    private fun JSONObject.toPlainMap(): Map<String, Any?> {
         val out = HashMap<String, Any?>(length())
         val keys = keys()
         while (keys.hasNext()) {
@@ -302,7 +303,7 @@ class ToolLoopDetector(private val config: ToolLoopConfig = ToolLoopConfig()) {
         return out
     }
 
-    private fun JSONArray.toList(): List<Any?> {
+    private fun JSONArray.toPlainList(): List<Any?> {
         val out = ArrayList<Any?>(length())
         for (i in 0 until length()) out.add(unwrap(get(i)))
         return out
@@ -310,20 +311,13 @@ class ToolLoopDetector(private val config: ToolLoopConfig = ToolLoopConfig()) {
 
     private fun unwrap(v: Any?): Any? = when (v) {
         JSONObject.NULL -> null
-        is JSONObject -> v.toMap()
-        is JSONArray -> v.toList()
+        is JSONObject -> v.toPlainMap()
+        is JSONArray -> v.toPlainList()
         else -> v
     }
 
-    private fun resultHashFor(result: String?, errorMessage: String?): String {
-        val payload = buildString {
-            append("err=")
-            append(errorMessage ?: "")
-            append("out=")
-            append(result ?: "")
-        }
-        return sha256(payload)
-    }
+    private fun resultHashFor(result: String?, errorMessage: String?): String =
+        ToolProgressSignature.signature(result, errorMessage)
 
     private fun extractUnknownToolName(errorMessage: String?): String? {
         if (errorMessage.isNullOrBlank()) return null
