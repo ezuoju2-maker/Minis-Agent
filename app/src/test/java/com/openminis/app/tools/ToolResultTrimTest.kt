@@ -67,4 +67,45 @@ class ToolResultTrimTest {
         assertTrue(trimmed.wasTrimmed)
         assertTrue(trimmed.text.contains("错误：命令未找到：apt-get"))
     }
+
+    @Test
+    fun `long runs of identical lines collapse into one`() {
+        val lines = ArrayList<String>()
+        for (i in 1..40) lines.add("Waiting for device...")
+        for (i in 1..160) lines.add("build step " + i)
+        val trimmed = ToolResultTrim.trim(lines.joinToString("\n"), maxLines = 40, maxChars = 3000)
+        assertTrue(trimmed.wasTrimmed)
+        assertTrue(trimmed.text.contains("Waiting for device..."))
+        assertTrue(trimmed.text.contains("repeated"))
+        assertTrue(trimmed.text.lines().size < 40)
+    }
+
+    @Test
+    fun `two identical lines are left alone`() {
+        val lines = ArrayList<String>()
+        for (i in 1..100) lines.add("row " + i)
+        lines[50] = "dup"
+        lines[51] = "dup"
+        val trimmed = ToolResultTrim.trim(lines.joinToString("\n"), maxLines = 30, maxChars = 2000)
+        val collapsedMarker = trimmed.text.contains("repeated")
+        assertEquals(false, collapsedMarker)
+    }
+
+    @Test
+    fun `truncated json warns against verbatim reuse`() {
+        val rows = (1..500).joinToString(",") { "{\"id\":" + it + "}" }
+        val payload = "[" + rows + "]"
+        val trimmed = ToolResultTrim.trim(payload, maxLines = 5, maxChars = 800)
+        assertTrue(trimmed.wasTrimmed)
+        assertTrue(trimmed.structuredPayload)
+        assertTrue(trimmed.noticeText().contains("structured-payload"))
+    }
+
+    @Test
+    fun `plain text notice has no json caveat`() {
+        val lines = (1..500).joinToString("\n") { "row " + it }
+        val trimmed = ToolResultTrim.trim(lines, maxLines = 20, maxChars = 800)
+        assertFalse(trimmed.structuredPayload)
+        assertFalse(trimmed.noticeText().contains("structured-payload"))
+    }
 }
