@@ -7896,14 +7896,16 @@ class ChatViewModel(
 
     fun checkpointForSession(): com.openminis.app.sandbox.checkpoint.SessionCheckpoint = writeCheckpoint
 
-    private fun refreshToolBlockNote(blockId: String, note: String) {
+    private fun refreshToolBlockNote(blockId: String, note: String): String? {
         var hit = false
+        var ownerId: String? = null
         val updated = _messages.value.map { msg ->
             if (msg.toolBlocks.none { it.id == blockId }) msg else {
                 msg.copy(
                     toolBlocks = msg.toolBlocks.map { b ->
                         if (b.id != blockId) b else {
                             hit = true
+                            ownerId = msg.id
                             val head = b.content.substringBefore("Changes:\n").trimEnd()
                                 .substringBefore("（已按段重选：").trimEnd()
                             b.copy(content = "$head\n（已按段重选：$note）")
@@ -7913,6 +7915,28 @@ class ChatViewModel(
             }
         }
         if (hit) _messages.value = updated
+        return ownerId
+    }
+
+    private suspend fun persistHunkNote(messageId: String, blockId: String, note: String) {
+        runCatching {
+            val sid = realSessionId.ifEmpty { sessionId }
+            val entity = chatRepository.loadMessages(sid).firstOrNull { it.id == messageId } ?: return@runCatching
+            val parts = org.json.JSONArray(entity.partsJson)
+            var changed = false
+            for (i in 0 until parts.length()) {
+                val o = parts.optJSONObject(i) ?: continue
+                if (o.optString("type") != "toolResult") continue
+                val v = o.optJSONObject("value") ?: continue
+                if (v.optString("toolUseId") != blockId) continue
+                val out = v.optString("output", "")
+                val head = out.substringBefore("Changes:\n").trimEnd()
+                    .substringBefore("（已按段重选：").trimEnd()
+                v.put("output", "$head\n（已按段重选：$note）")
+                changed = true
+            }
+            if (changed) chatRepository.updateMessageParts(messageId, parts.toString())
+        }
     }
 
     fun applyHunkSelection(block: AssistantBlock, selected: Set<Int>, onResult: (String) -> Unit) {
@@ -7941,12 +7965,11 @@ class ChatViewModel(
                                         "文件内容已变化，未应用。请让助手重新执行这次编辑。"
                                     } else {
                                         file.writeText(content.replaceFirst(newStr, target))
-                                        withContext(Dispatchers.Main) {
-                                            refreshToolBlockNote(
-                                                block.id,
-                                                "保留 ${selected.size}/${plan.hunks.size} 段 · ${target.toByteArray(Charsets.UTF_8).size} bytes",
-                                            )
+                                        val noteText = "保留 ${selected.size}/${plan.hunks.size} 段 · ${target.toByteArray(Charsets.UTF_8).size} bytes"
+                                        val ownerId = withContext(Dispatchers.Main) {
+                                            refreshToolBlockNote(block.id, noteText)
                                         }
+                                        if (ownerId != null) persistHunkNote(ownerId, block.id, noteText)
                                         "已保留 ${selected.size}/${plan.hunks.size} 段，写回 $path"
                                     }
                                 }
