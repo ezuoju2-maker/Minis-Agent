@@ -21,9 +21,10 @@ jobs:
           SDKMGR="$(ls -d "$ANDROID_SDK_ROOT"/cmdline-tools/*/bin/sdkmanager | tail -1)"
           yes | "$SDKMGR" --licenses > /dev/null || true
           "$SDKMGR" "platforms;android-36" "build-tools;35.0.0" > /dev/null
-      - name: Unit tests
+      - name: Unit tests and assemble
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace testDebugUnitTest
-      - name: Assemble debug
-        run: ./gradlew --no-daemon --stacktrace assembleDebug
+          ./gradlew --no-daemon --stacktrace \
+            -Pkotlin.daemon.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=768m" \
+            -Porg.gradle.workers.max=1 \
+            testDebugUnitTest assembleDebug
