@@ -1,11 +1,25 @@
 package com.openminis.app.tools
 
 object BatchToolOrder {
-    val WRITERS: Set<String> = setOf("shell_execute", FileWriteTool.NAME, FileEditTool.NAME)
-    val READERS: Set<String> = setOf(ReadImageTool.NAME, FileReadTool.NAME)
+    val WRITERS: Set<String> = setOf(
+        "shell_execute",
+        FileWriteTool.NAME,
+        FileEditTool.NAME,
+        ApplyPatchTool.NAME,
+        SkillSaveTool.NAME,
+    )
+
+    val READERS: Set<String> = setOf(
+        ReadImageTool.NAME,
+        FileReadTool.NAME,
+        RepoMapTool.NAME,
+        SkillLoadTool.NAME,
+    )
 
     fun writersBefore(index: Int, names: List<String>): List<Int> {
-        if (index !in names.indices || names[index] !in READERS) return emptyList()
+        if (index !in names.indices) return emptyList()
+        val name = names[index]
+        if (name !in READERS && name !in WRITERS) return emptyList()
         return (0 until index).filter { names[it] in WRITERS }
     }
 

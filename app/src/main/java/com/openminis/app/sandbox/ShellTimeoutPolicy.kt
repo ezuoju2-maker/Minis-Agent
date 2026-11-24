@@ -15,10 +15,10 @@ object ShellTimeoutPolicy {
 
     private val quickPrefixes = setOf(
         "ls", "cat", "head", "tail", "wc", "grep", "rg", "egrep", "fgrep",
-        "sed", "awk", "tr", "cut", "sort", "uniq", "find",
+        "sed", "awk", "tr", "cut", "uniq",
         "echo", "printf", "pwd", "which", "whoami", "id", "env", "date",
-        "basename", "dirname", "file", "stat", "du", "df",
-        "mkdir", "rmdir", "touch", "chmod", "chown", "cp", "mv", "rm", "ln",
+        "basename", "dirname", "file", "stat",
+        "mkdir", "rmdir", "touch",
     )
 
     private val networkPrefixes = setOf(
@@ -51,28 +51,49 @@ object ShellTimeoutPolicy {
         "serve", "http-server",
     )
 
+    private val recursiveFlag = Regex("(^|\\s)-[a-zA-Z]*[rR](\\s|$)")
+
     fun forCommand(command: String): Long {
         val trimmed = command.trim()
         if (trimmed.isEmpty()) return DEFAULT_TIMEOUT_MS
-        val lower = trimmed.lowercase()
+        val segments = splitSegments(trimmed.lowercase())
+        if (segments.isEmpty()) return DEFAULT_TIMEOUT_MS
+        var widest = 0L
+        for (segment in segments) {
+            val value = timeoutForSegment(segment)
+            if (value > widest) widest = value
+        }
+        return if (widest > 0L) widest else DEFAULT_TIMEOUT_MS
+    }
 
-        val firstSegment = lower.substringBefore("&&").substringBefore("||").substringBefore(";").trim()
-        val firstToken = firstSegment.substringBefore(' ')
+    private fun splitSegments(lower: String): List<String> =
+        lower.replace("&&", "\n")
+            .replace("||", "\n")
+            .replace(";", "\n")
+            .replace("|", "\n")
+            .split("\n")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
 
-        if (longRunningPrefixes.any { firstSegment.startsWith(it) }) return LONG_RUNNING_TIMEOUT_MS
-        if (buildPrefixes.any { firstSegment.startsWith(it) }) return BUILD_TIMEOUT_MS
-        if (installTokens.any { firstSegment.startsWith(it) && firstSegment.containsInstallSubcommand() }) {
+    private fun timeoutForSegment(segment: String): Long {
+        val firstToken = segment.substringBefore(' ')
+
+        if (longRunningPrefixes.any { segment.startsWith(it) }) return LONG_RUNNING_TIMEOUT_MS
+        if (buildPrefixes.any { segment.startsWith(it) }) return BUILD_TIMEOUT_MS
+        if (installTokens.any { segment.startsWith(it) && segment.containsInstallSubcommand() }) {
             return INSTALL_TIMEOUT_MS
         }
 
+        if (recursiveFlag.containsMatchIn(segment) || segment.contains("--recursive")) {
+            return if (firstToken in networkPrefixes) NETWORK_TIMEOUT_MS else DEFAULT_TIMEOUT_MS
+        }
         if (firstToken in networkPrefixes) return NETWORK_TIMEOUT_MS
         if (firstToken in quickPrefixes) return QUICK_TIMEOUT_MS
-
         return DEFAULT_TIMEOUT_MS
     }
 
     private fun String.containsInstallSubcommand(): Boolean {
         val installVerbs = listOf("install", "add", "get", "update", "upgrade")
-        return installVerbs.any { " $it" in this } || this.startsWith("apk ") || this.startsWith("pip install")
+        return installVerbs.any { " " + it in this } || this.startsWith("apk ") || this.startsWith("pip install")
     }
 }
