@@ -1,3 +1,18 @@
+#include <jni.h>
+#include <signal.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <cstring>
+#include <cstdio>
+#include <ctime>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <android/log.h>
+#include <unwind.h>
+#include <dlfcn.h>
+
+#define LOG_TAG "MinisCrashHandler"
+
 static char g_log_dir[512] = {0};
 
 static volatile sig_atomic_t g_in_handler = 0;
@@ -39,17 +54,21 @@ static void write_backtrace(int fd) {
     write(fd, hdr, strlen(hdr));
 
     for (int i = 0; i < st.count; i++) {
+
         char line[256];
         int n;
 
         Dl_info info;
+
         if (dladdr(frames[i], &info) != 0 && info.dli_fname != nullptr) {
             const char* lib = base_name(info.dli_fname);
+
             const uintptr_t pc = reinterpret_cast<uintptr_t>(frames[i]);
             const uintptr_t base = reinterpret_cast<uintptr_t>(info.dli_fbase);
             const uintptr_t off = (pc >= base) ? (pc - base) : 0;
 
             if (info.dli_sname != nullptr) {
+
                 n = snprintf(line, sizeof(line), "  #%02d %p  %s+0x%lx (%s)\n",
                              i, frames[i], lib, static_cast<unsigned long>(off),
                              info.dli_sname);
@@ -58,6 +77,7 @@ static void write_backtrace(int fd) {
                              i, frames[i], lib, static_cast<unsigned long>(off));
             }
         } else {
+
             n = snprintf(line, sizeof(line), "  #%02d %p  <unknown>\n",
                          i, frames[i]);
         }
@@ -86,6 +106,7 @@ struct minis_abort_msg_t {
 };
 
 static const char* read_bionic_abort_message() {
+
     void* sym = dlsym(RTLD_DEFAULT, "__abort_message");
     if (sym == nullptr) return nullptr;
     minis_abort_msg_t* const* slot =
@@ -93,6 +114,7 @@ static const char* read_bionic_abort_message() {
     if (slot == nullptr) return nullptr;
     const minis_abort_msg_t* block = *slot;
     if (block == nullptr) return nullptr;
+
     if (block->size <= sizeof(size_t) || block->size > 64 * 1024) return nullptr;
     if (block->msg[0] == '\0') return nullptr;
     return block->msg;
@@ -136,7 +158,6 @@ static void chain_to_previous(int sig, siginfo_t* info, void* ctx) {
     raise(sig);
 }
 
-
 static int count_maps_lines(int cap) {
     int fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
     if (fd < 0) return -1;
@@ -154,6 +175,7 @@ static int count_maps_lines(int cap) {
 static int count_dir_entries(const char* path, int cap) {
     int fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (fd < 0) return -1;
+
     char buf[4096];
     int n = 0;
     while (n < cap) {
@@ -186,6 +208,7 @@ static void write_resource_counts(int fd) {
 }
 
 static void crash_signal_handler(int sig, siginfo_t* info, void* ctx) {
+
     if (g_in_handler) {
         chain_to_previous(sig, info, ctx);
         return;
@@ -221,6 +244,7 @@ static void crash_signal_handler(int sig, siginfo_t* info, void* ctx) {
         char comm_path[64];
         snprintf(comm_path, sizeof(comm_path), "/proc/self/task/%d/comm", tid);
         int cfd = open(comm_path, O_RDONLY);
+
         if (cfd < 0) {
             cfd = open("/proc/self/comm", O_RDONLY);
             if (cfd >= 0) strncpy(comm, "(main?) ", sizeof(comm) - 1);
@@ -295,6 +319,7 @@ static void crash_signal_handler(int sig, siginfo_t* info, void* ctx) {
             written += w;
         }
     }
+
     write_resource_counts(fd);
 
     if (!addr_is_fault) {
@@ -302,11 +327,13 @@ static void crash_signal_handler(int sig, siginfo_t* info, void* ctx) {
         if (amsg != nullptr) {
             const char* h = "\nAbort message: ";
             write(fd, h, strlen(h));
+
             size_t len = 0;
             while (len < 4096 && amsg[len] != '\0') len++;
             write(fd, amsg, len);
             write(fd, "\n", 1);
         } else {
+
             const char* note =
                 "\nAbort message: (none captured)\n"
                 "The REASON is not in siginfo and no bionic abort message was\n"
@@ -329,7 +356,7 @@ static void crash_signal_handler(int sig, siginfo_t* info, void* ctx) {
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_openminis_app_crash_NativeCrashHandler_nativeInstall(
-        JNIEnv* env, jobject , jstring jLogDir) {
+        JNIEnv* env, jobject, jstring jLogDir) {
     if (jLogDir == nullptr) return;
     const char* dir = env->GetStringUTFChars(jLogDir, nullptr);
     if (dir == nullptr) return;
@@ -347,6 +374,7 @@ Java_com_openminis_app_crash_NativeCrashHandler_nativeInstall(
 
     struct sigaction sa{};
     sa.sa_sigaction = crash_signal_handler;
+
     sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
     sigemptyset(&sa.sa_mask);
 

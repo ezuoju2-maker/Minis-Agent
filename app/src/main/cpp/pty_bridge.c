@@ -1,5 +1,28 @@
+#include <sys/syscall.h>
+#include <sys/resource.h>
+#include <jni.h>
+#include <pty.h>
+#include <sys/ioctl.h>
+#include <sys/wait.h>
+#include <termios.h>
+#include <unistd.h>
+#include <errno.h>
+#include <string.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <time.h>
+#include <pthread.h>
+#include <android/log.h>
+
+#define LOG_TAG "PtyBridge"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
 static void closeInheritedFds(void) {
+#ifdef __NR_close_range
     if (syscall(__NR_close_range, 3U, ~0U, 0U) == 0) return;
+#endif
     long maxFd = 65536;
     struct rlimit rl;
     if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY && rl.rlim_cur < (rlim_t) maxFd) {
@@ -93,7 +116,9 @@ Java_com_openminis_app_sandbox_PtyBridge_forkExec(
     }
 
     if (pid == 0) {
+
         if (cwd && *cwd) chdir(cwd);
+
         sigset_t empty;
         sigemptyset(&empty);
         sigprocmask(SIG_SETMASK, &empty, NULL);
@@ -102,6 +127,7 @@ Java_com_openminis_app_sandbox_PtyBridge_forkExec(
         closeInheritedFds();
 
         execve(cmd, argv, envp);
+
         _exit(127);
     }
 

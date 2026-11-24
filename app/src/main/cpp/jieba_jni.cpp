@@ -1,3 +1,20 @@
+#include <jni.h>
+#include <android/log.h>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#include "cppjieba/DictTrie.hpp"
+#include "cppjieba/HMMModel.hpp"
+#include "cppjieba/MixSegment.hpp"
+#include "cppjieba/PosTagger.hpp"
+#include "cppjieba/QuerySegment.hpp"
+
+#define LOG_TAG "JiebaJNI"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
 namespace {
 
 struct JiebaState {
@@ -48,7 +65,7 @@ extern "C" {
 
 JNIEXPORT jboolean JNICALL
 Java_com_openminis_app_shared_JiebaEngine_nativeInit(
-    JNIEnv* env, jobject , jstring dictDir) {
+    JNIEnv* env, jobject, jstring dictDir) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_state) return JNI_TRUE;
 
@@ -65,6 +82,7 @@ Java_com_openminis_app_shared_JiebaEngine_nativeInit(
 
         state->dict = std::make_unique<cppjieba::DictTrie>(dictPath);
         state->hmm = std::make_unique<cppjieba::HMMModel>(hmmPath);
+
         state->mixSeg = std::make_unique<cppjieba::MixSegment>(state->dict.get(), state->hmm.get());
         state->querySeg = std::make_unique<cppjieba::QuerySegment>(state->dict.get(), state->hmm.get());
 
@@ -84,7 +102,7 @@ Java_com_openminis_app_shared_JiebaEngine_nativeInit(
 
 JNIEXPORT jobjectArray JNICALL
 Java_com_openminis_app_shared_JiebaEngine_nativeSegment(
-    JNIEnv* env, jobject , jstring text) {
+    JNIEnv* env, jobject, jstring text) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_state) {
         LOGE("nativeSegment before init");
@@ -93,6 +111,7 @@ Java_com_openminis_app_shared_JiebaEngine_nativeSegment(
     try {
         const std::string sentence = toStdString(env, text);
         std::vector<std::string> words;
+
         g_state->mixSeg->Cut(sentence, words,  true);
         return toStringArray(env, words);
     } catch (const std::exception& e) {
@@ -106,7 +125,7 @@ Java_com_openminis_app_shared_JiebaEngine_nativeSegment(
 
 JNIEXPORT jobjectArray JNICALL
 Java_com_openminis_app_shared_JiebaEngine_nativeSegmentForSearch(
-    JNIEnv* env, jobject , jstring text) {
+    JNIEnv* env, jobject, jstring text) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_state) {
         LOGE("nativeSegmentForSearch before init");
@@ -128,7 +147,7 @@ Java_com_openminis_app_shared_JiebaEngine_nativeSegmentForSearch(
 
 JNIEXPORT jobjectArray JNICALL
 Java_com_openminis_app_shared_JiebaEngine_nativePosTag(
-    JNIEnv* env, jobject , jstring text) {
+    JNIEnv* env, jobject, jstring text) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_state) {
         LOGE("nativePosTag before init");
@@ -138,6 +157,7 @@ Java_com_openminis_app_shared_JiebaEngine_nativePosTag(
         const std::string sentence = toStdString(env, text);
         std::vector<std::pair<std::string, std::string> > tagged;
         cppjieba::PosTagger tagger;
+
         tagger.Tag(sentence, tagged, *g_state->mixSeg);
         std::vector<std::string> flat;
         flat.reserve(tagged.size() * 2);
