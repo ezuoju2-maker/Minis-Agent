@@ -7889,6 +7889,8 @@ class ChatViewModel(
 
     private val writeCheckpoint = com.openminis.app.sandbox.checkpoint.SessionCheckpoint()
 
+    private val approvalCoordinator = com.openminis.app.agent.approval.ApprovalCoordinator()
+
     fun checkpointForSession(): com.openminis.app.sandbox.checkpoint.SessionCheckpoint = writeCheckpoint
 
     private fun withWriteCheckpoint(argsJson: String, block: () -> ToolExecutionResult): ToolExecutionResult {
@@ -8862,6 +8864,63 @@ class ChatViewModel(
             "bash /tmp/.minis-exec-\$\$.sh; rc=\$?; rm -f /tmp/.minis-exec-\$\$.sh; exit \$rc )"
     }
 
+    private suspend fun askApprovalForShell(
+        command: String,
+        reasons: List<String>,
+        toolId: String,
+    ): String? {
+        val submission = approvalCoordinator.submit(
+            command = command,
+            risk = com.openminis.app.agent.approval.CommandRisk.WARN,
+            nowMs = System.currentTimeMillis(),
+        )
+        when (submission) {
+            is com.openminis.app.agent.approval.Submission.Run -> return null
+            is com.openminis.app.agent.approval.Submission.Refused -> return submission.reason
+            is com.openminis.app.agent.approval.Submission.NeedsUser -> Unit
+        }
+        val pending = (submission as com.openminis.app.agent.approval.Submission.NeedsUser).pending
+        val allowOnce = "允许，本次会话内记住"
+        val allowAlways = "始终允许"
+        val deny = "拒绝"
+        val options = org.json.JSONArray()
+            .put(JSONObject().put("label", allowOnce).put("description", "本会话内同一类命令不再询问"))
+            .put(JSONObject().put("label", allowAlways).put("description", "永久允许这一类命令"))
+            .put(JSONObject().put("label", deny).put("description", "不执行，并让模型换更安全的做法"))
+        val question = JSONObject()
+            .put("type", "options")
+            .put("question", "需要你确认这条命令：\n`" + command.take(160) + "`")
+            .put("options", options)
+        if (reasons.isNotEmpty()) question.put("header", reasons.joinToString("; ").take(80))
+        val argsJson = JSONObject().put("questions", org.json.JSONArray().put(question)).toString()
+        val result = try {
+            com.openminis.app.agent.userask.UserAskToolRunner.execute(
+                argsJson = argsJson,
+                toolCallId = toolId,
+                sessionId = activeSessionId,
+                sessionTitle = overlaySessionTitle(),
+                timeoutMinutes = 5,
+            )
+        } catch (e: Exception) {
+            AppLogger.warning(TAG_STREAM, "[shell-approval] prompt failed: ${e.javaClass.simpleName}")
+            null
+        }
+        val answer = result?.let {
+            com.openminis.app.agent.userask.UserAskResolver.parseResults(it.output).firstOrNull()?.answer.orEmpty()
+        }.orEmpty()
+        val mode = when {
+            answer.any { it.contains("始终") } -> com.openminis.app.agent.approval.ApprovalMode.ALLOW_ALWAYS
+            answer.any { it.contains("允许") } -> com.openminis.app.agent.approval.ApprovalMode.ALLOW_SESSION
+            else -> com.openminis.app.agent.approval.ApprovalMode.DENY
+        }
+        val resolution = approvalCoordinator.resolve(pending, mode, System.currentTimeMillis())
+        return when (resolution) {
+            is com.openminis.app.agent.approval.Resolution.Approved -> null
+            is com.openminis.app.agent.approval.Resolution.Denied ->
+                approvalCoordinator.feedback(resolution, com.openminis.app.agent.approval.CommandRisk.WARN)
+        }
+    }
+
     private suspend fun executeShellCommand(
         argsJson: String,
         toolId: String,
@@ -8899,6 +8958,13 @@ class ChatViewModel(
                         "choose the scoped alternative described above.",
                     false, toolTitle = toolTitle,
                 )
+            }
+            if (commandRisk.level == com.openminis.app.tools.CommandRiskPolicy.Level.WARN) {
+                val refusal = askApprovalForShell(command, commandRisk.reasons, toolId)
+                if (refusal != null) {
+                    AppLogger.info(TAG_STREAM, "[shell-approval] denied cmd=${command.take(120)}")
+                    return ToolExecutionResult(refusal + "\nNothing was executed.", false, toolTitle = toolTitle)
+                }
             }
             val commandRiskNotice = if (commandRisk.level == com.openminis.app.tools.CommandRiskPolicy.Level.WARN) {
                 AppLogger.info(
