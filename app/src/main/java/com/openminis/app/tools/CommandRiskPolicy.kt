@@ -30,6 +30,9 @@ object CommandRiskPolicy {
     private val DD_DEVICE = Regex("""\bdd\b[^\n]*\bof=/dev/""")
     private val MKFS = Regex("""\bmkfs(\.\w+)?\b""")
     private val FIND_DELETE_ROOT = Regex("""\bfind\s+/\s[^\n]*-delete\b""")
+    private val FIND_DESTRUCT_ROOT = Regex("""\bfind\s+/\s[^\n]*(?:-delete|-exec\s+(?:rm|shred|truncate|dd)|-ok\s+rm|\|\s*xargs\s+(?:sudo\s+)?rm)""")
+    private val REDIRECT_PROTECTED = Regex(""">>?\s*(?:/etc/|/proc/|/sys/|/system/|/bin/|/sbin/|/usr/|/lib/|/lib64/|/root|/data/|/var/minis/(?:memory|attachments|mounts|shared))""")
+    private val WIPE_ALL = setOf("*", "./*", ".", "./")
 
     fun assess(command: String): Assessment {
         val raw = command.replace("\r\n", "\n")
@@ -69,6 +72,32 @@ object CommandRiskPolicy {
             )
         }
 
+        if (FIND_DESTRUCT_ROOT.containsMatchIn(compact)) {
+            return Assessment(
+                Level.BLOCK,
+                listOf("find / with a destructive action"),
+                "Running find from `/` together with -delete/-exec rm rewrites or destroys the system tree. " +
+                    "Target a specific directory under /var/minis/workspace and list the matches first.",
+            )
+        }
+        if (REDIRECT_PROTECTED.containsMatchIn(compact)) {
+            return Assessment(
+                Level.BLOCK,
+                listOf("redirects output into a protected path"),
+                "Writing over /etc, /usr, /bin or /var/minis state files breaks the environment. " +
+                    "Write into /var/minis/workspace instead.",
+            )
+        }
+        val rmEscape = relativeEscapeDepth(compact)
+        if (rmEscape != null && rmEscape >= 2) {
+            return Assessment(
+                Level.BLOCK,
+                listOf("recursive delete $rmEscape levels above the working directory"),
+                "Climbing that far up leaves the workspace and removes parts of the sandbox itself. " +
+                    "Delete specific paths inside /var/minis/workspace instead.",
+            )
+        }
+
         val rmHit = rmAgainstProtectedRoot(compact)
         if (rmHit != null) {
             return Assessment(
@@ -88,6 +117,8 @@ object CommandRiskPolicy {
         if (GIT_CLEAN.containsMatchIn(compact)) warnings.add("git clean -fdx deletes untracked files")
         if (CHMOD_777.containsMatchIn(compact)) warnings.add("chmod 777 on a root path")
         if (BROAD_KILL.containsMatchIn(compact)) warnings.add("kills every process in the sandbox")
+        if (rmEscape != null && rmEscape == 1) warnings.add("recursive delete one level above the working directory")
+        if (wipeAll(compact)) warnings.add("deletes every entry in the current directory; target a specific path")
         if (warnings.isEmpty()) return Assessment(Level.SAFE, emptyList())
 
         return Assessment(
@@ -132,6 +163,68 @@ object CommandRiskPolicy {
             }
         }
         return null
+    }
+
+    internal fun relativeEscapeDepth(command: String): Int? {
+        for (segment in command.split(Regex("[;&|\\n]+"))) {
+            val tokens = tokenize(segment)
+            val rmIdx = tokens.indexOfFirst { it == "rm" || it.endsWith("/rm") }
+            if (rmIdx < 0) continue
+            var recursive = false
+            var force = false
+            val targets = ArrayList<String>()
+            for (t in tokens.drop(rmIdx + 1)) {
+                when {
+                    t == "--recursive" -> recursive = true
+                    t == "--force" -> force = true
+                    t.startsWith("--") -> Unit
+                    t.startsWith("-") && t.length > 1 -> {
+                        if (t.contains('r') || t.contains('R')) recursive = true
+                        if (t.contains('f')) force = true
+                    }
+                    else -> targets.add(t)
+                }
+            }
+            if (!recursive || !force) continue
+            for (t in targets) {
+                val norm = t.trim().trim('\'', '"')
+                if (!norm.startsWith("..")) continue
+                var depth = 0
+                for (part in norm.split('/')) {
+                    if (part == "..") depth++ else break
+                }
+                if (depth > 0) return depth
+            }
+        }
+        return null
+    }
+
+    internal fun wipeAll(command: String): Boolean {
+        for (segment in command.split(Regex("[;&|\\n]+"))) {
+            val tokens = tokenize(segment)
+            val rmIdx = tokens.indexOfFirst { it == "rm" || it.endsWith("/rm") }
+            if (rmIdx < 0) continue
+            var recursive = false
+            var force = false
+            val targets = ArrayList<String>()
+            for (t in tokens.drop(rmIdx + 1)) {
+                when {
+                    t == "--recursive" -> recursive = true
+                    t == "--force" -> force = true
+                    t.startsWith("--") -> Unit
+                    t.startsWith("-") && t.length > 1 -> {
+                        if (t.contains('r') || t.contains('R')) recursive = true
+                        if (t.contains('f')) force = true
+                    }
+                    else -> targets.add(t)
+                }
+            }
+            if (!recursive) continue
+            for (t in targets) {
+                if (t.trim().trim('\'', '"') in WIPE_ALL) return true
+            }
+        }
+        return false
     }
 
     private fun normalizeTarget(t: String): String {

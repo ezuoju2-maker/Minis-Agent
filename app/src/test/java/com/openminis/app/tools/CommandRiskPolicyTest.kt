@@ -63,4 +63,35 @@ class CommandRiskPolicyTest {
         assertTrue(CommandRiskPolicy.rmAgainstProtectedRoot("rm -Rf '/'") != null)
         assertEquals(null, CommandRiskPolicy.rmAgainstProtectedRoot("rm -rf ./build"))
     }
+
+    @Test
+    fun `plain command stays safe after new guards`() {
+        assertEquals(CommandRiskPolicy.Level.SAFE, level("ls -la /var/minis/workspace"))
+        assertEquals(CommandRiskPolicy.Level.SAFE, level("echo hello > /var/minis/workspace/out.txt"))
+        assertEquals(CommandRiskPolicy.Level.SAFE, level("rm -rf build/*"))
+    }
+
+    @Test
+    fun `find with destructive exec from root is blocked`() {
+        assertEquals(CommandRiskPolicy.Level.BLOCK, level("find / -name x -exec rm -rf {} \\;"))
+        assertEquals(CommandRiskPolicy.Level.BLOCK, level("find / -type f | xargs rm -f"))
+    }
+
+    @Test
+    fun `redirect into protected path is blocked`() {
+        assertEquals(CommandRiskPolicy.Level.BLOCK, level("echo hacked > /etc/passwd"))
+        assertEquals(CommandRiskPolicy.Level.BLOCK, level("cat a >> /usr/lib/foo"))
+    }
+
+    @Test
+    fun `recursive delete escaping two levels is blocked`() {
+        assertEquals(CommandRiskPolicy.Level.BLOCK, level("rm -rf ../.."))
+        assertEquals(CommandRiskPolicy.Level.BLOCK, level("rm -rf ../../var"))
+    }
+
+    @Test
+    fun `one level up and wipe all are warnings`() {
+        assertEquals(CommandRiskPolicy.Level.WARN, level("rm -rf .."))
+        assertEquals(CommandRiskPolicy.Level.WARN, level("rm -rf *"))
+    }
 }
