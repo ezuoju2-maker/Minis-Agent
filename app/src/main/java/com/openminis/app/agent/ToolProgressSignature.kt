@@ -10,14 +10,23 @@ object ToolProgressSignature {
         Rule(Regex("\\b\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:[.,]\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?\\b"), "<ts>"),
         Rule(Regex("\\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\b"), "<uuid>"),
         Rule(Regex("\\b0x[0-9a-fA-F]{6,16}\\b"), "<addr>"),
+        Rule(Regex("\\b[0-9a-fA-F]{40,64}\\b"), "<hash>"),
+        Rule(Regex("\\[[=\\-#>\\s]{3,}\\]"), "<bar>"),
+        Rule(Regex("\\b\\d{1,2}:\\d{2}:\\d{2}(?:[.,]\\d+)?\\b"), "<tod>"),
         Rule(Regex("(?i)\\b(pid|tid|thread|process)\\s*[=:]\\s*\\d+\\b"), "<id>"),
+        Rule(Regex("\\b\\d{1,3}(?:\\.\\d+)?\\s*%"), "<pct>"),
         Rule(Regex("\\b\\d+(?:\\.\\d+)?(?:ms|us|ns|s)\\b"), "<dur>"),
     )
 
     private const val HEX = "0123456789abcdef"
 
+    private const val NORMALIZE_FULL_LIMIT = 200_000
+    private const val SAMPLE_HEAD = 32_000
+    private const val SAMPLE_TAIL = 8_000
+
     fun normalize(text: String): String {
-        var out = text
+        var out = collapseCarriageReturns(text)
+        out = capForNormalization(out)
         for (rule in RULES) out = rule.regex.replace(out, rule.token)
         return out.trim()
     }
@@ -42,6 +51,19 @@ object ToolProgressSignature {
             value.toString()
         }
         else -> value.toString()
+    }
+
+    private fun collapseCarriageReturns(text: String): String {
+        if (!text.contains('\r')) return text
+        val unified = text.replace("\r\n", "\n")
+        return unified.split("\n").joinToString("\n") { it.substringAfterLast('\r') }
+    }
+
+    private fun capForNormalization(text: String): String {
+        if (text.length <= NORMALIZE_FULL_LIMIT) return text
+        val head = text.take(SAMPLE_HEAD)
+        val tail = text.takeLast(SAMPLE_TAIL)
+        return head + "\n[normalized-sample]\n" + tail
     }
 
     private fun sha256(text: String): String {

@@ -7551,19 +7551,18 @@ class ChatViewModel(
                         } else {
                             outputWithLoopWarning
                         }
-                        val outputForLLM = if (name == "shell_execute") {
-                            val trimmedForModel = com.openminis.app.tools.ToolResultTrim.trim(
-                                outputForLlmBase, maxLines = 240, maxChars = 40_000,
-                            )
-                            if (!trimmedForModel.wasTrimmed) {
-                                trimmedForModel.text
-                            } else {
-                                trimmedForModel.text + "\n\n[output truncated for context: kept " +
-                                    trimmedForModel.keptLines + " of " + trimmedForModel.originalLines +
-                                    " lines. Re-run with head/tail/grep to read the omitted part.]"
-                            }
+                        val llmLimits = if (name == "shell_execute") {
+                            240 to 40_000
                         } else {
-                            outputForLlmBase
+                            300 to 28_000
+                        }
+                        val trimmedForModel = com.openminis.app.tools.ToolResultTrim.trim(
+                            outputForLlmBase, maxLines = llmLimits.first, maxChars = llmLimits.second,
+                        )
+                        val outputForLLM = if (!trimmedForModel.wasTrimmed) {
+                            trimmedForModel.text
+                        } else {
+                            trimmedForModel.text + "\n\n" + trimmedForModel.noticeText()
                         }
 
                         val blockIdx = allToolBlocks.indexOfFirst { it.id == id }

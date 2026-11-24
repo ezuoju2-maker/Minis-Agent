@@ -53,4 +53,33 @@ class ToolProgressSignatureTest {
     fun `normalize keeps meaningful digits intact`() {
         assertEquals("id 12345 unchanged", ToolProgressSignature.normalize("id 12345 unchanged"))
     }
+
+    @Test
+    fun `progress bars do not count as progress`() {
+        val a = "downloading [====      ] 45%"
+        val b = "downloading [========  ] 88%"
+        assertFalse(ToolProgressSignature.hasProgress(a, b))
+    }
+
+    @Test
+    fun `carriage return overwrites still compare equal`() {
+        val a = "step 1\rstep 2\rstep 3 done"
+        val b = "step 3 done"
+        assertEquals(ToolProgressSignature.normalize(b), ToolProgressSignature.normalize(a))
+        assertFalse(ToolProgressSignature.hasProgress(a, b))
+    }
+
+    @Test
+    fun `commit hashes and clock times do not count as progress`() {
+        val a = "build 0123456789abcdef0123456789abcdef01234567 at 10:31:22"
+        val b = "build fedcba9876543210fedcba9876543210fedcba98 at 11:47:05"
+        assertFalse(ToolProgressSignature.hasProgress(a, b))
+    }
+
+    @Test
+    fun `oversized output is sampled instead of scanned`() {
+        val big = "y".repeat(400_000)
+        val normalized = ToolProgressSignature.normalize(big)
+        assertTrue(normalized.length < 100_000)
+    }
 }
