@@ -400,7 +400,6 @@ class MinisApp : Application(), ImageLoaderFactory {
 
         // [T-native-offload-bind] start() no longer throws when the socket name
         try {
-        // [T-native-offload-bind] start() no longer throws when the socket name
             NativeOffloadServer.start(RootfsManager.getInstance(this).rootfsDir)
         } catch (t: Throwable) {
             Log.e("MinisApp", "native offload server failed to start; continuing without it", t)

@@ -87,7 +87,7 @@ class SubAgentToolSchemaTest {
         assertEquals(
             listOf(
                 "tool_title", "action", "task", "agent", "model_choice", "context",
-                "max_minutes", "wait", "progress_report", "job_id", "message",
+                "max_turns", "max_minutes", "wait", "progress_report", "job_id", "message",
                 "child_session_id",
             ),
             subAgentTool()!!.propertyOrdering,

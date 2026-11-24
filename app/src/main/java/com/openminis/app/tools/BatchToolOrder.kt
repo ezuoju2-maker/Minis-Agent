@@ -19,7 +19,7 @@ object BatchToolOrder {
     fun writersBefore(index: Int, names: List<String>): List<Int> {
         if (index !in names.indices) return emptyList()
         val name = names[index]
-        if (name !in READERS && name !in WRITERS) return emptyList()
+        if (name !in READERS) return emptyList()
         return (0 until index).filter { names[it] in WRITERS }
     }
 

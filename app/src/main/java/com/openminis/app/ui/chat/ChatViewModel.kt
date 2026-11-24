@@ -6929,6 +6929,7 @@ class ChatViewModel(
                         toolCallSignatures.clear()
                     } else {
                         // All fallbacks exhausted. Surface the trail of tried
+                        // [T-compact-last-resort-removed] A forced-compaction
                         if (shouldFallback) {
                             val skipped = unavailableGroupMembers()
                             if (fallbackReasons.isNotEmpty() || skipped.isNotEmpty()) {
