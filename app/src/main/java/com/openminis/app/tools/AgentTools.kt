@@ -78,9 +78,9 @@ object AgentTools {
         if (!isHelper) add(TodoTools.definition())
         if (skillsAvailable) add(SkillLoadTool.definition())
         if (!isHelper) add(SkillSaveTool.definition())
-        if (userAskExposed && !isHelper) add(com.openminis.app.agent.userask.UserAskPromptText.definition())
         add(McpNativeTools.gatewayDefinition())
         mcpTools.forEach { add(it) }
+        if (userAskExposed && !isHelper) add(com.openminis.app.agent.userask.UserAskPromptText.definition())
     }
 
     private fun subAgentTaskDefinition(rosterNames: List<String>): AgentToolDefinition =

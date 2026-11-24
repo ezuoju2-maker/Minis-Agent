@@ -4631,6 +4631,7 @@ class ChatViewModel(
         }
 
         decideUserAskExposureForRun(interactive = true)
+        // [T-port-user-ask]
         val baseSystemPrompt = buildSystemPrompt()
         val systemPrompt = if ((provider as? com.openminis.app.provider.anthropic.AnthropicProvider)?.isOAuth == true) {
             val prefix = com.openminis.app.auth.ClaudeOAuthManager.ANTHROPIC_OAUTH_IDENTIFIER_PROMPT
@@ -5277,6 +5278,7 @@ class ChatViewModel(
             }
 
             decideUserAskExposureForRun(interactive = !headless, userAskAnswer = userAskAnswer)
+            // [T-port-user-ask]
             val baseSystemPrompt = buildSystemPrompt()
             val systemPrompt = if ((provider as? com.openminis.app.provider.anthropic.AnthropicProvider)?.isOAuth == true) {
                 val prefix = com.openminis.app.auth.ClaudeOAuthManager.ANTHROPIC_OAUTH_IDENTIFIER_PROMPT
@@ -5534,6 +5536,7 @@ class ChatViewModel(
             }
 
             decideUserAskExposureForRun(interactive = true)
+            // [T-port-user-ask]
             val baseSystemPrompt = buildSystemPrompt()
             val systemPrompt = if ((provider as? com.openminis.app.provider.anthropic.AnthropicProvider)?.isOAuth == true) {
                 val prefix = com.openminis.app.auth.ClaudeOAuthManager.ANTHROPIC_OAUTH_IDENTIFIER_PROMPT
@@ -10512,6 +10515,7 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
             }
 
             decideUserAskExposureForRun(interactive = _promptQueue.value.any { it.origin == QueuedPromptOrigin.USER })
+            // [T-port-user-ask]
             val baseSystemPrompt = buildSystemPrompt()
             val systemPrompt = if ((provider as? com.openminis.app.provider.anthropic.AnthropicProvider)?.isOAuth == true) {
                 val prefix = com.openminis.app.auth.ClaudeOAuthManager.ANTHROPIC_OAUTH_IDENTIFIER_PROMPT
@@ -10726,6 +10730,7 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
 
         viewModelScope.launch {
             decideUserAskExposureForRun(interactive = true)
+            // [T-port-user-ask]
             val baseSystemPrompt = buildSystemPrompt()
             val systemPrompt =
                 if ((provider as? com.openminis.app.provider.anthropic.AnthropicProvider)?.isOAuth == true) {

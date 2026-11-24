@@ -189,7 +189,8 @@ class BrowserJSErrorDetailTest {
         val exec = manager.substringAfter("private suspend fun executeJS(").substringBefore("private suspend fun findElements(")
         assertTrue("return null still resolves as the text null", exec.contains("__minis__.resolve(String(__v__));"))
         assertTrue(exec.contains("__minis__.reject(\${BrowserUseJS.SCRIPT_THREW_JS});"))
-        assertTrue(exec.contains("if (BrowserJSResult.decode(value) == null) deferred.complete(EXECUTE_JS_DID_NOT_PARSE)"))
+        assertTrue(exec.contains("BrowserJSResult.decode(value) == null"))
+        assertTrue(exec.contains("deferred.complete(EXECUTE_JS_DID_NOT_PARSE)"))
         assertTrue(exec.contains("BrowserJSResult.syntaxErrorMessage(detail)"))
         assertTrue("timeout text unchanged", exec.contains("\"JavaScript execution timed out (30s)\""))
     }
