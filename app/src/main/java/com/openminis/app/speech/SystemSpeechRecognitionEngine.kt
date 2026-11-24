@@ -379,6 +379,7 @@ class SystemSpeechRecognitionEngine(private val appContext: Context) : SpeechRec
     }
 
 
+    // ── [T-voice-asr-failure-retry-prompt] Kept audio, replay, watchdog ────
     private val sessionPcm = ArrayList<ByteArray>()
     private var sessionPcmBytes = 0
     private val sessionPcmLock = Any()

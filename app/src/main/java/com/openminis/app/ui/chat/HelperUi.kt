@@ -858,6 +858,7 @@ internal fun HelperDetailContent(block: AssistantBlock) {
 }
 
 
+// ─── Callback card ───────────────────────────────────────────────────────
 internal fun AgentCallback.syntheticBlock(): AssistantBlock {
     val finished = kind == AgentCallback.Kind.FINISHED
     val status = if (!finished) "running"

@@ -65,6 +65,7 @@ object VoiceSendGate {
             (isFinishingForSend || SpeechRecognitionManager.state.value != RecognitionState.IDLE)
 
 
+    // ── [T-voice-asr-failure-retry-prompt] failure queue ────────────────────
     fun recordFailure(failed: SpeechRecognitionManager.FailedAudio, captureGeneration: Int) {
         if (captureGeneration != generation) {
             AppLogger.info(

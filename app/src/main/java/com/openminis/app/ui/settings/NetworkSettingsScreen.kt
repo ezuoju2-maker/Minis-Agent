@@ -170,6 +170,7 @@ fun NetworkSettingsScreen(
             }
         }
 
+        // Default route
         if (page == NetworkPage.ROUTING) SettingsSection(
             footer = stringResource(R.string.network_default_route_footer) + "\n\n" + stringResource(R.string.network_default_route_covers),
         ) {

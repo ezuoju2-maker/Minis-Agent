@@ -681,6 +681,7 @@ class PhotosOffloadHandler(private val context: Context) : NativeOffloadHandler 
     }
 
 
+    // ── delete (T64) ─────────────────────────────────────────────────────
     private fun handleDelete(args: OffloadArgs): NativeOffloadResult {
         val idsStr = args.get("ids")
             ?: return NativeOffloadResult(2, "android-photos delete: --ids <id1,id2,...> is required\n")

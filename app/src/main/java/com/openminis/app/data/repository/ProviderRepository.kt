@@ -158,6 +158,7 @@ class ProviderRepository(private val context: Context) {
                 )
             }
             if (!configLoadComplete.isCompleted) configLoadComplete.complete(Unit)
+            // [T-android-provider-voice] Reconcile voice-template seeds after
             try {
                 ensureVoiceTemplateModels()
             } catch (e: Exception) {
@@ -852,6 +853,7 @@ class ProviderRepository(private val context: Context) {
     }
 
 
+    // --- Model Group management ---
     fun addGroup(group: ModelGroup): Unit = synchronized(configLock) {
         ensureConfigLoaded()
         val config = workingCopy()

@@ -475,6 +475,7 @@ class AgentForegroundService : Service() {
                     ),
                 )
             } else {
+                // [T-android-overlay-completion-pending] Completion linger:
                 if (lingerJob == null) {
                     lingerJob = overlayScope.launch {
                         delay(COMPLETION_LINGER_TIMEOUT_MS)

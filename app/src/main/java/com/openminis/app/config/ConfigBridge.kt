@@ -424,6 +424,7 @@ object ConfigBridge {
                     displayNew = ""
                 }
                 else -> {
+                    // [FEAT-261021-03] normalize -> schema -> field checks,
                     val normalized = try {
                         field.normalize(parsedValue).also {
                             field.valueSchema.validate(it)

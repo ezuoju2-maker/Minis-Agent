@@ -21,6 +21,7 @@ object ProviderFactory {
         sessionId: String?,
         overrides: com.openminis.app.data.model.ModelOverrides? = null,
     ): LLMProvider {
+        // T174: route through ProviderInstance.effectiveBaseURL instead of
         val basePath = instance.effectiveBaseURL
         val provider: LLMProvider = when (instance.providerType) {
             ProviderType.anthropic -> {

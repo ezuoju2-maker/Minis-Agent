@@ -227,6 +227,7 @@ internal class FreshProcessShell(
                 runCatching { Thread.sleep(STATUS_POLL_MS) }
             }
         }
+        // Belt and braces: if anything still holds the write end, the read
         runCatching { process.inputStream.close() }
         runCatching { process.errorStream.close() }
     }

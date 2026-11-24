@@ -232,6 +232,7 @@ fun ProviderDetailScreen(
             }
         }
 
+        // ─── Custom Base URL ────────────────────────────────────────
         if (instance.providerType != ProviderType.openRouter) {
             SettingsSection(header = stringResource(R.string.provider_detail_custom_api_base)) {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -445,6 +446,7 @@ fun ProviderDetailScreen(
             }
         }
 
+        // ─── Status ─────────────────────────────────────────────────
         SettingsSection(header = stringResource(R.string.provider_detail_status)) {
             SettingsSwitchRow(
                 title = stringResource(R.string.provider_detail_enabled),
@@ -460,6 +462,7 @@ fun ProviderDetailScreen(
 
         com.openminis.app.ui.quota.ProviderQuotaSection(instance = instance)
 
+        // [T-android-provider-voice] When this instance owns audio-modality
         if (providerRepository.hasVoiceModels(instance.id)) {
             SettingsSection(header = null) {
                 SettingsRow(
@@ -483,6 +486,7 @@ fun ProviderDetailScreen(
 
         ThinkingRulesSection(instance = instance, providerRepository = providerRepository)
 
+        // ─── Models ─────────────────────────────────────────────────
         SettingsSection(
             header = stringResource(R.string.provider_detail_models_count_header, entries.size),
         ) {

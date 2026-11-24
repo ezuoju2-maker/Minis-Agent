@@ -153,6 +153,7 @@ fun BackupHistoryDetailScreen(
             }
         }
 
+        // -- Log --
         SettingsSection(header = stringResource(R.string.backup_history_log)) {
             if (record.log.isEmpty()) {
                 Text(

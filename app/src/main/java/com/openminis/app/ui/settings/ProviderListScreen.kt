@@ -241,6 +241,7 @@ fun ProviderListScreen(
             }
         }
 
+        // [T-android-provider-voice] Voice Services: runtime shadow mirror of
         val shadows = remember(config) { providerRepository.shadowVoiceProviders() }
         if (shadows.isNotEmpty()) {
             SettingsSection(

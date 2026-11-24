@@ -400,6 +400,7 @@ class MCPOAuthController(
     fun bridgeFile(server: String): File? {
         if (!isBridgeSafeName(server)) return null
         val file = File(bridgeDir, "$server.json")
+        // Belt and braces: the file must sit directly in the bridge directory.
         val inDir = runCatching { file.canonicalFile.parentFile == bridgeDir.canonicalFile }.getOrDefault(false)
         return if (inDir) file else null
     }

@@ -260,6 +260,7 @@ data class ProviderConfig(
     val modelGroups: MutableList<ModelGroup> = mutableListOf(),
     var defaultPrimaryGroupId: String? = null,
     var defaultSubGroupId: String? = null,
+    // [T-android-provider-voice] Voice Input / Voice Output group bindings —
     var voiceInputGroupId: String? = null,
     var voiceOutputGroupId: String? = null,
     var visionGroupId: String? = null,

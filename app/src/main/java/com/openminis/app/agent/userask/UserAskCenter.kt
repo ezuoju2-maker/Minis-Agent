@@ -165,6 +165,7 @@ object UserAskCenter {
     }
 
 
+    // ── Dismissal ──────────────────────────────────────────────────────────
     fun dismiss(requestId: String, reason: UserAskDismissReason) {
         resolve(requestId, "DISMISSED reason=${reason.wire}") { it.resolveDismissed(reason) }
     }

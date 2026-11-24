@@ -247,6 +247,7 @@ ${if (requiresBody) BODY_CHECK_JS else ""}
     """.trimIndent(), requiresBody = false)
 
 
+    // -- Find Elements --
     fun findElements(selector: String): String = guardedRead("""
         (function() {
             var els = document.querySelectorAll('${jsQuote(selector)}');
@@ -288,6 +289,7 @@ ${if (requiresBody) BODY_CHECK_JS else ""}
     """.trimIndent(), requiresBody = false)
 
 
+    // -- Get Backbone --
     fun getBackbone(maxDepth: Int): String = guardedRead("""
         (function() {
             var MAX_DEPTH = $maxDepth;
@@ -459,6 +461,7 @@ ${if (requiresBody) BODY_CHECK_JS else ""}
     """.trimIndent())
 
 
+    // -- Fetch (async IIFE) --
     fun fetch(url: String): String {
         val escaped = url.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
         return """

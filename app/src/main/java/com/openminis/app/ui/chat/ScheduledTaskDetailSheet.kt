@@ -183,6 +183,7 @@ internal fun ScheduledTaskDetailSheet(
 
                 HistoryCard(history)
 
+                // Actions: full-width card buttons, icon + label, as iOS
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (task != null && task.enabled) {
                         ActionCardButton(

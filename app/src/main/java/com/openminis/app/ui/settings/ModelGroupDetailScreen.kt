@@ -255,6 +255,7 @@ fun ModelGroupDetailScreen(
                 }
             } else {
                 itemsIndexed(memberIds, key = { _, id -> id }) { _, entryId ->
+                    // [T-android-provider-voice] System voice sentinels aren't
                     val entry = config.modelEntries.find { it.id == entryId }
                         ?: com.openminis.app.data.model.SystemVoiceEntries.resolve(entryId)
 

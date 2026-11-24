@@ -47,6 +47,7 @@ fun AddModelsToGroupScreen(
     }
 
     val existingIds = group.memberEntryIds.toSet()
+    // [T-android-provider-voice] Voice-scoped picker: when the target group is
     val modalityFilter = when (groupId) {
         config.voiceInputGroupId -> PickerModalityFilter.AUDIO_INPUT
         config.voiceOutputGroupId -> PickerModalityFilter.AUDIO_OUTPUT

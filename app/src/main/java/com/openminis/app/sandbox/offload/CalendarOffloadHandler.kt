@@ -403,6 +403,7 @@ class CalendarOffloadHandler(private val context: Context) : NativeOffloadHandle
     }
 
 
+    // ── delete ──────────────────────────────────────────────────────────
     private fun doDelete(args: OffloadArgs): NativeOffloadResult {
         ensurePermission(
             permissions = listOf(Manifest.permission.WRITE_CALENDAR),

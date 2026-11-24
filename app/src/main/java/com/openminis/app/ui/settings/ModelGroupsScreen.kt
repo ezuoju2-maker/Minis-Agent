@@ -261,6 +261,7 @@ fun ModelGroupsScreen(
                             selectedId = config.defaultSubGroupId,
                             onSelect = { providerRepository.defaultSubGroupId = it },
                         )
+                        // [T-android-provider-voice] Voice group bindings —
                         SectionDivider()
                         GroupDropdown(
                             label = stringResource(R.string.model_groups_voice_input),

@@ -234,6 +234,7 @@ fun SettingsScreen(
                 )
             }
 
+            // -- Storage --
             SettingsSection(title = stringResource(R.string.settings_section_storage)) {
                 SettingsItem(
                     icon = Icons.Outlined.Inventory2,
@@ -266,6 +267,7 @@ fun SettingsScreen(
                 )
             }
 
+            // -- Network -- [FEAT-261021-04, iOS c77be4fb6] its own section below
             SettingsSection(title = stringResource(R.string.network_title)) {
                 SettingsItem(
                     icon = Icons.Outlined.Lan,
@@ -298,6 +300,7 @@ fun SettingsScreen(
                 )
             }
 
+            // -- Permissions --
             SettingsSection(title = stringResource(R.string.settings_section_permissions)) {
                 SettingsItem(
                     icon = Icons.Outlined.Shield,

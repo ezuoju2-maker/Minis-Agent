@@ -263,6 +263,7 @@ internal object ProviderMutationMethods {
     }
 
 
+    // ─── Models ─────────────────────────────────────────────────────────────
     fun modelsAdd(context: Context, params: JSONObject): JSONObject {
         val repo = repo(context)
         val instanceId = params.optString("instanceId", "").ifEmpty {

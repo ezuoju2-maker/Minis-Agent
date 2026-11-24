@@ -416,6 +416,7 @@ internal suspend fun performTest(
     val apiKey = providerRepository.requestCredential(instance)
         ?: return@withContext failure("No API key configured for this provider.")
 
+    // [T-android-provider-voice] Speech tests route through the VoiceProvider
     if (kind == QuickTestKind.SPEECH_OUT || kind == QuickTestKind.TRANSCRIPTION) {
         val voice = com.openminis.app.provider.voice.VoiceProviderFactory.make(instance, apiKey)
             ?: return@withContext failure(context.getString(R.string.quicktest_voice_unsupported))

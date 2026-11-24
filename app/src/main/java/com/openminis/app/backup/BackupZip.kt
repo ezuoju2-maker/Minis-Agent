@@ -227,6 +227,7 @@ object BackupZip {
             throw ZipException("Refusing unsafe entry path: $entryName")
         }
         val resolved = parts.fold(root) { acc, part -> File(acc, part) }
+        // Belt and braces: a symlink or exotic name must not escape either.
         if (!resolved.canonicalPath.startsWith(root.canonicalPath + File.separator) &&
             resolved.canonicalPath != root.canonicalPath
         ) {

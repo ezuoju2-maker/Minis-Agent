@@ -591,6 +591,7 @@ fun ChatScreen(
         }
     }
 
+    // Hang-detector quiet-period reset: if the user lands on a chat session
     androidx.compose.runtime.LaunchedEffect(sessionId) {
         kotlinx.coroutines.delay(10_000)
         com.openminis.app.diagnostics.HangDetector.markHealthyTick()
@@ -610,6 +611,7 @@ fun ChatScreen(
         for (a in transfer.attachments) viewModel.addAttachment(a)
     }
 
+    // Mirrors `inputText` for the BasicTextField but tracks selection so we
     var inputFieldValue by remember {
         mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(""))
     }
@@ -2069,6 +2071,7 @@ fun ChatScreen(
                 var callbackDetailBlock by remember { mutableStateOf<AssistantBlock?>(null) }
                 val density = LocalDensity.current
                 val toolBarHeightDp = with(density) { toolBarHeightPx.toDp() }
+                // T174: an earlier version gated reserve on `toolBarHeightPx
                 val sessionLoadedForDots by viewModel.sessionLoadedState.collectAsState()
                 val enteringSession = showSessionEnteringIndicator(
                     isDraft = viewModel.isDraftSession,

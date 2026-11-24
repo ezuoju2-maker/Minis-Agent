@@ -27,6 +27,7 @@ data class ProviderConfigSnapshot(
 object ProviderConfigMetaKeys {
     const val DEFAULT_PRIMARY_GROUP_ID = "default_primary_group_id"
     const val DEFAULT_SUB_GROUP_ID = "default_sub_group_id"
+    // [T-android-provider-voice] Voice Input / Voice Output group bindings
     const val VOICE_INPUT_GROUP_ID = "voice_input_group_id"
     const val VOICE_OUTPUT_GROUP_ID = "voice_output_group_id"
     const val VISION_GROUP_ID = "vision_group_id"

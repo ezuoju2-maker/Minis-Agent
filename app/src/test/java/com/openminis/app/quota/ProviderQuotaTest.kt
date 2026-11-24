@@ -520,7 +520,7 @@ class ProviderQuotaTest {
         assertTrue(store.contains("attended = isWatched(instance.id)"))
 
         val detail = ProductionSources.read("ui/settings/ProviderDetailScreen.kt")
-        val statusIdx = detail.indexOf("
+        val statusIdx = detail.indexOf("// ─── Status ─")
         val quotaIdx = detail.indexOf("ui.quota.ProviderQuotaSection(instance = instance)")
         val thinkIdx = detail.indexOf("ThinkingRulesSection(instance = instance")
         assertTrue("Quota between Status and Thinking Rules", statusIdx in 0 until quotaIdx && quotaIdx < thinkIdx)

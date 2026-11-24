@@ -329,6 +329,7 @@ fun AppNavigation(
         }
     }
 
+    // Pinned-shortcut cold start: when launched via
     val htmlShortcut = initialDeepLink as? DeepLinkAction.OpenHtmlPreview
     val quickActionStart: String? = when (initialDeepLink) {
         is DeepLinkAction.NewVoiceChat -> {

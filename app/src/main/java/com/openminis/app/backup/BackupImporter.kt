@@ -388,6 +388,7 @@ class BackupImporter(
     }
 
 
+    // MARK: - Shared files / Skills / Memory / MCP
     private fun importSharedFiles(
         root: File,
         fileIndex: List<BackupFileIndexEntry>,

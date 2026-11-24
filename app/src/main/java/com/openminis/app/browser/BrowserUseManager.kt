@@ -669,6 +669,7 @@ class BrowserUseManager(
     }
 
 
+    // -- Screenshot --
     private suspend fun screenshot(fullPage: Boolean = false): BrowserActionResult {
         var truncated = false
         var originalHeightPx = 0
@@ -967,6 +968,7 @@ class BrowserUseManager(
     }
 
 
+    // -- Find Elements --
     private suspend fun findElements(selector: String?): BrowserActionResult {
         if (selector == null) return BrowserActionResult.error("find_elements requires 'selector'")
         return evaluateAndReturn(BrowserUseJS.findElements(selector))
@@ -979,12 +981,14 @@ class BrowserUseManager(
     }
 
 
+    // -- Get Backbone --
     private suspend fun getBackbone(maxDepth: Int?): BrowserActionResult {
         val depth = maxDepth ?: 5
         return evaluateActionScript(BrowserUseJS.getBackbone(depth)) { BrowserActionResult(text = formatBackboneResult(it)) }
     }
 
 
+    // -- Fetch --
     private suspend fun fetch(urlString: String?): BrowserActionResult {
         if (urlString.isNullOrEmpty()) return BrowserActionResult.error("fetch requires 'url' parameter")
 
@@ -1122,6 +1126,7 @@ class BrowserUseManager(
     }
 
 
+    // -- User Navigation --
     fun goBack() { if (webView.canGoBack()) webView.goBack() }
     fun goForward() { if (webView.canGoForward()) webView.goForward() }
     fun reload() { webView.reload() }

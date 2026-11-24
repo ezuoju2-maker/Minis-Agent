@@ -329,6 +329,7 @@ class PersistentShell(
             Log.d(TAG, "Reader loop ended: ${e.message}")
         }
 
+        // Process exited
         val cb = pendingCallback
         if (cb != null) {
             cb.onComplete?.invoke(cb.output.toString(), -1)

@@ -108,6 +108,7 @@ class ModelsCollection(
             userModifiedAt = System.currentTimeMillis(),
         )
         repo.addEntry(entry)
+        // Used verbatim as a path id ([T-config-path-dotted-id]).
         return entry.id
     }
 

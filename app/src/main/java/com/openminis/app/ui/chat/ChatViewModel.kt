@@ -3692,6 +3692,7 @@ class ChatViewModel(
                 resume()
             }
             } finally {
+                // T201: open the gate even on early `return@launch` (draft path,
                 sessionLoaded.value = true
                 println(
                     "[T-HANG-DIAG] loadSession EXIT session=$sessionId " +
@@ -4275,6 +4276,7 @@ class ChatViewModel(
     }
 
 
+    // ─── Share Injection (T51) ────────────────────────────────────────────
     private val _hasInjectedShareContent = kotlinx.coroutines.flow.MutableStateFlow(false)
     val hasInjectedShareContent: kotlinx.coroutines.flow.StateFlow<Boolean> =
         _hasInjectedShareContent.asStateFlow()
@@ -6142,6 +6144,7 @@ class ChatViewModel(
         lastInLoopCompactionMadeNoProgress = false
         var didInjectEmptyToolReminder = false
         var dsmlLeakRetries = 0
+        // [T-android-scheduled-resume-nudge] Set when a scheduled fire was
         var scheduledResumeNudgeOwed = false
         var didStopStaleReadAloud = false
         val turnCap = helperConfig?.maxTurns ?: MAX_AGENT_TURNS
@@ -6171,6 +6174,7 @@ class ChatViewModel(
                     currentProvider = chosen
                     classProviderAtSend = chosen
                     currentIdentity = providerIdentity(_activeEntryId.value)
+                    // A new model starts a new failure streak.
                     triedEntryIds.clear()
                     _activeEntryId.value?.let { triedEntryIds.add(it) }
                     emptyStreakEntryIds.clear()
@@ -6801,6 +6805,7 @@ class ChatViewModel(
                             while (allToolBlocks.size > turnStartBlockIndex) {
                                 allToolBlocks.removeAt(allToolBlocks.size - 1)
                             }
+                            // [T-retry-badge-awaiting] Still awaiting the retried
                             withContext(Dispatchers.Main) {
                                 updateAssistantMessage(
                                     assistantId, accumulatedText + turnTextSb.toString(), true, allToolBlocks,
@@ -6923,6 +6928,7 @@ class ChatViewModel(
                         toolCalls.clear()
                         toolCallSignatures.clear()
                     } else {
+                        // All fallbacks exhausted. Surface the trail of tried
                         if (shouldFallback) {
                             val skipped = unavailableGroupMembers()
                             if (fallbackReasons.isNotEmpty() || skipped.isNotEmpty()) {
@@ -6953,6 +6959,7 @@ class ChatViewModel(
                 }
             }
 
+            // Build assistant contentParts for history
             val assistantParts = mutableListOf<AgentContentPart>()
             if (turnText.isNotEmpty()) {
                 assistantParts.add(AgentContentPart.Text(turnText))
@@ -6986,6 +6993,7 @@ class ChatViewModel(
                 )
             }
 
+            // If no tool calls, we're done
             if (toolCalls.isEmpty()) {
                 AppLogger.info(TAG_STREAM, "runAgentLoop turn=$turn no tool calls → break (finishReason=$turnFinishReason)")
                 val dsmlReasoning = turnReasoningContent ?: turnThinking.toString()
@@ -7240,6 +7248,7 @@ class ChatViewModel(
                         _canResume.value = true
                     }
                 }
+                // [T-subagent-termination] The one-shot closing request (see
                 if (closingRequestDue) {
                     helperClosingNudgeSent = true
                     helperClosingAttempted = true
@@ -7312,6 +7321,7 @@ class ChatViewModel(
                     _canResume.value = false
                     continue
                 }
+                // Auto-title after first exchange
                 if (turn == 0) generateSessionTitleIfNeeded()
                 stopDiagExit = if (isEmptyTurn) "empty-turn" else "no-tool-calls"
                 loopExitedNormally = true
@@ -8249,6 +8259,7 @@ class ChatViewModel(
             return startBackgroundHelper(job.id, childVm, child.id, toolId, resolution, args, title, startedAt, converted = false, subAgentWireName = subAgentWireName)
         }
 
+        // ── Wait mode ────────────────────────────────────────────────────
         var finalStatus = "completed"
         var wrapUpAskedAt: Long? = null
         var wrapUpToolStopped = false
@@ -9986,6 +9997,7 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
                         }
                     }
                 } else {
+                    // [T-titlegen-retry-not-retrying] Every candidate failed
                     titleGenerationAttempts = TITLE_MAX_ATTEMPTS
                     AppLogger.warning("TitleGen", "outcome=gave-up (all title candidates failed) — applying first-message fallback title")
                     applyFallbackTitleFromFirstMessage("all title candidates failed")
