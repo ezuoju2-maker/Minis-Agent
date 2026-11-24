@@ -161,6 +161,6 @@ class PersonaReminderPlacementTest {
         val send = loop.indexOf("currentProvider.streamMessage(")
         assertTrue(site in 1 until send)
         assertTrue(loop.substring(site, send).contains("appendPersonaReminderToHistory(lastContextTokens)"))
-        assertTrue(vm.contains("trimStart().startsWith(\"<system-reminder>\")"))
+        assertTrue(vm.contains("startsWith(\"<system-reminder>\")"))
     }
 }

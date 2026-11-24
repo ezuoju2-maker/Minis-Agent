@@ -19,7 +19,7 @@ class ConfigConfirmStringsTest {
 
     private val main = ProductionSources.mainRoot()!!
     private val res = File(main.parentFile.parentFile.parentFile.parentFile, "res")
-    private val repo = generateSequence(main) { it.parentFile }.first { File(it, "src/ios/Localizable.xcstrings").exists() }
+    private val repo by lazy { generateSequence(main) { it.parentFile }.first { File(it, "src/ios/Localizable.xcstrings").exists() } }
 
     private val keys = mapOf(
         "config_confirm_title_one" to "Confirm change",

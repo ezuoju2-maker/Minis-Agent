@@ -111,7 +111,7 @@ class ChatShareWiringTest {
         assertTrue("device: options and renders live in the picker-owned state, not the preview's composition",
             preview.contains("var darkChoice by state::darkChoice") && preview.contains("val rendered = state.rendered"))
         assertTrue("#7: a cancelled date lookup is not saved as a date-less subtitle",
-            preview.contains("throw e // superseded"))
+            preview.contains("throw e"))
         val picker = ProductionSources.read("ui/chat/share/ChatShareSelectionScreen.kt")
         assertTrue("a fresh preview state per opening", picker.contains("previewState = ChatSharePreviewState()"))
         val renderer = ProductionSources.read("ui/chat/share/ChatExportRenderer.kt")

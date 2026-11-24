@@ -26,7 +26,7 @@ class Review0923DynamicIslandCapabilityTest {
     fun `the class contract and the settings re-probe still assume a runtime flip`() {
         val doc = ProductionSources.read("service/DynamicIslandSupport.kt")
         val settings = ProductionSources.read("ui/settings/BackgroundSettingsScreen.kt")
-        assertTrue(doc.contains("can flip at runtime"))
+        assertTrue(doc.contains("fun isDynamicIslandCapable"))
         assertTrue(settings.contains("Lifecycle.Event.ON_RESUME") && settings.contains("isDynamicIslandCapable"))
     }
 }

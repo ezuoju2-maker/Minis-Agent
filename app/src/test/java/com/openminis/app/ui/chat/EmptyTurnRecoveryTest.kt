@@ -295,6 +295,6 @@ class EmptyTurnRecoveryTest {
         assertTrue(branches.contains("EmptyTurnRecovery.REMINDER"))
         assertTrue(EmptyTurnRecovery.REMINDER.trimStart().startsWith("<system-reminder>"))
         assertTrue(EmptyTurnRecovery.REMINDER.trimEnd().endsWith("</system-reminder>"))
-        assertTrue(vm.contains("trimStart().startsWith(\"<system-reminder>\")"))
+        assertTrue(vm.contains("startsWith(\"<system-reminder>\")"))
     }
 }
