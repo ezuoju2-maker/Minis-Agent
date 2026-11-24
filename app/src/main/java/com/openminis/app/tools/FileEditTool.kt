@@ -20,10 +20,24 @@ object FileEditTool {
             "old_string" to AgentToolParam("string", "The exact text to find in the file. Must match precisely including whitespace and indentation. Must be unique in the file unless replace_all is true."),
             "new_string" to AgentToolParam("string", "The replacement text. Use empty string to delete old_string."),
             "replace_all" to AgentToolParam("boolean", "If true, replace ALL occurrences of old_string (default: false)"),
+            "hunks" to AgentToolParam("string", "Optional partial apply, as a JSON array of hunk indices such as [0,2].  After computing the edit, the change is split into numbered hunks; list the hunk indices to keep (0-based, as shown in the diff card). Omitted hunks stay as they were. Only works when the whole diff is intact (not truncated). Use it when the user accepts only part of a large edit."),
         ),
         required = listOf("tool_title", "path", "old_string", "new_string"),
-        propertyOrdering = listOf("tool_title", "path", "old_string", "new_string", "replace_all"),
+        propertyOrdering = listOf("tool_title", "path", "old_string", "new_string", "replace_all", "hunks"),
     )
+
+    private fun hunkIndices(args: JSONObject): Set<Int>? {
+        val arr = args.optJSONArray("hunks") ?: args.optString("hunks", "").trim().let { raw ->
+            if (raw.isEmpty()) return null
+            runCatching { org.json.JSONArray(raw) }.getOrNull() ?: return null
+        }
+        val out = LinkedHashSet<Int>()
+        for (i in 0 until arr.length()) {
+            val v = arr.optInt(i, -1)
+            if (v >= 0) out.add(v)
+        }
+        return out
+    }
 
     fun execute(argsJson: String, sessionId: String, context: Context): ToolExecutionResult {
         return try {
@@ -125,15 +139,36 @@ object FileEditTool {
             )
         }
 
-        val newContent = if (replaceAll) {
+        var newContent = if (replaceAll) {
             content.replace(oldString, newString)
         } else {
             content.replaceFirst(oldString, newString)
         }
+        val wanted = hunkIndices(args)
+        var hunkNote = ""
+        if (wanted != null) {
+            val plan = com.openminis.app.tools.patch.PatchSplitter.plan(content, newContent)
+            if (!plan.complete) {
+                return ToolExecutionResult(
+                    "Error: this edit is too large to split into hunks (the diff was truncated). " +
+                        "Apply the whole edit (omit `hunks`) or narrow old_string.",
+                    false, toolTitle = toolTitle,
+                )
+            }
+            val unknown = wanted - plan.ids().toSet()
+            if (unknown.isNotEmpty()) {
+                return ToolExecutionResult(
+                    "Error: unknown hunk index/indices $unknown; this edit has hunks ${plan.ids()}.",
+                    false, toolTitle = toolTitle,
+                )
+            }
+            newContent = plan.apply(wanted)
+            hunkNote = " (partial: kept hunks ${wanted.sorted()})"
+        }
 
         file.writeText(newContent)
         val replacements = if (replaceAll) count else 1
-        val base = "Edited $path ($replacements replacement(s), ${newContent.length} bytes)"
+        val base = "Edited $path ($replacements replacement(s), ${newContent.length} bytes)$hunkNote"
         val output = if (includeDiff) {
             val preview = ChangePreview.render(content, newContent, maxChars = 700)
             if (preview.isBlank()) base else "$base\nChanges:\n$preview"
