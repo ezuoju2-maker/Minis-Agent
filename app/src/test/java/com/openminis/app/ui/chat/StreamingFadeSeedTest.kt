@@ -119,7 +119,7 @@ class StreamingFadeSeedTest {
 
     @Test
     fun `the live deposit is ungated and replaces the previous tick's entry`() {
-        val dep = md.substringBefore("coroutineContext.ensureActive()")
+        val dep = md.substringAfter("liveDepositKey[0]?.let { prev ->").substringBefore("coroutineContext.ensureActive()")
         assertFalse(
             "the 2000-char gate must be gone — it guaranteed small fragments flash",
             dep.contains("displayContent.length > COLD_PARSE_OFFMAIN_THRESHOLD_CHARS"),

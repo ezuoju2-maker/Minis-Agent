@@ -186,7 +186,7 @@ class BrowserJSErrorDetailTest {
     }
 
     @Test fun `execute_js keeps a legitimate null and detects a script that did not parse`() {
-        val exec = manager
+        val exec = manager.substringAfter("private suspend fun executeJS(").substringBefore("private suspend fun findElements(")
         assertTrue("return null still resolves as the text null", exec.contains("__minis__.resolve(String(__v__));"))
         assertTrue(exec.contains("__minis__.reject(\${BrowserUseJS.SCRIPT_THREW_JS});"))
         assertTrue(exec.contains("if (BrowserJSResult.decode(value) == null) deferred.complete(EXECUTE_JS_DID_NOT_PARSE)"))
