@@ -503,7 +503,19 @@ class SkillRepository(private val context: Context) {
         val dirPath: String,
     )
 
+    private val remotePolicy = com.openminis.app.skills.remote.RemoteSourcePolicy()
+
+    private fun remoteAllowed(url: String): Boolean {
+        val verdict = remotePolicy.check(url)
+        if (verdict is com.openminis.app.skills.remote.SourceVerdict.Rejected) {
+            Log.w(TAG, "remote skill source rejected: ${verdict.reason} url=${url.take(120)}")
+            return false
+        }
+        return true
+    }
+
     suspend fun importFromGitHub(urlString: String): Skill? = withContext(Dispatchers.IO) {
+        if (!remoteAllowed(urlString)) return@withContext null
         val rawURL = githubToRawURL(urlString) ?: return@withContext null
         val content = httpGetString(rawURL) ?: return@withContext null
         val skill = importFromContent(content, ImportSource.URL, sourceURL = urlString) ?: return@withContext null
@@ -552,6 +564,11 @@ class SkillRepository(private val context: Context) {
             )
         }
 
+        if (!remoteAllowed(urlString)) {
+            return@withContext UpdateResult.Failure(
+                "Source host is not trusted; only GitHub hosts are allowed for skill updates."
+            )
+        }
         val rawURL = githubToRawURL(urlString)
             ?: return@withContext UpdateResult.Failure("Could not build a raw download URL from $urlString")
         val content = try { httpGetString(rawURL) } catch (e: Exception) {
