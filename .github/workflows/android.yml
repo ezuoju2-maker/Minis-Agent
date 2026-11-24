@@ -5,7 +5,7 @@ on:
   pull_request:
   workflow_dispatch:
 jobs:
-  build:
+  assemble:
     runs-on: ubuntu-latest
     env:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
@@ -30,10 +30,54 @@ jobs:
           SDKMGR="$(ls -d "$ANDROID_SDK_ROOT"/cmdline-tools/*/bin/sdkmanager | tail -1)"
           yes | "$SDKMGR" --licenses > /dev/null || true
           "$SDKMGR" "platforms;android-36" "build-tools;35.0.0" > /dev/null
-      - name: Unit tests and assemble
+      - name: Assemble debug
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon --stacktrace \
             -Pkotlin.daemon.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=768m" \
             -Porg.gradle.workers.max=1 \
-            testDebugUnitTest assembleDebug
+            assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minis-debug-apk
+          path: app/build/outputs/apk/**/*.apk
+          if-no-files-found: warn
+  unit-tests:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+      - name: Install SDK components
+        run: |
+          SDKMGR="$(ls -d "$ANDROID_SDK_ROOT"/cmdline-tools/*/bin/sdkmanager | tail -1)"
+          yes | "$SDKMGR" --licenses > /dev/null || true
+          "$SDKMGR" "platforms;android-36" "build-tools;35.0.0" > /dev/null
+      - name: Unit tests
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace \
+            -Pkotlin.daemon.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=768m" \
+            -Porg.gradle.workers.max=1 \
+            testDebugUnitTest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-reports
+          path: app/build/reports/tests/**/index.html
+          if-no-files-found: warn
