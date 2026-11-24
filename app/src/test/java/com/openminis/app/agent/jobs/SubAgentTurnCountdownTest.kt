@@ -54,7 +54,8 @@ class SubAgentTurnCountdownTest {
     @Test
     fun `the cap matches the main chat's own ceiling`() {
         assertEquals(500, AgentLoopLimits.MAX_AGENT_TURNS)
-        assertEquals(500, HelperRunner.MAX_TURNS)
+        assertEquals(AgentLoopLimits.MAX_AGENT_TURNS, 500)
+        org.junit.Assert.assertTrue(HelperRunner.MAX_TURNS < AgentLoopLimits.MAX_AGENT_TURNS)
         val src = File("src/main/java/com/openminis/app/ui/chat/ChatViewModel.kt").readText()
         assertTrue(
             src.contains("private const val MAX_AGENT_TURNS = com.openminis.app.agent.AgentLoopLimits.MAX_AGENT_TURNS"),

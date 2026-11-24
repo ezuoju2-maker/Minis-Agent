@@ -4,11 +4,17 @@ import com.openminis.app.config.collections.SubAgentsCollection
 import com.openminis.app.data.model.SubAgentDefinition
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.rules.TestRule
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import com.openminis.app.ExternalSourcesRule
 import org.junit.Test
 
 class ConfigCoverageBindingTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../ios").exists() || java.io.File("../ios").exists() || java.io.File("../../../ios").exists())
 
     private fun source(relative: String): String {
         val f = File("src/main/java/com/openminis/app/$relative")

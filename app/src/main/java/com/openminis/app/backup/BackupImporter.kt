@@ -289,6 +289,8 @@ class BackupImporter(
         }
 
         try {
+        // The manifest counts MESSAGES for the chats category, so this is the
+        // loop whose progress the button reports.
         var seen = 0
         var orphanedMessages = 0
         val orphanSessionIds = mutableSetOf<String>()

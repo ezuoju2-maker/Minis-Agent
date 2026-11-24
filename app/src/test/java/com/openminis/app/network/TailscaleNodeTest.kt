@@ -2,11 +2,17 @@ package com.openminis.app.network
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.rules.TestRule
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import com.openminis.app.ExternalSourcesRule
 import org.junit.Test
 
 class TailscaleNodeTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../../deps").exists() || java.io.File("../../deps").exists() || java.io.File("../deps").exists())
 
     @Test
     fun loginLinksAreRedactedInLogLines() {

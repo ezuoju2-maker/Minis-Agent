@@ -1,12 +1,18 @@
 package com.openminis.app.ui.markdown
 
 import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.rules.TestRule
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
+import com.openminis.app.ExternalSourcesRule
 import org.junit.Test
 import java.io.File
 
 class DollarMathRulesTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../windows").exists() || java.io.File("../windows").exists())
 
     private fun latexOf(md: String): List<String> =
         MarkdownParser.parseWithMath(md).mathSpans.map { it.latex }

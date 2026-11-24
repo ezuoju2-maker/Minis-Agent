@@ -6940,7 +6940,7 @@ class ChatViewModel(
                         throw actual
                     }
                 }
-            }
+            }  // end while (!collectDone)
 
             val turnText = turnTextSb.toString()
             accumulatedText += turnText

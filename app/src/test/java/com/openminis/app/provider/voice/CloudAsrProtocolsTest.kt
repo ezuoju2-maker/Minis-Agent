@@ -3,15 +3,21 @@ package com.openminis.app.provider.voice
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
+import org.junit.Rule
+import org.junit.rules.TestRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
+import com.openminis.app.ExternalSourcesRule
 import org.junit.Test
 import java.io.File
 import java.util.Base64
 
 class CloudAsrProtocolsTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../shared").exists() || java.io.File("../shared").exists() || java.io.File("../../../shared").exists())
 
     private val vectors: JSONObject by lazy {
         val file = listOf(

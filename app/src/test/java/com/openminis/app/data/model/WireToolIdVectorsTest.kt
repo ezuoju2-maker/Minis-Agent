@@ -2,12 +2,18 @@ package com.openminis.app.data.model
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.rules.TestRule
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
+import com.openminis.app.ExternalSourcesRule
 import org.junit.Test
 import java.io.File
 
 class WireToolIdVectorsTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../shared").exists() || java.io.File("../shared").exists() || java.io.File("../../../shared").exists())
 
     private val vectors: JSONObject = sequenceOf(
         File("../shared/tool-id"),

@@ -4,8 +4,11 @@ import com.openminis.app.data.model.LLMUsage
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.rules.TestRule
 import org.junit.Assert.assertTrue
 import org.junit.Ignore
+import com.openminis.app.ExternalSourcesRule
 import org.junit.Test
 import java.io.File
 import java.time.DayOfWeek
@@ -21,6 +24,9 @@ import kotlin.math.roundToLong
         "file. Restore the shared fixture to re-enable.",
 )
 class UsageVectorsTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../shared").exists() || java.io.File("../shared").exists() || java.io.File("../../../shared").exists())
 
     private val vectorsFile: File = sequenceOf(
         File("../shared/usage/usage_test_vectors.json"),

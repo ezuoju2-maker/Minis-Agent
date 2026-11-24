@@ -2,13 +2,19 @@ package com.openminis.app.agent.shell
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.rules.TestRule
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import com.openminis.app.ExternalSourcesRule
 import org.junit.Test
 import java.io.File
 
 class BashismDetectorTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../shared").exists() || java.io.File("../shared").exists() || java.io.File("../../../shared").exists())
 
     private val sharedDir: File = sequenceOf(
         File("../shared/bashism"),

@@ -2,12 +2,18 @@ package com.openminis.app.ui.chat
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.rules.TestRule
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import com.openminis.app.ExternalSourcesRule
 import org.junit.Test
 import java.io.File
 
 class ToolTitleReminderTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../ios").exists() || java.io.File("../ios").exists() || java.io.File("../../../ios").exists())
 
     @Test fun detectsMissingTitle() {
         assertTrue(ToolTitleReminder.isMissingTitle(JSONObject().put("command", "ls")))
