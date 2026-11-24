@@ -25,6 +25,7 @@ data class DelegateTaskArgs(
     val tierRequested: String,
     val agentName: String?,
     val modelChoice: SubAgentModelChoice,
+    val maxTurns: Int,
     val minutes: Int,
     val wait: Boolean,
     val progressLevel: String,
@@ -41,7 +42,7 @@ object HelperRunner {
     fun isSubAgentToolName(name: String?): Boolean =
         name == TOOL_NAME || name == LEGACY_TOOL_NAME || name == LEGACY_STATUS_TOOL_NAME
 
-    const val MAX_TURNS = com.openminis.app.agent.AgentLoopLimits.MAX_AGENT_TURNS
+    const val MAX_TURNS = com.openminis.app.agent.SubAgentBudgetPolicy.DEFAULT_TURNS
     const val MAX_PER_ASSISTANT_TURN = 3
     const val DEFAULT_MINUTES = 10
     const val MAX_MINUTES = 60
@@ -86,6 +87,7 @@ object HelperRunner {
         val tierRaw = o.optString("model_tier", "primary").trim().lowercase()
         val agentName = o.optString("agent", "").trim().ifEmpty { null }
         val modelChoice = SubAgentModelChoice.parse(o.optString("model_choice", "").trim())
+        val turnsRaw = if (o.has("max_turns")) o.optDouble("max_turns", MAX_TURNS.toDouble()).toInt() else null
         val minutesRaw = if (o.has("max_minutes")) o.optDouble("max_minutes", DEFAULT_MINUTES.toDouble()).toInt() else DEFAULT_MINUTES
         val level = o.optString("progress_report", "none").trim().lowercase()
         return DelegateTaskArgs(
@@ -96,6 +98,7 @@ object HelperRunner {
             tierRequested = tierRaw.ifEmpty { "primary" },
             agentName = agentName,
             modelChoice = modelChoice,
+            maxTurns = com.openminis.app.agent.SubAgentBudgetPolicy.coerceTurns(turnsRaw),
             minutes = minutesRaw.coerceIn(1, MAX_MINUTES),
             wait = if (o.has("wait")) o.optBoolean("wait", false) else false,
             progressLevel = if (level in setOf("none", "frequent", "moderate")) level else "none",
@@ -128,6 +131,11 @@ object HelperRunner {
     }
 
     const val TURN_WARNING_LEAD = 3
+
+    fun warningLead(turnCap: Int): Int = com.openminis.app.agent.SubAgentBudgetPolicy.warningLead(turnCap)
+
+    fun shouldWarn(remaining: Int, turnCap: Int): Boolean =
+        com.openminis.app.agent.SubAgentBudgetPolicy.shouldWarn(remaining, turnCap)
 
     fun turnBudgetWarning(remaining: Int): String =
         "[Budget check: $remaining tool ${if (remaining == 1) "round" else "rounds"} left before tools are withdrawn.] " +

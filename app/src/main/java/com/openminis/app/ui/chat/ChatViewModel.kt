@@ -6198,7 +6198,7 @@ class ChatViewModel(
             }
             if (helperConfig != null && !helperWrapUpInjected && !helperTurnWarningInjected) {
                 val remaining = turnCap - 1 - turn
-                if (remaining in 1..com.openminis.app.agent.jobs.HelperRunner.TURN_WARNING_LEAD) {
+                if (com.openminis.app.agent.jobs.HelperRunner.shouldWarn(remaining, turnCap)) {
                     helperTurnWarningInjected = true
                     val note = com.openminis.app.agent.jobs.HelperRunner.turnBudgetWarning(remaining)
                     val lastIdx = agentHistory.lastIndex
@@ -8114,7 +8114,7 @@ class ChatViewModel(
             ).also {
                 it.helperConfig = com.openminis.app.agent.jobs.HelperConfig(
                     parentSessionId = parentSid, parentToolUseId = toolId, jobId = job.id,
-                    maxTurns = hr.MAX_TURNS, title = title, tierUsed = resolution.tierUsed,
+                    maxTurns = args.maxTurns, title = title, tierUsed = resolution.tierUsed,
                     agentName = subAgent.name.takeIf { !subAgent.isBuiltIn },
                     agentInstructions = subAgent.instructions,
                 )
