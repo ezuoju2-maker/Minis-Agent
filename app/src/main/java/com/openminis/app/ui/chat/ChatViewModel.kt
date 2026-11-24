@@ -7887,6 +7887,24 @@ class ChatViewModel(
         return result.copy(toolTitle = obj.optString("tool_title", name))
     }
 
+    private val writeCheckpoint = com.openminis.app.sandbox.checkpoint.SessionCheckpoint()
+
+    fun checkpointForSession(): com.openminis.app.sandbox.checkpoint.SessionCheckpoint = writeCheckpoint
+
+    private fun withWriteCheckpoint(argsJson: String, block: () -> ToolExecutionResult): ToolExecutionResult {
+        val path = try { JSONObject(argsJson).optString("path", "").trim() } catch (_: Exception) { "" }
+        if (path.isEmpty()) return block()
+        val file = java.io.File(path)
+        val existedBefore = file.isFile
+        val before = if (existedBefore) runCatching { file.readText() }.getOrNull() else null
+        if (existedBefore && before == null) return block()
+        val result = block()
+        if (!result.success) return result
+        val after = runCatching { file.readText() }.getOrNull() ?: return result
+        writeCheckpoint.record(messages.value.size, path, before, after)
+        return result
+    }
+
     private suspend fun executeToolCached(
         name: String,
         argsJson: String,
@@ -7950,11 +7968,15 @@ class ChatViewModel(
                 }
                 result
             }
-            FileWriteTool.NAME -> FileWriteTool.execute(argsJson, fsSessionId, context).also {
-                if (it.success) maybeReloadSkillsForPath(argsJson)
+            FileWriteTool.NAME -> withWriteCheckpoint(argsJson) {
+                FileWriteTool.execute(argsJson, fsSessionId, context).also {
+                    if (it.success) maybeReloadSkillsForPath(argsJson)
+                }
             }
-            FileEditTool.NAME -> FileEditTool.execute(argsJson, fsSessionId, context).also {
-                if (it.success) maybeReloadSkillsForPath(argsJson)
+            FileEditTool.NAME -> withWriteCheckpoint(argsJson) {
+                FileEditTool.execute(argsJson, fsSessionId, context).also {
+                    if (it.success) maybeReloadSkillsForPath(argsJson)
+                }
             }
             com.openminis.app.tools.ApplyPatchTool.NAME ->
                 com.openminis.app.tools.ApplyPatchTool.execute(argsJson, fsSessionId, context)
