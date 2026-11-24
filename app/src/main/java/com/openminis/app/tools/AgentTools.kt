@@ -27,15 +27,18 @@ object AgentTools {
         rosterNames: List<String> = listOf(SubAgentDefinition.BUILT_IN_NAME),
         userAskExposed: Boolean = false,
         skillsAvailable: Boolean = false,
+        mcpTools: List<AgentToolDefinition> = emptyList(),
     ): List<AgentToolDefinition> {
         val key = listOf<Any?>(
             supportsImageInput, visionGroupConfigured, memoryEnabled, isHelper,
             delegateEnabled, browserEnabled, rosterNames, userAskExposed, skillsAvailable,
+            mcpTools.map { it.name + "|" + it.description },
         )
         toolsCache[key]?.let { return it }
         val built = buildTools(
             supportsImageInput, visionGroupConfigured, memoryEnabled, isHelper,
             delegateEnabled, browserEnabled, rosterNames, userAskExposed, skillsAvailable,
+            mcpTools,
         )
         toolsCache[key] = built
         return built
@@ -51,6 +54,7 @@ object AgentTools {
         rosterNames: List<String>,
         userAskExposed: Boolean,
         skillsAvailable: Boolean,
+        mcpTools: List<AgentToolDefinition>,
     ): List<AgentToolDefinition> = buildList {
         add(shellExecuteDefinition())
         add(FileReadTool.definition())
@@ -76,6 +80,7 @@ object AgentTools {
         if (!isHelper) add(SkillSaveTool.definition())
         if (userAskExposed && !isHelper) add(com.openminis.app.agent.userask.UserAskPromptText.definition())
         add(McpNativeTools.gatewayDefinition())
+        mcpTools.forEach { add(it) }
     }
 
     private fun subAgentTaskDefinition(rosterNames: List<String>): AgentToolDefinition =

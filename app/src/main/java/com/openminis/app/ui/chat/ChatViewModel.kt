@@ -1212,6 +1212,7 @@ class ChatViewModel(
             skillsAvailable = skillRepository?.skills?.value?.any {
                 skillRepository.isEnabledForSession(it.id, activeSessionId)
             } ?: false,
+            mcpTools = com.openminis.app.tools.McpToolRegistry.definitions(),
         )
 
     private fun executeResumeAgents(argsJson: String): ToolExecutionResult {
@@ -7798,6 +7799,38 @@ class ChatViewModel(
         _canResume.value = true
     }
 
+    private var lastMcpToolRefreshMs = 0L
+
+    private var mcpToolRefreshRunning = false
+
+    private fun maybeRefreshMcpTools() {
+        val repo = mcpRepository ?: return
+        val now = System.currentTimeMillis()
+        if (mcpToolRefreshRunning || now - lastMcpToolRefreshMs < 120_000L) return
+        val servers = repo.servers.value
+            .filter { it.enabled && repo.isEnabledForSession(it.id, activeSessionId) }
+            .map { it.id }
+        if (servers.isEmpty()) return
+        lastMcpToolRefreshMs = now
+        mcpToolRefreshRunning = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                com.openminis.app.tools.McpToolRegistry.refresh(servers) { server ->
+                    val out = com.openminis.app.sandbox.ExecutionCoordinator.execute(
+                        sessionId = activeSessionId,
+                        command = "minis-mcp-cli tools " + com.openminis.app.tools.McpNativeTools.quote(server),
+                        timeout = 20_000L,
+                    ).output
+                    out.takeIf { it.contains("\"tools\"") }
+                }
+            } catch (_: Exception) {
+                android.util.Log.i(TAG, "[mcp-tools] refresh failed, keeping previous list")
+            } finally {
+                mcpToolRefreshRunning = false
+            }
+        }
+    }
+
     private fun preflightValidateToolCall(
         name: String,
         args: JSONObject,
@@ -9578,6 +9611,7 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
         val skillFragment = skillRepository?.skillPromptFragment(activeSessionId)
         val todoFragment = com.openminis.app.tools.TodoTools.promptFragment(context, activeSessionId)
         mcpRepository?.reloadFromDisk()
+        maybeRefreshMcpTools()
         val mcpFragment = mcpRepository?.mcpPromptFragment(activeSessionId)
         val globalMemoryFragment = if (memoryOn) memoryRepository?.loadGlobalMemoryFragment() else null
         val dailyMemoryFragment = if (memoryOn) memoryRepository?.loadRecentDailyMemoryFragment() else null

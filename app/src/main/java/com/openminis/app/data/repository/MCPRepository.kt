@@ -323,6 +323,7 @@ class MCPRepository(private val context: Context) {
                 append("\n")
             }
             append("\n")
+            append("Tools already present in your tool list as `mcp__<server>__<tool>` are ready to call directly — one step, no discovery needed.\n")
             append("Preferred: call a tool with the `mcp_call` tool (server, tool, arguments as a JSON object) — one step, no shell escaping.\n")
             append("In shell: `minis-mcp-cli call <server> <tool> <json>` still works; use it only when you already have a pipeline.\n")
             append("Run `minis-mcp-cli tools <server>` once to confirm exact tool names and argument shapes.\n")
