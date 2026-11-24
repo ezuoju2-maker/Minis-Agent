@@ -252,9 +252,9 @@ object MiniMaxCodeApi : BuiltInPlatformApi {
                     val m = models.optJSONObject(id) ?: continue
                     val limit = m.optJSONObject("limit")
                     val inputs = m.optJSONObject("modalities")?.optJSONArray("input")
-                    val vision = (0 until (inputs?.length() ?: 0)).any {
-                        inputs!!.optString(it) in listOf("image", "video")
-                    }
+                    val vision = inputs?.let { arr ->
+                        (0 until arr.length()).any { arr.optString(it) in listOf("image", "video") }
+                    } ?: false
                     out += BuiltInModel(
                         id = id,
                         name = m.optString("name", "").ifEmpty { id },
