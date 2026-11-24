@@ -7896,6 +7896,25 @@ class ChatViewModel(
 
     fun checkpointForSession(): com.openminis.app.sandbox.checkpoint.SessionCheckpoint = writeCheckpoint
 
+    private fun refreshToolBlockNote(blockId: String, note: String) {
+        var hit = false
+        val updated = _messages.value.map { msg ->
+            if (msg.toolBlocks.none { it.id == blockId }) msg else {
+                msg.copy(
+                    toolBlocks = msg.toolBlocks.map { b ->
+                        if (b.id != blockId) b else {
+                            hit = true
+                            val head = b.content.substringBefore("Changes:\n").trimEnd()
+                                .substringBefore("（已按段重选：").trimEnd()
+                            b.copy(content = "$head\n（已按段重选：$note）")
+                        }
+                    },
+                )
+            }
+        }
+        if (hit) _messages.value = updated
+    }
+
     fun applyHunkSelection(block: AssistantBlock, selected: Set<Int>, onResult: (String) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             val msg = try {
@@ -7922,6 +7941,12 @@ class ChatViewModel(
                                         "文件内容已变化，未应用。请让助手重新执行这次编辑。"
                                     } else {
                                         file.writeText(content.replaceFirst(newStr, target))
+                                        withContext(Dispatchers.Main) {
+                                            refreshToolBlockNote(
+                                                block.id,
+                                                "保留 ${selected.size}/${plan.hunks.size} 段 · ${target.toByteArray(Charsets.UTF_8).size} bytes",
+                                            )
+                                        }
                                         "已保留 ${selected.size}/${plan.hunks.size} 段，写回 $path"
                                     }
                                 }
