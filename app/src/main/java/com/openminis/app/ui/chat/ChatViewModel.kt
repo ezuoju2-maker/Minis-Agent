@@ -7906,7 +7906,15 @@ class ChatViewModel(
         } else if (!ToolResultCache.isReadOnly(name)) {
             ToolResultCache.invalidateAll()
         }
+        val startedAt = System.currentTimeMillis()
         val fresh = executeTool(name, argsJson, toolId, toolBlocks, assistantId, currentText)
+        com.openminis.app.observability.TraceLog.record(
+            kind = "tool",
+            name = name,
+            durationMs = System.currentTimeMillis() - startedAt,
+            ok = fresh.success,
+            summary = fresh.output,
+        )
         if (cacheKey != null && fresh.success) ToolResultCache.put(cacheKey, fresh.output)
         return fresh
     }

@@ -81,4 +81,13 @@ class TraceLog(
         }
         return sb.toString()
     }
+
+    companion object {
+        val shared = TraceLog()
+
+        fun record(kind: String, name: String, durationMs: Long, ok: Boolean, summary: String = ""): TraceEvent =
+            shared.emit(0, kind, name, durationMs, ok, summary)
+
+        fun exportNdjson(): String = shared.toNdjson()
+    }
 }
