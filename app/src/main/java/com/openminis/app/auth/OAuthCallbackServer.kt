@@ -143,14 +143,26 @@ class OAuthCallbackServer(
                 val portsToTry = listOf(port) + fallbackPorts
                 var bound = false
                 for (p in portsToTry) {
-                    try {
-                        serverSocket = ServerSocket(p)
-                        boundPort = p
-                        bound = true
-                        break
-                    } catch (e: java.net.BindException) {
-                        Log.w(TAG, "Port $p in use, trying next...")
+                    var attempt = 0
+                    while (!bound && attempt < 2) {
+                        try {
+                            val ss = ServerSocket()
+                            ss.reuseAddress = true
+                            ss.bind(java.net.InetSocketAddress(p))
+                            serverSocket = ss
+                            boundPort = p
+                            bound = true
+                        } catch (e: java.net.BindException) {
+                            attempt++
+                        } catch (e: java.io.IOException) {
+                            attempt++
+                        }
+                        if (!bound && attempt < 2) {
+                            try { Thread.sleep(40) } catch (_: InterruptedException) { break }
+                        }
                     }
+                    if (bound) break
+                    Log.w(TAG, "Port $p unavailable after retries, trying next...")
                 }
                 if (!bound) {
                     Log.e(TAG, "All ports unavailable: $portsToTry")
