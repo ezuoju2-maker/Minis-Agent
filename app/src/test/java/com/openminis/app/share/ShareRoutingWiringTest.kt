@@ -22,7 +22,7 @@ class ShareRoutingWiringTest {
     }
 
     @Test fun `the NavHost fallback leaves scaffold routes alone and waits for RESUMED instead of dropping`() {
-        val fallback = nav.substringBefore("// Pinned-shortcut cold start")
+        val fallback = nav.substringAfter("if (hasDeepLink) return@LaunchedEffect")
         assertTrue(fallback.contains("if (route == Routes.SESSION_LIST || route == Routes.CHAT) return@LaunchedEffect"))
         assertTrue(fallback.contains("entry.lifecycle.currentStateFlow.first { it.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) }"))
         assertFalse("safeNavigate silently drops a non-RESUMED call", fallback.contains("navController.safeNavigate("))
