@@ -50,6 +50,25 @@ class DiffPreviewParserTest {
     }
 
     @Test
+    fun `rows are grouped when the line numbers skip`() {
+        val rows = DiffPreviewParser.rows(
+            "+0/1  a\n 1/2  b\n+2/3  c\n 9/10  far\n-10/11  d",
+        )
+        val groups = DiffPreviewParser.groups(rows)
+        assertEquals(5, groups.size)
+        assertEquals(0, groups[0])
+        assertEquals(0, groups[2])
+        assertEquals(1, groups[3])
+        assertEquals(1, groups[4])
+    }
+
+    @Test
+    fun `single hunk stays in group zero`() {
+        val rows = DiffPreviewParser.rows("+0/1  a\n 1/2  b")
+        assertEquals(listOf(0, 0), DiffPreviewParser.groups(rows))
+    }
+
+    @Test
     fun `truncation note is ignored`() {
         val rows = DiffPreviewParser.rows("+0/1  a\n… (preview truncated)")
         assertEquals(1, rows.size)

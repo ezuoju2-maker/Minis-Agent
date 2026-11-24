@@ -32,7 +32,21 @@ fun ToolDiffCard(rows: List<DiffRow>, modifier: Modifier = Modifier) {
     ) {
         SelectionContainer {
             Column(modifier = Modifier.fillMaxWidth()) {
-                for (row in rows.take(200)) {
+                val groups = DiffPreviewParser.groups(rows)
+                var lastGroup = -1
+                for ((index, row) in rows.take(200).withIndex()) {
+                    val g = groups.getOrElse(index) { 0 }
+                    if (g != lastGroup) {
+                        if (lastGroup >= 0) {
+                            Text(
+                                text = "第 ${g + 1} 段",
+                                color = context,
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+                            )
+                        }
+                        lastGroup = g
+                    }
                     val tint = when (row.marker) {
                         '+' -> added
                         '-' -> removed

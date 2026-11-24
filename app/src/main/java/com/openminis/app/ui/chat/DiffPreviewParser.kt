@@ -34,4 +34,28 @@ object DiffPreviewParser {
 
     fun stats(rows: List<DiffRow>): Pair<Int, Int> =
         rows.count { it.marker == '+' } to rows.count { it.marker == '-' }
+
+    fun groups(rows: List<DiffRow>): List<Int> {
+        val out = ArrayList<Int>(rows.size)
+        var group = -1
+        var prevOld: Int? = null
+        var lastAddAfter: Int? = null
+        for (row in rows) {
+            if (row.marker == '+') {
+                if (group < 0) group = 0
+                out.add(group)
+                lastAddAfter = row.newNumber
+                continue
+            }
+            val old = row.oldNumber
+            if (old != null) {
+                val boundary = prevOld != null && (old - prevOld) > 1
+                if (group < 0 || boundary) group++
+                prevOld = old
+            }
+            out.add(if (group < 0) 0 else group)
+            lastAddAfter = null
+        }
+        return out
+    }
 }
