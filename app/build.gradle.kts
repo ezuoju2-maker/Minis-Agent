@@ -124,6 +124,8 @@ android {
             it.maxHeapSize = "900m"
             it.jvmArgs("-XX:TieredStopAtLevel=1")
             it.forkEvery = 120
+            it.systemProperty("robolectric.dependency.repo.url", "https://maven.aliyun.com/repository/public")
+            it.systemProperty("robolectric.dependency.repo.id", "aliyun")
         }
     }
 

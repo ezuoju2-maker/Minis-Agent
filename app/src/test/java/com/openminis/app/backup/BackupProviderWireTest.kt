@@ -10,9 +10,14 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import com.openminis.app.ExternalSourcesRule
+import org.junit.Rule
 import org.junit.Test
 
 class BackupProviderWireTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../shared").exists() || java.io.File("../shared").exists())
 
     private val fixture: String by lazy {
         var dir: File? = File(".").absoluteFile

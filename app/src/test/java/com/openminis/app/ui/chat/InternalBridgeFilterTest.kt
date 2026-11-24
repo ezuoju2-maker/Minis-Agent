@@ -2,9 +2,14 @@ package com.openminis.app.ui.chat
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import com.openminis.app.ExternalSourcesRule
+import org.junit.Rule
 import org.junit.Test
 
 class InternalBridgeFilterTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../ios").exists() || java.io.File("../ios").exists())
 
     private val currentBridge =
         "(Interrupted mid-task by a new user message. Decide based on the new " +

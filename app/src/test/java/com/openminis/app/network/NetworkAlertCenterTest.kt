@@ -7,9 +7,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import com.openminis.app.ExternalSourcesRule
+import org.junit.Rule
 import org.junit.Test
 
 class NetworkAlertCenterTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../shared").exists() || java.io.File("../../ios").exists())
 
     @Before fun reset() = NetworkAlertCenter.resetForTest()
 

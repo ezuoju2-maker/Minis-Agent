@@ -14,9 +14,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import com.openminis.app.ExternalSourcesRule
+import org.junit.Rule
 import org.junit.Test
 
 class BackupIosWireShapeTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../ios").exists() || java.io.File("../ios").exists())
 
 
     private data class SwiftProp(val name: String, val optional: Boolean)

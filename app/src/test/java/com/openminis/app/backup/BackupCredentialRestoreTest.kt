@@ -5,10 +5,15 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import com.openminis.app.ExternalSourcesRule
+import org.junit.Rule
 import org.junit.Test
 import java.io.File
 
 class BackupCredentialRestoreTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../shared").exists() || java.io.File("../shared").exists())
 
     private val doc: JSONObject by lazy {
         var dir: File? = File("").absoluteFile

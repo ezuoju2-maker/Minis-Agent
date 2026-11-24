@@ -7,9 +7,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import com.openminis.app.ExternalSourcesRule
+import org.junit.Rule
 import org.junit.Test
 
 class ConfigPathSplitTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../shared").exists() || java.io.File("../shared").exists() || java.io.File("../../ios").exists() || java.io.File("../ios").exists())
 
     private val u = "05B474B3-C297-48C3-A239-688569B3F872"
 

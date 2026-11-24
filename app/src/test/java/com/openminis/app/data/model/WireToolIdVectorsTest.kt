@@ -15,12 +15,12 @@ class WireToolIdVectorsTest {
     @get:Rule
     val externalSourcesRule = ExternalSourcesRule(java.io.File("../../shared").exists() || java.io.File("../shared").exists() || java.io.File("../../../shared").exists())
 
-    private val vectors: JSONObject = sequenceOf(
+    private val vectors: JSONObject by lazy { sequenceOf(
         File("../shared/tool-id"),
         File("../../shared/tool-id"),
     ).firstOrNull { it.isDirectory }
         .let { it ?: File("../../shared/tool-id") }
-        .let { JSONObject(File(it, "wire_tool_id_vectors.json").readText()) }
+        .let { JSONObject(File(it, "wire_tool_id_vectors.json").readText()) } }
 
     private val legal = Regex("^[A-Za-z0-9_-]+$")
 

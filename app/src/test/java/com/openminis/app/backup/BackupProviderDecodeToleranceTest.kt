@@ -14,9 +14,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
+import com.openminis.app.ExternalSourcesRule
+import org.junit.Rule
 import org.junit.Test
 
 class BackupProviderDecodeToleranceTest {
+
+    @get:Rule
+    val externalSourcesRule = ExternalSourcesRule(java.io.File("../../shared").exists() || java.io.File("../shared").exists() || java.io.File("../../ios").exists() || java.io.File("../ios").exists())
 
     private val sharedDir: File by lazy {
         var dir: File? = File(".").absoluteFile
