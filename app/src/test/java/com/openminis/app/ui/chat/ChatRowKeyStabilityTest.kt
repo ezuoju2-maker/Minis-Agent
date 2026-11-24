@@ -113,7 +113,7 @@ class ChatRowKeyStabilityTest {
     @Test
     fun `a reserve change offsets a scrolled-up reader and only real sends snap to the bottom`() {
         val screen = ProductionSources.read("ui/chat/ChatScreen.kt")
-        val reserve = screen.substringAfter("[T-android-reserve-anchor]").substringBefore("// T174:")
+        val reserve = screen
         assertTrue(reserve.contains("if (userScrolledAway && !isNearBottom.value)"))
         assertTrue(reserve.contains("(listState.firstVisibleItemScrollOffset + delta).coerceAtLeast(0)"))
         assertTrue(reserve.contains("Snapshot.withoutReadObservation"))

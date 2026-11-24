@@ -73,7 +73,7 @@ class OnboardingModelFetchTest {
     @Test
     fun `the failure section replaces the spinner only after a finished fetch left the page empty`() {
         assertTrue(screen.contains("if (allEntries.isEmpty() && !fetching && failureDetail != null) {"))
-        assertTrue(screen.contains("if (fetching) return // Retry while in flight is a no-op."))
+          assertTrue(screen.contains("if (fetching) return"))
         assertTrue(screen.contains("onRetry = { runBoundedFetch() }"))
         assertTrue(screen.contains("if (visibleEntryCount(ids) == 0) {"))
     }

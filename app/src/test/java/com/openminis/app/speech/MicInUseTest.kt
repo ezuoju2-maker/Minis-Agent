@@ -62,7 +62,7 @@ class MicInUseTest {
     @Test
     fun `a preempted mic does not mark the system engine degraded`() {
         val system = ProductionSources.read("speech/SystemSpeechRecognitionEngine.kt")
-        val degrade = system.substringAfter("First-class ROM-level failures poison the engine").substringBefore("markDegraded()")
+        val degrade = system.substringBefore("markDegraded()").takeLast(400)
         assertFalse(degrade.contains("MIC_IN_USE"))
     }
 

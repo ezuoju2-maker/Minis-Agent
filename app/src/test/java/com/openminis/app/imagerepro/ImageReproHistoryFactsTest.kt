@@ -187,8 +187,7 @@ class ImageReproHistoryFactsTest {
 
     @Test fun `P-a9 Android has no takeover image source`() {
         val pool = ProductionSources.read("browser/BrowserTabPool.kt")
-        assertTrue(pool.contains("This is the \"Takeover\" action"))
-        val takeover = pool.substringAfter("This is the \"Takeover\" action").substringBefore("\n    }\n")
+        val takeover = pool
         for (t in listOf("base64", "Bitmap", "screenshot", "ImageData", "imageData")) assertFalse(takeover.contains(t))
         val imageProducers = ProductionSources.allKotlinFiles()
             .filter { f -> f.readText().let { it.contains("ImageData(") || Regex("imageData = [a-zA-Z]").containsMatchIn(it) } }

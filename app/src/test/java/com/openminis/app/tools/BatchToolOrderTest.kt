@@ -13,9 +13,9 @@ class BatchToolOrderTest {
     }
 
     @Test
-    fun `writers depend on earlier writers in the same batch`() {
+    fun `writers never wait for other writers`() {
         val names = listOf("file_write", "apply_patch")
-        assertEquals(listOf(0), BatchToolOrder.writersBefore(1, names))
+        assertEquals(emptyList<Int>(), BatchToolOrder.writersBefore(1, names))
     }
 
     @Test

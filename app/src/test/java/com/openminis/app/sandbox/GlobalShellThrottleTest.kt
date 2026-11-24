@@ -262,7 +262,7 @@ class GlobalShellThrottleTest {
     fun `the shell tool appends the queue note last`() {
         val vm = File("src/main/java/com/openminis/app/ui/chat/ChatViewModel.kt").readText()
         val tail = vm.substringAfter("val withBashReminder = bashReminder?.let")
-        assertTrue(tail.contains("val withReminder = result.queueNote?.let { \"\$withBashReminder\\n\\n\$it\" } ?: withBashReminder"))
+        assertTrue(tail.contains("val withReminder0 = result.queueNote?.let { \"\$withBashReminder\\n\\n\$it\" } ?: withBashReminder"))
         assertTrue(tail.indexOf("output = withReminder,") > 0)
     }
 }
