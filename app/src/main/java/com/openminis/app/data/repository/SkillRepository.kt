@@ -580,6 +580,14 @@ class SkillRepository(private val context: Context) {
         val parsed = parseSkillMd(content)
             ?: return@withContext UpdateResult.Failure("Downloaded SKILL.md is not valid (missing YAML frontmatter or 'name:' field)")
 
+        val versionCheck = com.openminis.app.skills.remote.SkillRegistry()
+            .compareVersions(parsed.version, existing.version)
+        if (parsed.version.isNotBlank() && existing.version.isNotBlank() && versionCheck < 0) {
+            return@withContext UpdateResult.Failure(
+                "Refusing downgrade: remote is ${parsed.version}, installed is ${existing.version}. " +
+                    "Delete the skill first if you really want the older content."
+            )
+        }
         val ok = update(
             id = skillId,
             name = parsed.name,
