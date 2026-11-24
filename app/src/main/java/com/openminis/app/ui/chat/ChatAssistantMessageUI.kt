@@ -429,7 +429,23 @@ internal fun AssistantMessageView(
                     }
                 }
                 else -> {
-                    ToolCallPill(block, allToolBlocks = toolPillBlocks)
+                    val diffRows = remember(block.id, block.content) {
+                        com.openminis.app.ui.chat.DiffPreviewParser.rows(
+                            com.openminis.app.ui.chat.DiffPreviewParser.section(block.content),
+                        )
+                    }
+                    if (diffRows.isEmpty()) {
+                        ToolCallPill(block, allToolBlocks = toolPillBlocks)
+                    } else {
+                        ToolCallPill(
+                            block.copy(content = block.content.substringBefore("Changes:\n").trimEnd()),
+                            allToolBlocks = toolPillBlocks,
+                        )
+                        com.openminis.app.ui.chat.ToolDiffCard(
+                            rows = diffRows,
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                        )
+                    }
                 }
             }
         }
