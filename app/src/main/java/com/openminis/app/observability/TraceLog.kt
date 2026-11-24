@@ -15,11 +15,12 @@ class TraceLog(
     private val summaryLimit: Int = 240,
 ) {
 
+    private val lock = Any()
     private val events = ArrayList<TraceEvent>()
     private var nextSeq = 1L
 
-    val size: Int get() = events.size
-    val lastSeq: Long get() = nextSeq - 1
+    val size: Int get() = synchronized(lock) { events.size }
+    val lastSeq: Long get() = synchronized(lock) { nextSeq - 1 }
 
     fun emit(
         turn: Int,
@@ -28,20 +29,28 @@ class TraceLog(
         durationMs: Long,
         ok: Boolean,
         summary: String = "",
-    ): TraceEvent {
-        val e = TraceEvent(nextSeq++, turn, sanitize(kind, 32), sanitize(name, 64), maxOf(0L, durationMs), ok, clip(summary))
+    ): TraceEvent = synchronized(lock) {
+        val e = TraceEvent(
+            nextSeq++,
+            turn,
+            sanitize(kind, 32),
+            sanitize(name, 64),
+            maxOf(0L, durationMs),
+            ok,
+            clip(summary),
+        )
         events.add(e)
         while (events.size > maxEvents) events.removeAt(0)
-        return e
+        e
     }
 
-    fun since(seq: Long): List<TraceEvent> = events.filter { it.seq > seq }
+    fun since(seq: Long): List<TraceEvent> = synchronized(lock) { events.filter { it.seq > seq } }
 
-    fun ofTurn(turn: Int): List<TraceEvent> = events.filter { it.turn == turn }
+    fun ofTurn(turn: Int): List<TraceEvent> = synchronized(lock) { events.filter { it.turn == turn } }
 
-    fun failures(): List<TraceEvent> = events.filter { !it.ok }
+    fun failures(): List<TraceEvent> = synchronized(lock) { events.filter { !it.ok } }
 
-    fun toNdjson(): String {
+    fun toNdjson(): String = synchronized(lock) {
         val sb = StringBuilder()
         for (e in events) {
             sb.append("{\"seq\":").append(e.seq)
@@ -53,10 +62,10 @@ class TraceLog(
                 .append(",\"summary\":\"").append(escape(e.summary))
                 .append("\"}\n")
         }
-        return sb.toString()
+        sb.toString()
     }
 
-    fun clear() = events.clear()
+    fun clear() = synchronized(lock) { events.clear() }
 
     private fun clip(text: String): String {
         val flat = text.replace('\n', ' ').replace('\r', ' ').replace(Regex("\\s+"), " ").trim()
@@ -75,7 +84,7 @@ class TraceLog(
                 c == '\n' -> sb.append("\\n")
                 c == '\r' -> sb.append("\\r")
                 c == '\t' -> sb.append("\\t")
-                c < ' ' -> sb.append("\\u").append(String.format(java.util.Locale.US, "%04x", c.code.toInt()))
+                c < ' ' -> sb.append("\\u").append(String.format("%04x", c.code))
                 else -> sb.append(c)
             }
         }

@@ -21,6 +21,7 @@ class HybridMemoryIndex(
 
     val size: Int get() = entries.size
 
+    @Synchronized
     fun upsert(id: String, text: String) {
         remove(id)
         val terms = tokenize(text)
@@ -32,6 +33,7 @@ class HybridMemoryIndex(
         entries[id] = Entry(text, terms, tf, terms.size, vectorize(terms))
     }
 
+    @Synchronized
     fun remove(id: String) {
         val old = entries.remove(id) ?: return
         for (t in old.tf.keys) {
@@ -41,12 +43,14 @@ class HybridMemoryIndex(
         totalLen -= old.len
     }
 
+    @Synchronized
     fun clear() {
         entries.clear()
         df.clear()
         totalLen = 0
     }
 
+    @Synchronized
     fun search(query: String, limit: Int = 8, minScore: Double = 0.0): List<Hit> {
         if (entries.isEmpty() || limit <= 0) return emptyList()
         val qTerms = tokenize(query)
@@ -77,6 +81,7 @@ class HybridMemoryIndex(
         return if (hits.size > limit) hits.subList(0, limit).toList() else hits
     }
 
+    @Synchronized
     fun rrfFuse(resultSets: List<List<String>>, k: Int = 60, limit: Int = 8): List<String> {
         val score = HashMap<String, Double>()
         for (set in resultSets) {

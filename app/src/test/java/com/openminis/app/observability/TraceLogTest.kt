@@ -66,6 +66,22 @@ class TraceLogTest {
     }
 
     @Test
+    fun `concurrent emits keep every sequence unique`() {
+        val log = TraceLog(maxEvents = 10_000, summaryLimit = 30)
+        val threads = (0 until 8).map { t ->
+            Thread {
+                repeat(100) { i -> log.emit(1, "tool", "n$t-$i", i.toLong(), true, "ok") }
+            }
+        }
+        threads.forEach { it.start() }
+        threads.forEach { it.join() }
+        assertEquals(800, log.size)
+        val seqs = log.since(0).map { it.seq }
+        assertEquals(800, seqs.toSet().size)
+        assertEquals(800L, seqs.maxOrNull())
+    }
+
+    @Test
     fun `clear empties the buffer`() {
         val log = TraceLog()
         log.emit(1, "tool", "x", 1, true)

@@ -21,6 +21,7 @@ class SessionCheckpoint(
 
     val size: Int get() = entries.size
 
+    @Synchronized
     fun record(turn: Int, path: String, before: String?, after: String): Boolean {
         if (before == after) return false
         val existing = entries[path]
@@ -45,8 +46,10 @@ class SessionCheckpoint(
         return true
     }
 
+    @Synchronized
     fun changedPaths(): List<String> = entries.keys.toList()
 
+    @Synchronized
     fun restorePlan(): List<RestoreOp> {
         val plan = ArrayList<RestoreOp>(entries.size)
         for (e in entries.values) {
@@ -55,8 +58,10 @@ class SessionCheckpoint(
         return plan
     }
 
+    @Synchronized
     fun revertPlan(path: String): RestoreOp? = entries[path]?.let { RestoreOp(it.path, it.before, it.perFileTruncated) }
 
+    @Synchronized
     fun forget(path: String): Boolean {
         val e = entries.remove(path) ?: return false
         bytes -= e.after.length + (e.before?.length ?: 0)
@@ -64,13 +69,16 @@ class SessionCheckpoint(
         return true
     }
 
+    @Synchronized
     fun markRestored() = clear()
 
+    @Synchronized
     fun clear() {
         entries.clear()
         bytes = 0
     }
 
+    @Synchronized
     fun summary(): String {
         if (entries.isEmpty()) return "no changes recorded"
         val first = entries.values.minOf { it.firstTurn }
