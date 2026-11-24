@@ -58,7 +58,8 @@ class SkillRegistry(
             .map { part -> part.takeWhile { it.isDigit() }.toIntOrNull() ?: 0 }
 
     private fun hostOf(url: String): String =
-        url.removePrefix("https://").substringBefore('/').substringBefore('?').lowercase()
+        url.removePrefix("https://").substringBefore('/').substringBefore('?')
+            .substringBefore(':').lowercase()
 
     private fun hexToBytes(hex: String): ByteArray {
         if (hex.length % 2 != 0) return ByteArray(0)

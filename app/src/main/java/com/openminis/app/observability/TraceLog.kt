@@ -75,7 +75,7 @@ class TraceLog(
                 c == '\n' -> sb.append("\\n")
                 c == '\r' -> sb.append("\\r")
                 c == '\t' -> sb.append("\\t")
-                c < ' ' -> sb.append("\\u").append(String.format("%04x", c.code))
+                c < ' ' -> sb.append("\\u").append(String.format(java.util.Locale.US, "%04x", c.code.toInt()))
                 else -> sb.append(c)
             }
         }
