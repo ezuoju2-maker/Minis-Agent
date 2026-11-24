@@ -220,7 +220,7 @@ class ShellExecutionStrategyTest {
 
     @Test
     fun `a finished command leaves a daemon's tracer running`() {
-        val body = freshSrc.substringAfter("private fun resolveExitCode(").substringBefore("\n    /**")
+        val body = freshSrc.substringAfter("private fun resolveExitCode(").substringBefore("private fun readStatus(")
         assertTrue(body.contains("if (closedOnStatus) return readStatus(statusFile) ?: 0"))
         assertFalse(body.contains("killProcessTree"))
         assertFalse(body.contains("destroyForcibly"))
