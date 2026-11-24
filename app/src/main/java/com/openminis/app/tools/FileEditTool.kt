@@ -83,7 +83,7 @@ object FileEditTool {
 
             try {
                 FileToolIO.run("Editing $path", writes = true) {
-                    edit(file, path, oldString, newString, replaceAll, toolTitle, includeDiff = true)
+                    edit(file, path, oldString, newString, replaceAll, toolTitle, includeDiff = true, hunks = hunkIndices(args))
                 }
             } catch (e: FileToolIO.TimedOut) {
                 ToolExecutionResult("Error: ${e.message}", false, toolTitle = toolTitle, timedOut = true)
@@ -106,6 +106,7 @@ object FileEditTool {
         replaceAll: Boolean,
         toolTitle: String,
         includeDiff: Boolean = false,
+        hunks: Set<Int>? = null,
     ): ToolExecutionResult {
         val size = file.length()
         if (size > FileToolIO.MAX_EDIT_BYTES) {
@@ -144,7 +145,7 @@ object FileEditTool {
         } else {
             content.replaceFirst(oldString, newString)
         }
-        val wanted = hunkIndices(args)
+        val wanted = hunks
         var hunkNote = ""
         if (wanted != null) {
             val plan = com.openminis.app.tools.patch.PatchSplitter.plan(content, newContent)
