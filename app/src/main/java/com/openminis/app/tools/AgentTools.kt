@@ -75,6 +75,7 @@ object AgentTools {
         if (skillsAvailable) add(SkillLoadTool.definition())
         if (!isHelper) add(SkillSaveTool.definition())
         if (userAskExposed && !isHelper) add(com.openminis.app.agent.userask.UserAskPromptText.definition())
+        add(McpNativeTools.gatewayDefinition())
     }
 
     private fun subAgentTaskDefinition(rosterNames: List<String>): AgentToolDefinition =

@@ -323,8 +323,9 @@ class MCPRepository(private val context: Context) {
                 append("\n")
             }
             append("\n")
-            append("To use: run `minis-mcp-cli tools <server>` to see available tools,\n")
-            append("then `minis-mcp-cli call <server> <tool> [args]` to invoke.\n")
+            append("Preferred: call a tool with the `mcp_call` tool (server, tool, arguments as a JSON object) — one step, no shell escaping.\n")
+            append("In shell: `minis-mcp-cli call <server> <tool> <json>` still works; use it only when you already have a pipeline.\n")
+            append("Run `minis-mcp-cli tools <server>` once to confirm exact tool names and argument shapes.\n")
             append("Tool names may overlap across servers: if two servers expose the same tool, qualify it as `call <server> <tool>`. Always confirm the exact tool name and arguments with `tools <server>` before calling.\n")
             append("When adding or modifying an MCP server config (via minis-mcp-cli add / the UI), use \$\$VARNAME in env/headers/url values as a placeholder resolved at runtime from the system/App environment variables — do not hardcode secrets; reference an existing App environment variable as \$\$NAME.")
         }

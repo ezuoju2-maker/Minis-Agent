@@ -7804,6 +7804,45 @@ class ChatViewModel(
         tools: List<AgentToolDefinition>,
     ): String? = preflightValidateToolCallImpl(name, args, tools)
 
+    private suspend fun executeMcpCall(
+        name: String,
+        argsJson: String,
+        toolId: String,
+        toolBlocks: MutableList<AssistantBlock>,
+        assistantId: String,
+        currentText: String,
+    ): ToolExecutionResult {
+        val obj = try { JSONObject(argsJson) } catch (_: Exception) { JSONObject() }
+        val ref = if (name == com.openminis.app.tools.McpNativeTools.GATEWAY) {
+            val server = obj.optString("server", "").trim()
+            val tool = obj.optString("tool", "").trim()
+            if (server.isEmpty() || tool.isEmpty()) {
+                return ToolExecutionResult(
+                    "Error: mcp_call needs both `server` and `tool` (exact names from the MCP section of " +
+                        "your instructions). Run `minis-mcp-cli tools <server>` once if unsure.",
+                    false,
+                    toolTitle = obj.optString("tool_title", ""),
+                )
+            }
+            com.openminis.app.tools.McpNativeTools.Ref(server, tool)
+        } else {
+            com.openminis.app.tools.McpNativeTools.parseToolName(name)
+                ?: return ToolExecutionResult(
+                    "Error: malformed MCP tool name '" + name + "'. Expected mcp__<server>__<tool>.",
+                    false,
+                    toolTitle = obj.optString("tool_title", ""),
+                )
+        }
+        val arguments = com.openminis.app.tools.McpNativeTools.argumentsJson(obj)
+        val command = com.openminis.app.tools.McpNativeTools.shellCommand(ref.server, ref.tool, arguments)
+        val shellArgs = JSONObject()
+            .put("command", command)
+            .put("tool_title", obj.optString("tool_title", name))
+            .toString()
+        val result = executeShellCommand(shellArgs, toolId, toolBlocks, assistantId, currentText)
+        return result.copy(toolTitle = obj.optString("tool_title", name))
+    }
+
     private suspend fun executeToolCached(
         name: String,
         argsJson: String,
@@ -7837,6 +7876,12 @@ class ChatViewModel(
         currentText: String,
     ): ToolExecutionResult {
         val toolTitle = try { JSONObject(argsJson).optString("tool_title", name) } catch (_: Exception) { name }
+
+        if (name == com.openminis.app.tools.McpNativeTools.GATEWAY ||
+            name.startsWith(com.openminis.app.tools.McpNativeTools.PREFIX)
+        ) {
+            return executeMcpCall(name, argsJson, toolId, toolBlocks, assistantId, currentText)
+        }
 
         return when (name) {
             FileReadTool.NAME -> {
