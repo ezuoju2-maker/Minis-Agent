@@ -7896,6 +7896,39 @@ class ChatViewModel(
 
     fun checkpointForSession(): com.openminis.app.sandbox.checkpoint.SessionCheckpoint = writeCheckpoint
 
+    private fun executeCheckpointRestore(argsJson: String): ToolExecutionResult {
+        val path = try { JSONObject(argsJson).optString("path", "").trim() } catch (_: Exception) { "" }
+        val ops = if (path.isEmpty()) writeCheckpoint.restorePlan() else listOfNotNull(writeCheckpoint.revertPlan(path))
+        if (ops.isEmpty()) {
+            return ToolExecutionResult(
+                "Nothing to restore: no file changes were recorded in this session.",
+                false,
+                toolTitle = "Restore checkpoint",
+            )
+        }
+        var restored = 0
+        var failed = 0
+        for (op in ops) {
+            val file = java.io.File(op.path)
+            val ok = runCatching {
+                if (op.content == null) file.delete() || !file.exists() else {
+                    file.parentFile?.mkdirs()
+                    file.writeText(op.content)
+                }
+                true
+            }.getOrDefault(false)
+            if (ok) restored++ else failed++
+        }
+        if (path.isEmpty()) writeCheckpoint.clear() else writeCheckpoint.forget(path)
+        val detail = buildString {
+            append("Restored $restored file(s)")
+            if (failed > 0) append(", $failed failed")
+            append(".")
+            if (ops.any { it.truncated }) append(" Some snapshots were truncated and may be incomplete.")
+        }
+        return ToolExecutionResult(detail, failed == 0, toolTitle = "Restore checkpoint")
+    }
+
     private fun withWriteCheckpoint(argsJson: String, block: () -> ToolExecutionResult): ToolExecutionResult {
         val path = try { JSONObject(argsJson).optString("path", "").trim() } catch (_: Exception) { "" }
         if (path.isEmpty()) return block()
@@ -7983,6 +8016,7 @@ class ChatViewModel(
                     if (it.success) maybeReloadSkillsForPath(argsJson)
                 }
             }
+            com.openminis.app.tools.CheckpointRestoreTool.NAME -> executeCheckpointRestore(argsJson)
             com.openminis.app.tools.ApplyPatchTool.NAME ->
                 com.openminis.app.tools.ApplyPatchTool.execute(argsJson, fsSessionId, context)
             com.openminis.app.tools.RepoMapTool.NAME ->

@@ -80,6 +80,7 @@ object AgentTools {
         if (!isHelper) add(SkillSaveTool.definition())
         add(McpNativeTools.gatewayDefinition())
         mcpTools.forEach { add(it) }
+        if (!isHelper) add(com.openminis.app.tools.CheckpointRestoreTool.definition())
         if (userAskExposed && !isHelper) add(com.openminis.app.agent.userask.UserAskPromptText.definition())
     }
 

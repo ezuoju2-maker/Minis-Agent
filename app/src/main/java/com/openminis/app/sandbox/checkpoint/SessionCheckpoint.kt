@@ -57,6 +57,13 @@ class SessionCheckpoint(
 
     fun revertPlan(path: String): RestoreOp? = entries[path]?.let { RestoreOp(it.path, it.before, it.perFileTruncated) }
 
+    fun forget(path: String): Boolean {
+        val e = entries.remove(path) ?: return false
+        bytes -= e.after.length + (e.before?.length ?: 0)
+        if (bytes < 0) bytes = 0
+        return true
+    }
+
     fun markRestored() = clear()
 
     fun clear() {

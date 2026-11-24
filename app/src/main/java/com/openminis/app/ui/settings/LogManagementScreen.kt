@@ -99,6 +99,14 @@ fun LogManagementScreen(
         title = stringResource(R.string.log_title),
         onBack = onBack,
         scrollable = false,
+        actions = {
+            IconButton(onClick = { shareTraceExport(context) }) {
+                Icon(
+                    Icons.Default.Share,
+                    contentDescription = stringResource(R.string.common_share),
+                )
+            }
+        },
     ) {
         SingleChoiceSegmentedButtonRow(
             modifier = Modifier
@@ -468,6 +476,13 @@ fun LogDetailScreen(
     }
 }
 
+
+private fun shareTraceExport(context: Context) {
+    val text = com.openminis.app.observability.TraceLog.exportNdjson()
+    if (text.isBlank()) return
+    val file = File(context.cacheDir, "minis-trace-${System.currentTimeMillis()}.ndjson")
+    runCatching { file.writeText(text) }.onSuccess { shareLogFile(context, file) }
+}
 
 private fun shareLogFile(context: Context, file: File) {
     try {
