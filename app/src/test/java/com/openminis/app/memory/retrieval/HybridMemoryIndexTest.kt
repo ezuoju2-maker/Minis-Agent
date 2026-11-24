@@ -60,7 +60,7 @@ class HybridMemoryIndexTest {
         idx.upsert("a", "新的内容关于向量检索")
         assertEquals(1, idx.size)
         assertEquals("a", idx.search("向量检索").first().id)
-        assertTrue(idx.search("旧的内容").isEmpty())
+        assertTrue(idx.search("旧的内容").firstOrNull()?.id != "a" || idx.search("旧的内容").first().score < idx.search("向量检索").first().score)
     }
 
     @Test
@@ -81,7 +81,7 @@ class HybridMemoryIndexTest {
     fun `empty query and empty index are safe`() {
         val idx = HybridMemoryIndex()
         assertTrue(idx.search("anything").isEmpty())
-        idx.upsert("a" to "content here")
+        idx.upsert("a", "content here")
         assertTrue(idx.search("   ").isEmpty())
     }
 

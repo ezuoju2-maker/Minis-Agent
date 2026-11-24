@@ -1,6 +1,5 @@
 package com.openminis.app.memory.retrieval
 
-import kotlin.math.abs
 import kotlin.math.sqrt
 
 class HybridMemoryIndex(
@@ -64,7 +63,7 @@ class HybridMemoryIndex(
             for ((t, qc) in qTf) {
                 val f = e.tf[t] ?: continue
                 val d = df[t] ?: 0
-                val idf = ln(1.0 + (n - d + 0.5) / (d + 0.5))
+                val idf = kotlin.math.ln(1.0 + (n - d + 0.5) / (d + 0.5))
                 lex += idf * (f * (k1 + 1.0)) / (f + k1 * (1.0 - b + b * e.len / avgdl)) * qc.toDouble()
             }
             if (lex <= 0.0) continue
@@ -122,7 +121,7 @@ class HybridMemoryIndex(
         val v = DoubleArray(vectorDims)
         for (t in terms) {
             val h = fnv64(t)
-            val idx = abs(h xor (h ushr 32)).toInt() % vectorDims
+            val idx = java.lang.Math.floorMod(h xor (h ushr 32), vectorDims.toLong()).toInt()
             val sign = if ((h ushr 63) == 0L) 1.0 else -1.0
             v[idx] += sign
         }
@@ -153,5 +152,4 @@ class HybridMemoryIndex(
         return h
     }
 
-    private fun ln(x: Double): Double = kotlin.math.log(x)
 }
