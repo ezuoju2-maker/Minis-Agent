@@ -3009,6 +3009,11 @@ fun ChatScreen(
                             viewModel.closeToolDetail()
                             onOpenAgentTranscript(childId)
                         },
+                        onApplyHunks = { blk, sel ->
+                            viewModel.applyHunkSelection(blk, sel) { msg ->
+                                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        },
                     )
                 }
                 callbackDetailBlock?.let { block ->

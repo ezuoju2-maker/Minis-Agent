@@ -279,6 +279,7 @@ internal fun ToolDetailSheet(
     onOpenTerminalWithCommand: (String) -> Unit = {},
     onOpenBrowserForUrl: (String) -> Unit = {},
     onOpenAgentTranscript: ((childSessionId: String) -> Unit)? = null,
+    onApplyHunks: ((AssistantBlock, Set<Int>) -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var currentIdx by remember { mutableStateOf(initialIndex.coerceIn(0, toolBlocks.lastIndex.coerceAtLeast(0))) }
@@ -617,6 +618,28 @@ internal fun ToolDetailSheet(
                                             .verticalScroll(outputScrollState),
                                         verticalArrangement = Arrangement.spacedBy(0.dp),
                                     ) {
+                                        if (!isLive && onApplyHunks != null) {
+                                            val plan = remember(block.id, oldStr, newStr) {
+                                                com.openminis.app.tools.patch.PatchSplitter.plan(oldStr, newStr, context = 1)
+                                            }
+                                            if (plan.hunks.size > 1 && plan.complete) {
+                                                var picked by remember(block.id) { mutableStateOf(plan.ids().toSet()) }
+                                                val rows = remember(block.id, oldStr, newStr) {
+                                                    com.openminis.app.ui.chat.DiffPreviewParser.rowsOf(
+                                                        plan.hunks.flatMap { it.rows },
+                                                    )
+                                                }
+                                                com.openminis.app.ui.chat.ToolDiffCard(
+                                                    rows = rows,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                                    selected = picked,
+                                                    onToggleGroup = { g ->
+                                                        picked = com.openminis.app.tools.patch.HunkArgs.toggle(picked, g)
+                                                    },
+                                                    onApply = { onApplyHunks?.invoke(block, picked) },
+                                                )
+                                            }
+                                        }
                                         if (oldStr.isNotEmpty()) {
                                             oldStr.lines().forEach { line ->
                                                 Text(

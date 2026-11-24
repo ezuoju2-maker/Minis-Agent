@@ -7896,6 +7896,46 @@ class ChatViewModel(
 
     fun checkpointForSession(): com.openminis.app.sandbox.checkpoint.SessionCheckpoint = writeCheckpoint
 
+    fun applyHunkSelection(block: AssistantBlock, selected: Set<Int>, onResult: (String) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val msg = try {
+                val args = JSONObject(block.toolArgs)
+                val path = args.optString("path", "").trim()
+                val oldStr = args.optString("old_string", "")
+                val newStr = args.optString("new_string", "")
+                if (path.isEmpty() || newStr.isEmpty()) {
+                    "无法读取这次编辑的参数"
+                } else {
+                    val plan = com.openminis.app.tools.patch.PatchSplitter.plan(oldStr, newStr, context = 1)
+                    when {
+                        !plan.complete -> "这次编辑太长，无法按段重写"
+                        selected.isEmpty() -> "没有选中任何段"
+                        else -> {
+                            val target = plan.apply(selected)
+                            val file = com.openminis.app.sandbox.PRootKernel.resolveSessionHostPath(fsSessionId, path, context)
+                            when {
+                                file == null -> "找不到文件：$path"
+                                !file.exists() -> "文件已不存在：$path"
+                                else -> {
+                                    val content = file.readText()
+                                    if (content.indexOf(newStr) < 0) {
+                                        "文件内容已变化，未应用。请让助手重新执行这次编辑。"
+                                    } else {
+                                        file.writeText(content.replaceFirst(newStr, target))
+                                        "已保留 ${selected.size}/${plan.hunks.size} 段，写回 $path"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                "应用失败：${e.message}"
+            }
+            withContext(Dispatchers.Main) { onResult(msg) }
+        }
+    }
+
     private fun executeCheckpointRestore(argsJson: String): ToolExecutionResult {
         val path = try { JSONObject(argsJson).optString("path", "").trim() } catch (_: Exception) { "" }
         val ops = if (path.isEmpty()) writeCheckpoint.restorePlan() else listOfNotNull(writeCheckpoint.revertPlan(path))

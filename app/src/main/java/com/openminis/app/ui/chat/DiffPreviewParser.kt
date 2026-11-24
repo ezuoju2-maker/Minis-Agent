@@ -32,6 +32,16 @@ object DiffPreviewParser {
         return out
     }
 
+    fun rowsOf(lines: List<com.openminis.app.tools.ChangePreview.Line>): List<DiffRow> =
+        lines.map { line ->
+            val marker = when (line.kind) {
+                com.openminis.app.tools.ChangePreview.Line.Kind.ADD -> '+'
+                com.openminis.app.tools.ChangePreview.Line.Kind.REMOVE -> '-'
+                else -> ' '
+            }
+            DiffRow(marker, line.oldNumber, line.newNumber, line.text)
+        }
+
     fun stats(rows: List<DiffRow>): Pair<Int, Int> =
         rows.count { it.marker == '+' } to rows.count { it.marker == '-' }
 
