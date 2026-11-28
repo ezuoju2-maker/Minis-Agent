@@ -32,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -100,6 +101,9 @@ fun LogManagementScreen(
         onBack = onBack,
         scrollable = false,
         actions = {
+            TextButton(onClick = { shareTraceExport(context, otlp = true) }) {
+                Text(stringResource(R.string.log_share_otlp), style = MaterialTheme.typography.labelMedium)
+            }
             IconButton(onClick = { shareTraceExport(context) }) {
                 Icon(
                     Icons.Default.Share,
@@ -477,10 +481,15 @@ fun LogDetailScreen(
 }
 
 
-private fun shareTraceExport(context: Context) {
-    val text = com.openminis.app.observability.TraceLog.exportNdjson()
+private fun shareTraceExport(context: Context, otlp: Boolean = false) {
+    val text = if (otlp) {
+        com.openminis.app.observability.TraceLog.exportOtlpJson(sessionId = "minis")
+    } else {
+        com.openminis.app.observability.TraceLog.exportNdjson()
+    }
     if (text.isBlank()) return
-    val file = File(context.cacheDir, "minis-trace-${System.currentTimeMillis()}.ndjson")
+    val suffix = if (otlp) "otlp.json" else "ndjson"
+    val file = File(context.cacheDir, "minis-trace-${System.currentTimeMillis()}.$suffix")
     runCatching { file.writeText(text) }.onSuccess { shareLogFile(context, file) }
 }
 

@@ -98,5 +98,8 @@ class TraceLog(
             shared.emit(0, kind, name, durationMs, ok, summary)
 
         fun exportNdjson(): String = shared.toNdjson()
+
+        fun exportOtlpJson(sessionId: String, baseEpochMs: Long = System.currentTimeMillis()): String =
+            com.openminis.app.observability.otlp.OtlpTrace.toOtlpJson(shared.since(0), sessionId, baseEpochMs)
     }
 }

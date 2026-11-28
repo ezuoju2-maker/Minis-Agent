@@ -750,6 +750,7 @@
     <string name="log_truncated_marker">… (truncated, %1$s total)</string>
     <string name="log_not_found">Log file not found.</string>
     <string name="log_error_reading">Error reading log: %1$s</string>
+    <string name="log_share_otlp">OTLP</string>
     <string name="log_share_chooser">Share Log</string>
     <string name="log_share_all_chooser">Share Logs</string>
     <string name="memory_title">Memory</string>

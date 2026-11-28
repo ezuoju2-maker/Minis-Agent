@@ -733,6 +733,7 @@
     <string name="log_truncated_marker">…（已截斷，總共 %1$s）</string>
     <string name="log_not_found">找不到記錄檔。</string>
     <string name="log_error_reading">讀取記錄時發生錯誤：%1$s</string>
+    <string name="log_share_otlp">OTLP</string>
     <string name="log_share_chooser">分享記錄</string>
     <string name="log_share_all_chooser">分享記錄</string>
     <string name="memory_title">記憶</string>

@@ -734,6 +734,7 @@
     <string name="log_truncated_marker">…（已截断，共 %1$s）</string>
     <string name="log_not_found">未找到日志文件。</string>
     <string name="log_error_reading">读取日志出错: %1$s</string>
+    <string name="log_share_otlp">OTLP</string>
     <string name="log_share_chooser">分享日志</string>
     <string name="log_share_all_chooser">分享日志</string>
     <string name="memory_title">记忆</string>
