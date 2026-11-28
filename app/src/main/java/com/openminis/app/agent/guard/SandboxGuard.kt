@@ -20,7 +20,7 @@ object SandboxGuard {
         Regex("""\bchmod\b"""),
         Regex("""\bchown\b"""),
         Regex("""\bln\b"""),
-        Regex("""\bsed\s+(?:-[a-zA-Z]+i|--in-place)\b"""),
+        Regex("""\bsed\s+(?:-[\w-]*i|--in-place)\b"""),
         Regex("""\bdd\b""" ),
         Regex("""\binstall\b""" ),
         Regex("""\b(?:apt|apt-get|apk|yum|dnf)\s+(?:-\S+\s+)*(?:install|upgrade|remove|purge|add)\b"""),
