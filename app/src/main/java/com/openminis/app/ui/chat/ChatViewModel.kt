@@ -8017,6 +8017,63 @@ class ChatViewModel(
         return ToolExecutionResult(detail, failed == 0, toolTitle = "Restore checkpoint")
     }
 
+    private fun conversationRecords(): List<com.openminis.app.agent.continuity.HistorySearch.Record> {
+        val out = ArrayList<com.openminis.app.agent.continuity.HistorySearch.Record>()
+        for (m in _messages.value) {
+            val body = m.content.trim()
+            when (m.role) {
+                "user" -> if (body.isNotEmpty()) {
+                    out.add(com.openminis.app.agent.continuity.HistorySearch.Record(m.id, "user", body))
+                }
+
+                "assistant" -> {
+                    if (body.isNotEmpty()) {
+                        out.add(com.openminis.app.agent.continuity.HistorySearch.Record(m.id, "assistant", body))
+                    }
+                    for (b in m.toolBlocks) {
+                        val content = b.content.trim()
+                        if (content.isEmpty()) continue
+                        val label = b.toolName.ifEmpty { b.toolTitle.ifEmpty { "tool" } }
+                        out.add(
+                            com.openminis.app.agent.continuity.HistorySearch.Record(
+                                "${m.id}#${b.id}",
+                                "tool",
+                                "$label: $content",
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    private fun executeInspectRunStatus(argsJson: String): ToolExecutionResult {
+        val title = runCatching { JSONObject(argsJson).optString("tool_title", "Inspect run status") }
+            .getOrDefault("Inspect run status")
+        val goal = com.openminis.app.agent.goal.SessionGoals.load(context, activeSessionId)
+        val counts = com.openminis.app.tools.TodoTools.counts(context, activeSessionId)
+        val runningJobs = runCatching {
+            com.openminis.app.agent.jobs.AgentJobRegistry.jobs.value.count { it.value.isActive }
+        }.getOrDefault(0)
+        val records = conversationRecords()
+        return ToolExecutionResult(buildString {
+            append("Goal: ").append(goal?.let { "\"${it.text}\"" } ?: "none").append('\n')
+            append("Task plan: ")
+            if (counts == null) append("none") else {
+                append(counts.completed).append('/').append(counts.total).append(" completed · ")
+                append(counts.inProgress).append(" in progress · ").append(counts.pending).append(" pending")
+            }
+            append('\n')
+            append("Background jobs running: ").append(runningJobs).append('\n')
+            append("Messages in context: ").append(_messages.value.size).append('\n')
+            append("Indexed records for history_search: ").append(records.size)
+            if (goal == null && counts == null) {
+                append('\n\nNothing is tracked as unfinished. Do not claim completion beyond what the transcript shows.')
+            }
+        }, true, toolTitle = title)
+    }
+
     private fun withWriteCheckpoint(argsJson: String, block: () -> ToolExecutionResult): ToolExecutionResult {
         val path = try { JSONObject(argsJson).optString("path", "").trim() } catch (_: Exception) { "" }
         if (path.isEmpty()) return block()
@@ -8154,6 +8211,13 @@ class ChatViewModel(
             "memory_fact" -> executeMemoryFactTool(argsJson)
             com.openminis.app.tools.TodoTools.NAME ->
                 com.openminis.app.tools.TodoTools.execute(context, activeSessionId, argsJson)
+            com.openminis.app.tools.ContinuityTools.GOAL ->
+                com.openminis.app.tools.ContinuityTools.executeGoal(context, activeSessionId, argsJson)
+            com.openminis.app.tools.ContinuityTools.HISTORY_SEARCH ->
+                com.openminis.app.tools.ContinuityTools.executeHistorySearch(conversationRecords(), argsJson)
+            com.openminis.app.tools.ContinuityTools.HISTORY_READ ->
+                com.openminis.app.tools.ContinuityTools.executeHistoryRead(conversationRecords(), argsJson)
+            com.openminis.app.tools.ContinuityTools.RUN_STATUS -> executeInspectRunStatus(argsJson)
             com.openminis.app.tools.SkillLoadTool.NAME -> {
                 val repo = skillRepository
                 if (repo == null) ToolExecutionResult("Error: Skills not available", false)
@@ -9895,6 +9959,7 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
             append("- Device language: ").append(lang).append("\n")
             append("- minis-model-use models available: ").append(modelUseCount)
             if (todoFragment != null) append(todoFragment)
+            com.openminis.app.agent.goal.SessionGoals.promptFragment(context, activeSessionId)?.let { append(it) }
         }
     }
 

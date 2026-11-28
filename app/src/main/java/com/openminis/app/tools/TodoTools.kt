@@ -100,6 +100,25 @@ object TodoTools {
         return ToolExecutionResult(summary, true, toolTitle = toolTitle)
     }
 
+    data class Counts(val pending: Int, val inProgress: Int, val completed: Int) {
+        val total: Int get() = pending + inProgress + completed
+    }
+
+    fun counts(context: Context, sessionId: String): Counts? {
+        val f = file(context, sessionId)
+        if (!f.exists()) return null
+        val items = runCatching {
+            val arr = JSONObject(f.readText()).optJSONArray("todos") ?: return@runCatching null
+            (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.optString("status", "pending") }
+        }.getOrNull() ?: return null
+        if (items.isEmpty()) return null
+        return Counts(
+            pending = items.count { it == "pending" },
+            inProgress = items.count { it == "in_progress" },
+            completed = items.count { it == "completed" },
+        )
+    }
+
     fun promptFragment(context: Context, sessionId: String): String? {
         val f = file(context, sessionId)
         if (!f.exists()) return null

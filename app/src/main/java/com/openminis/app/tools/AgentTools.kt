@@ -79,6 +79,12 @@ object AgentTools {
             add(subAgentTaskDefinition(rosterNames))
         }
         if (!isHelper) add(TodoTools.definition())
+        add(ContinuityTools.searchDefinition())
+        add(ContinuityTools.readDefinition())
+        if (!isHelper) {
+            add(ContinuityTools.goalDefinition())
+            add(ContinuityTools.runStatusDefinition())
+        }
         if (skillsAvailable) add(SkillLoadTool.definition())
         if (!isHelper) add(SkillSaveTool.definition())
         add(McpNativeTools.gatewayDefinition())
