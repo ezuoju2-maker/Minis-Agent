@@ -8,6 +8,8 @@ import com.openminis.app.sandbox.RootfsManager
 import com.openminis.app.sandbox.SpawnSignalMask
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -19,7 +21,6 @@ class LightPandaServer private constructor(private val context: Context) {
 
     companion object {
         private const val START_TIMEOUT_MS = 30_000L
-        private const val TAG = "LightPandaServer"
 
         @Volatile
         private var instance: LightPandaServer? = null
@@ -41,7 +42,7 @@ class LightPandaServer private constructor(private val context: Context) {
         .readTimeout(2, TimeUnit.SECONDS)
         .build()
 
-    private val lock = Any()
+    private val lock = Mutex()
 
     @Volatile
     private var process: Process? = null
@@ -63,49 +64,52 @@ class LightPandaServer private constructor(private val context: Context) {
         val state = when {
             installed.isEmpty() -> "not installed"
             isRunning -> "running on 127.0.0.1:$port"
+            lastError.isNotEmpty() -> "stopped ($lastError)"
             else -> "stopped"
         }
-        val err = lastError.takeIf { it.isNotEmpty() }?.let { " (last error: $it)" } ?: ""
-        return "Lightpanda $installed: $state$err"
+        return "Lightpanda $installed: $state"
     }
 
     suspend fun ensureRunning(): Result<String> = withContext(Dispatchers.IO) {
-        synchronized(lock) {
-            if (isRunning && probe(port)) {
-                lastError = ""
-                return@withContext Result.success("ws://127.0.0.1:$port/")
-            }
-            stopLocked()
-            val installError = LightPandaInstaller.installIfNeeded(context)
-            if (installError != null) {
-                lastError = installError
-                return@withContext Result.failure(IllegalStateException(installError))
-            }
-            val freePort = runCatching {
-                ServerSocket(0).use { it.localPort }
-            }.getOrElse { 9222 }
-            val started = runCatching { spawn(freePort) }
-            if (started.isFailure) {
-                val msg = started.exceptionOrNull()?.message ?: "spawn failed"
-                lastError = msg
-                return@withContext Result.failure(IllegalStateException(msg))
-            }
-            process = started.getOrThrow()
-            port = freePort
-            val deadline = System.currentTimeMillis() + START_TIMEOUT_MS
-            while (System.currentTimeMillis() < deadline) {
-                if (process?.isAlive != true) break
-                if (probe(freePort)) {
-                    lastError = ""
-                    return@withContext Result.success("ws://127.0.0.1:$freePort/")
-                }
-                delay(250)
-            }
-            val log = runCatching { logFile.readText().takeLast(1200) }.getOrDefault("")
-            lastError = if (log.isBlank()) "did not answer on 127.0.0.1:$freePort" else log.trim()
-            stopLocked()
-            Result.failure(IllegalStateException(lastError))
+        lock.withLock { ensureRunningLocked() }
+    }
+
+    private suspend fun ensureRunningLocked(): Result<String> {
+        if (isRunning && probe(port)) {
+            lastError = ""
+            return Result.success("ws://127.0.0.1:$port/")
         }
+        stopLocked()
+
+        LightPandaInstaller.installIfNeeded(context)?.let { message ->
+            lastError = message
+            return Result.failure(IllegalStateException(message))
+        }
+
+        val freePort = runCatching { ServerSocket(0).use { it.localPort } }.getOrElse { 9222 }
+        val started = runCatching { spawn(freePort) }
+        val failure = started.exceptionOrNull()
+        if (failure != null) {
+            lastError = failure.message ?: "could not start Lightpanda"
+            return Result.failure(IllegalStateException(lastError))
+        }
+        process = started.getOrThrow()
+        port = freePort
+
+        val deadline = System.currentTimeMillis() + START_TIMEOUT_MS
+        while (System.currentTimeMillis() < deadline) {
+            if (process?.isAlive != true) break
+            if (probe(freePort)) {
+                lastError = ""
+                return Result.success("ws://127.0.0.1:$freePort/")
+            }
+            delay(250)
+        }
+
+        val tail = runCatching { logFile.readText().takeLast(1200) }.getOrDefault("")
+        lastError = if (tail.isBlank()) "no answer on 127.0.0.1:$freePort" else tail.trim()
+        stopLocked()
+        return Result.failure(IllegalStateException(lastError))
     }
 
     private fun probe(p: Int): Boolean = runCatching {
@@ -113,15 +117,7 @@ class LightPandaServer private constructor(private val context: Context) {
         http.newCall(req).execute().use { it.isSuccessful }
     }.getOrDefault(false)
 
-    fun version(): String = runCatching {
-        val req = Request.Builder().url("http://127.0.0.1:$port/json/version").get().build()
-        http.newCall(req).execute().use { body ->
-            if (!body.isSuccessful) return@use ""
-            body.body?.string() ?: ""
-        }
-    }.getOrDefault("")
-
-    fun stop() = synchronized(lock) { stopLocked() }
+    suspend fun stop() = lock.withLock { stopLocked() }
 
     private fun stopLocked() {
         val p = process

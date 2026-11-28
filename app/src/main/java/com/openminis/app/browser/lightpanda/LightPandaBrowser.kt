@@ -50,7 +50,7 @@ class LightPandaBrowser private constructor(private val context: Context) {
         fresh
     }
 
-    fun stop() {
+    suspend fun stop() {
         client?.close()
         client = null
         clientUrl = ""
