@@ -1,11 +1,14 @@
 {
-  "version": 1,
+  "version": 2,
   "updated": "2026-11-28",
-  "note": "Skill sources crawled by Minis `find_skills`. Edit this file to add or retire an ecosystem; installed apps pick it up on their next refresh (7d cache).",
+  "note": "Curated seed sources for Minis `find_skills`. Installed apps refresh this file every 7 days; the radar ALSO discovers new GitHub skill repos (including WorkBuddy / OpenClaw community packs) on its own, so this list is a starting point, not a ceiling. Add or retire repos here and every install picks it up.",
   "sources": [
     { "repo": "anthropics/skills", "branch": "main", "official": true },
     { "repo": "obra/superpowers", "branch": "main" },
     { "repo": "affaan-m/ECC", "branch": "main" },
-    { "repo": "ComposioHQ/awesome-claude-skills", "branch": "master" }
+    { "repo": "ComposioHQ/awesome-claude-skills", "branch": "master" },
+    { "repo": "bergside/awesome-design-skills", "branch": "main" },
+    { "repo": "Illyism/seo-skills", "branch": "main" },
+    { "repo": "Trystan-SA/product-engineer-skills", "branch": "main" }
   ]
 }

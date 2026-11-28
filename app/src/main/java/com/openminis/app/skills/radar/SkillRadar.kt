@@ -46,6 +46,18 @@ class SkillRadar(
             } catch (_: Exception) {
             }
         }
+        val discovered = prefs().getString(KEY_DISCOVERED, null)
+        val fromDiscovery = ArrayList<Source>()
+        if (discovered != null) {
+            try {
+                val arr = JSONArray(discovered)
+                for (i in 0 until arr.length()) {
+                    val s = sourceFromJson(arr.optJSONObject(i)) ?: continue
+                    if (fromDiscovery.none { it.repo == s.repo }) fromDiscovery.add(s)
+                }
+            } catch (_: Exception) {
+            }
+        }
         val stored = prefs().getString(KEY_SOURCES, null)
         val extra = ArrayList<Source>()
         if (stored != null) {
@@ -61,6 +73,7 @@ class SkillRadar(
         val out = ArrayList<Source>()
         for (s in BUILTIN) if (out.none { it.repo == s.repo }) out.add(s)
         for (s in fromManifest) if (out.none { it.repo == s.repo }) out.add(s)
+        for (s in fromDiscovery) if (out.none { it.repo == s.repo }) out.add(s)
         for (s in extra) if (out.none { it.repo == s.repo }) out.add(s)
         return out
     }
@@ -95,7 +108,13 @@ class SkillRadar(
         if (force || System.currentTimeMillis() - manifestAt > MANIFEST_TTL_MS) {
             refreshManifest()
         }
-        val srcs = sources()
+        val discoveredAt = prefs().getLong(KEY_DISCOVERED_AT, 0L)
+        if (store.load() != null && System.currentTimeMillis() - discoveredAt > DISCOVERY_TTL_MS &&
+            !prefs().getBoolean(KEY_DISCOVERY_MUTED, false)
+        ) {
+            discoverNewSources()
+        }
+        val srcs = sources().take(MAX_CRAWL_SOURCES)
         val entries = ArrayList<SkillCandidate>()
         val notes = ArrayList<String>()
         for (s in srcs) {
@@ -142,6 +161,44 @@ class SkillRadar(
             .apply()
     }
 
+    private fun discoverNewSources() {
+        val known = sources().map { it.repo }.toMutableSet()
+        val found = ArrayList<SkillDiscovery.Found>()
+        for (q in SkillDiscovery.QUERIES) {
+            val body = get("https://api.github.com/search/repositories?q=$q&sort=stars&order=desc&per_page=10", 12_000)
+                ?: continue
+            val hits = SkillDiscovery.parse(body, known, minStars = 100, limit = 6)
+            for (h in hits) {
+                if (found.none { it.repo == h.repo }) found.add(h)
+                known.add(h.repo)
+            }
+        }
+        if (found.isEmpty()) {
+            prefs().edit().putLong(KEY_DISCOVERED_AT, System.currentTimeMillis()).apply()
+            return
+        }
+        val verified = ArrayList<Source>()
+        for (cand in found.sortedByDescending { it.stars }.take(MAX_DISCOVERIES_PER_RUN)) {
+            val tree = get("https://api.github.com/repos/${cand.repo}/git/trees/${cand.branch}?recursive=1", 15_000)
+                ?: continue
+            if (SkillTree.parse(tree, cand.repo, cand.branch, official = false).isEmpty()) continue
+            verified.add(Source(cand.repo, cand.branch, official = false))
+        }
+        val previous = ArrayList<Source>()
+        try {
+            val arr = JSONArray(prefs().getString(KEY_DISCOVERED, "[]") ?: "[]")
+            for (i in 0 until arr.length()) sourceFromJson(arr.optJSONObject(i))?.let { previous.add(it) }
+        } catch (_: Exception) {
+        }
+        val merged = ArrayList<Source>()
+        for (v in verified) if (merged.none { it.repo == v.repo }) merged.add(v)
+        for (p in previous) if (merged.none { it.repo == p.repo }) merged.add(p)
+        prefs().edit()
+            .putString(KEY_DISCOVERED, toJson(merged.take(MAX_DISCOVERED_SOURCES)).toString())
+            .putLong(KEY_DISCOVERED_AT, System.currentTimeMillis())
+            .apply()
+    }
+
     private fun ensureFresh(): SkillIndexStore.Snapshot? {
         val snap = store.load()
         if (snap != null && snap.entries.isNotEmpty() && System.currentTimeMillis() - snap.fetchedAt <= TTL_MS) {
@@ -149,6 +206,10 @@ class SkillRadar(
         }
         return snap
     }
+
+    fun snapshot(): SkillIndexStore.Snapshot? = store.load()
+
+    fun hasIndex(): Boolean = store.load()?.entries?.isNotEmpty() == true
 
     fun indexAge(): String {
         val snap = store.load() ?: return "no index yet"
@@ -253,6 +314,13 @@ class SkillRadar(
         private const val KEY_MANIFEST_SOURCES = "skills.radar.manifest.sources"
         private const val KEY_MANIFEST_AT = "skills.radar.manifest.at"
         const val MANIFEST_TTL_MS = 7L * 24 * 3600 * 1000
+        const val DISCOVERY_TTL_MS = 7L * 24 * 3600 * 1000
+        const val MAX_DISCOVERIES_PER_RUN = 4
+        const val MAX_DISCOVERED_SOURCES = 8
+        const val MAX_CRAWL_SOURCES = 16
+        private const val KEY_DISCOVERED = "skills.radar.discovered"
+        private const val KEY_DISCOVERED_AT = "skills.radar.discovered.at"
+        private const val KEY_DISCOVERY_MUTED = "skills.radar.discovery.muted"
         const val DEFAULT_MANIFEST = "https://raw.githubusercontent.com/ezuoju2-maker/Minis-Agent/main/skills-sources.json"
         const val TTL_MS = 24L * 3600 * 1000
         const val MAX_ENTRIES = 3000

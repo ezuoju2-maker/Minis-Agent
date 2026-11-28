@@ -9,18 +9,19 @@ object FindSkillsTool {
 
     fun definition(): AgentToolDefinition = AgentToolDefinition(
         name = NAME,
-        description = "Search the live public skill ecosystem (Anthropic Skills, Superpowers, ECC, Composio's " +
-            "awesome-claude-skills and any extra sources the user added) for a SKILL.md that already solves what " +
-            "the user is asking, and install the one you pick.\n\nWHEN TO USE: the user says \"can you do X\", " +
-            "\"how do I do X\", \"is there a skill for X\", or asks for a specialized capability you do not have " +
-            "built in (PDF form filling, slide design, brand guidelines, data cleaning, code review checklists…). " +
-            "Call this BEFORE telling the user something is unavailable — the ecosystem is large and the index " +
-            "refreshes itself every 24h. Do NOT call it for ordinary chat, for work you can already do with " +
-            "shell/file tools, or when the user only wants an explanation.\n\nFLOW: action=search returns ranked " +
-            "candidates with an `id`. If one clearly fits, call action=install with that id, then skill_load it to " +
-            "read the steps. If nothing fits, say so and fall back to your own tools — never install a loosely " +
-            "related skill \"just in case\". action=refresh re-crawls sources; action=sources lists them; " +
-            "add_source/remove_source manage extra GitHub repos.",
+        description = "Search the live public skill ecosystem and install the SKILL.md that fits the job at hand. " +
+            "Sources are crawled from GitHub, not a fixed list: Anthropic Skills, Superpowers, ECC, Composio, " +
+            "WorkBuddy and OpenClaw community packs, plus Chinese and niche repos the radar discovers on its own " +
+            "— roughly thousands of SKILL.md files, refreshed every 24h, with new repos auto-discovered weekly.\n\n" +
+            "WHEN TO USE: at the START of any task that needs a specialized capability you do not already have " +
+            "(PDF forms, slides, posters, e-commerce hero images, short-drama scripts, data cleaning, code review, " +
+            "deploy, SEO, security recon…). The user should never have to ask whether a skill exists — you look, " +
+            "install and use it yourself, and only then fall back to improvising. Also use it when the user asks " +
+            "\"can you do X\" / \"is there a skill for X\". Do NOT use it for ordinary chat, or for work plain " +
+            "shell/file tools already handle.\n\nFLOW: action=search returns ranked candidates with an `id`; if " +
+            "one clearly fits, action=install that id, then skill_load it and follow its steps. Never install a " +
+            "loosely related skill \"just in case\". action=refresh re-crawls and re-discovers sources; " +
+            "action=sources lists them; add_source/remove_source manage extra GitHub repos.",
         parameters = mapOf(
             "tool_title" to AgentToolParam(
                 "string",

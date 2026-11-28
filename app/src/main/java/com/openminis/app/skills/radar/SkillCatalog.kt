@@ -131,12 +131,14 @@ object SkillMatcher {
 
         val cjkQuery = q.filter { isCjk(it) }
         if (cjkQuery.isNotEmpty()) {
-            if (haystack.contains(cjkQuery)) score += 14.0
-            else {
-                for (chunk in cjkQuery.split(Regex("[^\\p{IsHan}]+")).filter { it.length >= 2 }) {
-                    if (haystack.contains(chunk)) score += 7.0
-                }
+            if (haystack.contains(cjkQuery)) score += 6.0
+            val grams = cjkQuery.windowed(2).filter { it.length == 2 }
+            if (grams.isNotEmpty()) {
+                val hits = grams.count { haystack.contains(it) }
+                score += (hits * 4.0).coerceAtMost(16.0)
             }
+            val charHits = cjkQuery.toSet().count { haystack.contains(it) }
+            score += (charHits * 0.5).coerceAtMost(2.0)
         }
 
         if (haystack.contains(" $q ") || nameText.startsWith("$q ") || nameText == q) score += 6.0

@@ -63,6 +63,9 @@ class SkillRepository(private val context: Context) {
             var name = ""
             var description = ""
             var version = "1.0.0"
+            var displayName = ""
+            var descriptionZh = ""
+            var descriptionEn = ""
 
             var i = 1
             while (i < frontmatterEndLine) {
@@ -100,10 +103,15 @@ class SkillRepository(private val context: Context) {
                     "name" -> name = resolved
                     "description" -> description = resolved
                     "version" -> version = resolved
+                    "display_name" -> displayName = resolved
+                    "description_zh" -> descriptionZh = resolved
+                    "description_en" -> descriptionEn = resolved
                 }
             }
 
+            if (name.isBlank()) name = displayName
             if (name.isBlank()) return null
+            if (description.isBlank()) description = descriptionZh.ifBlank { descriptionEn }
 
             val bodyStartLine = frontmatterEndLine + 1
             val body = if (bodyStartLine < lines.size) {

@@ -3175,6 +3175,7 @@ class ChatViewModel(
 
     init {
         loadSession()
+        warmSkillRadar()
         viewModelScope.launch {
             var wasStreaming = false
             isStreaming.collect { streaming ->
@@ -5090,6 +5091,36 @@ class ChatViewModel(
         AppLogger.info(TAG, "[provider-edit] rebuilt provider for edited instance ${id.take(8)} (responses=${instance.useResponsesAPI})")
     }
 
+    @Volatile private var skillScoutText: String? = null
+    @Volatile private var skillScoutFor: String? = null
+    @Volatile private var skillScoutCache: String? = null
+    @Volatile private var skillRadarEntries: List<com.openminis.app.skills.radar.SkillCandidate>? = null
+    @Volatile private var skillRadarWarmupStarted = false
+
+    private fun skillScoutLine(): String? {
+        val text = skillScoutText ?: return null
+        if (text == skillScoutFor) return skillScoutCache
+        val entries = skillRadarEntries ?: return null
+        val installed = skillRepository?.skills?.value?.mapNotNull { it.sourceURL }?.toSet() ?: emptySet()
+        val fragment = com.openminis.app.skills.radar.SkillScout.fragment(text, entries, installed)
+        skillScoutFor = text
+        skillScoutCache = fragment
+        return fragment
+    }
+
+    private fun warmSkillRadar() {
+        val repo = skillRepository ?: return
+        if (skillRadarWarmupStarted) return
+        skillRadarWarmupStarted = true
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val radar = com.openminis.app.skills.radar.SkillRadar(context, repo)
+                if (!radar.hasIndex()) radar.refresh(false)
+                skillRadarEntries = radar.snapshot()?.entries
+            }
+        }
+    }
+
     fun sendMessage(text: String) {
         com.openminis.app.agent.jobs.AgentJobRegistry.clearDelegationMute(activeSessionId)
         sendMessage(text, skipContextCheck = false, headless = false)
@@ -5120,6 +5151,10 @@ class ChatViewModel(
         com.openminis.app.agent.jobs.AgentJobRegistry.clearDelegationMute(activeSessionId)
         val promptAttachments = PromptAttachments.of(ownsComposer = !headless, own = headlessAttachments, composer = _attachments.value)
         val trimmed = text.trim()
+        if (trimmed.isNotEmpty()) {
+            skillScoutText = trimmed
+            warmSkillRadar()
+        }
         if (_isStreaming.value) {
             val before = _promptQueue.value.size
             enqueuePrompt(
@@ -10214,8 +10249,15 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
                     "Superpowers, ECC, Composio's awesome-claude-skills, plus any source the user added) and " +
                     "installs what it finds. Reach for it when the user asks whether you can do something " +
                     "specialized, or how to do it, and before telling them a capability is missing — the index " +
-                    "refreshes itself every 24 hours. After installing, skill_load the skill to follow its steps.",
+                    "refreshes itself every 24 hours, and keeps discovering new GitHub skill repos on its own " +
+                    "(including WorkBuddy / OpenClaw community packs). After installing, skill_load the skill to " +
+                    "follow its steps. You install on your own initiative the moment a task needs a capability " +
+                    "you do not have — the user never has to ask whether a skill exists.",
             )
+            skillScoutLine()?.let { line ->
+                append("\n\n")
+                append(line)
+            }
             if (skillFragment != null) {
                 append("\n\n")
                 append(skillFragment)
