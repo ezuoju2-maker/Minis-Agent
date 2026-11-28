@@ -43,6 +43,7 @@
 | 长记性 | 四本错题本（errors / corrections / best_practices / knowledge_gaps）：纠正、偏好、失败、更优解、过时 API 分别落盘；写入前备份、相似条目合并去重、重复 3 次自动提示晋升为长期记忆。下次同类任务先召回再动手，静默照做不复述。设置页「自学笔记」可逐条查看、删除、晋升 | `agent/learning/*`<br>`tools/LessonTool.kt`<br>`ui/settings/LearningNotebookScreen.kt` |
 | 接 GitHub | 连接器：设置页独立入口「GitHub」，点「连接 GitHub」走 Device Flow——屏幕上给出验证码与链接，本机点开或复制链接到另一台手机打开都能授权；也可直接粘贴经典 PAT / 细粒度 token。授权后可干该 token 全部能干的活：仓库与文件读写、Issue、PR、Release、Actions 触发、搜索、GraphQL，全部走 `github` 工具；token 加密存本机并从备份中排除，删仓库需二次确认，技能雷达自动借用该 token 提升限额 | `github/*`<br>`tools/GitHubTool.kt`<br>`ui/settings/GitHubConnectScreen.kt` |
 | 找技能 | 接任务就自己去装：`find_skills` 检索 Anthropic Skills、Superpowers、ECC、Composio、WorkBuddy / OpenClaw 社区包等公开技能库（数千份 SKILL.md），按名字/路径/描述打分；索引 24 小时重爬，并且每周用 GitHub 搜索自己发现新技能仓库，不依赖任何写死的清单。源清单 `skills-sources.json` 只是起点 | `skills/radar/*`<br>`tools/FindSkillsTool.kt` |
+| 自带技能 | 内置 [mattpocock/skills](https://github.com/mattpocock/skills) 全部 39 个技能（tdd、code-review、diagnosing-bugs、to-spec、to-tickets、research、retro、implement、handoff、writing-for-agents 等），随 APK 打包进 `assets/bundled_skills/`，首次启动自动装进 `/var/minis/skills/` 并保持升级；默认启用其中 10 个工程向技能，其余在设置页一键开启，附带 MIT 许可 | `assets/bundled_skills/*`<br>`data/repository/SkillRepository.kt` |
 | 看过程 | 每次工具调用写一行 NDJSON（序号、轮次、耗时、结果），设置页一键导出分享 | `observability/TraceLog.kt` |
 | 省重复 | 只读工具结果进 LRU 缓存，16 条 / 2 MB / 5 分钟后失效 | `tools/ToolResultCache.kt` |
 | 长任务不跑偏 | 会话目标随每次调用注入、压缩后仍在；历史可按关键词回查原文片段 | `agent/goal/SessionGoals.kt`<br>`agent/continuity/HistorySearch.kt` |
@@ -129,7 +130,7 @@ gradle/                            版本目录与 wrapper
 
 An Android agent that executes on the device instead of in the cloud. The model only decides what to do next; file access, command execution, page automation and memory retrieval all happen locally, with commands running inside an Ubuntu 24.04 PRoot sandbox and no cloud execution environment involved.
 
-2297 files of source, no build output in the tree. Package `com.openminis.app`, versionCode 92, final commit `b6424dd`.
+2686 files of source, no build output in the tree. Package `com.openminis.app`, versionCode 92, final commit `b6424dd`.
 
 ### What it does
 
@@ -147,6 +148,7 @@ An Android agent that executes on the device instead of in the cloud. The model 
 | Learn from you | Four journals on disk (errors / corrections / best_practices / knowledge_gaps) for failures, corrections and preferences, better approaches and outdated APIs. Writes are backed up, near-duplicates merge, and a pattern repeated 3 times is offered for promotion to long-term memory. Similar tasks recall them before acting, applied silently. A **Learning notebook** screen in Settings lists every entry and lets you forget or promote one | `agent/learning/*`<br>`tools/LessonTool.kt`<br>`ui/settings/LearningNotebookScreen.kt` |
 | GitHub connector | A dedicated **GitHub** entry in Settings: tap *Connect GitHub* to run the OAuth device flow — the app shows a code plus a link you can open on this phone or copy to another one; or paste a classic/fine-grained PAT instead. Once connected the agent acts with every scope the token carries — repo and file writes, issues, PRs, releases, Actions dispatch, search and GraphQL through one `github` tool; the token is encrypted on-device and excluded from backups, repo deletion needs explicit confirmation, and the skill radar reuses the token for its API budget | `github/*`<br>`tools/GitHubTool.kt`<br>`ui/settings/GitHubConnectScreen.kt` |
 | Find skills | Self-serve on every task: `find_skills` searches Anthropic Skills, Superpowers, ECC, Composio, WorkBuddy / OpenClaw community packs and thousands of other SKILL.md repos, ranks by name/path/description, then installs; the index re-crawls every 24h and the radar discovers new repos itself through GitHub search every week — no hardcoded catalogue. `skills-sources.json` is only a starting point | `skills/radar/*`<br>`tools/FindSkillsTool.kt` |
+| Skills on board | Ships [mattpocock/skills](https://github.com/mattpocock/skills) in full — 39 skills covering tdd, code review, bug diagnosis, specs, tickets, research, retros, implementation, handoff and agent-facing writing — packed into `assets/bundled_skills/`, installed into `/var/minis/skills/` on first launch and kept upgraded. Ten engineering skills are enabled by default, the rest toggle on in Settings, MIT licence included | `assets/bundled_skills/*`<br>`data/repository/SkillRepository.kt` |
 | Watch it run | Every tool call appends an NDJSON line (seq, turn, duration, outcome), exportable from settings | `observability/TraceLog.kt` |
 | Avoid repeats | Read-only results enter an LRU cache, 16 entries / 2 MB / 5 minutes | `tools/ToolResultCache.kt` |
 | Stay on long tasks | A session goal is injected into every call and survives compaction; history stays searchable by keyword with excerpts | `agent/goal/SessionGoals.kt`<br>`agent/continuity/HistorySearch.kt` |
