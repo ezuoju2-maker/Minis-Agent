@@ -135,7 +135,7 @@ class SkillScanParityTest {
         body.lines().filterNot { it.trimStart().startsWith("//") }.joinToString("\n")
 
     @Test fun `building the system prompt never touches the skill directory`() {
-        val body = code(functionBody(chatVm, "private fun buildSystemPrompt(): String?"))
+        val body = code(functionBody(chatVm, "private fun buildSystemPrompt("))
         assertFalse("per-send rescan is back", body.contains("skillRepository?.reloadFromDisk()"))
         assertFalse(body.contains("skillRepository?.requestReload"))
         assertTrue(body.contains("skillPromptFragment(activeSessionId)"))
