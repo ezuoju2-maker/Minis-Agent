@@ -1,0 +1,22 @@
+Lightpanda browser
+==================
+
+This application can install and run the Lightpanda headless browser
+(https://github.com/lightpanda-io/browser), version 1.0.6, arm64 Linux build.
+
+Lightpanda is licensed under the GNU Affero General Public License v3.0.
+The binary is not bundled with this application: it is downloaded at runtime
+from the official release page below and verified against a pinned SHA-256
+before use.
+
+  https://github.com/lightpanda-io/browser/releases/download/1.0.6/lightpanda-aarch64-linux
+  SHA-256: 26e0042a52f493d8cc1b04faef42aea9b46bef9ccfcc86170098bd330c19a890
+
+Corresponding source for the binary is available from the upstream project:
+
+  https://github.com/lightpanda-io/browser/tree/v1.0.6
+
+License text: https://www.gnu.org/licenses/agpl-3.0.txt
+
+Running the binary is subject to the AGPL. If you redistribute a build of this
+application together with the binary, review those obligations first.

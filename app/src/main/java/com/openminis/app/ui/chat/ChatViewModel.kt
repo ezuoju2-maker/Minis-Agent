@@ -8104,6 +8104,8 @@ class ChatViewModel(
                     if (it.success) maybeReloadSkillsForPath(argsJson)
                 }
             }
+            com.openminis.app.browser.lightpanda.LightPandaTool.NAME ->
+                com.openminis.app.browser.lightpanda.LightPandaTool.execute(context, argsJson, toolTitle)
             com.openminis.app.tools.CheckpointRestoreTool.NAME -> executeCheckpointRestore(argsJson)
             com.openminis.app.tools.ApplyPatchTool.NAME ->
                 com.openminis.app.tools.ApplyPatchTool.execute(argsJson, fsSessionId, context)

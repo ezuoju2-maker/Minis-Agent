@@ -34,6 +34,7 @@
 | 改代码 | 一次编辑拆成若干 hunk，详情页逐段预览，勾掉哪段哪段就不生效，写盘后摘要回写消息记录 | `tools/patch/PatchSplitter.kt`<br>`ui/chat/ToolDiffCard.kt` |
 | 跑命令 | 按 `&&`、`\|\|`、`;`、`\|` 拆段，逐段取最宽超时；危险命令先弹卡片，拒了就把「换更安全的做法」回给模型 | `sandbox/ShellTimeoutPolicy.kt`<br>`agent/approval/*` |
 | 操作浏览器 | 基于可访问性树定位元素，只把变化的节点算进 diff，坐标和选择器两条路都能走 | `accessibility/ScreenTreeDiff.kt` |
+| 无头浏览器 | 沙箱内跑 Lightpanda（CDP），可导航、读取正文、点击、输入、执行 JS、截图；首次使用下载 74 MB 并校验 SHA-256 | `browser/lightpanda/*` |
 | 长期记忆 | 中文按单双字 bigram、英文按整词切分，BM25 与 128 维稀疏向量余弦按 0.65/0.35 融合，多路结果用 RRF 合并 | `memory/retrieval/HybridMemoryIndex.kt` |
 | 接 MCP | 统一网关 `mcp_call`，也可直接点名 `mcp__server__tool`；启动预热，单服务 20 个、全局 48 个工具封顶 | `tools/McpNativeTools.kt`<br>`tools/McpToolRegistry.kt` |
 | 拆子任务 | 委派给子代理执行，默认 60 轮，上下限 8–200，倒数 `max(3, cap/5)` 轮开始提醒收尾 | `agent/SubAgentBudgetPolicy.kt` |
@@ -133,6 +134,7 @@ An Android agent that executes on the device instead of in the cloud. The model 
 | Edit code | One edit is split into hunks, previewed per section, unchecked hunks never land; the summary is written back to the message record | `tools/patch/PatchSplitter.kt`<br>`ui/chat/ToolDiffCard.kt` |
 | Run commands | Segments split on `&&`, `\|\|`, `;`, `\|` each get the widest timeout; risky commands raise a card, a refusal sends "pick a safer route" back to the model | `sandbox/ShellTimeoutPolicy.kt`<br>`agent/approval/*` |
 | Drive a browser | Elements located through the accessibility tree, only changed nodes enter the diff, coordinates and selectors both work | `accessibility/ScreenTreeDiff.kt` |
+| Headless browser | Lightpanda over CDP inside the sandbox: navigate, read text, click, type, run JS, capture screenshots; first use downloads 74 MB and verifies SHA-256 | `browser/lightpanda/*` |
 | Remember facts | CJK split into unigrams and bigrams, Latin into words; BM25 fused with cosine over a 128-dim sparse vector at 0.65/0.35, lists merged with RRF | `memory/retrieval/HybridMemoryIndex.kt` |
 | Speak MCP | One gateway `mcp_call`, or call `mcp__server__tool` directly; prewarm on start, capped at 20 tools per server and 48 overall | `tools/McpNativeTools.kt`<br>`tools/McpToolRegistry.kt` |
 | Split work | Delegated sub-agents run 60 turns by default, floor 8 ceiling 200, warnings from `max(3, cap/5)` turns out | `agent/SubAgentBudgetPolicy.kt` |

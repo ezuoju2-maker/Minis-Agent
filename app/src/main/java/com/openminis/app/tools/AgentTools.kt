@@ -65,7 +65,10 @@ object AgentTools {
         if (supportsImageInput || visionGroupConfigured) {
             add(ReadImageTool.definition())
         }
-        if (browserEnabled) add(browserUseDefinition())
+        if (browserEnabled) {
+            add(browserUseDefinition())
+            add(com.openminis.app.browser.lightpanda.LightPandaTool.definition())
+        }
         if (memoryEnabled) {
             if (!isHelper) add(memoryWriteDefinition())
             add(memoryGetDefinition())
