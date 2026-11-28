@@ -59,6 +59,14 @@ object ApplyPatchTool {
             if (patchText.isBlank()) {
                 return ToolExecutionResult("Error: 'patch' is required", false, toolTitle = toolTitle)
             }
+            if (com.openminis.app.agent.guard.SandboxMode.get(context) ==
+                com.openminis.app.agent.guard.SandboxMode.READ_ONLY
+            ) {
+                return ToolExecutionResult(
+                    "Refused: the session sandbox mode is read-only, so patches are not applied.",
+                    false, toolTitle = toolTitle,
+                )
+            }
             val base = args.optString("base", "/var/minis/workspace").ifBlank { "/var/minis/workspace" }
             val dryRun = args.optBoolean("dry_run", false)
 

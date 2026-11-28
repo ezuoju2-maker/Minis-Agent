@@ -8048,6 +8048,34 @@ class ChatViewModel(
         return out
     }
 
+    private fun executeSandboxMode(argsJson: String): ToolExecutionResult {
+        val title = runCatching { JSONObject(argsJson).optString("tool_title", "Sandbox mode") }
+            .getOrDefault("Sandbox mode")
+        val args = try { JSONObject(argsJson) } catch (_: Exception) {
+            return ToolExecutionResult("Error: invalid arguments", false, toolTitle = title)
+        }
+        val action = args.optString("action", "show").trim().lowercase()
+        val current = com.openminis.app.agent.guard.SandboxMode.get(context)
+        if (action == "show" || action.isEmpty()) {
+            return ToolExecutionResult("Sandbox mode: ${current.id} — ${current.label()}.", true, toolTitle = title)
+        }
+        if (action != "set") return ToolExecutionResult("Error: unknown action \"$action\"", false, toolTitle = title)
+        val target = com.openminis.app.agent.guard.SandboxMode.parse(args.optString("mode", ""))
+            ?: return ToolExecutionResult(
+                "Error: `mode` must be read_only, workspace_write or full", false, toolTitle = title,
+            )
+        com.openminis.app.agent.guard.SandboxMode.set(context, target)
+        com.openminis.app.observability.TraceLog.record(
+            kind = "guard", name = "sandbox_mode", durationMs = 0, ok = true,
+            summary = "${current.id} -> ${target.id}",
+        )
+        return ToolExecutionResult(
+            "Sandbox mode switched to ${target.id} — ${target.label()}.",
+            true,
+            toolTitle = title,
+        )
+    }
+
     private fun executeAgentForge(argsJson: String): ToolExecutionResult {
         val title = runCatching { JSONObject(argsJson).optString("tool_title", "Forge sub agent") }
             .getOrDefault("Forge sub agent")
@@ -8217,6 +8245,18 @@ class ChatViewModel(
         toolTitle: String,
     ): ToolExecutionResult? {
         if (name != FileWriteTool.NAME && name != FileEditTool.NAME) return null
+        if (com.openminis.app.agent.guard.SandboxMode.get(context) == com.openminis.app.agent.guard.SandboxMode.READ_ONLY) {
+            com.openminis.app.observability.TraceLog.record(
+                kind = "guard", name = name, durationMs = 0, ok = false,
+                summary = "read-only mode refused $name",
+            )
+            return ToolExecutionResult(
+                "Refused: the session sandbox mode is read-only, so no file can be created or edited. " +
+                    "Report what you found; the user can switch to workspace-write to allow edits.",
+                false,
+                toolTitle = toolTitle,
+            )
+        }
         val path = try { JSONObject(argsJson).optString("path", "") } catch (_: Exception) { "" }
         if (path.isBlank()) return null
         val rootfsHost = try {
@@ -8337,6 +8377,7 @@ class ChatViewModel(
                 com.openminis.app.tools.ContinuityTools.executeHistoryRead(conversationRecords(), argsJson)
             com.openminis.app.tools.ContinuityTools.RUN_STATUS -> executeInspectRunStatus(argsJson)
             com.openminis.app.tools.AgentForgeTool.NAME -> executeAgentForge(argsJson)
+            com.openminis.app.tools.SandboxModeTool.NAME -> executeSandboxMode(argsJson)
             com.openminis.app.tools.SkillLoadTool.NAME -> {
                 val repo = skillRepository
                 if (repo == null) ToolExecutionResult("Error: Skills not available", false)
@@ -9252,6 +9293,18 @@ class ChatViewModel(
 
             if (command.isBlank()) {
                 return ToolExecutionResult("Error: 'command' is required", false, toolTitle = toolTitle)
+            }
+
+            val sandbox = com.openminis.app.agent.guard.SandboxGuard.assess(
+                com.openminis.app.agent.guard.SandboxMode.get(context),
+                command,
+            )
+            if (sandbox.blocked) {
+                AppLogger.warning("Sandbox", "shell refused by mode: ${command.take(160)}")
+                com.openminis.app.observability.TraceLog.record(
+                    kind = "guard", name = "shell_execute", durationMs = 0, ok = false, summary = sandbox.reason,
+                )
+                return ToolExecutionResult(sandbox.reason, false, toolTitle = toolTitle)
             }
 
             val commandRisk = com.openminis.app.tools.CommandRiskPolicy.assess(command)

@@ -80,6 +80,7 @@ object AgentTools {
             add(AgentForgeTool.definition())
         }
         if (!isHelper) add(TodoTools.definition())
+        if (!isHelper) add(SandboxModeTool.definition())
         add(ContinuityTools.searchDefinition())
         add(ContinuityTools.readDefinition())
         if (!isHelper) {
