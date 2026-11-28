@@ -57,6 +57,36 @@ class MemoryRecallTest {
     }
 
     @Test
+    fun `recall handles chinese queries without spaces`() {
+        val r = repo()
+        r.upsert("用户", "常用编辑器", "vim")
+        r.upsert("项目", "数据库", "postgres")
+        val out = r.recall("我平时用哪个编辑器")
+        assertTrue(out.contains("vim"))
+        assertTrue(!out.contains("postgres"))
+    }
+
+    @Test
+    fun `recallForPrompt matches chinese sentences`() {
+        val r = repo()
+        r.upsert("用户", "编程语言", "Kotlin")
+        r.upsert("用户", "早餐", "豆浆")
+        val out = r.recallForPrompt("我最近在写什么语言的项目")
+        assertTrue(out.contains("Kotlin"))
+        assertTrue(!out.contains("豆浆"))
+    }
+
+    @Test
+    fun `recallForPrompt sees facts written after the index was built`() {
+        val r = repo()
+        r.upsert("user", "editor", "vim")
+        r.recallForPrompt("editor")
+        r.upsert("user", "terminal", "kitty")
+        val out = r.recallForPrompt("terminal kitty")
+        assertTrue(out.contains("terminal = kitty"))
+    }
+
+    @Test
     fun `legacy search and topFacts unchanged by new API`() {
         val r = repo()
         r.upsert("user", "editor", "vim")

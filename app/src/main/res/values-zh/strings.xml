@@ -2534,4 +2534,5 @@
     <string name="github_device_waiting">等待你确认…</string>
     <string name="github_device_copied">已复制</string>
     <string name="github_token_invalid">GitHub 没有接受这个令牌</string>
+    <string name="backup_dest_details">服务器详情</string>
 </resources>

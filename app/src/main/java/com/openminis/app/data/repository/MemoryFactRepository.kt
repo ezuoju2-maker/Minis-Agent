@@ -1,6 +1,8 @@
 package com.openminis.app.data.repository
 
 import com.openminis.app.logging.AppLogger
+import com.openminis.app.memory.retrieval.HybridMemoryIndex
+import com.openminis.app.memory.retrieval.MemoryTokens
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
@@ -37,6 +39,17 @@ class MemoryFactRepository(private val memoryDir: File) {
     }
 
     private val lock = Any()
+
+    private val hybrid = HybridMemoryIndex(vectorDims = 96, lexicalWeight = 0.7)
+
+    private var hybridDirty = true
+
+    private fun syncHybridLocked(facts: List<Fact>) {
+        if (!hybridDirty && hybrid.size == facts.size) return
+        hybrid.clear()
+        for (f in facts) hybrid.upsert(f.key, "${f.subject} ${f.predicate} ${f.value}")
+        hybridDirty = false
+    }
 
 
     private fun loadAllLocked(): List<Fact> {
@@ -125,6 +138,7 @@ class MemoryFactRepository(private val memoryDir: File) {
             facts.add(Fact(s, p, v, sourceSessionId = sourceSessionId, createdAt = now, updatedAt = now))
         }
         persistLocked(facts)
+        hybridDirty = true
         "Fact remembered: $s · $p = $v"
     }
 
@@ -168,7 +182,7 @@ class MemoryFactRepository(private val memoryDir: File) {
     data class ScoredFact(val fact: Fact, val score: Double)
 
     fun recall(query: String, limit: Int = 10): String = synchronized(lock) {
-        val terms = query.trim().lowercase(Locale.US).split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val terms = MemoryTokens.of(query.trim())
         val facts = loadAllLocked()
         if (terms.isEmpty()) return@synchronized ""
 
@@ -205,23 +219,39 @@ class MemoryFactRepository(private val memoryDir: File) {
     fun recallForPrompt(query: String, limit: Int = 8, maxChars: Int = MAX_INJECT_CHARS): String =
         synchronized(lock) {
             if (query.isBlank()) return@synchronized topFacts(limit)
-            val terms = query.lowercase(Locale.US).split(Regex("\\s+")).filter { it.isNotEmpty() }
+            val facts = loadAllLocked()
+            if (facts.isEmpty()) return@synchronized ""
+            syncHybridLocked(facts)
             val now = System.currentTimeMillis()
-            loadAllLocked()
-                .filter { it.confidence >= 0.45f }
-                .map { f ->
-                    val hay = "${f.subject} ${f.predicate} ${f.value}".lowercase(Locale.US)
-                    val overlap = if (terms.isEmpty()) 1.0 else terms.count { hay.contains(it) }.toDouble() / terms.size
-                    f to (f.confidence * decayFactor(f.updatedAt, now) + overlap)
+            val byKey = facts.associateBy { it.key }
+            val ranked = hybrid.search(query, limit * 3, minScore = 0.0)
+                .mapNotNull { hit ->
+                    val f = byKey[hit.id] ?: return@mapNotNull null
+                    if (f.confidence < 0.45f) return@mapNotNull null
+                    f to (hit.score * f.confidence * decayFactor(f.updatedAt, now))
                 }
                 .sortedWith(compareByDescending<Pair<Fact, Double>> { it.second }.thenBy { it.first.key })
                 .take(limit)
                 .map { it.first }
-                .mapNotNull { f ->
-                    val line = "- ${f.subject}: ${f.predicate} = ${f.value}"
-                    line.takeIf { it.length <= maxChars }
-                }
-                .joinToString("\n")
+            val picked = if (ranked.isNotEmpty()) {
+                ranked
+            } else {
+                val terms = MemoryTokens.of(query)
+                if (terms.isEmpty()) return@synchronized topFacts(limit)
+                facts.filter { it.confidence >= 0.45f }
+                    .map { f ->
+                        val hay = "${f.subject} ${f.predicate} ${f.value}".lowercase(Locale.US)
+                        val overlap = terms.count { hay.contains(it) }.toDouble() / terms.size
+                        f to (f.confidence * decayFactor(f.updatedAt, now) + overlap)
+                    }
+                    .sortedWith(compareByDescending<Pair<Fact, Double>> { it.second }.thenBy { it.first.key })
+                    .take(limit)
+                    .map { it.first }
+            }
+            picked.mapNotNull { f ->
+                val line = "- ${f.subject}: ${f.predicate} = ${f.value}"
+                line.takeIf { it.length <= maxChars }
+            }.joinToString("\n")
         }
 
     private fun decayFactor(updatedAt: Long, now: Long): Double {

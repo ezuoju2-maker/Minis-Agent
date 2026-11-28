@@ -5650,7 +5650,7 @@ class ChatViewModel(
 
             decideUserAskExposureForRun(interactive = !headless, userAskAnswer = userAskAnswer)
             // [T-port-user-ask]
-            val baseSystemPrompt = buildSystemPrompt()
+            val baseSystemPrompt = buildSystemPrompt(trimmed)
             val systemPrompt = if ((provider as? com.openminis.app.provider.anthropic.AnthropicProvider)?.isOAuth == true) {
                 val prefix = com.openminis.app.auth.ClaudeOAuthManager.ANTHROPIC_OAUTH_IDENTIFIER_PROMPT
                 if (baseSystemPrompt?.startsWith(prefix) == true) baseSystemPrompt
@@ -10397,7 +10397,7 @@ class ChatViewModel(
             chatRepository.appendMessage(sid, role, partsJson).id
         }
 
-    private fun buildSystemPrompt(): String? {
+    private fun buildSystemPrompt(query: String = ""): String? {
         val today = java.time.LocalDate.now()
         val dateStr = today.format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
         val tzId = java.util.TimeZone.getDefault().id
@@ -10563,7 +10563,7 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
         val mcpFragment = mcpRepository?.mcpPromptFragment(activeSessionId)
         val globalMemoryFragment = if (memoryOn) memoryRepository?.loadGlobalMemoryFragment() else null
         val dailyMemoryFragment = if (memoryOn) memoryRepository?.loadRecentDailyMemoryFragment() else null
-        val factFragment = if (memoryOn) memoryFactRepository.topFacts() else ""
+        val factFragment = if (memoryOn) memoryFactRepository.recallForPrompt(query) else ""
         AppLogger.info(
             "XSessionDiag",
             "[XSessionDiag] prompt/memory: session=${activeSessionId.take(8)} " +
