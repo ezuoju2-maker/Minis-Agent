@@ -53,12 +53,12 @@ object AnthropicModelsApi {
                 .applyUserAgentOverride(customUserAgent)
 
             if (isOAuth) {
-                requestBuilder.header("Authorization", "Bearer $apiKey")
+                requestBuilder.header("Authorization", "Bearer ${com.openminis.app.provider.WireSanitize.token(apiKey)}")
                 requestBuilder.header("anthropic-beta", "oauth-2025-04-20")
             } else if (candidate != null) {
-                requestBuilder.header("Authorization", "Bearer $apiKey")
+                requestBuilder.header("Authorization", "Bearer ${com.openminis.app.provider.WireSanitize.token(apiKey)}")
             } else {
-                requestBuilder.header("x-api-key", apiKey)
+                requestBuilder.header("x-api-key", com.openminis.app.provider.WireSanitize.token(apiKey))
             }
 
             val request = requestBuilder.build()

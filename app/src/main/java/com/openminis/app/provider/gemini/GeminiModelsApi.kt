@@ -33,7 +33,7 @@ object GeminiModelsApi {
         val builder = Request.Builder()
         if (isOAuth) {
             builder.url("https://generativelanguage.googleapis.com/v1beta/models")
-            builder.header("Authorization", "Bearer $apiKey")
+            builder.header("Authorization", "Bearer ${com.openminis.app.provider.WireSanitize.token(apiKey)}")
         } else {
             builder.url("https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey")
         }

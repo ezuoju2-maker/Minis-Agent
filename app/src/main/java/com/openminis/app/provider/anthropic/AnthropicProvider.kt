@@ -761,13 +761,14 @@ class AnthropicProvider(
             builder.header("Anthropic-Dangerous-Direct-Browser-Access", "true")
         }
 
+        val safeKey = com.openminis.app.provider.WireSanitize.token(apiKey)
         if (isOAuth) {
-            builder.header("Authorization", "Bearer $apiKey")
-        } else if (apiKey.isEmpty()) {
+            builder.header("Authorization", "Bearer $safeKey")
+        } else if (safeKey.isEmpty()) {
         } else if (isCustomEndpoint) {
-            builder.header("Authorization", "Bearer $apiKey")
+            builder.header("Authorization", "Bearer $safeKey")
         } else {
-            builder.header("x-api-key", apiKey)
+            builder.header("x-api-key", safeKey)
         }
 
         builder.applyUserAgentOverride(

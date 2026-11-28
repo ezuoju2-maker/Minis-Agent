@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -102,8 +103,13 @@ class GeminiProvider(
         method: String,
         bodyFor: (ThinkingRuleResolver.GeminiThinkingFormat?) -> JSONObject,
     ): okhttp3.Response {
-        val separator = if ('?' in method) "&" else "?"
-        val url = "$basePath/models/${model.id}:$method${separator}key=$apiKey"
+        val rawUrl = "$basePath/models/${model.id}:$method"
+        val url = rawUrl.toHttpUrlOrNull()
+            ?.newBuilder()
+            ?.addQueryParameter("key", com.openminis.app.provider.WireSanitize.token(apiKey))
+            ?.build()
+            ?.toString()
+            ?: "$rawUrl${if ('?' in method) "&" else "?"}key=${com.openminis.app.provider.WireSanitize.queryEncoded(apiKey)}"
         fun post(body: JSONObject) = client.newCall(
             Request.Builder()
                 .url(url)

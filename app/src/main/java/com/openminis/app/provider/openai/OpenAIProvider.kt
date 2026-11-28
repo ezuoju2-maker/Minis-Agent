@@ -207,10 +207,12 @@ class OpenAIProvider private constructor(
     }
 
 
-    private fun Request.Builder.applyKeyAuth(token: String): Request.Builder =
-        if (token.isEmpty()) this
-        else if (isAzure) header("api-key", token)
-        else header("Authorization", "Bearer $token")
+    private fun Request.Builder.applyKeyAuth(token: String): Request.Builder {
+        val safe = com.openminis.app.provider.WireSanitize.token(token)
+        return if (safe.isEmpty()) this
+        else if (isAzure) header("api-key", safe)
+        else header("Authorization", "Bearer $safe")
+    }
 
     private fun azureUrl(path: String): String? {
         val raw = azureBase?.trim()?.takeIf { it.isNotEmpty() } ?: return null

@@ -154,7 +154,10 @@ data class ProviderInstance(
 ) {
     val effectiveBaseURL: String?
         get() {
-            val base = customBaseURL?.trimEnd('/') ?: return null
+            val trimmed = customBaseURL?.trim() ?: return null
+            if (trimmed.isEmpty()) return null
+            val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
+            val base = withScheme.trimEnd('/')
             return if (appendV1Suffix && !base.endsWith("/v1")) "$base/v1" else base
         }
 

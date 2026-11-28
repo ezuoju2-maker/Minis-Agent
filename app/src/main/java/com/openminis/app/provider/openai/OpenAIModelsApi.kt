@@ -101,7 +101,7 @@ object OpenAIModelsApi {
         val url = buildURL(baseURL)
         val request = Request.Builder()
             .url(url)
-            .header("Authorization", "Bearer $apiKey")
+            .header("Authorization", "Bearer ${com.openminis.app.provider.WireSanitize.token(apiKey)}")
             .applyUserAgentOverride(customUserAgent)
             .build()
 
