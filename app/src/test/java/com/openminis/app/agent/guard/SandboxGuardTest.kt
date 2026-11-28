@@ -27,6 +27,32 @@ class SandboxGuardTest {
     }
 
     @Test
+    fun readOnlyRefusesDownloadersAndArchivers() {
+        assertTrue(verdict(SandboxMode.READ_ONLY, "curl -o out.json https://api.example.com/x").blocked)
+        assertTrue(verdict(SandboxMode.READ_ONLY, "curl --output /tmp/a https://example.com").blocked)
+        assertTrue(verdict(SandboxMode.READ_ONLY, "wget -O pkg.tgz https://example.com/p.tgz").blocked)
+        assertTrue(verdict(SandboxMode.READ_ONLY, "unzip pack.zip -d out").blocked)
+        assertTrue(verdict(SandboxMode.READ_ONLY, "tar -xzf pack.tgz").blocked)
+        assertTrue(verdict(SandboxMode.READ_ONLY, "git clone https://example.com/r.git").blocked)
+        assertTrue(verdict(SandboxMode.READ_ONLY, "python -c \"open('x','w').write('1')\"").blocked)
+        assertTrue(verdict(SandboxMode.READ_ONLY, "pip download requests").blocked)
+    }
+
+    @Test
+    fun readOnlyAllowsPlainDownloadsAndNetworkReads() {
+        assertTrue(verdict(SandboxMode.READ_ONLY, "curl -s https://api.example.com/x").allowed)
+        assertTrue(verdict(SandboxMode.READ_ONLY, "wget -q -O- https://example.com/p").allowed)
+    }
+
+    @Test
+    fun workspaceWriteBlocksDownloadingIntoSystemPaths() {
+        assertTrue(verdict(SandboxMode.WORKSPACE_WRITE, "curl -o /usr/local/bin/x https://example.com").blocked)
+        assertTrue(verdict(SandboxMode.WORKSPACE_WRITE, "unzip pack.zip -d /etc").blocked)
+        assertTrue(verdict(SandboxMode.WORKSPACE_WRITE, "tar -xzf a.tgz -C /usr").blocked)
+        assertTrue(verdict(SandboxMode.WORKSPACE_WRITE, "curl -o out.json https://example.com").allowed)
+    }
+
+    @Test
     fun readOnlyAllowsReads() {
         assertTrue(verdict(SandboxMode.READ_ONLY, "cat README.md").allowed)
         assertTrue(verdict(SandboxMode.READ_ONLY, "ls -la /var/minis/workspace").allowed)

@@ -27,7 +27,14 @@ object SandboxGuard {
         Regex("""\b(?:pip|pip3|pipx|npm|pnpm|yarn|gem|composer)\s+(?:-\S+\s+)*(?:install|add|remove|uninstall|update)\b"""),
         Regex("""\b(?:cargo|go)\s+(?:install|get)\b"""),
         Regex("""\bfind\b[^\n]*\s(?:-delete|-exec\s+(?:rm|shred|truncate|dd))""" ),
-        Regex("""\bgit\s+(?:-\S+\s+)*(?:checkout|reset|clean|apply|merge|rebase|stash|commit)\b"""),
+        Regex("""\bgit\s+(?:-\S+\s+)*(?:checkout|reset|clean|apply|merge|rebase|stash|commit|clone|init|pull|fetch|restore|submodule)\b"""),
+        Regex("""\b(?:curl|wget)\b[^\n]*\s(?:-o|--output|-O|--output-document)\s*(?![\s-])\S+"""),
+        Regex("""\b(?:unzip|7z)\b[^\n]*\s(?:-d|--directory)\b"""),
+        Regex("""\btar\b[^\n]*(?:\s-x|--extract)"""),
+        Regex("""\b(?:python|python3|node|ruby|perl)\b[^\n]*(?:open\s*\(\s*[^\n]*['\"]w|writeFileSync|\.write\s*\()"""),
+        Regex("""\b(?:mkfifo|mknod)\b"""),
+        Regex("""\b(?:pip|pip3)\s+download\b"""),
+        Regex("""\b(?:cp|mv)\b[^\n]*\s(-t|--target-directory)\b"""),
     )
 
     private val SYSTEM_ROOTS = listOf(
