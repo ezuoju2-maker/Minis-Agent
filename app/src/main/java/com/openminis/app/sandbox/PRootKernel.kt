@@ -449,7 +449,8 @@ object PRootKernel {
 
     private val perSessionSubdirs = SessionMounts.SESSION_SUBDIRS.toSet()
 
-    fun resolveSessionHostPath(sessionId: String, linuxPath: String, context: Context): File? {
+    fun resolveSessionHostPath(sessionId: String, rawLinuxPath: String, context: Context): File? {
+        val linuxPath = normalizeLinuxPath(rawLinuxPath) ?: return null
         if (!linuxPath.startsWith("/var/minis/")) return resolveHostPath(linuxPath)
         val rest = linuxPath.removePrefix("/var/minis/")
         val slash = rest.indexOf('/')
@@ -460,7 +461,22 @@ object PRootKernel {
         return if (tail.isEmpty()) sessionBase else File(sessionBase, tail)
     }
 
-    fun resolveHostPath(linuxPath: String): File? {
+    fun normalizeLinuxPath(path: String): String? {
+        if (!path.startsWith("/")) return null
+        val parts = path.split('/')
+        val out = ArrayList<String>(parts.size)
+        for (part in parts) {
+            when {
+                part.isEmpty() || part == "." -> Unit
+                part == ".." -> if (out.isEmpty()) return null else out.removeAt(out.size - 1)
+                else -> out.add(part)
+            }
+        }
+        return "/" + out.joinToString("/")
+    }
+
+    fun resolveHostPath(rawLinuxPath: String): File? {
+        val linuxPath = normalizeLinuxPath(rawLinuxPath) ?: return null
         val sorted = bindMounts.keys.sortedByDescending { it.length }
         for (mountPoint in sorted) {
             if (linuxPath == mountPoint || linuxPath.startsWith("$mountPoint/")) {
