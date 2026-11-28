@@ -83,6 +83,19 @@ object ApplyPatchTool {
                         false, toolTitle = toolTitle,
                     )
                 }
+                val access = com.openminis.app.agent.guard.PathAccessPolicy.evaluate(linuxPath)
+                    if (access.blocked) {
+                        runCatching {
+                            com.openminis.app.observability.TraceLog.record(
+                                kind = "guard",
+                                name = NAME,
+                                durationMs = 0,
+                                ok = false,
+                                summary = "denied patch on $linuxPath (zone=${access.zone.label})",
+                            )
+                        }
+                        return ToolExecutionResult(access.reason, false, toolTitle = toolTitle)
+                    }
                 val exists = file.exists() && file.isFile
                 if (exists && file.length() > MAX_FILE_BYTES) {
                     return ToolExecutionResult(

@@ -8120,6 +8120,31 @@ class ChatViewModel(
         return fresh
     }
 
+    private fun guardWriteTarget(
+        name: String,
+        argsJson: String,
+        toolTitle: String,
+    ): ToolExecutionResult? {
+        if (name != FileWriteTool.NAME && name != FileEditTool.NAME) return null
+        val path = try { JSONObject(argsJson).optString("path", "") } catch (_: Exception) { "" }
+        if (path.isBlank()) return null
+        val rootfsHost = try {
+            com.openminis.app.sandbox.RootfsManager.getInstance(context).rootfsDir.absolutePath
+        } catch (_: Exception) {
+            null
+        }
+        val verdict = com.openminis.app.agent.guard.PathAccessPolicy.evaluate(path, rootfsHost)
+        if (!verdict.blocked) return null
+        com.openminis.app.observability.TraceLog.record(
+            kind = "guard",
+            name = name,
+            durationMs = 0,
+            ok = false,
+            summary = "denied write to $path (zone=${verdict.zone.label})",
+        )
+        return ToolExecutionResult(verdict.reason, false, toolTitle = toolTitle)
+    }
+
     private suspend fun executeTool(
         name: String,
         argsJson: String,
@@ -8135,6 +8160,8 @@ class ChatViewModel(
         ) {
             return executeMcpCall(name, argsJson, toolId, toolBlocks, assistantId, currentText)
         }
+
+        guardWriteTarget(name, argsJson, toolTitle)?.let { return it }
 
         return when (name) {
             FileReadTool.NAME -> {
@@ -9925,6 +9952,14 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
 
         return buildString {
             append(base)
+            append("\n\n")
+            append(
+                "File access guard: file_write, file_edit and apply_patch may only write under " +
+                    com.openminis.app.agent.guard.PathAccessPolicy.writableRoots() +
+                    ". Writes to system directories (/etc, /usr/bin, /proc, /sys, /dev, /var/lib …) are refused " +
+                    "before anything touches disk — install or change system files through shell_execute and a " +
+                    "package manager instead.",
+            )
             if (skillFragment != null) {
                 append("\n\n")
                 append(skillFragment)
