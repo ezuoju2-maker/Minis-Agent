@@ -40,6 +40,9 @@ abstract class OAuthManager(
             .readTimeout(15, TimeUnit.SECONDS)
             .build()
 
+        internal fun stateMatches(expected: String?, provided: String?): Boolean =
+            !expected.isNullOrBlank() && provided == expected
+
         fun sanitizeBody(body: String, maxLen: Int = 300): String {
             val masked = Regex(
                 "\"(access_token|refresh_token|id_token|api_key|key|client_secret|device_code|user_code|code_verifier)\"\\s*:\\s*\"[^\"]*\"",
@@ -169,8 +172,8 @@ abstract class OAuthManager(
                 kotlinx.coroutines.GlobalScope.launch(Dispatchers.Main) { onComplete(false) }
             },
         ) { code, state ->
-            if (state != null && state != currentState) {
-                Log.w(TAG, "State mismatch")
+            if (!stateMatches(currentState, state)) {
+                Log.w(TAG, "State missing or mismatched — refusing the callback")
                 onComplete(false)
                 return@OAuthCallbackServer
             }

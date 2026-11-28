@@ -40,10 +40,11 @@ class WebViewHolder(
         settings.domStorageEnabled = true
         settings.allowFileAccess = true
         settings.allowContentAccess = true
+        val fromFile = com.openminis.app.preview.LocalHtmlTrust.fileAccessFlags(initialUrl)
         @Suppress("DEPRECATION")
-        settings.allowFileAccessFromFileURLs = true
+        settings.allowFileAccessFromFileURLs = fromFile.first
         @Suppress("DEPRECATION")
-        settings.allowUniversalAccessFromFileURLs = true
+        settings.allowUniversalAccessFromFileURLs = fromFile.second
         settings.useWideViewPort = true
         settings.loadWithOverviewMode = true
         mobileUserAgent = settings.userAgentString

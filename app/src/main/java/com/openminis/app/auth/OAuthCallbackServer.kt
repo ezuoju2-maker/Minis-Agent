@@ -148,7 +148,7 @@ class OAuthCallbackServer(
                         try {
                             val ss = ServerSocket()
                             ss.reuseAddress = true
-                            ss.bind(java.net.InetSocketAddress(p))
+                            ss.bind(java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), p))
                             serverSocket = ss
                             boundPort = p
                             bound = true
