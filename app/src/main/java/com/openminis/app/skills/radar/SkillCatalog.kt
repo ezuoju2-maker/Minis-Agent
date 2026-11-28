@@ -36,8 +36,8 @@ data class SkillCandidate(
 
         fun of(repo: String, branch: String, path: String, official: Boolean): SkillCandidate {
             val dir = path.substringBeforeLast('/', "")
-            val name = dir.substringAfterLast('/', "").ifEmpty { repo.substringAfterLast('/') }
-                .replace('-', ' ').replace('_', ' ').trim()
+            val seg = dir.substringAfterLast('/', dir).ifEmpty { repo.substringAfterLast('/', repo) }
+            val name = seg.replace('-', ' ').replace('_', ' ').trim()
             return SkillCandidate(
                 id = idOf(repo, path),
                 name = name,

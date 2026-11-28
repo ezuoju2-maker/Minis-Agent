@@ -67,6 +67,13 @@ class SkillMatcherTest {
     }
 
     @Test
+    fun topLevelSkillKeepsItsDirectoryName() {
+        assertEquals("pdf", SkillCandidate.of("anthropics/skills", "main", "pdf/SKILL.md", false).name)
+        assertEquals("x", SkillCandidate.of("a/b", "main", "deep/x/SKILL.md", false).name)
+        assertEquals("b", SkillCandidate.of("a/b", "main", "SKILL.md", false).name)
+    }
+
+    @Test
     fun idIsStableAndReadable() {
         assertEquals("anthropics/skills/pdf", pdf.id)
         assertEquals("https://github.com/anthropics/skills/blob/main/pdf/SKILL.md", pdf.url)
