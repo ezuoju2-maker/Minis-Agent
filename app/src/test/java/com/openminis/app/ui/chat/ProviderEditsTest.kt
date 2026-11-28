@@ -16,6 +16,7 @@ class ProviderEditsTest {
         providerType = ProviderType.openAI,
         credentialType = ProviderCredential.apiKey,
         useResponsesAPI = responses,
+        createdAt = 1L,
     )
 
     @Test
