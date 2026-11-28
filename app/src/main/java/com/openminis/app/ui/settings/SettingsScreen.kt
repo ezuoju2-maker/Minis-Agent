@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.BatteryFull
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Dashboard
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Extension
@@ -98,6 +99,7 @@ fun SettingsScreen(
     onAgentsClick: () -> Unit = {},
     onAgentToolsClick: () -> Unit = {},
     onMcpClick: () -> Unit = {},
+    onGitHubClick: () -> Unit = {},
     onSoulClick: () -> Unit = {},
     onPermissionsClick: () -> Unit = {},
     onUsageClick: () -> Unit = {},
@@ -223,6 +225,13 @@ fun SettingsScreen(
                     title = stringResource(R.string.settings_mcp),
                     subtitle = stringResource(R.string.settings_mcp_subtitle),
                     onClick = onMcpClick,
+                )
+                SettingsItem(
+                    icon = Icons.Outlined.Code,
+                    iconColor = Color(0xFF1F2328),
+                    title = stringResource(R.string.settings_github),
+                    subtitle = stringResource(R.string.settings_github_subtitle),
+                    onClick = onGitHubClick,
                 )
                 SettingsItem(
                     icon = Icons.Outlined.Terminal,

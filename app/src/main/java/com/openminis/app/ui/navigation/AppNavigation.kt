@@ -70,6 +70,7 @@ import com.openminis.app.data.repository.SkillRepository
 import com.openminis.app.ui.settings.LogDetailScreen
 import com.openminis.app.ui.settings.LogManagementScreen
 import com.openminis.app.ui.settings.MemoryFileEditScreen
+import com.openminis.app.ui.settings.GitHubConnectScreen
 import com.openminis.app.ui.settings.MemoryManagementScreen
 import com.openminis.app.ui.settings.OffloadPermissionScreen
 import com.openminis.app.ui.settings.ShizukuPermissionScreen
@@ -152,6 +153,7 @@ object Routes {
     const val SUB_AGENT_DETAIL = "sub_agent/{agentId}"
     const val AGENT_TOOLS = "agent_tools"
     const val MCP = "mcp"
+    const val GITHUB = "github_connector"
     const val SOUL = "soul"
     const val MEMORY_FILE_EDIT = "memory_file/{fileName}/{isGlobal}"
     const val PERMISSIONS = "permissions"
@@ -436,6 +438,7 @@ fun AppNavigation(
                 onAgentsClick = { navController.safeNavigate(Routes.AGENTS) },
                 onAgentToolsClick = { navController.safeNavigate(Routes.AGENT_TOOLS) },
                 onMcpClick = { navController.safeNavigate(Routes.MCP) },
+                onGitHubClick = { navController.safeNavigate(Routes.GITHUB) },
                 onSoulClick = { navController.safeNavigate(Routes.SOUL) },
                 onPermissionsClick = { navController.safeNavigate(Routes.PERMISSIONS) },
                 onUsageClick = { navController.safeNavigate(Routes.USAGE_STATS) },
@@ -1123,6 +1126,10 @@ fun AppNavigation(
                     envVarRepository = envVarRepository,
                 )
             }
+        }
+
+        composable(Routes.GITHUB) {
+            GitHubConnectScreen(onBack = { navController.safePopBackStack() })
         }
 
         composable(Routes.SOUL) {

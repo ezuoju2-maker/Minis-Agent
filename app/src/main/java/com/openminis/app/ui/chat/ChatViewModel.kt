@@ -5338,7 +5338,7 @@ class ChatViewModel(
                 )
             }
             "logout" -> {
-                auth.clear()
+                auth.disconnect()
                 ToolExecutionResult("Disconnected. GitHub calls now run anonymously (60 requests/hour).", true, toolTitle = title)
             }
             "status" -> {
@@ -5346,7 +5346,10 @@ class ChatViewModel(
                 if (session == null) {
                     ToolExecutionResult(
                         "GitHub is not connected yet — public calls only, 60 requests/hour.\n" +
-                            "To connect: ask the user for a token. Create one at GitHub → Settings → Developer " +
+                            "Best path: tell the user to open Settings → GitHub and tap Connect GitHub — that runs " +
+                            "the device flow (a code plus a link they can open on this or another phone), and the " +
+                            "token never passes through the chat.\n" +
+                            "Fallback: ask the user for a token. Create one at GitHub → Settings → Developer " +
                             "settings → Personal access tokens (classic) with these scopes for maximum access: " +
                             com.openminis.app.github.GitHubAuth.MAX_SCOPES_HINT +
                             ". Then call github action=login token=<token>. Fine-grained tokens work too; pick the " +

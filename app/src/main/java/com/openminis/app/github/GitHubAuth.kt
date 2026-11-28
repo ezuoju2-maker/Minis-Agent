@@ -44,6 +44,32 @@ class GitHubAuth(context: Context) {
             .apply()
     }
 
+    fun disconnect() {
+        prefs().edit()
+            .remove(KEY_TOKEN)
+            .remove(KEY_LOGIN)
+            .remove(KEY_NAME)
+            .remove(KEY_SCOPES)
+            .remove(KEY_KIND)
+            .remove(KEY_SAVED_AT)
+            .apply()
+    }
+
+    fun clientId(): String = prefs().getString(KEY_CLIENT_ID, null)
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: GitHubDeviceFlow.DEFAULT_CLIENT_ID
+
+    fun usesDefaultClientId(): Boolean =
+        prefs().getString(KEY_CLIENT_ID, null)?.trim().isNullOrEmpty()
+
+    fun saveClientId(value: String) {
+        val trimmed = value.trim()
+        prefs().edit().apply {
+            if (trimmed.isEmpty()) remove(KEY_CLIENT_ID) else putString(KEY_CLIENT_ID, trimmed)
+        }.apply()
+    }
+
     fun clear() = prefs().edit().clear().apply()
 
     companion object {
@@ -54,6 +80,7 @@ class GitHubAuth(context: Context) {
         private const val KEY_SCOPES = "github.scopes"
         private const val KEY_KIND = "github.kind"
         private const val KEY_SAVED_AT = "github.savedAt"
+        private const val KEY_CLIENT_ID = "github.clientId"
 
         const val MAX_SCOPES_HINT =
             "repo, workflow, admin:org, admin:repo_hook, admin:public_key, admin:gpg_key, " +
