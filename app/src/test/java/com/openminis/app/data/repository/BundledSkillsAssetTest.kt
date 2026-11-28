@@ -1,7 +1,5 @@
 package com.openminis.app.data.repository
 
-import android.content.Context
-import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -13,7 +11,7 @@ import org.robolectric.RobolectricTestRunner
 class BundledSkillsAssetTest {
 
     private val assets: android.content.res.AssetManager =
-        ApplicationProvider.getApplicationContext<Context>().assets
+        org.robolectric.RuntimeEnvironment.getApplication().assets
 
     private fun folders(): List<String> =
         assets.list("bundled_skills").orEmpty().filter { it != "LICENSE-mattpocock-skills.txt" }.sorted()
