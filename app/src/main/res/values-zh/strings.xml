@@ -2564,4 +2564,6 @@
     <string name="learning_state_learning">出现 %1$d 次 · 用过 %2$d 次</string>
     <string name="settings_learning">自学笔记</string>
     <string name="settings_learning_subtitle">四本账，看它到底记住了什么</string>
+    <string name="skill_enable_bundled_all">一键启用全部内置技能</string>
+    <string name="skill_enable_bundled_all_subtitle">已安装 %1$d 个内置技能但处于关闭状态，点一下全部启用。</string>
 </resources>

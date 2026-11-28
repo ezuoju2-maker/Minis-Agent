@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.ChatBubble
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Language
@@ -229,6 +230,17 @@ fun SkillsManagementScreen(
             header = stringResource(R.string.skill_section_installed),
             footer = stringResource(R.string.skill_section_footer),
         ) {
+            val disabledBundled = skills.filter {
+                it.importSource == SkillRepository.ImportSource.BUNDLED && !it.isEnabled
+            }
+            if (disabledBundled.isNotEmpty() && searchQuery.isBlank()) {
+                SettingsRow(
+                    title = stringResource(R.string.skill_enable_bundled_all),
+                    subtitle = stringResource(R.string.skill_enable_bundled_all_subtitle, disabledBundled.size),
+                    icon = Icons.Outlined.Bolt,
+                    onClick = { disabledBundled.forEach { skillRepository.setEnabled(it.id, true) } },
+                )
+            }
             if (skills.isEmpty()) {
                 Column(
                     modifier = Modifier

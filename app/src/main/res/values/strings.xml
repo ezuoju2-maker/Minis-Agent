@@ -2618,4 +2618,6 @@
     <string name="learning_state_learning">seen %1$d× · used %2$d×</string>
     <string name="settings_learning">Learning notebook</string>
     <string name="settings_learning_subtitle">Four journals — see exactly what it remembered</string>
+    <string name="skill_enable_bundled_all">Enable all bundled skills</string>
+    <string name="skill_enable_bundled_all_subtitle">%1$d bundled skills are installed but off. Tap to enable them all.</string>
 </resources>
