@@ -5108,6 +5108,97 @@ class ChatViewModel(
         return fragment
     }
 
+    @Volatile private var lessonFor: String? = null
+    @Volatile private var lessonBlock: String? = null
+
+    private fun lessonPromptSection(): String? {
+        val text = skillScoutText ?: return null
+        if (text == lessonFor) return lessonBlock
+        val store = com.openminis.app.agent.learning.LessonStore(context)
+        val block = buildString {
+            val lessons = store.search(text, 4)
+            if (lessons.isNotEmpty()) {
+                append("Learned corrections from earlier sessions — follow them silently, without reciting them:\n")
+                lessons.forEach { append("- ").append(it.text.take(140)).append('\n') }
+                store.markUsed(lessons)
+            }
+            if (com.openminis.app.agent.learning.CorrectionDetector.detect(text)) {
+                if (isNotEmpty()) append('\n')
+                append(com.openminis.app.agent.learning.CorrectionDetector.nudge())
+            }
+        }
+        lessonFor = text
+        lessonBlock = block.ifEmpty { null }
+        return lessonBlock
+    }
+
+    private fun executeLessonWrite(argsJson: String): ToolExecutionResult {
+        val title = runCatching { JSONObject(argsJson).optString("tool_title", "Lesson") }
+            .getOrDefault("Lesson")
+        val args = try { JSONObject(argsJson) } catch (_: Exception) {
+            return ToolExecutionResult("Error: invalid arguments", false, toolTitle = title)
+        }
+        val store = com.openminis.app.agent.learning.LessonStore(context)
+        val action = args.optString("action", "write").trim().lowercase()
+        return when (action) {
+            "write", "" -> {
+                val text = args.optString("text", "").trim()
+                if (text.isEmpty()) {
+                    return ToolExecutionResult(
+                        "Error: `text` is required — one imperative rule, ≤120 chars.",
+                        false, toolTitle = title,
+                    )
+                }
+                val tags = args.optJSONArray("tags")?.let { arr ->
+                    (0 until arr.length()).mapNotNull { arr.optString(it, null) }.filter { it.isNotBlank() }
+                } ?: emptyList()
+                val saved = store.add(text, tags)
+                    ?: return ToolExecutionResult(
+                        "Error: lesson must be 3–240 characters of plain text.",
+                        false, toolTitle = title,
+                    )
+                com.openminis.app.observability.TraceLog.record(
+                    kind = "learning", name = "lesson_write", durationMs = 0, ok = true,
+                    summary = "save ${saved.id}: ${saved.text.take(60)}",
+                )
+                ToolExecutionResult(
+                    "Saved lesson #${saved.id} (confidence ${"%.2f".format(saved.confidence)}, " +
+                        "${store.all().size} total). It will be recalled automatically next time the topic comes up.",
+                    true, toolTitle = title,
+                )
+            }
+            "list" -> {
+                val lessons = store.all().sortedByDescending { it.confidence }
+                if (lessons.isEmpty()) {
+                    ToolExecutionResult("The notebook is empty — nothing has been learned yet.", true, toolTitle = title)
+                } else {
+                    val body = buildString {
+                        append("Learned lessons (").append(lessons.size).append("):\n")
+                        lessons.take(40).forEach { l ->
+                            append("- #").append(l.id).append(" (").append("%.2f".format(l.confidence))
+                            if (l.tags.isNotEmpty()) append(", ").append(l.tags.joinToString("/"))
+                            append(") ").append(l.text).append('\n')
+                        }
+                    }
+                    ToolExecutionResult(body.trimEnd(), true, toolTitle = title)
+                }
+            }
+            "forget" -> {
+                val target = args.optString("id", "").trim().ifEmpty { args.optString("text", "").trim() }
+                if (target.isEmpty()) {
+                    return ToolExecutionResult("Error: give `id` or `text` to forget.", false, toolTitle = title)
+                }
+                val ok = store.forget(target)
+                ToolExecutionResult(
+                    if (ok) "Forgot \"${target.take(60)}\". Remaining: ${store.all().size}."
+                    else "No lesson matched \"${target.take(60)}\". Try action=list.",
+                    ok, toolTitle = title,
+                )
+            }
+            else -> ToolExecutionResult("Error: unknown action \"$action\".", false, toolTitle = title)
+        }
+    }
+
     private fun warmSkillRadar() {
         val repo = skillRepository ?: return
         if (skillRadarWarmupStarted) return
@@ -8516,6 +8607,7 @@ class ChatViewModel(
             com.openminis.app.tools.AgentForgeTool.NAME -> executeAgentForge(argsJson)
             com.openminis.app.tools.SandboxModeTool.NAME -> executeSandboxMode(argsJson)
             com.openminis.app.tools.FindSkillsTool.NAME -> executeFindSkills(argsJson)
+            com.openminis.app.tools.LessonTool.NAME -> executeLessonWrite(argsJson)
             com.openminis.app.tools.SkillLoadTool.NAME -> {
                 val repo = skillRepository
                 if (repo == null) ToolExecutionResult("Error: Skills not available", false)
@@ -10252,11 +10344,18 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
                     "refreshes itself every 24 hours, and keeps discovering new GitHub skill repos on its own " +
                     "(including WorkBuddy / OpenClaw community packs). After installing, skill_load the skill to " +
                     "follow its steps. You install on your own initiative the moment a task needs a capability " +
-                    "you do not have — the user never has to ask whether a skill exists.",
+                    "you do not have — the user never has to ask whether a skill exists.\n\n" +
+                    "Self-improvement: when the user corrects you, states a standing rule, or points out that " +
+                    "you repeated an old mistake, call lesson_write with ONE imperative sentence; lessons are " +
+                    "recalled automatically on similar tasks later, so apply them silently instead of reciting them.",
             )
             skillScoutLine()?.let { line ->
                 append("\n\n")
                 append(line)
+            }
+            lessonPromptSection()?.let { section ->
+                append("\n\n")
+                append(section)
             }
             if (skillFragment != null) {
                 append("\n\n")

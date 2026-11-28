@@ -92,6 +92,7 @@ object AgentTools {
             add(SkillLoadTool.definition())
         }
         if (!isHelper) add(SkillSaveTool.definition())
+        if (!isHelper) add(LessonTool.definition())
         add(McpNativeTools.gatewayDefinition())
         mcpTools.forEach { add(it) }
         if (!isHelper) add(com.openminis.app.tools.CheckpointRestoreTool.definition())
