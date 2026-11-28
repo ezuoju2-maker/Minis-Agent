@@ -61,8 +61,12 @@ object SessionExporter {
     fun baseName(sessions: List<ChatSessionEntity>): String {
         val single = sessions.singleOrNull()
         if (single != null) {
-            val title = single.title?.take(60)?.replace("/", "-")?.replace(":", "-")
-            if (!title.isNullOrBlank()) return title
+            val cleaned = single.title
+                ?.take(60)
+                ?.replace(Regex("[\\/:*?\"<>|\n\r\t]"), "-")
+                ?.trim()
+                ?.trim('.', ' ', '-')
+            if (!cleaned.isNullOrBlank()) return cleaned
         }
         return "minis-sessions-${sessions.size}"
     }
