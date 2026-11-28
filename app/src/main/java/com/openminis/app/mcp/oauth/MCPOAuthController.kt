@@ -182,7 +182,7 @@ class MCPOAuthController(
                 Callback.Cancelled -> return@withContext Result.Cancelled
                 is Callback.Code -> callback
             }
-            if (answer.state != null && answer.state != pkce.state) {
+            if (answer.state.isNullOrBlank() || answer.state != pkce.state) {
                 AppLogger.warning(TAG, "[Authorize] '$server' state mismatch")
                 return@withContext Result.Failed("State mismatch in the OAuth callback.")
             }

@@ -185,11 +185,16 @@ fun AddProviderScreen(
 
 private val providerDisplayOrder = listOf(
     ProviderType.openAI,
+    ProviderType.openAIResponses,
     ProviderType.anthropic,
     ProviderType.gemini,
     ProviderType.xAI,
     ProviderType.kimiCode,
+    ProviderType.minimaxCode,
+    ProviderType.qoder,
+    ProviderType.workBuddy,
     ProviderType.openRouter,
+    ProviderType.githubCopilot,
 )
 
 
@@ -239,7 +244,7 @@ private fun ChooseProviderScreen(
         onBack = onBack,
     ) {
         val context = LocalContext.current
-        val offeredTypes = providerDisplayOrder + ProviderType.githubCopilot
+        val offeredTypes = providerDisplayOrder
         SettingsSection(
             header = stringResource(R.string.add_provider_choose_provider),
             footer = stringResource(R.string.add_provider_you_can_add_multiple_instances_of_the_sa),
