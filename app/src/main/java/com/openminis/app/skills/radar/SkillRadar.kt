@@ -22,10 +22,16 @@ class SkillRadar(
     private fun prefs() = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     private fun get(url: String, timeoutMs: Int = 20_000): String? = try {
+        val headers = buildMap {
+            put("User-Agent", UA)
+            put("Accept", "application/vnd.github+json")
+            com.openminis.app.github.GitHubAuth.token(context)?.takeIf { it.isNotBlank() }
+                ?.let { put("Authorization", "Bearer $it") }
+        }
         NetworkUrlRequest.open(
             NetworkHttp.DEFAULT_TAG,
             url,
-            headers = mapOf("User-Agent" to UA, "Accept" to "application/vnd.github+json"),
+            headers = headers,
             connectTimeoutMs = 8_000,
             readTimeoutMs = timeoutMs,
         ).use { r -> if (r.code in 200..299) r.text() else null }

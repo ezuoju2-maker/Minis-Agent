@@ -5292,6 +5292,152 @@ class ChatViewModel(
         }
     }
 
+    private suspend fun executeGitHub(argsJson: String): ToolExecutionResult = withContext(Dispatchers.IO) {
+        val title = runCatching { JSONObject(argsJson).optString("tool_title", "GitHub") }
+            .getOrDefault("GitHub")
+        val args = try { JSONObject(argsJson) } catch (_: Exception) {
+            return@withContext ToolExecutionResult("Error: invalid arguments", false, toolTitle = title)
+        }
+        val auth = com.openminis.app.github.GitHubAuth(context)
+        when (val action = args.optString("action", "status").trim().lowercase()) {
+            "login" -> {
+                val token = args.optString("token", "").trim()
+                if (token.isEmpty()) {
+                    return@withContext ToolExecutionResult(
+                        "Error: `token` is required. Ask the user to create a GitHub token (Settings → Developer " +
+                            "settings → Personal access tokens) with the scopes they want: " +
+                            com.openminis.app.github.GitHubAuth.MAX_SCOPES_HINT,
+                        false, toolTitle = title,
+                    )
+                }
+                val reply = com.openminis.app.github.GitHubApi(token).request("GET", "/user")
+                if (!reply.ok) {
+                    val reason = if (reply.code == 401) "the token was rejected (401)" else "HTTP ${reply.code}"
+                    return@withContext ToolExecutionResult(
+                        "Error: GitHub did not accept the token — $reason. It may be expired, revoked, or " +
+                            "copied incompletely.",
+                        false, toolTitle = title,
+                    )
+                }
+                val user = runCatching { JSONObject(reply.body) }.getOrNull()
+                val login = user?.optString("login", "") ?: ""
+                val name = user?.optString("name", "") ?: ""
+                val scopes = reply.scopes.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                val kind = if (token.startsWith("github_pat_")) "fine-grained" else "classic"
+                auth.save(token, login, name, scopes, kind)
+                com.openminis.app.observability.TraceLog.record(
+                    kind = "github", name = "login", durationMs = 0, ok = true,
+                    summary = "connected @${login} (${kind}, ${scopes.size} scopes)",
+                )
+                ToolExecutionResult(
+                    "Connected to GitHub as @${login.ifEmpty { "unknown" }}" +
+                        (if (name.isNotEmpty()) " ($name)" else "") + " · $kind token" +
+                        (if (scopes.isEmpty()) ", scopes hidden by GitHub" else ", scopes: ${scopes.joinToString(", ")}") +
+                        ". The connector now acts with all of this token's permissions.",
+                    true, toolTitle = title,
+                )
+            }
+            "logout" -> {
+                auth.clear()
+                ToolExecutionResult("Disconnected. GitHub calls now run anonymously (60 requests/hour).", true, toolTitle = title)
+            }
+            "status" -> {
+                val session = auth.session()
+                if (session == null) {
+                    ToolExecutionResult(
+                        "GitHub is not connected yet — public calls only, 60 requests/hour.\n" +
+                            "To connect: ask the user for a token. Create one at GitHub → Settings → Developer " +
+                            "settings → Personal access tokens (classic) with these scopes for maximum access: " +
+                            com.openminis.app.github.GitHubAuth.MAX_SCOPES_HINT +
+                            ". Then call github action=login token=<token>. Fine-grained tokens work too; pick the " +
+                            "repository permissions and org permissions needed.",
+                        false, toolTitle = title,
+                    )
+                } else {
+                    val rate = com.openminis.app.github.GitHubApi(session.token).request("GET", "/rate_limit")
+                    val core = runCatching {
+                        JSONObject(rate.body).optJSONObject("resources")?.optJSONObject("core")
+                    }.getOrNull()
+                    val remaining = core?.optInt("remaining", -1) ?: -1
+                    val limit = core?.optInt("limit", -1) ?: -1
+                    ToolExecutionResult(
+                        "Connected as @${session.login.ifEmpty { "unknown" }}" +
+                            (if (session.name.isNotEmpty()) " (${session.name})" else "") + " · ${session.kind} token" +
+                            (if (session.scopes.isEmpty()) ", scopes hidden (fine-grained)"
+                            else ", scopes: ${session.scopes.joinToString(", ")}") +
+                            (if (limit > 0) " · rate $remaining/$limit per hour" else "") +
+                            ". Token stored encrypted on this device; logout clears it.",
+                        true, toolTitle = title,
+                    )
+                }
+            }
+            "api" -> {
+                val method = args.optString("method", "GET").trim().uppercase().ifEmpty { "GET" }
+                val path = args.optString("path", "").trim()
+                if (path.isEmpty()) {
+                    return@withContext ToolExecutionResult("Error: `path` is required, e.g. /user or /repos/owner/name.",
+                        false, toolTitle = title)
+                }
+                if (com.openminis.app.github.GitHubApi.isRepoDelete(path, method) && !args.optBoolean("confirm", false)) {
+                    return@withContext ToolExecutionResult(
+                        "Refused: deleting a repository is irreversible. Ask the user to confirm explicitly, then " +
+                            "call again with confirm=true.",
+                        false, toolTitle = title,
+                    )
+                }
+                val body = args.optString("body", "").trim().ifBlank { null }
+                if (body != null) {
+                    val bad = com.openminis.app.github.GitHubApi.invalidBody(body)
+                    if (bad != null) {
+                        return@withContext ToolExecutionResult(
+                            "Error: $bad — pass a JSON object/array string.",
+                            false, toolTitle = title,
+                        )
+                    }
+                }
+                val session = auth.session()
+                val reply = com.openminis.app.github.GitHubApi(session?.token).request(method, path, body)
+                com.openminis.app.observability.TraceLog.record(
+                    kind = "github", name = "api", durationMs = 0, ok = reply.ok,
+                    summary = "$method $path -> ${reply.code}",
+                )
+                ToolExecutionResult(
+                    com.openminis.app.github.GitHubApi.summarize(reply) + hintFor(reply, session != null),
+                    reply.ok, toolTitle = title,
+                )
+            }
+            "graphql" -> {
+                val query = args.optString("query", "").trim()
+                if (query.isEmpty()) {
+                    return@withContext ToolExecutionResult("Error: `query` is required for GraphQL.", false, toolTitle = title)
+                }
+                val session = auth.session()
+                    ?: return@withContext ToolExecutionResult("Error: GraphQL needs a connected token — action=login first.",
+                        false, toolTitle = title)
+                val payload = JSONObject().put("query", query).toString()
+                val reply = com.openminis.app.github.GitHubApi(session.token).request("POST", "/graphql", payload)
+                com.openminis.app.observability.TraceLog.record(
+                    kind = "github", name = "graphql", durationMs = 0, ok = reply.ok,
+                    summary = "query ${query.take(40)} -> ${reply.code}",
+                )
+                ToolExecutionResult(
+                    com.openminis.app.github.GitHubApi.summarize(reply) + hintFor(reply, true),
+                    reply.ok, toolTitle = title,
+                )
+            }
+            else -> ToolExecutionResult("Error: unknown action \"$action\".", false, toolTitle = title)
+        }
+    }
+
+    private fun hintFor(reply: com.openminis.app.github.GitHubApi.Reply, connected: Boolean): String = when {
+        reply.code == 401 -> "\n(token rejected — ask the user to reconnect with github action=login)"
+        reply.code == 403 && reply.rateRemaining == "0" ->
+            "\n(hourly rate limit exhausted" + (if (connected) " for this token" else " for anonymous calls") +
+                " — wait for the reset or connect a token)"
+        reply.code == 404 -> "\n(nothing there: wrong owner/repo/path, or the token cannot see it)"
+        else -> ""
+    }
+
     private fun warmSkillRadar() {
         val repo = skillRepository ?: return
         if (skillRadarWarmupStarted) return
@@ -8705,6 +8851,7 @@ class ChatViewModel(
             com.openminis.app.tools.SandboxModeTool.NAME -> executeSandboxMode(argsJson)
             com.openminis.app.tools.FindSkillsTool.NAME -> executeFindSkills(argsJson)
             com.openminis.app.tools.LessonTool.NAME -> executeLessonWrite(argsJson)
+            com.openminis.app.tools.GitHubTool.NAME -> executeGitHub(argsJson)
             com.openminis.app.tools.SkillLoadTool.NAME -> {
                 val repo = skillRepository
                 if (repo == null) ToolExecutionResult("Error: Skills not available", false)

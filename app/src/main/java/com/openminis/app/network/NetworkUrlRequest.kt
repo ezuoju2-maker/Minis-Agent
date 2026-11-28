@@ -18,6 +18,7 @@ object NetworkUrlRequest {
         val contentLength: Long,
         private val input: () -> InputStream,
         private val onClose: () -> Unit,
+        val headers: Map<String, String> = emptyMap(),
     ) : Closeable {
         fun body(): InputStream = input()
 
@@ -74,6 +75,7 @@ object NetworkUrlRequest {
                 resp.body?.byteStream() ?: java.io.ByteArrayInputStream(ByteArray(0))
             },
             onClose = { resp.close() },
+            headers = resp.headers.names().associateWith { name -> resp.header(name).orEmpty() },
         )
     }
 
@@ -95,6 +97,13 @@ object NetworkUrlRequest {
             conn.outputStream.write(body)
         }
         val code = conn.responseCode
-        return Response(code, conn.contentLengthLong, input = { conn.inputStream }, onClose = { conn.disconnect() })
+        val headerMap = conn.headerFields.entries
+            .mapNotNull { e -> e.key?.let { k -> k to e.value.firstOrNull().orEmpty() } }
+            .toMap()
+        return Response(
+            code, conn.contentLengthLong,
+            input = { conn.inputStream }, onClose = { conn.disconnect() },
+            headers = headerMap,
+        )
     }
 }
