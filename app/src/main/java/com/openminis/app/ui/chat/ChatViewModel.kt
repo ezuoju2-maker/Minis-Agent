@@ -5115,6 +5115,7 @@ class ChatViewModel(
     @Volatile private var lessonBlock: String? = null
 
     private val lessonStore by lazy { com.openminis.app.agent.learning.LessonStore(context) }
+    @Volatile private var lessonWritesSinceReview = 0
 
     private fun lessonPromptSection(): String? {
         val text = skillScoutText ?: return null
@@ -5221,6 +5222,11 @@ class ChatViewModel(
                     summary = "save ${saved.kind.id}/${saved.id}: ${saved.text.take(60)}",
                 )
                 lessonFor = null
+                lessonWritesSinceReview += 1
+                if (lessonWritesSinceReview >= 8) {
+                    lessonWritesSinceReview = 0
+                    runCatching { lessonStore.consolidate() }
+                }
                 ToolExecutionResult(
                     "Saved to ${saved.kind.file} as #${saved.id} (${saved.category.id}, confidence " +
                         "${"%.2f".format(saved.confidence)}, seen ${saved.hits}x). " + lessonStore.stats(),
@@ -5228,7 +5234,10 @@ class ChatViewModel(
                 )
             }
             "list" -> {
-                val lessons = lessonStore.all().sortedByDescending { it.promoted to it.confidence }
+                val lessons = lessonStore.all().sortedWith(
+                    compareByDescending<com.openminis.app.agent.learning.LessonStore.Lesson> { it.promoted }
+                        .thenByDescending { it.confidence },
+                )
                 if (lessons.isEmpty()) {
                     ToolExecutionResult("The notebook is empty — nothing has been learned yet.", true, toolTitle = title)
                 } else {
