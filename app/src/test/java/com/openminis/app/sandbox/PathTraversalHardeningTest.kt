@@ -17,7 +17,7 @@ class PathTraversalHardeningTest {
     @Test
     fun resolvesParentSegmentsLexically() {
         assertEquals("/var/minis/workspace/a.txt", PRootKernel.normalizeLinuxPath("/var/minis/shared/../workspace/a.txt"))
-        assertEquals("/etc/passwd", PRootKernel.normalizeLinuxPath("/../../etc/passwd"))
+        assertNull(PRootKernel.normalizeLinuxPath("/../../etc/passwd"))
     }
 
     @Test
