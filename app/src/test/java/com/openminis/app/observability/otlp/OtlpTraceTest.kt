@@ -50,7 +50,9 @@ class OtlpTraceTest {
     @Test
     fun failedEventsCarryErrorStatus() {
         val spans = spans(OtlpTrace.toOtlpJson(
-            listOf(event(1, 0, "guard", "file_write", 0, false, "denied /etc"), "s1", 0),
+            listOf(event(1, 0, "guard", "file_write", 0, false, "denied /etc")),
+            "s1",
+            0,
         ))
         assertEquals(2, spans[0].getJSONObject("status").getInt("code"))
     }
