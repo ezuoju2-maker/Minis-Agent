@@ -115,7 +115,7 @@ gradle/                            版本目录与 wrapper
 
 | | |
 |---|---|
-| 安装包 | `Minis-Agent-2.0-final.apk` |
+| 安装包 | `Minis-Agent-2.0-final.apk`（versionCode 93 · `2.0-final-2026-11-28-ubuntu24.04-minis`） |
 | 大小 | 102,524,665 字节 |
 | SHA-256 | `b3fc2293bc4a8b4ce6e77e20304f4d96662b91603540568702a4b2339e37d768` |
 | 来源 | 提交 `b6424dd` 的 CI 构建，`assemble` 与 `unit-tests` 均通过 |
@@ -220,7 +220,7 @@ gradle/                            version catalog and wrapper
 
 | | |
 |---|---|
-| Artifact | `Minis-Agent-2.0-final.apk` |
+| Artifact | `Minis-Agent-2.0-final.apk` (versionCode 93, `2.0-final-2026-11-28-ubuntu24.04-minis`) |
 | Size | 102,524,665 bytes |
 | SHA-256 | `b3fc2293bc4a8b4ce6e77e20304f4d96662b91603540568702a4b2339e37d768` |
 | Built from | commit `b6424dd`, CI `assemble` and `unit-tests` both green |
