@@ -466,18 +466,23 @@ class AnthropicProvider(
             if (msg.contentParts.isNotEmpty()) {
                 val contentArray = JSONArray()
                 if (echoThinking && msg.role == LLMMessage.Role.ASSISTANT) {
-                    contentArray.put(JSONObject().apply {
-                        put("type", "thinking")
-                        put("thinking", msg.reasoningContent ?: "")
-                    })
+                    com.openminis.app.provider.wire.AssistantWire.thinkingBlock(msg.reasoningContent)?.let { reasoning ->
+                        contentArray.put(JSONObject().apply {
+                            put("type", "thinking")
+                            put("thinking", reasoning)
+                        })
+                    }
                 }
                 for (part in msg.contentParts) {
                     when (part) {
                         is AgentContentPart.Text -> {
-                            contentArray.put(JSONObject().apply {
-                                put("type", "text")
-                                put("text", part.text)
-                            })
+                            val text = com.openminis.app.provider.wire.AssistantWire.textBlock(part.text)
+                            if (text != null) {
+                                contentArray.put(JSONObject().apply {
+                                    put("type", "text")
+                                    put("text", text)
+                                })
+                            }
                         }
                         is AgentContentPart.ToolUse -> {
                             contentArray.put(JSONObject().apply {

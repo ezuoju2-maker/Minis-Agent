@@ -1401,7 +1401,11 @@ class OpenAIProvider private constructor(
                         val textParts = msg.contentParts.filterIsInstance<AgentContentPart.Text>()
                         val toolUseParts = msg.contentParts.filterIsInstance<AgentContentPart.ToolUse>()
                         if (textParts.isNotEmpty() || toolUseParts.isNotEmpty()) {
-                            obj.put("content", textParts.joinToString("") { it.text })
+                            val visible = textParts.joinToString("") { it.text }
+                            val content = com.openminis.app.provider.wire.AssistantWire.contentFor(
+                                visible, toolUseParts.isNotEmpty(),
+                            )
+                            if (content != null) obj.put("content", content)
                         }
                         if (toolUseParts.isNotEmpty()) {
                             val toolCallsArr = JSONArray()
