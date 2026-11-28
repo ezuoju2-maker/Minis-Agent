@@ -8048,6 +8048,88 @@ class ChatViewModel(
         return out
     }
 
+    private fun executeAgentForge(argsJson: String): ToolExecutionResult {
+        val title = runCatching { JSONObject(argsJson).optString("tool_title", "Forge sub agent") }
+            .getOrDefault("Forge sub agent")
+        val args = try { JSONObject(argsJson) } catch (e: Exception) {
+            return ToolExecutionResult("Error: invalid arguments (${e.javaClass.simpleName})", false, toolTitle = title)
+        }
+        val action = args.optString("action", "create").trim().lowercase()
+        val roster = providerRepository.subAgents
+        return when (action) {
+            "list" -> ToolExecutionResult(
+                com.openminis.app.agent.fleet.AgentForge.renderRoster(roster), true, toolTitle = title,
+            )
+
+            "remove" -> {
+                val target = args.optString("target", "").trim()
+                if (target.isEmpty()) {
+                    return ToolExecutionResult("Error: `target` is required for remove", false, toolTitle = title)
+                }
+                val def = com.openminis.app.agent.fleet.AgentForge.match(roster, target)
+                    ?: return ToolExecutionResult("Error: no sub agent named \"$target\"", false, toolTitle = title)
+                if (def.isBuiltIn) {
+                    return ToolExecutionResult(
+                        "Error: the built-in sub agent cannot be removed", false, toolTitle = title,
+                    )
+                }
+                providerRepository.deleteSubAgent(def.id)
+                com.openminis.app.observability.TraceLog.record(
+                    kind = "forge", name = "remove", durationMs = 0, ok = true,
+                    summary = "removed sub agent \"${def.name}\"",
+                )
+                ToolExecutionResult("Removed \"${def.name}\". The roster now holds " +
+                    "${providerRepository.subAgents.count { !it.isBuiltIn }} custom sub agents.", true, toolTitle = title)
+            }
+
+            "create", "preview" -> {
+                val req = com.openminis.app.agent.fleet.AgentForge.Request(
+                    name = args.optString("name", ""),
+                    whenToUse = args.optString("when_to_use", ""),
+                    goal = args.optString("goal", ""),
+                    steps = stringList(args.optJSONArray("steps")),
+                    constraints = stringList(args.optJSONArray("constraints")),
+                    outputFormat = args.optString("output_format", ""),
+                    instructions = args.optString("instructions", ""),
+                    thinking = args.optString("thinking", ""),
+                )
+                com.openminis.app.agent.fleet.AgentForge.validate(req, roster)?.let {
+                    return ToolExecutionResult(it, false, toolTitle = title)
+                }
+                val def = com.openminis.app.agent.fleet.AgentForge.build(req)
+                val body = buildString {
+                    append(if (action == "preview") "Preview (not saved) — " else "Saved — ")
+                    append("sub agent \"").append(def.name).append("\" · ")
+                    append(providerRepository.subAgents.count { !it.isBuiltIn }).append(" custom in roster\n\n")
+                    append("When to use: ").append(def.description).append("\n\n")
+                    append("Instructions (").append(def.instructions.length).append(" chars):\n")
+                    append(def.instructions).append("\n\n")
+                    append("Delegate to it with subagent_task and `agent: ").append(def.name).append("`.")
+                }
+                if (action == "create") {
+                    providerRepository.upsertSubAgent(def)
+                    com.openminis.app.observability.TraceLog.record(
+                        kind = "forge", name = "create", durationMs = 0, ok = true,
+                        summary = "sub agent \"${def.name}\" (${def.instructions.length} chars)",
+                    )
+                }
+                ToolExecutionResult(body, true, toolTitle = title)
+            }
+
+            else -> ToolExecutionResult("Error: unknown action \"$action\"", false, toolTitle = title)
+        }
+    }
+
+    private fun stringList(arr: org.json.JSONArray?): List<String> {
+        if (arr == null) return emptyList()
+        val out = ArrayList<String>(arr.length())
+        for (i in 0 until arr.length()) {
+            val v = arr.optString(i, "").trim()
+            if (v.isNotEmpty()) out.add(v)
+        }
+        return out
+    }
+
     private fun executeInspectRunStatus(argsJson: String): ToolExecutionResult {
         val title = runCatching { JSONObject(argsJson).optString("tool_title", "Inspect run status") }
             .getOrDefault("Inspect run status")
@@ -8245,6 +8327,7 @@ class ChatViewModel(
             com.openminis.app.tools.ContinuityTools.HISTORY_READ ->
                 com.openminis.app.tools.ContinuityTools.executeHistoryRead(conversationRecords(), argsJson)
             com.openminis.app.tools.ContinuityTools.RUN_STATUS -> executeInspectRunStatus(argsJson)
+            com.openminis.app.tools.AgentForgeTool.NAME -> executeAgentForge(argsJson)
             com.openminis.app.tools.SkillLoadTool.NAME -> {
                 val repo = skillRepository
                 if (repo == null) ToolExecutionResult("Error: Skills not available", false)

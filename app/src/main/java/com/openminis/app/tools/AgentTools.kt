@@ -77,6 +77,7 @@ object AgentTools {
         }
         if (!isHelper && delegateEnabled) {
             add(subAgentTaskDefinition(rosterNames))
+            add(AgentForgeTool.definition())
         }
         if (!isHelper) add(TodoTools.definition())
         add(ContinuityTools.searchDefinition())
