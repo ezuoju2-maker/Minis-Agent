@@ -9,49 +9,31 @@ import org.junit.Test
 class AssistantWireTest {
 
     @Test
-    fun visibleTextIsKept() {
-        assertEquals("done", AssistantWire.contentFor("done", hasToolCalls = false))
-        assertEquals("done", AssistantWire.contentFor("done", hasToolCalls = true))
+    fun moonshotEndpointsAreStrict() {
+        assertTrue(AssistantWire.strictBlankContent("https://api.moonshot.ai/v1", "kimi-k2"))
+        assertTrue(AssistantWire.strictBlankContent("https://api.example/v1", "kimi-k2-turbo"))
     }
 
     @Test
-    fun blankContentIsOmittedOnToolCallTurns() {
-        assertNull(AssistantWire.contentFor("   ", hasToolCalls = true))
-        assertNull(AssistantWire.contentFor("", hasToolCalls = true))
+    fun openAiEndpointsAreTolerant() {
+        assertFalse(AssistantWire.strictBlankContent("https://api.openai.com/v1", "gpt-4o"))
+        assertFalse(AssistantWire.strictBlankContent("https://example.invalid/v1", "deepseek-chat"))
     }
 
     @Test
-    fun blankContentStaysEmptyWhenNoToolCalls() {
-        assertEquals("", AssistantWire.contentFor("", hasToolCalls = false))
+    fun blankContentOmittedOnlyForStrictEndpoints() {
+        assertNull(AssistantWire.contentField("", hasToolCalls = true, strictBlankContent = true))
+        assertEquals("", AssistantWire.contentField("", hasToolCalls = true, strictBlankContent = false))
     }
 
     @Test
-    fun toolCallTurnLegality() {
-        assertFalse(AssistantWire.isLegalToolCallTurn("", hasToolCalls = true))
-        assertTrue(AssistantWire.isLegalToolCallTurn("calling", hasToolCalls = true))
-        assertTrue(AssistantWire.isLegalToolCallTurn("", hasToolCalls = false))
+    fun visibleTextAlwaysKept() {
+        assertEquals("done", AssistantWire.contentField("done", hasToolCalls = true, strictBlankContent = true))
+        assertEquals("done", AssistantWire.contentField("done", hasToolCalls = false, strictBlankContent = true))
     }
 
     @Test
-    fun textBlockSkipsBlanks() {
-        assertNull(AssistantWire.textBlock(""))
-        assertNull(AssistantWire.textBlock(" \n "))
-        assertEquals("hi", AssistantWire.textBlock("hi"))
-    }
-
-    @Test
-    fun thinkingBlockSkipsBlanks() {
-        assertNull(AssistantWire.thinkingBlock(null))
-        assertNull(AssistantWire.thinkingBlock(""))
-        assertEquals("reasoned", AssistantWire.thinkingBlock("reasoned"))
-    }
-
-    @Test
-    fun reasoningEchoOnlyWhenEnabledAndPresent() {
-        assertEquals("why", AssistantWire.reasoningFor("why", thinkingEnabled = true, placeholderAllowed = true))
-        assertEquals("why", AssistantWire.reasoningFor("why", thinkingEnabled = true, placeholderAllowed = false))
-        assertNull(AssistantWire.reasoningFor("why", thinkingEnabled = false, placeholderAllowed = true))
-        assertEquals("", AssistantWire.reasoningFor(null, thinkingEnabled = true, placeholderAllowed = true))
-        assertNull(AssistantWire.reasoningFor(null, thinkingEnabled = true, placeholderAllowed = false))
+    fun blankContentKeptWithoutToolCalls() {
+        assertEquals("", AssistantWire.contentField("", hasToolCalls = false, strictBlankContent = true))
     }
 }

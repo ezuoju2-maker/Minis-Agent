@@ -2,24 +2,13 @@ package com.openminis.app.provider.wire
 
 object AssistantWire {
 
-    fun contentFor(text: String, hasToolCalls: Boolean): String? = when {
-        text.isNotBlank() -> text
-        hasToolCalls -> null
-        else -> ""
+    fun strictBlankContent(endpoint: String, modelId: String): Boolean {
+        val e = endpoint.lowercase()
+        val m = modelId.lowercase()
+        return e.contains("moonshot") || e.contains("kimi") ||
+            m.startsWith("kimi") || m.startsWith("moonshot")
     }
 
-    fun reasoningFor(reasoning: String?, thinkingEnabled: Boolean, placeholderAllowed: Boolean): String? =
-        when {
-            !thinkingEnabled -> null
-            reasoning != null -> reasoning
-            placeholderAllowed -> ""
-            else -> null
-        }
-
-    fun isLegalToolCallTurn(text: String, hasToolCalls: Boolean): Boolean =
-        !(hasToolCalls && text.isBlank())
-
-    fun textBlock(text: String): String? = text.takeIf { it.isNotBlank() }
-
-    fun thinkingBlock(reasoning: String?): String? = reasoning?.takeIf { it.isNotBlank() }
+    fun contentField(visible: String, hasToolCalls: Boolean, strictBlankContent: Boolean): String? =
+        if (hasToolCalls && visible.isBlank() && strictBlankContent) null else visible
 }
