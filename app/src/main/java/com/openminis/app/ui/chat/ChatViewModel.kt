@@ -8069,7 +8069,7 @@ class ChatViewModel(
             append("Messages in context: ").append(_messages.value.size).append('\n')
             append("Indexed records for history_search: ").append(records.size)
             if (goal == null && counts == null) {
-                append('\n\nNothing is tracked as unfinished. Do not claim completion beyond what the transcript shows.')
+                append("\n\nNothing is tracked as unfinished. Do not claim completion beyond what the transcript shows.")
             }
         }, true, toolTitle = title)
     }
