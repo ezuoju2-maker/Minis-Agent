@@ -46,6 +46,22 @@ class SkillRepository(private val context: Context) {
 
         private const val EXPORT_TTL_MS = 24L * 3600 * 1000
 
+        private const val BUNDLED_ASSET_ROOT = "bundled_skills"
+        private const val BUNDLED_ASSET_VERSION = "2026.11.28"
+
+        private val BUNDLED_DEFAULT_ENABLED = setOf(
+            "tdd",
+            "code-review",
+            "diagnosing-bugs",
+            "to-spec",
+            "to-tickets",
+            "research",
+            "retro",
+            "implement",
+            "handoff",
+            "writing-for-agents",
+        )
+
         internal fun parseSkillMd(content: String): ParsedSkill? {
             val trimmed = content.removePrefix("﻿").trimStart()
             if (!trimmed.startsWith("---")) return null
@@ -99,13 +115,15 @@ class SkillRepository(private val context: Context) {
                     i++
                 }
 
+                val clean = resolved.trim().removeSurrounding("\"").removeSurrounding("'").trim()
+
                 when (key) {
-                    "name" -> name = resolved
-                    "description" -> description = resolved
-                    "version" -> version = resolved
-                    "display_name" -> displayName = resolved
-                    "description_zh" -> descriptionZh = resolved
-                    "description_en" -> descriptionEn = resolved
+                    "name" -> name = clean
+                    "description" -> description = clean
+                    "version" -> version = clean
+                    "display_name" -> displayName = clean
+                    "description_zh" -> descriptionZh = clean
+                    "description_en" -> descriptionEn = clean
                 }
             }
 
@@ -1019,6 +1037,11 @@ class SkillRepository(private val context: Context) {
 
 
     private fun installBundledSkills() {
+        installInlineBundledSkill()
+        installAssetBundledSkills()
+    }
+
+    private fun installInlineBundledSkill() {
         val bundledId = "skill-creator"
         val bundledVersion = "2.0.0"
         val existing = _skills.value.find { it.id == bundledId }
@@ -1031,6 +1054,7 @@ class SkillRepository(private val context: Context) {
                 description = parsed.description,
                 version = bundledVersion,
                 body = parsed.body,
+                importSource = ImportSource.BUNDLED,
                 updatedAt = System.currentTimeMillis(),
             )
             db.execSQL(
@@ -1045,9 +1069,91 @@ class SkillRepository(private val context: Context) {
                 name = parsed.name,
                 description = parsed.description,
                 body = parsed.body,
+                version = bundledVersion,
                 source = ImportSource.BUNDLED,
             )
             Log.i(TAG, "Installed bundled skill: $bundledId (v$bundledVersion)")
+        }
+    }
+
+    private fun installAssetBundledSkills() {
+        val folders = runCatching { context.assets.list(BUNDLED_ASSET_ROOT) }.getOrNull() ?: return
+        for (folder in folders.sorted()) {
+            val assetDir = "$BUNDLED_ASSET_ROOT/$folder"
+            val markdown = readAssetText("$assetDir/SKILL.md") ?: continue
+            val parsed = parseSkillMd(markdown) ?: continue
+            val id = slugify(parsed.name).ifBlank { slugify(folder) }
+            if (id.isBlank()) continue
+            val existing = _skills.value.find { it.id == id }
+            val enabledByDefault = id in BUNDLED_DEFAULT_ENABLED
+
+            if (existing != null) {
+                if (existing.version >= BUNDLED_ASSET_VERSION) continue
+                val updated = existing.copy(
+                    description = parsed.description,
+                    version = BUNDLED_ASSET_VERSION,
+                    body = parsed.body,
+                    importSource = ImportSource.BUNDLED,
+                    updatedAt = System.currentTimeMillis(),
+                )
+                db.execSQL(
+                    "UPDATE skills SET description=?, version=?, import_source=?, updated_at=? WHERE id=?",
+                    arrayOf<Any>(updated.description, BUNDLED_ASSET_VERSION, ImportSource.BUNDLED.value, updated.updatedAt, id)
+                )
+                copyAssetTree(id, assetDir)
+                writeSkillMd(updated)
+                mutateSkills { list -> list.map { if (it.id == id) updated else it } }
+            } else {
+                val skill = Skill(
+                    id = id,
+                    name = parsed.name,
+                    description = parsed.description,
+                    version = BUNDLED_ASSET_VERSION,
+                    importSource = ImportSource.BUNDLED,
+                    isEnabled = enabledByDefault,
+                    body = parsed.body,
+                )
+                insertDb(skill)
+                copyAssetTree(id, assetDir)
+                writeSkillMd(skill)
+                mutateSkills { it + skill }
+            }
+        }
+    }
+
+    private fun readAssetText(path: String): String? =
+        runCatching {
+            context.assets.open(path).use { it.bufferedReader().readText() }
+        }.getOrNull()
+
+    private fun copyAssetTree(id: String, assetDir: String) {
+        val target = File(skillsDir, id)
+        target.mkdirs()
+        val pending = ArrayDeque(listOf(assetDir to target))
+        val visited = mutableSetOf<String>()
+        while (pending.isNotEmpty()) {
+            val (from, to) = pending.removeFirst()
+            if (!visited.add(from)) continue
+            val children = runCatching { context.assets.list(from) }.getOrNull() ?: continue
+            for (child in children) {
+                val childFrom = "$from/$child"
+                val childTo = File(to, child)
+                val grandChildren = runCatching { context.assets.list(childFrom) }.getOrNull().orEmpty()
+                if (grandChildren.isNotEmpty()) {
+                    pending.addLast(childFrom to childTo)
+                    continue
+                }
+                val bytes = runCatching {
+                    context.assets.open(childFrom).use { input -> input.readBytes() }
+                }.getOrNull() ?: continue
+                runCatching {
+                    childTo.parentFile?.mkdirs()
+                    childTo.writeBytes(bytes)
+                    if (child.endsWith(".sh")) childTo.setExecutable(true)
+                }.onFailure {
+                    Log.w(TAG, "copyAssetTree: failed $childFrom → ${childTo.path}: ${it.message}")
+                }
+            }
         }
     }
 
@@ -1225,7 +1331,12 @@ class SkillRepository(private val context: Context) {
         val content = buildString {
             appendLine("---")
             appendLine("name: ${skill.name}")
-            appendLine("description: ${skill.description}")
+            if (skill.description.contains('\n')) {
+                appendLine("description: |-")
+                skill.description.lines().forEach { appendLine("  ${it.trim()}") }
+            } else {
+                appendLine("description: ${skill.description}")
+            }
             appendLine("version: ${skill.version}")
             appendLine("---")
             append(skill.body)
