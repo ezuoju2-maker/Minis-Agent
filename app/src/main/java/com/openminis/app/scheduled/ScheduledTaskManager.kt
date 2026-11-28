@@ -181,8 +181,25 @@ class ScheduledTaskManager(private val context: Context) {
             return
         }
         val pi = buildPendingIntent(task.id, triggerAt)
+        val exactAllowed = if (android.os.Build.VERSION.SDK_INT >= 31) {
+            runCatching { alarmManager.canScheduleExactAlarms() }.getOrDefault(false)
+        } else {
+            true
+        }
+        if (!exactAllowed) {
+            AppLogger.warning(
+                TAG,
+                "exact alarms are not granted; scheduling task=${task.id} inexactly " +
+                    "(the user can allow exact alarms in system settings)",
+            )
+        }
         try {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+            if (exactAllowed) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+            } else {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                return
+            }
             AppLogger.info(TAG, "registered task=${task.id} label=\"${task.label}\" triggerAt=$triggerAt")
         } catch (e: SecurityException) {
             AppLogger.warning(

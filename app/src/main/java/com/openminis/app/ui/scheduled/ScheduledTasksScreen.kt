@@ -38,7 +38,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +64,34 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@Composable
+private fun ExactAlarmBanner(onOpen: () -> Unit) {
+    androidx.compose.material3.Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                stringResource(R.string.scheduled_exact_alarm_title),
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                stringResource(R.string.scheduled_exact_alarm_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(onClick = onOpen) {
+                Text(stringResource(R.string.scheduled_exact_alarm_action))
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScheduledTasksScreen(
@@ -78,6 +108,30 @@ fun ScheduledTasksScreen(
     var pendingDelete by remember { mutableStateOf<ScheduledTask?>(null) }
     val showHomeBadge by vm.showHomeBadge.collectAsState()
     var showMenu by remember { mutableStateOf(false) }
+    var exactAlarmsAllowed by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        exactAlarmsAllowed = if (android.os.Build.VERSION.SDK_INT >= 31) {
+            runCatching {
+                context.getSystemService(android.app.AlarmManager::class.java)
+                    ?.canScheduleExactAlarms() ?: true
+            }.getOrDefault(true)
+        } else {
+            true
+        }
+    }
+
+    fun openExactAlarmSettings() {
+        if (android.os.Build.VERSION.SDK_INT < 31) return
+        runCatching {
+            context.startActivity(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    android.net.Uri.parse("package:" + context.packageName),
+                ),
+            )
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -140,6 +194,11 @@ fun ScheduledTasksScreen(
                 .padding(padding),
             contentPadding = PaddingValues(vertical = 8.dp),
         ) {
+            if (!exactAlarmsAllowed) {
+                item(key = "exact-alarm-banner") {
+                    ExactAlarmBanner(onOpen = ::openExactAlarmSettings)
+                }
+            }
             items(tasks, key = { it.id }) { task ->
                 ScheduledTaskRow(
                     task = task,

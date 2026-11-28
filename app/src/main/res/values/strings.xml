@@ -2589,4 +2589,7 @@
     <string name="github_device_waiting">Waiting for approval…</string>
     <string name="github_device_copied">Copied</string>
     <string name="github_token_invalid">GitHub did not accept this token</string>
+    <string name="scheduled_exact_alarm_title">Precise timing is off</string>
+    <string name="scheduled_exact_alarm_body">Android has not granted exact-alarm access, so scheduled tasks may fire a few minutes late. Allow it to keep reminders on time.</string>
+    <string name="scheduled_exact_alarm_action">Allow exact alarms</string>
 </resources>
