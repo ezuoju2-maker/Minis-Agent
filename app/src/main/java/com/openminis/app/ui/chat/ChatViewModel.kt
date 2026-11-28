@@ -8259,6 +8259,25 @@ class ChatViewModel(
         }
         val path = try { JSONObject(argsJson).optString("path", "") } catch (_: Exception) { "" }
         if (path.isBlank()) return null
+        val body = try {
+            val o = JSONObject(argsJson)
+            when (name) {
+                FileWriteTool.NAME -> o.optString("content", "")
+                FileEditTool.NAME -> o.optString("new_string", "")
+                else -> ""
+            }
+        } catch (_: Exception) {
+            ""
+        }
+        com.openminis.app.agent.guard.SecretScan.first(body)?.let { hit ->
+            com.openminis.app.observability.TraceLog.record(
+                kind = "guard", name = name, durationMs = 0, ok = false,
+                summary = "secret refused in ${hit.kind}",
+            )
+            return ToolExecutionResult(
+                com.openminis.app.agent.guard.SecretScan.guidance(hit), false, toolTitle = toolTitle,
+            )
+        }
         val rootfsHost = try {
             com.openminis.app.sandbox.RootfsManager.getInstance(context).rootfsDir.absolutePath
         } catch (_: Exception) {

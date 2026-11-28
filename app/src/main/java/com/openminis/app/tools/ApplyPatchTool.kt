@@ -59,6 +59,11 @@ object ApplyPatchTool {
             if (patchText.isBlank()) {
                 return ToolExecutionResult("Error: 'patch' is required", false, toolTitle = toolTitle)
             }
+            com.openminis.app.agent.guard.SecretScan.first(patchText)?.let { hit ->
+                return ToolExecutionResult(
+                    com.openminis.app.agent.guard.SecretScan.guidance(hit), false, toolTitle = toolTitle,
+                )
+            }
             if (com.openminis.app.agent.guard.SandboxMode.get(context) ==
                 com.openminis.app.agent.guard.SandboxMode.READ_ONLY
             ) {
