@@ -8149,7 +8149,16 @@ class ChatViewModel(
             append('\n')
             append("Background jobs running: ").append(runningJobs).append('\n')
             append("Messages in context: ").append(_messages.value.size).append('\n')
-            append("Indexed records for history_search: ").append(records.size)
+            append("Indexed records for history_search: ").append(records.size).append('\n')
+            append("Model: ").append(currentModel?.id ?: "unknown")
+            currentWatermarks()?.let { wm ->
+                append(" · window ").append(wm.window).append(" · usable ").append(wm.usable)
+                append(" · compaction at ").append(wm.trigger)
+                if (wm.mode != com.openminis.app.ui.chat.ContextTrimPlanner.Mode.NORMAL) {
+                    append(" (").append(wm.mode.name.lowercase()).append(" budget)")
+                }
+            }
+            append(" · output ceiling ").append(currentModelMaxOutputTokens ?: "provider default")
             if (goal == null && counts == null) {
                 append("\n\nNothing is tracked as unfinished. Do not claim completion beyond what the transcript shows.")
             }
