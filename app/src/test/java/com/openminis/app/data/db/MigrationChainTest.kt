@@ -8,8 +8,7 @@ class MigrationChainTest {
 
     private val migrations = AppDatabase.allMigrations
 
-    private val version: Int =
-        AppDatabase::class.java.getAnnotation(androidx.room.Database::class.java)?.version ?: 0
+    private val version: Int = AppDatabase.VERSION
 
     @Test
     fun forwardsCoverEveryVersionStep() {
