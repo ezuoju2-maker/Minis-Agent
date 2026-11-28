@@ -40,6 +40,7 @@
 | 拆子任务 | 委派给子代理执行，默认 60 轮，上下限 8–200，倒数 `max(3, cap/5)` 轮开始提醒收尾 | `agent/SubAgentBudgetPolicy.kt` |
 | 可回滚 | 每次写文件前留旧内容，能按单文件或整轮回滚，模型直接调 `checkpoint_restore` | `sandbox/checkpoint/SessionCheckpoint.kt` |
 | 装技能 | 远程技能只认 https、主机白名单、64 位十六进制 SHA-256，版本号降级直接拒绝 | `skills/remote/*` |
+| 找技能 | `find_skills` 现场检索 Anthropic Skills、Superpowers、ECC、Composio 等公开技能库（约 2000 份 SKILL.md），按名字/路径/描述打分排序，挑中就装；索引 24 小时自动过期重爬，源清单放在仓库里的 `skills-sources.json`，改一次全体生效 | `skills/radar/*`<br>`tools/FindSkillsTool.kt` |
 | 看过程 | 每次工具调用写一行 NDJSON（序号、轮次、耗时、结果），设置页一键导出分享 | `observability/TraceLog.kt` |
 | 省重复 | 只读工具结果进 LRU 缓存，16 条 / 2 MB / 5 分钟后失效 | `tools/ToolResultCache.kt` |
 | 长任务不跑偏 | 会话目标随每次调用注入、压缩后仍在；历史可按关键词回查原文片段 | `agent/goal/SessionGoals.kt`<br>`agent/continuity/HistorySearch.kt` |
@@ -141,6 +142,7 @@ An Android agent that executes on the device instead of in the cloud. The model 
 | Split work | Delegated sub-agents run 60 turns by default, floor 8 ceiling 200, warnings from `max(3, cap/5)` turns out | `agent/SubAgentBudgetPolicy.kt` |
 | Roll back | Prior file content is kept before every write; rollback by file or by whole run, the model calls `checkpoint_restore` | `sandbox/checkpoint/SessionCheckpoint.kt` |
 | Install skills | Remote skills need https, an allowlisted host and a 64-hex SHA-256; version downgrades are refused | `skills/remote/*` |
+| Find skills | `find_skills` live-searches public skill repos (Anthropic Skills, Superpowers, ECC, Composio — ~2000 SKILL.md files), ranks by name/path/description and installs the pick; the index expires every 24h, and the source list lives in `skills-sources.json` so one edit updates every install | `skills/radar/*`<br>`tools/FindSkillsTool.kt` |
 | Watch it run | Every tool call appends an NDJSON line (seq, turn, duration, outcome), exportable from settings | `observability/TraceLog.kt` |
 | Avoid repeats | Read-only results enter an LRU cache, 16 entries / 2 MB / 5 minutes | `tools/ToolResultCache.kt` |
 | Stay on long tasks | A session goal is injected into every call and survives compaction; history stays searchable by keyword with excerpts | `agent/goal/SessionGoals.kt`<br>`agent/continuity/HistorySearch.kt` |

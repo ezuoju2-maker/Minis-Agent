@@ -87,7 +87,10 @@ object AgentTools {
             add(ContinuityTools.goalDefinition())
             add(ContinuityTools.runStatusDefinition())
         }
-        if (skillsAvailable) add(SkillLoadTool.definition())
+        if (skillsAvailable) {
+            add(FindSkillsTool.definition())
+            add(SkillLoadTool.definition())
+        }
         if (!isHelper) add(SkillSaveTool.definition())
         add(McpNativeTools.gatewayDefinition())
         mcpTools.forEach { add(it) }

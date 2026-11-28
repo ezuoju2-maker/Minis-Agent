@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "updated": "2026-11-28",
+  "note": "Skill sources crawled by Minis `find_skills`. Edit this file to add or retire an ecosystem; installed apps pick it up on their next refresh (7d cache).",
+  "sources": [
+    { "repo": "anthropics/skills", "branch": "main", "official": true },
+    { "repo": "obra/superpowers", "branch": "main" },
+    { "repo": "affaan-m/ECC", "branch": "main" },
+    { "repo": "ComposioHQ/awesome-claude-skills", "branch": "master" }
+  ]
+}

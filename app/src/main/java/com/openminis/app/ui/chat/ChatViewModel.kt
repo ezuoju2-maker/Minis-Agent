@@ -8048,6 +8048,89 @@ class ChatViewModel(
         return out
     }
 
+    private suspend fun executeFindSkills(argsJson: String): ToolExecutionResult {
+        val title = runCatching { JSONObject(argsJson).optString("tool_title", "Find skills") }
+            .getOrDefault("Find skills")
+        val args = try { JSONObject(argsJson) } catch (_: Exception) {
+            return ToolExecutionResult("Error: invalid arguments", false, toolTitle = title)
+        }
+        val repository = skillRepository
+            ?: return ToolExecutionResult("Error: Skills are not available in this session.", false, toolTitle = title)
+        val radar = com.openminis.app.skills.radar.SkillRadar(context, repository)
+        return when (val action = args.optString("action", "search").trim().lowercase()) {
+            "search", "" -> {
+                val query = args.optString("query", "").trim()
+                if (query.isEmpty()) {
+                    return ToolExecutionResult(
+                        "Error: `query` is required for a search (e.g. \"pdf form filling\").",
+                        false, toolTitle = title,
+                    )
+                }
+                val limit = args.optInt("limit", 6).coerceIn(1, 12)
+                val (candidates, note) = radar.search(query, limit, autoRefresh = true)
+                com.openminis.app.observability.TraceLog.record(
+                    kind = "skill", name = "find_skills", durationMs = 0, ok = candidates.isNotEmpty(),
+                    summary = "search \"${query.take(60)}\" -> ${candidates.size}",
+                )
+                if (candidates.isEmpty()) {
+                    ToolExecutionResult(
+                        "No skill in the ecosystem matched \"$query\".$note " +
+                            "Say so plainly and use your own tools instead; you can retry with broader words " +
+                            "or action=refresh if the index looks stale.",
+                        true, toolTitle = title,
+                    )
+                } else {
+                    val body = buildString {
+                        append("Skills matching \"").append(query).append("\" — ").append(note).append('\n')
+                        candidates.forEachIndexed { i, c ->
+                            append(i + 1).append(". ").append(c.name)
+                            if (c.description.isNotEmpty()) {
+                                append(" — ").append(c.description.replace('\n', ' ').take(110))
+                            }
+                            append(" [").append(c.repo).append("] id=").append(c.id).append('\n')
+                        }
+                        append("\nInstall the one that actually fits: find_skills action=install id=<id>, ")
+                        append("then skill_load it. Do not install a loosely related skill.")
+                    }
+                    ToolExecutionResult(body.trimEnd(), true, toolTitle = title)
+                }
+            }
+            "install" -> {
+                val id = args.optString("id", "").trim()
+                val url = args.optString("url", "").trim()
+                if (id.isEmpty() && url.isEmpty()) {
+                    return ToolExecutionResult("Error: give `id` from a search result or a SKILL.md `url`.", false, toolTitle = title)
+                }
+                val message = radar.install(if (id.isNotEmpty()) id else url)
+                val ok = !message.startsWith("Error") && !message.startsWith("Install failed")
+                com.openminis.app.observability.TraceLog.record(
+                    kind = "skill", name = "find_skills", durationMs = 0, ok = ok,
+                    summary = "install ${(id.ifEmpty { url }).take(80)}",
+                )
+                ToolExecutionResult(message, ok, toolTitle = title)
+            }
+            "refresh" -> {
+                val report = radar.refresh(force = true)
+                ToolExecutionResult(report, !report.startsWith("Refresh failed"), toolTitle = title)
+            }
+            "sources" -> {
+                val lines = buildString {
+                    append("Sources (index: ").append(radar.indexAge()).append("):\n")
+                    radar.sources().forEach { s ->
+                        append("- ").append(s.repo).append(" @").append(s.branch)
+                        if (s.official) append(" (official)")
+                        append('\n')
+                    }
+                    append("Refresh happens automatically when the index is older than 24h.")
+                }
+                ToolExecutionResult(lines, true, toolTitle = title)
+            }
+            "add_source" -> ToolExecutionResult(radar.addSource(args.optString("source", "")), true, toolTitle = title)
+            "remove_source" -> ToolExecutionResult(radar.removeSource(args.optString("source", "")), true, toolTitle = title)
+            else -> ToolExecutionResult("Error: unknown action \"$action\".", false, toolTitle = title)
+        }
+    }
+
     private fun executeSandboxMode(argsJson: String): ToolExecutionResult {
         val title = runCatching { JSONObject(argsJson).optString("tool_title", "Sandbox mode") }
             .getOrDefault("Sandbox mode")
@@ -8397,6 +8480,7 @@ class ChatViewModel(
             com.openminis.app.tools.ContinuityTools.RUN_STATUS -> executeInspectRunStatus(argsJson)
             com.openminis.app.tools.AgentForgeTool.NAME -> executeAgentForge(argsJson)
             com.openminis.app.tools.SandboxModeTool.NAME -> executeSandboxMode(argsJson)
+            com.openminis.app.tools.FindSkillsTool.NAME -> executeFindSkills(argsJson)
             com.openminis.app.tools.SkillLoadTool.NAME -> {
                 val repo = skillRepository
                 if (repo == null) ToolExecutionResult("Error: Skills not available", false)
@@ -10123,6 +10207,14 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
                     ". Writes to system directories (/etc, /usr/bin, /proc, /sys, /dev, /var/lib …) are refused " +
                     "before anything touches disk — install or change system files through shell_execute and a " +
                     "package manager instead.",
+            )
+            append("\n\n")
+            append(
+                "Skills ecosystem: `find_skills` searches the live public skill ecosystem (Anthropic Skills, " +
+                    "Superpowers, ECC, Composio's awesome-claude-skills, plus any source the user added) and " +
+                    "installs what it finds. Reach for it when the user asks whether you can do something " +
+                    "specialized, or how to do it, and before telling them a capability is missing — the index " +
+                    "refreshes itself every 24 hours. After installing, skill_load the skill to follow its steps.",
             )
             if (skillFragment != null) {
                 append("\n\n")
