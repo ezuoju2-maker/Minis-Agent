@@ -26,10 +26,13 @@ object LightPandaInstaller {
         "26e0042a52f493d8cc1b04faef42aea9b46bef9ccfcc86170098bd330c19a890"
     private const val MARKER = ".lightpanda"
 
-    private val http = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .build()
+    private val http = com.openminis.app.network.NetworkHttp.client(
+        "lightpanda",
+        OkHttpClient.Builder()
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .build(),
+    )
 
     fun binary(context: Context): File =
         File(RootfsManager.getInstance(context).rootfsDir, "usr/local/bin/lightpanda")

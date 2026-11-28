@@ -22,7 +22,7 @@ object CdpCodec {
     fun stringValue(result: JSONObject): String? {
         val inner = result.optJSONObject("result") ?: return null
         if (inner.has("value")) return inner.opt("value")?.toString()
-        return inner.optString("description", null)
+        return inner.opt("description")?.toString()
     }
 
     fun exceptionText(result: JSONObject): String? {

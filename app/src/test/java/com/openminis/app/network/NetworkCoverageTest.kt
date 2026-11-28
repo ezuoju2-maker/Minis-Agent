@@ -175,11 +175,13 @@ class NetworkCoverageTest {
             "mcp/oauth/MCPOAuthDiscovery.kt",
             "mcp/oauth/MCPOAuthController.kt", "ui/settings/MCPIntegrationsScreen.kt",
             "network/NetworkHttp.kt", "network/NetworkUrlRequest.kt",
+            "browser/lightpanda/LightPandaInstaller.kt",
         )
         val directByDecision = setOf(
             "ui/sandbox/MirrorSettingsScreen.kt",
             "auth/OAuthRedirectActivity.kt",
             "ui/MinisImageFetcher.kt",
+            "browser/cdp/CdpClient.kt", "browser/lightpanda/LightPandaServer.kt",
             "debug/DebugRPCHandler.kt", "debug/NetDebugMethods.kt", "debug/ProviderMutationMethods.kt",
         )
         val unknown = found - routed - directByDecision
