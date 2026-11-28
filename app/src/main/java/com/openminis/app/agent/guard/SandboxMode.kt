@@ -17,7 +17,7 @@ enum class SandboxMode(val id: String) {
     companion object {
         const val PREFS = "agent_settings"
         const val KEY = "agent.sandbox.mode"
-        const val DEFAULT = FULL
+        val DEFAULT = FULL
 
         fun parse(raw: String?): SandboxMode? = when (raw?.trim()?.lowercase()?.replace('-', '_')) {
             "read_only", "readonly", "ro" -> READ_ONLY
