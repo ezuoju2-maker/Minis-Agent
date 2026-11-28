@@ -2606,7 +2606,7 @@
     <string name="learning_forget_message">Only this entry is removed; the rest of the notebook stays.</string>
     <string name="learning_forget_confirm">Forget</string>
     <string name="learning_journal_errors">Failures</string>
-    <string name="learning_journal_corrections">Corrections & preferences</string>
+    <string name="learning_journal_corrections">Corrections &amp; preferences</string>
     <string name="learning_journal_best">Better approaches</string>
     <string name="learning_journal_gaps">Knowledge gaps</string>
     <string name="learning_category_preference">preference</string>
