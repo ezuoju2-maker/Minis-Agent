@@ -36,7 +36,7 @@ class WireSanitizeTest {
 
     @Test
     fun queryEncodingEscapesPastedKeys() {
-        assertEquals("sk%2Dabc%2B", WireSanitize.queryEncoded("sk-abc+"))
+        assertEquals("sk-abc%2B", WireSanitize.queryEncoded("sk-abc+"))
         assertEquals("abc", WireSanitize.queryEncoded(" abc "))
     }
 
