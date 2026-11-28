@@ -84,6 +84,7 @@ object DeepLinkHandler {
             "usage", "usage-stats", "usage_stats" ->
                 DeepLinkAction.OpenSettingsScreen(Routes.USAGE_STATS)
             "skills" -> DeepLinkAction.OpenSettingsScreen(Routes.SKILLS)
+            "learning", "notebook", "lessons" -> DeepLinkAction.OpenSettingsScreen(Routes.LEARNING)
             "github", "github-connector", "github_connector" ->
                 DeepLinkAction.OpenSettingsScreen(Routes.GITHUB)
             "memory" -> DeepLinkAction.OpenSettingsScreen(Routes.MEMORY)

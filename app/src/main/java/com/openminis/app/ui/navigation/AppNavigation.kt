@@ -154,6 +154,7 @@ object Routes {
     const val AGENT_TOOLS = "agent_tools"
     const val MCP = "mcp"
     const val GITHUB = "github_connector"
+    const val LEARNING = "learning_notebook"
     const val SOUL = "soul"
     const val MEMORY_FILE_EDIT = "memory_file/{fileName}/{isGlobal}"
     const val PERMISSIONS = "permissions"
@@ -439,6 +440,7 @@ fun AppNavigation(
                 onAgentToolsClick = { navController.safeNavigate(Routes.AGENT_TOOLS) },
                 onMcpClick = { navController.safeNavigate(Routes.MCP) },
                 onGitHubClick = { navController.safeNavigate(Routes.GITHUB) },
+                onLearningClick = { navController.safeNavigate(Routes.LEARNING) },
                 onSoulClick = { navController.safeNavigate(Routes.SOUL) },
                 onPermissionsClick = { navController.safeNavigate(Routes.PERMISSIONS) },
                 onUsageClick = { navController.safeNavigate(Routes.USAGE_STATS) },
@@ -1126,6 +1128,12 @@ fun AppNavigation(
                     envVarRepository = envVarRepository,
                 )
             }
+        }
+
+        composable(Routes.LEARNING) {
+            com.openminis.app.ui.settings.LearningNotebookScreen(
+                onBack = { navController.safePopBackStack() },
+            )
         }
 
         composable(Routes.GITHUB) {

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Feedback
@@ -100,6 +101,7 @@ fun SettingsScreen(
     onAgentToolsClick: () -> Unit = {},
     onMcpClick: () -> Unit = {},
     onGitHubClick: () -> Unit = {},
+    onLearningClick: () -> Unit = {},
     onSoulClick: () -> Unit = {},
     onPermissionsClick: () -> Unit = {},
     onUsageClick: () -> Unit = {},
@@ -225,6 +227,13 @@ fun SettingsScreen(
                     title = stringResource(R.string.settings_mcp),
                     subtitle = stringResource(R.string.settings_mcp_subtitle),
                     onClick = onMcpClick,
+                )
+                SettingsItem(
+                    icon = Icons.Outlined.School,
+                    iconColor = Color(0xFFAF52DE),
+                    title = stringResource(R.string.settings_learning),
+                    subtitle = stringResource(R.string.settings_learning_subtitle),
+                    onClick = onLearningClick,
                 )
                 SettingsItem(
                     icon = Icons.Outlined.Code,
