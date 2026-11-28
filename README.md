@@ -11,7 +11,7 @@
 ![compose](https://img.shields.io/badge/Compose-Material%203-4285f4?style=flat-square)
 ![build](https://img.shields.io/badge/build-passing-2ea043?style=flat-square)
 
-<sub>2297 个文件 · 815 份主源码 · 746 个测试类 · 30 个工具 · 38 个功能包</sub>
+<sub>2428 个文件 · 848 份主源码 · 784 个测试类 · 30 个工具 · 38 个功能包</sub>
 
 [中文](#中文) · [English](#english)
 
@@ -25,7 +25,7 @@
 
 一个把工具执行放在设备上而不是云端的 Android Agent。模型只负责决定下一步做什么，文件读写、命令执行、网页操作、记忆检索都在手机本地完成，命令跑在 Ubuntu 24.04 的 PRoot 沙箱里，命令在 PRoot 沙箱里真实执行，不经过任何云端执行环境。
 
-源码 2297 个文件，不含任何构建产物；包名 `com.openminis.app`，versionCode 92，最终提交 `b6424dd`。
+源码 2428 个文件，不含任何构建产物；包名 `com.openminis.app`，versionCode 92，构建自发布时的 `main` HEAD。
 
 ### 能做什么
 
@@ -130,7 +130,7 @@ gradle/                            版本目录与 wrapper
 
 An Android agent that executes on the device instead of in the cloud. The model only decides what to do next; file access, command execution, page automation and memory retrieval all happen locally, with commands running inside an Ubuntu 24.04 PRoot sandbox and no cloud execution environment involved.
 
-2686 files of source, no build output in the tree. Package `com.openminis.app`, versionCode 92, final commit `b6424dd`.
+2428 files tracked, no build output in the tree. Package `com.openminis.app`, versionCode 92, built from `main` HEAD at release time.
 
 ### What it does
 
