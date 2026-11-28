@@ -73,3 +73,51 @@ class CorrectionDetectorTest {
         assertTrue(nudge.contains("ONE reusable rule"))
     }
 }
+
+class LessonRulesTest {
+
+    @Test
+    fun preferenceStatementsLandInThePreferenceBucket() {
+        assertEquals(LessonStore.Category.PREFERENCE, LessonStore.inferCategory("我不吃辣，推荐餐厅别带辣"))
+        assertEquals(LessonStore.Category.PREFERENCE, LessonStore.inferCategory("我来自湖北"))
+    }
+
+    @Test
+    fun technicalAndWorkflowSignalsAreSeparated() {
+        assertEquals(LessonStore.Category.TECHNICAL, LessonStore.inferCategory("这个 API 已经废弃，改用 v2 接口"))
+        assertEquals(LessonStore.Category.WORKFLOW, LessonStore.inferCategory("以后先跑测试再提交"))
+    }
+
+    @Test
+    fun promotionNeedsThreeHitsAndNoFlag() {
+        assertTrue(!LessonStore.shouldPromote(2, false))
+        assertTrue(LessonStore.shouldPromote(3, false))
+        assertTrue(!LessonStore.shouldPromote(3, true))
+    }
+
+    @Test
+    fun failuresAreNormalizedAndScrubbed() {
+        val text = LessonStore.normalizeFailure(
+            "shell_execute",
+            "Error: gradle failed at /home/user/project/app/build.gradle line 1204, exit code 1",
+        )
+        assertNotNull(text)
+        assertTrue(text!!.startsWith("shell_execute: "))
+        assertTrue(text.contains("…"))
+        assertTrue(!text.contains("1204"))
+    }
+
+    @Test
+    fun ordinaryOutputIsNotAJournalledFailure() {
+        assertEquals(null, LessonStore.normalizeFailure("shell_execute", "total 12\ndrwxr-xr-x 3 user"))
+        assertEquals(null, LessonStore.normalizeFailure("shell_execute", "ok"))
+    }
+
+    @Test
+    fun kindParsingAcceptsHumanWords() {
+        assertEquals(LessonStore.Kind.BEST, LessonStore.Kind.parse("最佳实践"))
+        assertEquals(LessonStore.Kind.GAP, LessonStore.Kind.parse("knowledge_gap"))
+        assertEquals(LessonStore.Kind.ERROR, LessonStore.Kind.parse("错误"))
+        assertEquals(LessonStore.Kind.CORRECTION, LessonStore.Kind.parse(null))
+    }
+}

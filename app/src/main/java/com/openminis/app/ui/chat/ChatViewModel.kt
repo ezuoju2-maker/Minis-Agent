@@ -3176,6 +3176,9 @@ class ChatViewModel(
     init {
         loadSession()
         warmSkillRadar()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { com.openminis.app.agent.learning.LessonStore(context).consolidate() }
+        }
         viewModelScope.launch {
             var wasStreaming = false
             isStreaming.collect { streaming ->
@@ -5111,16 +5114,31 @@ class ChatViewModel(
     @Volatile private var lessonFor: String? = null
     @Volatile private var lessonBlock: String? = null
 
+    private val lessonStore by lazy { com.openminis.app.agent.learning.LessonStore(context) }
+
     private fun lessonPromptSection(): String? {
         val text = skillScoutText ?: return null
         if (text == lessonFor) return lessonBlock
-        val store = com.openminis.app.agent.learning.LessonStore(context)
         val block = buildString {
-            val lessons = store.search(text, 4)
+            val lessons = lessonStore.search(text, 5)
             if (lessons.isNotEmpty()) {
-                append("Learned corrections from earlier sessions — follow them silently, without reciting them:\n")
-                lessons.forEach { append("- ").append(it.text.take(140)).append('\n') }
-                store.markUsed(lessons)
+                append("Notebook — lessons from earlier sessions. Check them BEFORE you act, follow them silently, " +
+                    "never recite them:\n")
+                lessons.forEach { l ->
+                    append("- [").append(label(l.kind)).append(']').append(' ').append(l.text.take(140)).append('\n')
+                }
+                lessonStore.markUsed(lessons)
+            }
+            val pending = lessonStore.pendingPromotions().take(2)
+            if (pending.isNotEmpty()) {
+                if (isNotEmpty()) append('\n')
+                append("Promotion: ")
+                pending.forEach { l ->
+                    append("#").append(l.id).append(" repeated ").append(l.hits)
+                        .append("x (\"").append(l.text.take(60)).append("\"). ")
+                }
+                append("Ask the user once whether to keep it permanently — only if they say yes, call " +
+                    "lesson_write action=promote id=<id>.")
             }
             if (com.openminis.app.agent.learning.CorrectionDetector.detect(text)) {
                 if (isNotEmpty()) append('\n')
@@ -5132,13 +5150,50 @@ class ChatViewModel(
         return lessonBlock
     }
 
+    private fun label(kind: com.openminis.app.agent.learning.LessonStore.Kind): String = when (kind) {
+        com.openminis.app.agent.learning.LessonStore.Kind.ERROR -> "error"
+        com.openminis.app.agent.learning.LessonStore.Kind.CORRECTION -> "correction"
+        com.openminis.app.agent.learning.LessonStore.Kind.BEST -> "best practice"
+        com.openminis.app.agent.learning.LessonStore.Kind.GAP -> "gap"
+    }
+
+    private fun captureCorrection(text: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                lessonStore.add(
+                    com.openminis.app.agent.learning.LessonStore.Kind.CORRECTION,
+                    com.openminis.app.agent.learning.LessonStore.inferCategory(text),
+                    text.take(180),
+                    listOf("auto"),
+                    initialConfidence = 0.45,
+                )
+                lessonFor = null
+            }
+        }
+    }
+
+    private fun captureToolFailure(tool: String, output: String) {
+        val normalized = com.openminis.app.agent.learning.LessonStore.normalizeFailure(tool, output) ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                lessonStore.add(
+                    com.openminis.app.agent.learning.LessonStore.Kind.ERROR,
+                    com.openminis.app.agent.learning.LessonStore.Category.TECHNICAL,
+                    normalized,
+                    listOf(tool),
+                    initialConfidence = 0.5,
+                )
+                lessonFor = null
+            }
+        }
+    }
+
     private fun executeLessonWrite(argsJson: String): ToolExecutionResult {
         val title = runCatching { JSONObject(argsJson).optString("tool_title", "Lesson") }
             .getOrDefault("Lesson")
         val args = try { JSONObject(argsJson) } catch (_: Exception) {
             return ToolExecutionResult("Error: invalid arguments", false, toolTitle = title)
         }
-        val store = com.openminis.app.agent.learning.LessonStore(context)
         val action = args.optString("action", "write").trim().lowercase()
         return when (action) {
             "write", "" -> {
@@ -5149,50 +5204,79 @@ class ChatViewModel(
                         false, toolTitle = title,
                     )
                 }
+                val kind = com.openminis.app.agent.learning.LessonStore.Kind.parse(args.optString("kind", "correction"))
+                val category = com.openminis.app.agent.learning.LessonStore.Category
+                    .parse(args.optString("category", ""))
+                    ?: com.openminis.app.agent.learning.LessonStore.inferCategory(text)
                 val tags = args.optJSONArray("tags")?.let { arr ->
                     (0 until arr.length()).mapNotNull { arr.optString(it, null) }.filter { it.isNotBlank() }
                 } ?: emptyList()
-                val saved = store.add(text, tags)
+                val saved = lessonStore.add(kind, category, text, tags)
                     ?: return ToolExecutionResult(
                         "Error: lesson must be 3–240 characters of plain text.",
                         false, toolTitle = title,
                     )
                 com.openminis.app.observability.TraceLog.record(
                     kind = "learning", name = "lesson_write", durationMs = 0, ok = true,
-                    summary = "save ${saved.id}: ${saved.text.take(60)}",
+                    summary = "save ${saved.kind.id}/${saved.id}: ${saved.text.take(60)}",
                 )
+                lessonFor = null
                 ToolExecutionResult(
-                    "Saved lesson #${saved.id} (confidence ${"%.2f".format(saved.confidence)}, " +
-                        "${store.all().size} total). It will be recalled automatically next time the topic comes up.",
+                    "Saved to ${saved.kind.file} as #${saved.id} (${saved.category.id}, confidence " +
+                        "${"%.2f".format(saved.confidence)}, seen ${saved.hits}x). " + lessonStore.stats(),
                     true, toolTitle = title,
                 )
             }
             "list" -> {
-                val lessons = store.all().sortedByDescending { it.confidence }
+                val lessons = lessonStore.all().sortedByDescending { it.promoted to it.confidence }
                 if (lessons.isEmpty()) {
                     ToolExecutionResult("The notebook is empty — nothing has been learned yet.", true, toolTitle = title)
                 } else {
                     val body = buildString {
-                        append("Learned lessons (").append(lessons.size).append("):\n")
+                        append("Notebook ").append(lessonStore.stats()).append(":\n")
                         lessons.take(40).forEach { l ->
-                            append("- #").append(l.id).append(" (").append("%.2f".format(l.confidence))
-                            if (l.tags.isNotEmpty()) append(", ").append(l.tags.joinToString("/"))
+                            append("- #").append(l.id).append(" [").append(label(l.kind)).append('/')
+                                .append(l.category.id).append("] (").append("%.2f".format(l.confidence))
+                            if (l.hits > 1) append(", ").append(l.hits).append("x")
+                            if (l.promoted) append(", permanent")
                             append(") ").append(l.text).append('\n')
                         }
                     }
                     ToolExecutionResult(body.trimEnd(), true, toolTitle = title)
                 }
             }
+            "stats" -> ToolExecutionResult(lessonStore.stats(), true, toolTitle = title)
             "forget" -> {
                 val target = args.optString("id", "").trim().ifEmpty { args.optString("text", "").trim() }
                 if (target.isEmpty()) {
                     return ToolExecutionResult("Error: give `id` or `text` to forget.", false, toolTitle = title)
                 }
-                val ok = store.forget(target)
+                val ok = lessonStore.forget(target)
+                lessonFor = null
                 ToolExecutionResult(
-                    if (ok) "Forgot \"${target.take(60)}\". Remaining: ${store.all().size}."
-                    else "No lesson matched \"${target.take(60)}\". Try action=list.",
+                    if (ok) "Forgot \"${target.take(60)}\". Now: ${lessonStore.stats()}."
+                    else "No entry matched \"${target.take(60)}\". Try action=list.",
                     ok, toolTitle = title,
+                )
+            }
+            "promote" -> {
+                val id = args.optString("id", "").trim()
+                if (id.isEmpty()) return ToolExecutionResult("Error: give `id`.", false, toolTitle = title)
+                val promoted = lessonStore.promote(id)
+                    ?: return ToolExecutionResult("No entry with id #$id.", false, toolTitle = title)
+                runCatching {
+                    memoryFactRepository.upsert(
+                        subject = "self-improvement",
+                        predicate = "rule",
+                        value = promoted.text,
+                        sourceSessionId = activeSessionId,
+                    )
+                }
+                lessonFor = null
+                ToolExecutionResult(
+                    "Promoted #${promoted.id} to permanent and wrote it into long-term memory. " +
+                        "It will also keep appearing in the notebook.",
+                    true, toolTitle = title,
                 )
             }
             else -> ToolExecutionResult("Error: unknown action \"$action\".", false, toolTitle = title)
@@ -5245,6 +5329,9 @@ class ChatViewModel(
         if (trimmed.isNotEmpty()) {
             skillScoutText = trimmed
             warmSkillRadar()
+            if (com.openminis.app.agent.learning.CorrectionDetector.detect(trimmed)) {
+                captureCorrection(trimmed)
+            }
         }
         if (_isStreaming.value) {
             val before = _promptQueue.value.size
@@ -8437,6 +8524,7 @@ class ChatViewModel(
         }
         val startedAt = System.currentTimeMillis()
         val fresh = executeTool(name, argsJson, toolId, toolBlocks, assistantId, currentText)
+        if (!fresh.success) captureToolFailure(name, fresh.output)
         com.openminis.app.observability.TraceLog.record(
             kind = "tool",
             name = name,
@@ -10345,9 +10433,12 @@ Scheduled tasks: crontab / at / nohup loops will stop when the app is suspended,
                     "(including WorkBuddy / OpenClaw community packs). After installing, skill_load the skill to " +
                     "follow its steps. You install on your own initiative the moment a task needs a capability " +
                     "you do not have — the user never has to ask whether a skill exists.\n\n" +
-                    "Self-improvement: when the user corrects you, states a standing rule, or points out that " +
-                    "you repeated an old mistake, call lesson_write with ONE imperative sentence; lessons are " +
-                    "recalled automatically on similar tasks later, so apply them silently instead of reciting them.",
+                    "Self-improvement: a four-journal notebook (errors, corrections, best practices, knowledge " +
+                    "gaps) persists across sessions. Correcting you, a standing rule, a failed approach worth " +
+                    "remembering or a better way you found → write ONE imperative sentence with lesson_write. " +
+                    "Relevant entries are recalled automatically before similar tasks: apply them silently, never " +
+                    "recite them. When an entry is flagged as repeated 3+ times, ask the user once whether to keep " +
+                    "it permanently, and only then promote it.",
             )
             skillScoutLine()?.let { line ->
                 append("\n\n")

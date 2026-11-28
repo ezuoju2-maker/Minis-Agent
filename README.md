@@ -40,7 +40,7 @@
 | 拆子任务 | 委派给子代理执行，默认 60 轮，上下限 8–200，倒数 `max(3, cap/5)` 轮开始提醒收尾 | `agent/SubAgentBudgetPolicy.kt` |
 | 可回滚 | 每次写文件前留旧内容，能按单文件或整轮回滚，模型直接调 `checkpoint_restore` | `sandbox/checkpoint/SessionCheckpoint.kt` |
 | 装技能 | 远程技能只认 https、主机白名单、64 位十六进制 SHA-256，版本号降级直接拒绝 | `skills/remote/*` |
-| 长记性 | 自我改进笔记本：你说「不对 / 应该是 / 以后都」时，模型把教训压成一句祈使句存盘；下次遇到同类任务自动召回注入，不复述、不打扰。重复确认提置信度，重复条目自动合并，说「忘掉」即可删除 | `agent/learning/*`<br>`tools/LessonTool.kt` |
+| 长记性 | 四本错题本（errors / corrections / best_practices / knowledge_gaps）：纠正、偏好、失败、更优解、过时 API 分别落盘；写入前备份、相似条目合并去重、重复 3 次自动提示晋升为长期记忆。下次同类任务先召回再动手，静默照做不复述 | `agent/learning/*`<br>`tools/LessonTool.kt` |
 | 找技能 | 接任务就自己去装：`find_skills` 检索 Anthropic Skills、Superpowers、ECC、Composio、WorkBuddy / OpenClaw 社区包等公开技能库（数千份 SKILL.md），按名字/路径/描述打分；索引 24 小时重爬，并且每周用 GitHub 搜索自己发现新技能仓库，不依赖任何写死的清单。源清单 `skills-sources.json` 只是起点 | `skills/radar/*`<br>`tools/FindSkillsTool.kt` |
 | 看过程 | 每次工具调用写一行 NDJSON（序号、轮次、耗时、结果），设置页一键导出分享 | `observability/TraceLog.kt` |
 | 省重复 | 只读工具结果进 LRU 缓存，16 条 / 2 MB / 5 分钟后失效 | `tools/ToolResultCache.kt` |
@@ -143,7 +143,7 @@ An Android agent that executes on the device instead of in the cloud. The model 
 | Split work | Delegated sub-agents run 60 turns by default, floor 8 ceiling 200, warnings from `max(3, cap/5)` turns out | `agent/SubAgentBudgetPolicy.kt` |
 | Roll back | Prior file content is kept before every write; rollback by file or by whole run, the model calls `checkpoint_restore` | `sandbox/checkpoint/SessionCheckpoint.kt` |
 | Install skills | Remote skills need https, an allowlisted host and a 64-hex SHA-256; version downgrades are refused | `skills/remote/*` |
-| Learn from you | A self-improving notebook: when you correct it ("no, put the report in out/", "from now on…"), it compresses the lesson into one imperative rule and stores it; similar later tasks recall it automatically and it applies the rule silently. Repeats raise confidence, duplicates merge, and "forget" deletes an entry | `agent/learning/*`<br>`tools/LessonTool.kt` |
+| Learn from you | Four journals on disk (errors / corrections / best_practices / knowledge_gaps) for failures, corrections and preferences, better approaches and outdated APIs. Writes are backed up, near-duplicates merge, and a pattern repeated 3 times is offered for promotion to long-term memory. Similar tasks recall them before acting, applied silently | `agent/learning/*`<br>`tools/LessonTool.kt` |
 | Find skills | Self-serve on every task: `find_skills` searches Anthropic Skills, Superpowers, ECC, Composio, WorkBuddy / OpenClaw community packs and thousands of other SKILL.md repos, ranks by name/path/description, then installs; the index re-crawls every 24h and the radar discovers new repos itself through GitHub search every week — no hardcoded catalogue. `skills-sources.json` is only a starting point | `skills/radar/*`<br>`tools/FindSkillsTool.kt` |
 | Watch it run | Every tool call appends an NDJSON line (seq, turn, duration, outcome), exportable from settings | `observability/TraceLog.kt` |
 | Avoid repeats | Read-only results enter an LRU cache, 16 entries / 2 MB / 5 minutes | `tools/ToolResultCache.kt` |
